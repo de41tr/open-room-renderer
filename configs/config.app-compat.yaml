@@ -1,0 +1,68 @@
+friendly_name: "Open Room Renderer"
+manufacturer: "Independent"
+manufacturer_url: ""
+model_name: "Linux Room Renderer"
+model_number: "alpha-0.1"
+
+# Optional proprietary-app compatibility profile.
+# This is not the default config because it uses a more app-shaped discovery
+# surface. Keep configs/config.example.yaml as the portable open-source-client
+# path.
+wiim_home_profile: true
+
+uuid: null
+discovery_uuid: null
+mdns_instance_name: "Open Room Renderer"
+bootid: "000000000000000000000000000000000000"
+security: "http"
+
+# The app-compat path that worked best during local testing used the app-facing
+# HTTP port 80, SSDP, and mDNS.
+http_api_port: 80
+upnp_port: 80
+mirror_http_on_upnp_port: true
+mirror_port_80: true
+
+bind_address: "0.0.0.0"
+advertise_ip: null
+
+mpv_socket: "/tmp/open-room-renderer-mpv.sock"
+auto_spawn_mpv: true
+default_volume: 50
+log_level: "INFO"
+state_dir: ".state/app-compat"
+
+enable_mdns: true
+enable_ssdp: true
+log_wiim_http_details: false
+
+# Keep the visible app service surface honest.
+#
+# Only TuneIn-style playback is currently functional enough to advertise in the
+# app. Earlier experiments used broader masks that made services such as
+# Spotify/Tidal/Qobuz/Plex-like entries appear, but those are intentionally not
+# enabled here because the renderer does not provide working implementations for
+# them in this alpha.
+source_experiment_variant: "tunein"
+tunein_streams_value: "200"
+tunein_stream_all_value: null
+tunein_minimal_capability: true
+legacy_capability_value: "0x0"
+legacy_plm_support_value: "0"
+
+# Non-functional music services stay disabled in the release profile.
+enable_plex_service: false
+enable_plex_legacy_gate: false
+plex_capability_mode: "normal"
+plex_user_info_mode: "not_login"
+enable_stream_service_sentinels: false
+
+proxy_on_demand_audio: false
+range_seek_reload: false
+channel_balance: "0.0"
+
+podcast_presets:
+  - name: "Test MP3"
+    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+
+experimental_sources: []

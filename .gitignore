@@ -1,0 +1,37 @@
+# Python/build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# Local development environment
+.venv/
+venv/
+
+# Runtime state may contain private tokens, user names, and device identity.
+.state/
+
+# Captures and renderer logs can contain local IPs, app traffic, and redacted
+# credentials; keep only curated examples in docs if needed.
+logs/
+
+# Local reverse-engineering/session notes. Curate sanitized excerpts into docs/
+# before publishing.
+NOTES.md
+.codex-bus/
+.codex/
+.agents/
+cbus
+codex-bus.sh
+
+# Generated WiiM Home experiment configs.
+/tmp/
+
+# Editor/OS noise
+.DS_Store
+*.swp
+*~

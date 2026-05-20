@@ -1,0 +1,26 @@
+# Example user-level systemd service for Open Room Renderer.
+#
+# Copy this to:
+#   ~/.config/systemd/user/open-room-renderer.service
+#
+# Then adjust WorkingDirectory and ExecStart for your checkout path.
+# This example runs as your normal user, not root.
+
+[Unit]
+Description=Open Room Renderer local audio sink
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/YOUR_USER/open-room-renderer
+ExecStart=/home/YOUR_USER/open-room-renderer/.venv/bin/open-room-renderer serve --config /home/YOUR_USER/open-room-renderer/configs/config.example.yaml
+Restart=on-failure
+RestartSec=5
+
+# Keep logs in the user journal. Do not enable verbose raw HTTP logging for
+# public bug reports.
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

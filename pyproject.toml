@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "open-room-renderer"
+version = "0.1.0"
+description = "Independent Linux/mpv local network audio renderer prototype"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+keywords = ["audio", "mpv", "renderer", "upnp", "ssdp", "raspberry-pi"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Framework :: AsyncIO",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Sound/Audio",
+]
+dependencies = [
+  "aiohttp>=3.9",
+  "PyYAML>=6.0",
+  "requests>=2.31",
+  "zeroconf>=0.132",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "pywiim",
+]
+mdns = []
+
+[project.scripts]
+open-room-renderer = "fake_linkplay.cli:main"
+fake-linkplay = "fake_linkplay.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["fake_linkplay*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

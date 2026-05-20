@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest a safe, contributor-friendly improvement.
+title: "[Feature]: "
+labels: ["help wanted"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not request or describe bypasses for authentication, pairing, signatures, DRM, encryption, certificates, or access controls. Do not include proprietary material or raw dumps.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or contributor problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - docs
+        - tests
+        - raspberry-pi
+        - mpv
+        - discovery
+        - audio
+        - config
+        - packaging
+        - other

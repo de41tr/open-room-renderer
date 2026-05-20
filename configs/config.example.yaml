@@ -1,0 +1,33 @@
+friendly_name: "Open Room Renderer"
+manufacturer: "Independent"
+model_name: "Linux Room Renderer"
+model_number: "alpha-0.1"
+uuid: null
+http_api_port: 80
+upnp_port: 80
+bind_address: "0.0.0.0"
+advertise_ip: null
+mpv_socket: "/tmp/open-room-renderer-mpv.sock"
+auto_spawn_mpv: true
+default_volume: 50
+log_level: "INFO"
+state_dir: ".state"
+enable_mdns: false
+enable_ssdp: true
+log_wiim_http_details: false
+source_experiment_variant: "none"
+legacy_capability_value: "0x0"
+legacy_plm_support_value: "0"
+proxy_on_demand_audio: false
+range_seek_reload: false
+podcast_presets:
+  - name: "Test MP3"
+    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+experimental_sources:
+  - id: "example-radio"
+    name: "Example Radio"
+    source: "Example Radio"
+    url: "https://example.invalid/"
+    icon: ""
+    type: "radio"
+    enabled: false

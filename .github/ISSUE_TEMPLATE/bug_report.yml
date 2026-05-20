@@ -1,0 +1,78 @@
+name: Bug report
+description: Report a reproducible problem with sanitized logs only.
+title: "[Bug]: "
+labels: ["bug", "needs-repro"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste tokens, MAC addresses, serial numbers, UUIDs, raw protocol dumps, private IPs, cookies, keys, certificates, or proprietary app/firmware content.
+  - type: input
+    id: os
+    attributes:
+      label: OS / distro
+      placeholder: "Manjaro, Arch, Raspberry Pi OS, Debian..."
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      placeholder: "Raspberry Pi 4, laptop, mini PC..."
+  - type: dropdown
+    id: audio_stack
+    attributes:
+      label: Audio stack
+      options:
+        - ALSA
+        - PulseAudio
+        - PipeWire
+        - Unsure
+  - type: input
+    id: mpv
+    attributes:
+      label: mpv version
+      placeholder: "mpv --version"
+  - type: input
+    id: install
+    attributes:
+      label: Install method
+      placeholder: "dev-setup-manjaro.sh, manual venv, package..."
+  - type: input
+    id: app_version
+    attributes:
+      label: Client/app version, if you choose to provide it
+      placeholder: "Optional"
+  - type: textarea
+    id: worked_before
+    attributes:
+      label: What worked before?
+      description: Mention the last known working behavior or version, if any.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Start with ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove tokens, IDs, MACs, UUIDs, private IPs, cookies, keys, certificates, and raw protocol payloads.
+      render: text
