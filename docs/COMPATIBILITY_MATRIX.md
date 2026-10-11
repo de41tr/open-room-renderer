@@ -8,7 +8,7 @@ This is scoped evidence, not a product certification. Updated 2026-10-11 UTC.
 | Basic volume/mute/control acknowledgement | UNIT/MOCK + real local PyWiiM HTTP integration with fake backend | Real Unix IPC and DAC readback pending |
 | Selected-URI playback/control | MOCK + real libmpv/null through HTTP | Unix IPC and real audio pending |
 | Playback generations/EOF | UNIT/MOCK, generation-race and observer tests | Actual production IPC and hardware pending |
-| Concrete multi-item queue | UNIT/MOCK + REAL_BACKEND/null indexed/Next/Previous/EOF selection | Legacy unresolved providers need AP06 |
+| Concrete multi-item queue | UNIT/MOCK + REAL_BACKEND/null indexed/Next/Previous/EOF selection | Unsupported provider headers fail explicitly |
 | Next/Previous; normal loop mode | Actual queue selection; normal mode only | Repeat/shuffle remain unsupported |
 | Discovery/identity and app-shaped handshake | UNIT/MOCK discovery + actual local HTTP handshake with fake backend; truthful typed SCPDs | LAN multicast and actual Android app pending |
 | GENA lifecycle/callback safety | Real local subscribe/renew/notify/expiry tests; actual callbacks in REAL_BACKEND/null workflow | Actual Android parser/client pending |
@@ -26,3 +26,9 @@ The optional audio proxy is now local-backend-only and limited to selected media
 with per-hop validated/pinned destinations. This does not make the unauthenticated
 renderer safe to expose publicly. LAN multicast and real target devices remain
 separate acceptance steps.
+
+Header-only `newTuneIn` public station queues now materialize one real item with
+preserved identity/artwork and bounded anonymous resolution (UNIT/MOCK evidence).
+Concrete episode tracks retain real durations; episode-ID resolution is unsupported.
+Live public endpoint research is separate from the still-unverified end-to-end
+provider playback and Android acceptance.

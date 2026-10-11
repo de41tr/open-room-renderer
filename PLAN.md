@@ -11,7 +11,7 @@ No main-branch edits, merge, or release.
 3. AP05: real multi-item queue, one-based selection, browse and transport navigation.
 4. AP03: consistent discovery, persistent independent identity and honest capabilities.
 5. AP04: renewable, bounded, safe GENA subscriptions and queue events.
-6. AP06: header-only public-radio selection through the existing resolver.
+6. AP06: header-only public-radio selection through a bounded anonymous public-station resolver.
 7. AP07: backend/process failures and owned shutdown.
 8. AP08: recovery that respects stop, pause, and newer playback generations.
 9. P1 where time permits: metadata, confirmed seek, volume/mute, existing DSP,
@@ -24,6 +24,6 @@ this execution environment cannot create Unix-domain sockets.
 
 ## Checkpoints reached
 
-AP01, AP02, AP05, AP03 and AP04 have tested implementation checkpoints, including
-real libmpv/null control and two-track/callback flows. AP06, AP07 and AP08 are next;
+AP01, AP02, AP05, AP03, AP04 and AP06 have tested implementation checkpoints,
+including real libmpv/null control and two-track/callback flows. AP07 and AP08 are next;
 P1 follows. This records progress, not full hardware/app acceptance.

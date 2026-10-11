@@ -146,3 +146,30 @@ rejected without being contacted.
 AP03 published as `99d771d0142934f63d534493e7e7c93b68f664ca`.
 Next: AP06 canonical header-only provider resolution; AP07 lifecycle work is
 independent and in progress; AP08 owner-respecting recovery follows.
+
+## AP06 public-station queue checkpoint
+
+- Header-only `newTuneIn` station IDs resolve into exactly one concrete queue
+  item. Source, station ID, name, show name, artwork and opaque SearchUrl survive;
+  Play uses the resolved media URL through the ordinary backend.
+- A fixed anonymous OPML JSON endpoint receives only station ID and format
+  parameters. No OEM partner fields, credentials or arbitrary SearchUrl are sent.
+  Responses, deadline and candidate attempts are bounded; redirects and service
+  error announcement clips are rejected. Unsafe candidates do not hide later
+  valid ones. No account/premium integration is claimed.
+- Resolution is generation-scoped. Pause, stop or a new source invalidate old
+  results. Failed resolution faults rather than inventing playable state.
+- Unsupported provider/episode headers fault explicitly. Concrete episode tracks
+  retain their actual supplied duration; the invented one-hour fallback is gone.
+  Optional on-demand proxying also works for concrete episode URLs.
+
+Validation: 861 tests passed in the exact publication snapshot with the optional
+REAL_BACKEND/null lane enabled (860 plus one explicit skip by default), including
+MOCK station response and SOAP queue regressions. Public endpoint and bounded AAC
+bytes were independently observed through research tools; the production Python
+resolver's live attempt was blocked by this environment's DNS resolution. This
+is not a live end-to-end radio playback, Android or hardware certification.
+
+AP04 published as `792d79c773273255b2eb25307cc814d2a96344ff`.
+Next: finish AP07 lifecycle review fixes, then AP08 bounded owner-respecting
+source recovery.

@@ -57,6 +57,8 @@ class PlaybackQueue:
     loop: int = 0
     stream_id: str = ""
     show_name: str = ""
+    stream_type: str = ""
+    content_type: str = ""
 
     def __post_init__(self) -> None:
         self.validate()
@@ -91,7 +93,8 @@ class PlaybackQueue:
         if not isinstance(self.name, str) or not self.name.strip():
             raise QueueError("Queue name must not be empty")
         for value in (self.name, self.list_name, self.source, self.search_url,
-                      self.artwork, self.quality, self.stream_id, self.show_name):
+                      self.artwork, self.quality, self.stream_id, self.show_name,
+                      self.stream_type, self.content_type):
             _validate_text(value)
         if not isinstance(self.items, list):
             raise QueueError("Queue items must be a list")
@@ -331,8 +334,8 @@ def parse_queue_context(
             id=_text(track, "Id") or "",
             metadata=metadata,
             artwork=direct_artwork if direct_artwork is not None else artwork,
-            stream_type=_text(track, "StreamType") or "",
-            content_type=_text(track, "ContentType") or "",
+            stream_type=_text(track, "StreamType") or _text(info, "StreamType") or "",
+            content_type=_text(track, "ContentType") or _text(info, "ContentType") or "",
             duration=duration,
         ))
 
@@ -360,6 +363,8 @@ def parse_queue_context(
         loop=0 if loop is None else loop,
         stream_id=stream_id,
         show_name=_text(info, "ShowName") or "",
+        stream_type=_text(info, "StreamType") or "",
+        content_type=_text(info, "ContentType") or "",
     )
     queue.validate(max_tracks=max_tracks)
     return queue
@@ -384,6 +389,7 @@ def serialize_queue_context(queue: PlaybackQueue) -> str:
         ("TrackNumber", queue.count), ("StreamId", queue.stream_id),
         ("StartPlayIndex", queue.index), ("ShowName", queue.show_name),
         ("PicUrl", queue.artwork), ("Quality", queue.quality),
+        ("StreamType", queue.stream_type), ("ContentType", queue.content_type),
     ):
         add(info, name, value)
     tracks = ET.SubElement(root, "Tracks")

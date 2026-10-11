@@ -1,9 +1,12 @@
 import pytest
+from html import escape
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from fake_linkplay.config import Config, ExperimentalSource, load_config
 from fake_linkplay.http_api import EventSubscriber, HttpApi, ParsedCommand
 from fake_linkplay.mpv_backend import MpvBackend, redact_sensitive as redact_mpv_sensitive
+from fake_linkplay.radio import RadioResolution
 from fake_linkplay.state import RendererState
 
 
@@ -419,61 +422,60 @@ async def test_stream_services_active_toggle_returns_status_only() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tunein_create_queue_uses_search_url_and_playqueue_loads_it() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1", state_dir=f"/tmp/fake-linkplay-test-{uuid4()}")
-    mpv = DummyMpv()
-    api = HttpApi(cfg, RendererState.from_config(cfg), mpv)
-    body = (
-        "<CreateQueue><QueueContext>"
-        "&lt;PlayList&gt;&lt;ListName&gt;The JOY FM&lt;/ListName&gt;"
-        "&lt;ListInfo&gt;&lt;SourceName&gt;newTuneIn&lt;/SourceName&gt;"
-        "&lt;SearchUrl&gt;http://api.radiotime.com/profiles/s29850/media?partnerId=wfk5AKYX&amp;amp;latlon=,&amp;amp;version=2.0&lt;/SearchUrl&gt;"
-        "&lt;PicUrl&gt;http://cdn-profiles.tunein.com/s29850/images/logoq.png&lt;/PicUrl&gt;"
-        "&lt;/ListInfo&gt;&lt;/PlayList&gt;"
-        "</QueueContext></CreateQueue>"
+async def test_tunein_create_queue_resolves_station_and_preserves_provider_metadata() -> None:
+    api = make_api()
+    direct_url = "https://media.example.test/station.mp3"
+    search_url = "http://api.radiotime.com/profiles/s12345/media?partnerId=synthetic&latlon=,&version=2.0"
+    artwork = "http://cdn-profiles.tunein.com/s12345/images/logoq.png"
+    context = (
+        "<PlayList><ListName>Synthetic Station</ListName><ListInfo>"
+        "<SourceName>newTuneIn</SourceName>"
+        f"<SearchUrl>{escape(search_url)}</SearchUrl><PicUrl>{artwork}</PicUrl>"
+        "</ListInfo></PlayList>"
     )
+    api._resolve_station_id = AsyncMock(return_value=RadioResolution(direct_url, "s12345"))
     api._resolve_playback_url = _identity_resolver  # type: ignore[method-assign]
-    await api._execute_soap_side_effect("CreateQueue", body)
-    assert api.queue_url == "http://api.radiotime.com/profiles/s29850/media?partnerId=wfk5AKYX&latlon=,&version=2.0"
+    await api._execute_soap_side_effect("CreateQueue", f"<CreateQueue><QueueContext>{escape(context)}</QueueContext></CreateQueue>")
+    api._resolve_station_id.assert_awaited_once_with("s12345")
+    assert api.queue_url == direct_url
     assert api.queue_source == "newTuneIn"
-    assert api.queue_search_url == api.queue_url
-    assert api.state.album_art_uri == "http://cdn-profiles.tunein.com/s29850/images/logog.png"
+    assert api.queue_search_url == search_url
+    assert api.state.album_art_uri == artwork
     assert "<SourceName>newTuneIn</SourceName>" in api.queue_context
     assert "<TrackSource>newTuneIn</TrackSource>" in api.queue_context
-    assert "<PicUrl>http://cdn-profiles.tunein.com/s29850/images/logog.png</PicUrl>" in api.queue_context
-    assert "<upnp:albumArtURI>http://cdn-profiles.tunein.com/s29850/images/logog.png</upnp:albumArtURI>" in api.state.track_metadata
-    assert "<song:image>http://cdn-profiles.tunein.com/s29850/images/logog.png</song:image>" in api.state.track_metadata
-    assert "<SearchUrl>http://api.radiotime.com/profiles/s29850/media?partnerId=wfk5AKYX&amp;latlon=,&amp;version=2.0</SearchUrl>" in api.queue_context
+    assert f"<PicUrl>{artwork}</PicUrl>" in api.queue_context
+    assert f"<upnp:albumArtURI>{artwork}</upnp:albumArtURI>" in api.state.track_metadata
+    assert f"<song:image>{artwork}</song:image>" in api.state.track_metadata
+    assert f"<SearchUrl>{escape(search_url)}</SearchUrl>" in api.queue_context
+    assert api.state.totlen == 0
     meta = api.state.as_meta_info()
-    assert meta["albumArtURI"] == "http://cdn-profiles.tunein.com/s29850/images/logog.png"
-    assert meta["picurl"] == "http://cdn-profiles.tunein.com/s29850/images/logog.png"
+    assert meta["albumArtURI"] == artwork
+    assert meta["picurl"] == artwork
     await api._execute_soap_side_effect("PlayQueueWithIndex", "<PlayQueueWithIndex><Index>1</Index></PlayQueueWithIndex>")
-    assert mpv.loaded_url == api.queue_url
+    assert api.mpv.loaded_url == direct_url
     assert api.state.track_source == "newTuneIn"
 
 
 @pytest.mark.asyncio
 async def test_play_after_stop_reloads_existing_queue_url() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1")
-    mpv = DummyMpv()
-    api = HttpApi(cfg, RendererState.from_config(cfg), mpv)
-    body = (
-        "<CreateQueue><QueueContext>"
-        "&lt;PlayList&gt;&lt;ListName&gt;The Bone&lt;/ListName&gt;"
-        "&lt;ListInfo&gt;&lt;SourceName&gt;newTuneIn&lt;/SourceName&gt;"
-        "&lt;SearchUrl&gt;http://api.radiotime.com/profiles/s29409/media?partnerId=wfk5AKYX&lt;/SearchUrl&gt;"
-        "&lt;/ListInfo&gt;&lt;/PlayList&gt;"
-        "</QueueContext></CreateQueue>"
+    api = make_api()
+    direct_url = "https://media.example.test/station.mp3"
+    context = (
+        "<PlayList><ListName>Synthetic Station</ListName>"
+        "<ListInfo><SourceName>newTuneIn</SourceName><StreamId>s12345</StreamId>"
+        "</ListInfo></PlayList>"
     )
+    api._resolve_station_id = AsyncMock(return_value=RadioResolution(direct_url, "s12345"))
     api._resolve_playback_url = _identity_resolver  # type: ignore[method-assign]
-    await api._execute_soap_side_effect("CreateQueue", body)
+    await api._execute_soap_side_effect("CreateQueue", f"<CreateQueue><QueueContext>{escape(context)}</QueueContext></CreateQueue>")
     await api._execute_soap_side_effect("PlayQueueWithIndex", "<PlayQueueWithIndex><Index>1</Index></PlayQueueWithIndex>")
     await api._execute_soap_side_effect("Stop", "<Stop />")
     await api._execute_soap_side_effect("Play", "<Play />")
-    assert mpv.load_count == 2
-    assert mpv.loaded_url == api.queue_url
+    assert api.mpv.load_count == 2
+    assert api.mpv.loaded_url == direct_url
     assert api.state.status == "play"
     assert api.state.track_source == "newTuneIn"
+    api._resolve_station_id.assert_awaited_once_with("s12345")
 
 
 @pytest.mark.asyncio
@@ -487,7 +489,7 @@ async def test_direct_http_play_uses_custom_radio_source() -> None:
 
 def test_avtransport_event_body_contains_current_play_state_and_metadata() -> None:
     api = make_api()
-    api.state.current_url = "http://api.radiotime.com/profiles/s29850/media"
+    api.state.current_url = "https://media.example.test/station.mp3"
     api.state.title = "The JOY FM"
     api.state.track_source = "newTuneIn"
     api.state.play_medium = "RADIO-NETWORK"
@@ -597,52 +599,45 @@ def test_tunein_json_duration_accepts_actions_play_duration_milliseconds() -> No
     assert HttpApi._json_duration_seconds(text) == 2880
 
 
+def _episode_queue_body(duration: int | None = 2880) -> str:
+    """A supplied playable episode, with provider hints only in ListInfo."""
+    duration_field = f"<Duration>{duration}</Duration>" if duration is not None else ""
+    context = (
+        "<PlayList><ListName>Synthetic Episode</ListName><ListInfo>"
+        "<SourceName>newTuneIn</SourceName><StreamId>t12345</StreamId>"
+        "<SearchUrl>http://api.radiotime.com/profiles/t12345/media?partnerId=synthetic</SearchUrl>"
+        "<PicUrl>https://art.example.test/logoq.png</PicUrl>"
+        "<StreamType>episode</StreamType><ContentType>radio</ContentType>"
+        "</ListInfo><Tracks><Track1><Title>Synthetic Episode</Title>"
+        f"<URL>https://media.example.test/show.mp3</URL>{duration_field}"
+        "</Track1></Tracks></PlayList>"
+    )
+    return f"<CreateQueue><QueueContext>{escape(context)}</QueueContext></CreateQueue>"
+
+
 @pytest.mark.asyncio
 async def test_tunein_episode_queue_marks_metadata_not_live() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1")
-    api = HttpApi(cfg, RendererState.from_config(cfg), DummyMpv())
-    body = (
-        "<CreateQueue><QueueContext>"
-        "&lt;PlayList&gt;&lt;ListName&gt;Mit wem habt ihr gerade Streit? - mit Muddern&lt;/ListName&gt;"
-        "&lt;ListInfo&gt;&lt;SourceName&gt;newTuneIn&lt;/SourceName&gt;"
-        "&lt;SearchUrl&gt;http://api.radiotime.com/profiles/t554419790/media?partnerId=wfk5AKYX&lt;/SearchUrl&gt;"
-        "&lt;PicUrl&gt;http://cdn-profiles.tunein.com/p235703/images/logoq.png&lt;/PicUrl&gt;"
-        "&lt;StreamType&gt;episode&lt;/StreamType&gt;&lt;ContentType&gt;radio&lt;/ContentType&gt;"
-        "&lt;/ListInfo&gt;&lt;/PlayList&gt;"
-        "</QueueContext></CreateQueue>"
-    )
-    api._resolve_playback_url = _identity_resolver  # type: ignore[method-assign]
-    await api._execute_soap_side_effect("CreateQueue", body)
+    api = make_api()
+    await api._execute_soap_side_effect("CreateQueue", _episode_queue_body())
     assert api.queue_is_live is False
+    assert api.state.queue.current.stream_type == "episode"
+    assert api.state.queue.current.content_type == "radio"
     assert "<StreamType>episode</StreamType>" in api.queue_context
     assert "<song:isLive>0</song:isLive>" in api.state.track_metadata
-
-
-async def _episode_resolver(url: str) -> str:
-    return "https://media.example.test/show.mp3"
+    assert api.state.totlen == 2880
 
 
 @pytest.mark.asyncio
-async def test_tunein_episode_queue_uses_resolved_audio_url_in_queue_context() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1", http_api_port=59152)
-    api = HttpApi(cfg, RendererState.from_config(cfg), DummyMpv())
-    api._resolve_playback_url = _episode_resolver  # type: ignore[method-assign]
-    api._probe_audio_duration_seconds = _no_duration_probe  # type: ignore[method-assign]
-    body = (
-        "<CreateQueue><QueueContext>"
-        "&lt;PlayList&gt;&lt;ListName&gt;BlueMoon&lt;/ListName&gt;"
-        "&lt;ListInfo&gt;&lt;SourceName&gt;newTuneIn&lt;/SourceName&gt;"
-        "&lt;SearchUrl&gt;http://api.radiotime.com/profiles/t553952764/media?partnerId=wfk5AKYX&lt;/SearchUrl&gt;"
-        "&lt;StreamType&gt;episode&lt;/StreamType&gt;"
-        "&lt;/ListInfo&gt;&lt;/PlayList&gt;"
-        "</QueueContext></CreateQueue>"
-    )
-    await api._execute_soap_side_effect("CreateQueue", body)
-    assert api.queue_resolved_url == "https://media.example.test/show.mp3"
+async def test_tunein_episode_queue_uses_supplied_audio_url_in_queue_context() -> None:
+    api = make_api()
+    api._resolve_station_id = AsyncMock(side_effect=AssertionError("Direct episodes need no station lookup"))
+    await api._execute_soap_side_effect("CreateQueue", _episode_queue_body())
+    assert api.queue_url == "https://media.example.test/show.mp3"
     assert "<URL>https://media.example.test/show.mp3</URL>" in api.queue_context
     await api._execute_soap_side_effect("PlayQueueWithIndex", "<PlayQueueWithIndex><Index>1</Index></PlayQueueWithIndex>")
     assert api.mpv.loaded_url == "https://media.example.test/show.mp3"
     assert api.mpv.load_options == {}
+    api._resolve_station_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -654,46 +649,32 @@ async def test_tunein_episode_can_use_local_audio_proxy_when_enabled() -> None:
         proxy_on_demand_audio=True,
     )
     api = HttpApi(cfg, RendererState.from_config(cfg), DummyMpv())
-    api._resolve_playback_url = _episode_resolver  # type: ignore[method-assign]
-    api._probe_audio_duration_seconds = _no_duration_probe  # type: ignore[method-assign]
-    body = (
-        "<CreateQueue><QueueContext>"
-        "&lt;PlayList&gt;&lt;ListName&gt;BlueMoon&lt;/ListName&gt;"
-        "&lt;ListInfo&gt;&lt;SourceName&gt;newTuneIn&lt;/SourceName&gt;"
-        "&lt;SearchUrl&gt;http://api.radiotime.com/profiles/t553952764/media?partnerId=wfk5AKYX&lt;/SearchUrl&gt;"
-        "&lt;StreamType&gt;episode&lt;/StreamType&gt;"
-        "&lt;/ListInfo&gt;&lt;/PlayList&gt;"
-        "</QueueContext></CreateQueue>"
-    )
-    await api._execute_soap_side_effect("CreateQueue", body)
+    await api._execute_soap_side_effect("CreateQueue", _episode_queue_body())
     await api._execute_soap_side_effect("PlayQueueWithIndex", "<PlayQueueWithIndex><Index>1</Index></PlayQueueWithIndex>")
     assert api.mpv.loaded_url == "http://127.0.0.1:59152/proxy/audio?url=https%3A%2F%2Fmedia.example.test%2Fshow.mp3"
     assert api.mpv.load_options == {}
 
 
 @pytest.mark.asyncio
-async def test_episode_seek_rel_time_updates_position_and_duration() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1", http_api_port=59152)
-    mpv = DummyMpv()
-    api = HttpApi(cfg, RendererState.from_config(cfg), mpv)
-    api._resolve_playback_url = _episode_resolver  # type: ignore[method-assign]
-    api._probe_audio_duration_seconds = _no_duration_probe  # type: ignore[method-assign]
-    body = (
-        "<CreateQueue><QueueContext>"
-        "&lt;PlayList&gt;&lt;ListName&gt;BlueMoon&lt;/ListName&gt;"
-        "&lt;ListInfo&gt;&lt;SourceName&gt;newTuneIn&lt;/SourceName&gt;"
-        "&lt;SearchUrl&gt;http://api.radiotime.com/profiles/t553952764/media?partnerId=wfk5AKYX&lt;/SearchUrl&gt;"
-        "&lt;StreamType&gt;episode&lt;/StreamType&gt;"
-        "&lt;/ListInfo&gt;&lt;/PlayList&gt;"
-        "</QueueContext></CreateQueue>"
-    )
-    await api._execute_soap_side_effect("CreateQueue", body)
-    assert api.state.totlen == 3600
-    assert 'duration="3600"' in api.state.track_metadata
-    await api._play_url(api.queue_url)
+async def test_episode_seek_rel_time_updates_position_and_preserves_supplied_duration() -> None:
+    api = make_api()
+    await api._execute_soap_side_effect("CreateQueue", _episode_queue_body())
+    assert api.state.totlen == 2880
+    assert 'duration="2880"' in api.state.track_metadata
+    await api._execute_soap_side_effect("PlayQueueWithIndex", "<PlayQueueWithIndex><Index>1</Index></PlayQueueWithIndex>")
     await api._execute_soap_side_effect("Seek", "<Seek><Unit>REL_TIME</Unit><Target>00:00:30</Target></Seek>")
-    assert mpv.seeked_to == 30
+    assert api.mpv.seeked_to == 30
     assert api.state.curpos == 30
+    assert api.state.totlen == 2880
+
+
+@pytest.mark.asyncio
+async def test_episode_without_supplied_duration_does_not_invent_one_hour() -> None:
+    api = make_api()
+    await api._execute_soap_side_effect("CreateQueue", _episode_queue_body(duration=None))
+    assert api.queue_is_live is False
+    assert api.state.queue.current.duration == api.queue_duration_sec == api.state.totlen == 0
+    assert 'duration="3600"' not in api.state.track_metadata
 
 
 def test_seek_ready_uses_playback_progress_over_demux_underrun() -> None:
@@ -904,10 +885,6 @@ def test_event_subscriber_dedupe_and_gateway_defaults() -> None:
 
 async def _identity_resolver(url: str) -> str:
     return url
-
-
-async def _no_duration_probe(url: str) -> int:
-    return 0
 
 
 @pytest.mark.asyncio

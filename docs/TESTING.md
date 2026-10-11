@@ -94,3 +94,28 @@ uses real local HTTP fixtures with explicitly mocked approved routing, checks
 each redirect, blocked destinations, selected-source/loopback gating, range and
 compressed-byte preservation, sanitization and resource limits. The suite never
 contacts real metadata endpoints or internal administrative services.
+
+## Public-station resolution and header queues
+
+`test_radio_resolver.py` uses injected JSON and DNS/transport doubles: fixed
+endpoint, bounded response/deadline/candidate attempts, unsafe candidates, failure
+announcements and later valid choices. `test_radio_queue.py` is MOCK SOAP/state
+integration: a header becomes one concrete item, opaque metadata is never fetched,
+old resolver results cannot overwrite a new source, and failures never claim play.
+Concrete episodes use supplied durations, not a synthetic fallback.
+
+Anonymous public OPML resolution was observed on 2026-10-11 for station s32537
+using [the fixed JSON endpoint](https://opml.radiotime.com/Tune.ashx?id=s32537&formats=mp3,aac&render=json);
+a bounded returned AAC sample was readable without authentication. The official
+[station-ID guide](https://broadcaster-help.tunein.com/en/support/solutions/articles/151000172143-what-is-my-station-id-)
+explains the s-prefixed identifier. These observations are experimental, not an
+API stability or production partnership guarantee. The documented
+[Platform API](https://developer.tunein.com/cfp_login) is a separate partner flow
+and is not used. A live call from the Python execution environment failed at DNS,
+so no live end-to-end provider playback is asserted.
+
+Only lowercase s plus 1–32 digits and direct MP3/AAC station candidates are
+supported. Episode IDs, account media and error clips fail explicitly. The
+resolver validates candidate destinations; later direct mpv playback is still
+mpv-owned network access. Connection-time pinning applies to the optional media
+proxy, not automatically to every backend request.

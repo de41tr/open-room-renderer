@@ -24,7 +24,7 @@ from html import unescape as html_unescape
 from pathlib import Path
 from collections.abc import Awaitable, Callable
 from urllib.parse import quote
-from urllib.parse import unquote, urljoin
+from urllib.parse import unquote, urljoin, urlsplit, parse_qs
 from uuid import uuid4
 
 from aiohttp import ClientError
@@ -36,6 +36,7 @@ from .capabilities import capability_fields, configured_sources, service_capabil
 from .config import Config
 from .mpv_backend import BackendError, MpvBackend
 from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_target, validate_callback_url
+from .radio import RadioResolution, RadioResolutionError, resolve_station
 from .queue import PlaybackQueue, QueueError, QueueItem, parse_queue_context, serialize_queue_context
 from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
@@ -140,7 +141,6 @@ class HttpApi:
         self.queue_content_type = ""
         self.queue_is_live = True
         self.queue_duration_sec = 0
-        self._last_resolve_duration_sec = 0
         self._backend_lock = asyncio.Lock()
         self._proxy_sources: dict[str, int] = {}
         self._proxy_semaphore = asyncio.Semaphore(4)
@@ -1300,7 +1300,6 @@ class HttpApi:
             and not self.queue_is_live
             and direct_url.startswith(("http://", "https://"))
             and "api.radiotime.com/" not in direct_url
-            and original_url != direct_url
         ):
             proxied = self._local_audio_proxy_url(direct_url)
             LOG.info("using local proxy for on-demand playback direct=%s proxy=%s", direct_url, proxied)
@@ -1345,30 +1344,74 @@ class HttpApi:
     def _seek_audio_proxy_url(self, url: str, start_seconds: int) -> str:
         return f"{self._local_audio_proxy_url(url)}&start={max(0, int(start_seconds))}"
 
-    async def _resolve_playback_url(self, url: str) -> str:
-        """Resolve service/profile URLs to direct media URLs when possible."""
-
-        self._last_resolve_duration_sec = 0
-        if "api.radiotime.com/" not in url:
-            return url
+    @staticmethod
+    def _radio_station_from_url(url: str, *, allow_opml: bool = True) -> str:
+        """Extract a supported ID; never forward opaque provider parameters."""
         try:
-            timeout = ClientTimeout(total=8)
-            async with ClientSession(timeout=timeout, headers={"User-Agent": "Linkplay/4.8"}) as session:
-                async with session.get(url, allow_redirects=True) as response:
-                    final_url = str(response.url)
-                    content_type = response.headers.get("Content-Type", "")
-                    text = await response.text(errors="ignore")
-        except (ClientError, TimeoutError, OSError) as exc:
-            LOG.warning("could not resolve TuneIn/Radiotime URL %s: %s", url, exc)
-            return url
-        self._last_resolve_duration_sec = self._json_duration_seconds(text)
-        if final_url and "api.radiotime.com/" not in final_url and not content_type.lower().startswith(("text/", "application/json", "application/xml")):
-            return final_url
-        candidate = self._first_stream_url(text)
-        if candidate and "api.radiotime.com/" not in candidate:
-            return candidate
-        LOG.info("TuneIn/Radiotime response did not contain a direct stream URL: status content_type=%s preview=%s", content_type, self._preview(text))
-        return final_url or url
+            parts = urlsplit(url)
+            if parts.scheme not in {"http", "https"} or parts.username or parts.password:
+                return ""
+            if parts.port not in {None, 80, 443}:
+                return ""
+            if parts.hostname == "api.radiotime.com":
+                match = re.fullmatch(r"/profiles/(s[0-9]{1,32})/media", parts.path)
+                return match[1] if match else ""
+            if allow_opml and parts.hostname == "opml.radiotime.com" and parts.path == "/Tune.ashx":
+                ids = parse_qs(parts.query).get("id", [])
+                if len(ids) == 1 and re.fullmatch(r"s[0-9]{1,32}", ids[0]):
+                    return ids[0]
+        except ValueError:
+            pass
+        return ""
+
+    async def _resolve_station_id(self, station_id: str) -> RadioResolution:
+        return await resolve_station(station_id)
+
+    async def _resolve_playback_url(self, url: str) -> str:
+        """Resolve recognized public station references, never arbitrary JSON."""
+        station_id = self._radio_station_from_url(url)
+        if station_id:
+            try:
+                return (await self._resolve_station_id(station_id)).url
+            except RadioResolutionError:
+                raise BackendError("Public station resolution failed") from None
+        try:
+            host = urlsplit(url).hostname
+        except ValueError:
+            host = None
+        if host in {"api.radiotime.com", "opml.radiotime.com"}:
+            raise BackendError("Unsupported public radio reference")
+        return url
+
+    async def _materialize_radio_queue(self, queue: PlaybackQueue) -> None:
+        """Resolve a header-only station under the current command generation."""
+        station_id = queue.stream_id or self._radio_station_from_url(queue.search_url, allow_opml=False)
+        if (queue.source != "newTuneIn" or not re.fullmatch(r"s[0-9]{1,32}", station_id)
+                or queue.stream_type not in {"", "station"}):
+            raise SoapFault(402, "Invalid Args")
+        if self.state.backend_url or self.state.status in {"play", "pause", "transition"}:
+            await self._transport_command("stop")
+        generation = self._accept_playback_command("stop")
+        self.state.mark_stop()
+        self._schedule_event_notify()
+        try:
+            result = await self._resolve_station_id(station_id)
+        except (RadioResolutionError, OSError, TimeoutError):
+            if generation == self.state.generation:
+                self.state.mark_error("Public station resolution failed")
+                self._schedule_event_notify()
+            raise BackendError("Public station resolution failed") from None
+        if generation != self.state.generation:
+            raise BackendError("Radio queue command superseded")
+        queue.stream_id = station_id
+        queue.items = [QueueItem(
+            url=result.url, title=queue.list_name or queue.show_name or station_id,
+            source=queue.source, id=station_id, artwork=queue.artwork,
+            stream_type="station", content_type=queue.content_type or result.content_type,
+            duration=0,
+        )]
+        queue.index = 1
+        await self._replace_queue(queue)
 
     @staticmethod
     def _json_duration_seconds(text: str) -> int:
@@ -2536,6 +2579,8 @@ class HttpApi:
         self.state.track_source = self.queue_source
         self.state.play_medium = "RADIO-NETWORK" if self.queue_is_live else "THIRD-DLNA"
         self.state.track_metadata = (item.metadata or self._didl_metadata(item.url, self.queue_title, self.queue_source, self.queue_pic_url, self.queue_is_live)) if item else ""
+        if item and not item.metadata and item.duration > 0:
+            self.state.track_metadata = self._metadata_with_duration(self.state.track_metadata, int(item.duration))
         self.state.curpos = 0
         self.state.totlen = self.queue_duration_sec
         self.queue_context = serialize_queue_context(queue)
@@ -2778,78 +2823,10 @@ class HttpApi:
                 queue = parse_queue_context(context, name=self._xml_text(body, "QueueName") or None)
             except QueueError:
                 raise SoapFault(402, "Invalid Args") from None
-            if queue.items or not (queue.source and (queue.stream_id or queue.search_url)):
+            if queue.items or not (queue.source or queue.stream_id or queue.search_url):
                 await self._replace_queue(queue)
                 return
-            # Built-in services such as TuneIn and Radio Paradise usually pass
-            # a Linkplay QueueContext. Preserve source/search/art metadata so
-            # later BrowseQueue, GetInfoEx, artwork, and transport state agree.
-            queue_context = self._xml_text(body, "QueueContext")
-            url = self._first_stream_url(queue_context or body)
-            title = self._xml_text(queue_context, "ListName") or self._xml_text(queue_context, "ShowName") or self._xml_text(queue_context, "Id")
-            queue_name = title or self._xml_text(body, "QueueName") or "CurrentQueue"
-            self.queue_name = queue_name
-            if url:
-                self.queue_url = url
-                self.queue_resolved_url = ""
-                self.queue_title = title
-                self.state.current_url = url
-                self.state.title = title or (url.rsplit("/", 1)[-1] or "Network stream")
-                source_name = self._xml_text(queue_context, "SourceName") or self._xml_text(queue_context, "Source") or "radio"
-                self.queue_source = "RadioParadise" if "radioparadise.com" in url else source_name
-                self.queue_search_url = self._xml_text(queue_context, "SearchUrl") or url
-                self.queue_pic_url = self._best_art_url(self._xml_text(queue_context, "PicUrl"))
-                self.queue_quality = self._xml_text(queue_context, "Quality")
-                self.queue_stream_type = self._xml_text(queue_context, "StreamType") or "station"
-                self.queue_content_type = self._xml_text(queue_context, "ContentType") or "audio"
-                self.queue_is_live = not self._queue_item_is_episode(url, self.queue_stream_type, self.queue_content_type, queue_context)
-                self.queue_duration_sec = self._metadata_duration_seconds(self._xml_text(queue_context, "Metadata"))
-                if "api.radiotime.com/" in url:
-                    resolved = await self._resolve_playback_url(url)
-                    if resolved and "api.radiotime.com/" not in resolved:
-                        self.queue_resolved_url = resolved
-                        self.state.resolved_url = resolved
-                        if self._last_resolve_duration_sec > 0:
-                            self.queue_duration_sec = self._last_resolve_duration_sec
-                if not self.queue_is_live and self.queue_duration_sec <= 0 and self.queue_resolved_url:
-                    self.queue_duration_sec = await self._probe_audio_duration_seconds(self.queue_resolved_url)
-                if not self.queue_is_live and self.queue_duration_sec <= 0:
-                    self.queue_duration_sec = 3600
-                self.state.totlen = self.queue_duration_sec if not self.queue_is_live else 0
-                original_metadata = self._xml_text(queue_context, "Metadata")
-                self.state.album_art_uri = self.queue_pic_url or self._metadata_art_url(original_metadata)
-                self.state.track_metadata = original_metadata or self._didl_metadata(
-                    self.queue_resolved_url or url,
-                    self.state.title,
-                    source_name,
-                    self.state.album_art_uri,
-                    self.queue_is_live,
-                )
-                if not self.state.album_art_uri:
-                    self.state.album_art_uri = self._metadata_art_url(self.state.track_metadata)
-                self.state.track_metadata = self._metadata_with_art(self.state.track_metadata, self.state.album_art_uri, self.queue_is_live)
-                if self.queue_resolved_url:
-                    self.state.track_metadata = self._metadata_with_url(self.state.track_metadata, self.queue_resolved_url)
-                if not self.queue_is_live and self.queue_duration_sec > 0:
-                    self.state.track_metadata = self._metadata_with_duration(self.state.track_metadata, self.queue_duration_sec)
-                self.state.play_medium = "STATION-NETWORK" if "radioparadise.com" in url else self._xml_text(queue_context, "PlayMedium") or "RADIO-NETWORK"
-                self.state.track_source = self.queue_source
-                self.state.queue = PlaybackQueue(
-                    name=self.queue_name, list_name=self.queue_title, source=self.queue_source,
-                    search_url=self.queue_search_url, artwork=self.queue_pic_url, quality=self.queue_quality,
-                    items=[QueueItem(url=self.queue_url, title=self.state.title, source=self.queue_source,
-                                     metadata=self.state.track_metadata, artwork=self.state.album_art_uri,
-                                     stream_type=self.queue_stream_type, content_type=self.queue_content_type,
-                                     duration=self.queue_duration_sec, resolved_url=self.queue_resolved_url)], index=1,
-                )
-                self.queue_context = self._build_queue_context()
-                LOG.info("SOAP CreateQueue stored title=%s url=%s resolved=%s live=%s", self.state.title, url, self.queue_resolved_url, self.queue_is_live)
-                self._schedule_event_notify(("PlayQueue1", "PlayQueue"))
-            elif queue_context:
-                self.queue_context = queue_context
-                self._schedule_event_notify(("PlayQueue1", "PlayQueue"))
-            else:
-                LOG.info("SOAP %s did not contain a stream URL", action)
+            await self._materialize_radio_queue(queue)
             return
         if action == "PlayQueueWithIndex":
             raw_index = self._xml_text(body, "Index")

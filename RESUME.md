@@ -5,16 +5,17 @@
 2. Check `git status`, branch and remote head. Work only on
    `dot/renderer-autonomous-20261012`. Never merge or release.
 3. Read STATUS.md and PLAN.md, then run `.venv/bin/python -m pytest -q`.
-4. AP04 callback lifecycle and media-proxy boundaries are tested (740 with
-   real-backend lane enabled). Next: AP06 canonical header-only queues, then
-   AP07 lifecycle integration and AP08 recovery.
+4. AP06 canonical public-station queues are tested (861 with the real-backend
+   lane enabled). Next: AP07 lifecycle review fixes, then AP08 recovery.
+   AP07 edits remain uncommitted in backend/CLI/lifecycle tests.
 5. AP01 is published in draft PR #1 as `2e3068ede2b095b572f7249bc7bdaadecdd9641a`.
    The exact-state PyWiiM checkpoint is published as `a079284e14b1d5f86286b97ff0e5237ca5014bde`.
    AP02 is published as `4a3849e391111e2fb45b95dc7ee6f6aaf30423fb`.
    AP05 is published as `2d6e6ad29f998ab58f57ab38c4d19c93a5662b90`.
    AP03 is published as `99d771d0142934f63d534493e7e7c93b68f664ca`.
-   AP04/security is the next publication checkpoint. Backend/CLI lifecycle edits
-   may be in progress independently; test and publish them separately.
+   AP04/security is published as `792d79c773273255b2eb25307cc814d2a96344ff`.
+   AP06 is the next publication checkpoint. Backend/CLI lifecycle edits are
+   in progress independently; test and publish them separately.
 6. Keep production mpv JSON IPC. AF_UNIX is denied in this cloud sandbox; use
    fake-backend tests and optional libmpv/null-output validation with honest scope.
 7. Review all changed files and commit content for private data before publishing;
