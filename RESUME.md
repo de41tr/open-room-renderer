@@ -19,7 +19,9 @@
    AP07 is published as `aa3d455d5c80195a2f3e3ccce351b8b8a7702a9c`.
    AP08 is published as `a6b2b2594403bc92709a874fcf00b8848375cab7`.
    AP11 is published as `664483c0c2ddb22641f9bd25d42f33d5a11b1f74`.
-   AP12 is the next publication checkpoint; metadata/CI edits remain separate.
+   AP12 is published as `2bab4bc4a802b9fe8108aca8ad8566ede49eb7b4`.
+   Native IPC CI is the next publication; monitor its actual jobs after push.
+   Metadata changes remain uncommitted and must be preserved.
 6. Keep production mpv JSON IPC. AF_UNIX is denied in this cloud sandbox; use
    fake-backend tests and optional libmpv/null-output validation with honest scope.
 7. Review all changed files and commit content for private data before publishing;

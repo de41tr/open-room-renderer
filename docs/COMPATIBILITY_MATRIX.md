@@ -54,3 +54,7 @@ digital PCM cuts, pass filters, stereo balance silence, reload and failed-native
 candidate retention. Invalid/unimplemented controls fail instead of succeeding.
 Preset library persistence is tested; active EQ replay on restart remains pending.
 Configuration readback, decoded PCM and physical/acoustic effects remain separate.
+
+A standard public Ubuntu x86_64/ARM64 PR workflow and explicit real Unix IPC test
+are now prepared. Positive CI execution is pending; do not infer production IPC
+or ARM success from the workflow file or the sandbox's default skips.

@@ -1,0 +1,72 @@
+name: Renderer tests
+
+# PR branches only. Do not run the same revision again for a push, and never
+# use pull_request_target to execute contribution code with privileged access.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renderer-tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  renderer-tests:
+    name: Renderer / ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        # Standard public-repository runners; ARM64 is not ARMv7 or Pi hardware.
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out contribution without saved credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install official Ubuntu native dependencies
+        id: setup
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y mpv libmpv2 python3.12-venv
+          /usr/bin/python3.12 -m venv .venv-ci
+          .venv-ci/bin/python -m pip install --upgrade pip
+          .venv-ci/bin/python -m pip install -e '.[dev]'
+
+      - name: Record the actual environment
+        run: |
+          uname -m
+          dpkg --print-architecture
+          .venv-ci/bin/python --version
+          mpv --version
+          dpkg-query -W mpv libmpv2
+          .venv-ci/bin/python -m pip freeze
+          echo 'Null/PCM outputs only; no physical audio, ARMv7, or Raspberry Pi claim.'
+
+      - name: Run default unit and local-client suite
+        run: .venv-ci/bin/python -m pytest -q -rs
+
+      - name: Run explicit real libmpv null and digital-PCM lanes
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          library="$(dpkg-query -L libmpv2 | grep '/libmpv\.so\.2$')"
+          test -n "$library" && test -f "$library"
+          export ORR_TEST_LIBMPV_PATH="$(readlink -f "$library")"
+          .venv-ci/bin/python -m pytest -q -s \
+            tests/test_libmpv_integration.py tests/test_libmpv_gain.py \
+            tests/test_libmpv_dsp.py tests/test_libmpv_recovery.py
+
+      - name: Run explicit production Unix IPC and lifecycle lane
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          ORR_TEST_UNIX_IPC: "1"
+        run: .venv-ci/bin/python -m pytest -q -s tests/test_mpv_unix_integration.py

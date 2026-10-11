@@ -199,3 +199,23 @@ Tests also verify normal/cancellation cleanup. No audible output is opened.
 Positive-gain headroom/clipping prevention and physical channel routing are not
 certified by the negative-cut fixtures. Active EQ restore is not yet implemented;
 only the validated preset library and confirmed balance are persisted.
+
+## Native Unix IPC and public CI
+
+`test_mpv_unix_integration.py` is opt-in with ORR_TEST_UNIX_IPC=1. Default runs
+skip it explicitly; opt-in with missing mpv, blocked sockets or failed playback
+fails instead of substituting a transport. It uses actual production Unix JSON
+IPC, generated WAVs, loopback HTTP/SOAP and null output. Separate cases exercise
+external ownership and owned process/socket cleanup plus fresh-instance restart.
+A test-local exec wrapper adds only null/config-isolation options and preserves
+the mpv PID for peer-credential ownership checks. All children are reaped.
+
+The PR workflow uses read-only contents permission, pinned official checkout,
+no saved credentials, secrets, deployments or artifacts, and 15-minute jobs on
+standard Ubuntu x86_64/ARM64 runners. GitHub documents these standard runners as
+[free for public repositories](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+It records installed versions and runs default, libmpv and native IPC lanes
+separately. ARM64 runner execution is not ARMv7, Pi/DAC or handset acceptance.
+
+Initial status: workflow prepared and statically checked; positive native IPC
+execution is pending CI because this development sandbox forbids AF_UNIX.

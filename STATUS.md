@@ -300,3 +300,18 @@ persistent, but it does not silently claim a restored active curve.
 AP11 published as `664483c0c2ddb22641f9bd25d42f33d5a11b1f74`.
 Next: metadata consistency, confirmed active-setting restore and seek/install
 acceptance. Native Unix IPC/ARM64 CI is being prepared separately.
+
+## Native IPC CI prepared
+
+Added a read-only PR workflow on standard public Ubuntu x86_64 and ARM64 runners
+with 15-minute limits. No deployment, secret use or repository security setting
+change is included. The new opt-in test exercises actual mpv Unix IPC, local
+controls/queues/EOF and owned/external process/socket lifetime with null output.
+
+Local verification: 104 related tests passed; the two native cases skip by
+default, and explicit opt-in without mpv was confirmed to fail rather than skip.
+Positive native execution is pending CI. The public repository has no previous
+workflow runs; Actions settings were not changed.
+
+AP12 published as `2bab4bc4a802b9fe8108aca8ad8566ede49eb7b4`.
+Continue metadata/active settings/seek work while monitoring actual CI results.
