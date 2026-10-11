@@ -36,6 +36,10 @@ def redact_sensitive(value: object) -> str:
     return text
 
 
+class BackendError(RuntimeError):
+    """The backend did not acknowledge a requested operation."""
+
+
 @dataclass
 class MpvBackend:
     """Async mpv JSON IPC wrapper.
@@ -212,35 +216,42 @@ class MpvBackend:
             return pause_response
         return response
 
+    async def checked_command(self, args: list[Any]) -> dict[str, Any]:
+        """Wait for an acknowledgement; never equate socket write with success."""
+        response = await self.command(args, timeout=2.0)
+        if response.get("error") != "success":
+            raise BackendError("Backend operation failed")
+        return response
+
     async def pause(self) -> None:
         """Pause playback."""
 
-        await self.command(["set_property", "pause", True], timeout=2.0)
+        await self.checked_command(["set_property", "pause", True])
 
     async def resume(self) -> None:
         """Resume playback."""
 
-        await self.command(["set_property", "pause", False], timeout=2.0)
+        await self.checked_command(["set_property", "pause", False])
 
     async def stop(self) -> None:
         """Stop the current mpv item."""
 
-        await self.command(["stop"], timeout=2.0)
+        await self.checked_command(["stop"])
 
     async def seek(self, seconds: int) -> None:
         """Seek to an absolute position in seconds."""
 
-        await self.command_no_wait(["seek", seconds, "absolute"])
+        await self.checked_command(["seek", seconds, "absolute"])
 
     async def volume(self, value: int) -> None:
         """Set mpv volume."""
 
-        await self.command_no_wait(["set_property", "volume", value])
+        await self.checked_command(["set_property", "volume", value])
 
     async def mute(self, value: bool) -> None:
         """Set mpv mute state."""
 
-        await self.command_no_wait(["set_property", "mute", value])
+        await self.checked_command(["set_property", "mute", value])
 
     async def channel_balance(self, value: float) -> None:
         """Store stereo balance and reapply the DSP filter graph."""

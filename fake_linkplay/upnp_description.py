@@ -592,7 +592,7 @@ def avtransport_response_fields(action: str, state: Any | None = None) -> str | 
             ]
         )
     if action == "GetCurrentTransportActions":
-        return "<Actions>Play,Pause,Stop,Seek,Next,Previous</Actions>"
+        return "<Actions>Play,Pause,Stop,Seek,Previous</Actions>"
     return None
 
 

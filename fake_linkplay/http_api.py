@@ -30,7 +30,8 @@ from aiohttp import ClientTimeout
 from aiohttp import web
 
 from .config import Config
-from .mpv_backend import MpvBackend
+from .mpv_backend import BackendError, MpvBackend
+from .soap import MUTATING_ACTIONS, SoapFault, fault_xml, parse_request
 from .state import RendererState
 from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
 
@@ -521,39 +522,39 @@ class HttpApi:
         if name == "pause":
             self._pending_seek_generation += 1
             self._pending_seek_target = None
+            await self._backend_call(self.mpv.pause())
             self.state.mark_pause()
-            await self.mpv.pause()
             self._schedule_event_notify()
             return "OK"
         if name in {"resume", "onepause"}:
             self._pending_seek_generation += 1
             self._pending_seek_target = None
-            await self.mpv.resume()
+            await self._backend_call(self.mpv.resume())
             self.state.status = "play"
             self._schedule_event_notify()
             return "OK"
         if name == "stop":
             self._pending_seek_generation += 1
             self._pending_seek_target = None
+            await self._backend_call(self.mpv.stop())
             self.state.mark_stop()
-            await self.mpv.stop()
             self._schedule_event_notify()
             return "OK"
         if name == "seek":
             seconds = max(0, int(parsed.args[0]))
-            await self.mpv.seek(seconds)
+            await self._backend_call(self.mpv.seek(seconds))
             self.state.curpos = seconds
             return "OK"
         if name == "volume":
             value = max(0, min(100, int(parsed.args[0])))
+            await self._backend_call(self.mpv.volume(value))
             self.state.volume = value
-            await self.mpv.volume(value)
             self._schedule_event_notify(("rendercontrol1", "RenderingControl"))
             return "OK"
         if name == "mute":
             value = parsed.args[0] == "1"
+            await self._backend_call(self.mpv.mute(value))
             self.state.mute = value
-            await self.mpv.mute(value)
             self._schedule_event_notify(("rendercontrol1", "RenderingControl"))
             return "OK"
         return {"error": "Failed", "command": name}
@@ -1199,13 +1200,13 @@ class HttpApi:
         if isinstance(response, dict) and response.get("error") not in {None, "success"}:
             LOG.warning("mpv refused playback original=%s resolved=%s backend=%s response=%s", url, direct_url, playback_url, response)
             self.state.mark_stop()
-            return
+            raise BackendError("Backend load failed")
         ready = await self._wait_for_mpv_audio_ready(generation, playback_url)
         if not ready:
             LOG.warning("mpv did not report audio-ready original=%s resolved=%s backend=%s", url, direct_url, playback_url)
             self.state.mark_stop()
             self._schedule_event_notify(("rendertransport1", "AVTransport"))
-            return
+            raise BackendError("Backend did not confirm playback")
         await self.sync_mpv_state()
         self.state.mark_playing(url)
 
@@ -2027,33 +2028,43 @@ class HttpApi:
     async def soap(self, request: web.Request) -> web.Response:
         """Handle UPnP SOAP actions and return small XML response envelopes."""
 
-        action = request.headers.get("SOAPACTION", "OK").strip('"').rsplit("#", 1)[-1]
         body = await request.text()
-        LOG.info(
-            "SOAP remote=%s host=%s path=%s service=%s action=%s ua=%s",
-            request.remote,
-            request.host,
-            request.path_qs,
-            request.match_info.get("service"),
-            action,
-            request.headers.get("User-Agent", ""),
-        )
-        await self._execute_soap_side_effect(action, body)
-        result = None
-        if action == "GetControlDeviceInfo":
-            result = get_control_device_info_response_fields(self.cfg, self.cfg.resolved_advertise_ip, self.state)
-        elif action == "StreamServicesCapability":
-            capability = json.dumps(self._stream_services_capability(), separators=(",", ":"))
-            result = f"<StreamCapability>{escape(capability)}</StreamCapability>"
-        elif request.match_info.get("service", "").lower() in {"rendercontrol1", "renderingcontrol"}:
-            result = self._rendering_response_fields(action)
-        elif request.match_info.get("service", "").lower() in {"rendertransport1", "avtransport"}:
-            if action in {"GetInfoEx", "GetPositionInfo", "GetMediaInfo", "GetTransportInfo"}:
-                await self.sync_mpv_state()
-            result = avtransport_response_fields(action, self.state)
-        elif request.match_info.get("service", "").lower() in {"playqueue1", "playqueue"}:
-            result = self._playqueue_response_fields(action, body)
-        response_text = soap_response(action or "OK", request.match_info.get("service", ""), result)
+        try:
+            service, action, action_body = parse_request(
+                request.match_info.get("service", ""),
+                request.headers.get("SOAPACTION", ""), body,
+            )
+            if action in MUTATING_ACTIONS[service]:
+                await self._execute_soap_side_effect(action, action_body)
+                result = self._playqueue_response_fields(action, action_body) if action == "UserLogin" else ""
+            elif action == "GetControlDeviceInfo":
+                result = get_control_device_info_response_fields(self.cfg, self.cfg.resolved_advertise_ip, self.state)
+            elif action == "StreamServicesCapability":
+                capability = json.dumps(self._stream_services_capability(), separators=(",", ":"))
+                result = f"<StreamCapability>{escape(capability)}</StreamCapability>"
+            elif service == "RenderingControl":
+                result = self._rendering_response_fields(action)
+            elif service == "AVTransport":
+                if action in {"GetInfoEx", "GetPositionInfo", "GetMediaInfo", "GetTransportInfo"}:
+                    await self.sync_mpv_state()
+                result = avtransport_response_fields(action, self.state)
+            elif service == "PlayQueue":
+                result = self._playqueue_response_fields(action, action_body)
+            elif action == "GetProtocolInfo":
+                result = "<Source></Source><Sink>http-get:*:audio/*:*</Sink>"
+            elif action == "GetCurrentConnectionIDs":
+                result = "<ConnectionIDs></ConnectionIDs>"
+            else:
+                raise SoapFault(401, "Invalid Action")
+            if result is None:
+                raise SoapFault(401, "Invalid Action")
+            response_text = soap_response(action, service, result)
+        except SoapFault as exc:
+            return web.Response(status=500, text=fault_xml(exc), content_type="text/xml")
+        except (BackendError, OSError, TimeoutError):
+            return web.Response(status=500, text=fault_xml(SoapFault(501, "Action Failed")), content_type="text/xml")
+        except (ValueError, TypeError, OverflowError):
+            return web.Response(status=500, text=fault_xml(SoapFault(402, "Invalid Args")), content_type="text/xml")
         self._log_http_detail(request, body, 200, response_text)
         return web.Response(text=response_text, content_type="text/xml")
 
@@ -2367,12 +2378,42 @@ class HttpApi:
             ]
         )
 
+    @staticmethod
+    async def _backend_call(operation):
+        """Check adapters returning mpv results as well as exception-based ones."""
+        result = await operation
+        if isinstance(result, dict) and result.get("error") not in {None, "success"}:
+            raise BackendError("Backend operation failed")
+        return result
+
     async def _execute_soap_side_effect(self, action: str, body: str) -> None:
         """Apply state or mpv side effects implied by a SOAP action."""
 
+        required = {
+            "SetVolume": "DesiredVolume", "SetMute": "DesiredMute",
+            "SetAVTransportURI": "CurrentURI", "CreateQueue": "QueueContext",
+            "ReplaceQueue": "QueueContext", "PlayQueueWithIndex": "Index",
+            "Seek": "Target",
+        }
+        if action in required and not self._xml_text(body, required[action]).strip():
+            raise SoapFault(402, "Invalid Args")
+        if action == "Play":
+            speed = self._xml_text(body, "Speed")
+            if speed and speed != "1":
+                raise SoapFault(717, "Play Speed Not Supported")
+            if not (self.queue_url or self.state.current_url):
+                raise SoapFault(701, "Transition Not Available")
+        if action == "PlayQueueWithIndex":
+            index = self._xml_text(body, "Index")
+            if index != "1" or not self.queue_url:
+                raise SoapFault(711, "Illegal Seek Target")
+        if action == "Seek" and self._xml_text(body, "Unit") not in {"", "REL_TIME"}:
+            raise SoapFault(710, "Seek Mode Not Supported")
+        if action == "Seek" and not re.fullmatch(r"\d+:[0-5]\d:[0-5]\d", self._xml_text(body, "Target")):
+            raise SoapFault(402, "Invalid Args")
         if action == "UserLogin":
             account_source = self._xml_text(body, "AccountSource")
-            if account_source == "Plex":
+            if account_source == "Plex" and self.cfg.enable_plex_service:
                 pin_id = self._xml_text(body, "Code")
                 if pin_id:
                     user_info = await self._plex_user_info_from_pin(pin_id)
@@ -2381,32 +2422,36 @@ class HttpApi:
                         self._persist_plex_user_info(user_info)
                         LOG.info("SOAP UserLogin Plex stored userId=%s clientIdentifier=%s", user_info.get("userId"), self.plex_client_id)
                     else:
-                        LOG.warning("SOAP UserLogin Plex did not obtain a token for pin id %s", pin_id)
+                        raise SoapFault(501, "Action Failed")
                 else:
-                    LOG.warning("SOAP UserLogin Plex missing Code pin id")
+                    raise SoapFault(402, "Invalid Args")
+            else:
+                raise SoapFault(401, "Invalid Action")
             return
         if action == "SetVolume":
             raw = self._xml_text(body, "DesiredVolume")
             if raw:
-                value = max(0, min(100, int(float(raw))))
+                if not raw.isdecimal() or not 0 <= int(raw) <= 100:
+                    raise SoapFault(402, "Invalid Args")
+                value = int(raw)
+                await self._backend_call(self.mpv.volume(value))
                 self.state.volume = value
-                await self.mpv.volume(value)
                 LOG.info("SOAP SetVolume applied value=%s", value)
                 self._schedule_event_notify(("rendercontrol1", "RenderingControl"))
             return
         if action == "SetMute":
             raw = self._xml_text(body, "DesiredMute")
             if raw:
-                value = raw.strip() in {"1", "true", "True"}
+                if raw.strip().lower() not in {"0", "1", "true", "false"}:
+                    raise SoapFault(402, "Invalid Args")
+                value = raw.strip().lower() in {"1", "true"}
+                await self._backend_call(self.mpv.mute(value))
                 self.state.mute = value
-                await self.mpv.mute(value)
                 LOG.info("SOAP SetMute applied value=%s", value)
                 self._schedule_event_notify(("rendercontrol1", "RenderingControl"))
             return
         if action == "SetChannel":
-            LOG.info("SOAP SetChannel accepted as no-op")
-            self._schedule_event_notify(("rendercontrol1", "RenderingControl"))
-            return
+            raise SoapFault(401, "Invalid Action")
         if action == "SetAVTransportURI":
             url = self._xml_text(body, "CurrentURI")
             if url:
@@ -2429,33 +2474,32 @@ class HttpApi:
                 await self._play_url(url)
                 LOG.info("SOAP Play loaded url=%s", url)
             else:
-                await self.mpv.resume()
+                await self._backend_call(self.mpv.resume())
                 self.state.status = "play"
             self._schedule_event_notify()
             return
         if action == "Pause":
             self._pending_seek_generation += 1
             self._pending_seek_target = None
+            await self._backend_call(self.mpv.pause())
             self.state.mark_pause()
-            await self.mpv.pause()
             self._schedule_event_notify()
             return
         if action == "Stop":
             self._play_generation += 1
             self._pending_seek_generation += 1
             self._pending_seek_target = None
+            await self._backend_call(self.mpv.stop())
             self.state.mark_stop()
-            await self.mpv.stop()
             self._schedule_event_notify()
             return
         if action == "Next":
-            LOG.info("SOAP Next accepted as no-op plicurr=%s plicount=%s", self.state.plicurr, self.state.plicount)
-            self._schedule_event_notify(("rendertransport1", "AVTransport"))
-            return
+            raise SoapFault(401, "Invalid Action")
         if action == "Previous":
+            if not self.state.current_url or self.state.status not in {"play", "pause"}:
+                raise SoapFault(701, "Transition Not Available")
+            await self._backend_call(self.mpv.seek(0))
             self.state.curpos = 0
-            if self.state.current_url and self.state.status in {"play", "pause"}:
-                await self.mpv.seek(0)
             LOG.info("SOAP Previous restarted current track")
             self._schedule_event_notify(("rendertransport1", "AVTransport"))
             return
@@ -2477,24 +2521,14 @@ class HttpApi:
                 unit = self._xml_text(body, "Unit")
                 target = self._xml_text(body, "Target")
                 if unit and unit != "REL_TIME":
-                    LOG.info("SOAP Seek unsupported unit=%s target=%s; treating as no-op", unit, target)
-                    self._schedule_event_notify(("rendertransport1", "AVTransport"))
-                    return
+                    raise SoapFault(710, "Seek Mode Not Supported")
                 seconds = self._hms_to_seconds(target)
             if not self.queue_is_live and self.state.totlen > 0:
                 seconds = min(seconds, max(0, self.state.totlen - 1))
             seconds = max(0, int(seconds))
-            self.state.curpos = seconds
-            self.state.mark_transitioning()
-            self._pending_seek_target = seconds
-            self._pending_seek_final_status = final_status
-            self._pending_seek_generation += 1
-            seek_generation = self._pending_seek_generation
-            self._schedule_event_notify(("rendertransport1", "AVTransport"))
             if self._should_reload_for_large_seek(seconds, previous_pos):
                 direct_url = self.queue_resolved_url or self.state.resolved_url
                 seek_url = self._seek_audio_proxy_url(direct_url, seconds)
-                self._playback_offset_sec = seconds
                 LOG.info(
                     "SOAP %s reloading range proxy position=%s previous=%s direct=%s proxy=%s",
                     action,
@@ -2503,9 +2537,17 @@ class HttpApi:
                     direct_url,
                     seek_url,
                 )
-                await self.mpv.loadfile(seek_url, self._mpv_seek_reload_options())
+                await self._backend_call(self.mpv.loadfile(seek_url, self._mpv_seek_reload_options()))
+                self._playback_offset_sec = seconds
             else:
-                await self.mpv.seek(seconds)
+                await self._backend_call(self.mpv.seek(seconds))
+            self.state.curpos = seconds
+            self.state.mark_transitioning()
+            self._pending_seek_target = seconds
+            self._pending_seek_final_status = final_status
+            self._pending_seek_generation += 1
+            seek_generation = self._pending_seek_generation
+            self._schedule_event_notify(("rendertransport1", "AVTransport"))
             LOG.info("SOAP %s applied position=%s duration=%s", action, seconds, self.state.totlen)
             asyncio.create_task(self._finish_seek_after_buffering(seek_generation, seconds, previous_pos))
             return
@@ -2595,9 +2637,7 @@ class HttpApi:
             self._schedule_event_notify(("PlayQueue1", "PlayQueue", "rendertransport1", "AVTransport"))
             return
         if action in {"SetQueuePolicy", "AppendQueue", "AppendTracksInQueue", "AppendTracksInQueueEx", "RemoveTracksInQueue"}:
-            LOG.info("SOAP %s accepted as no-op", action)
-            self._schedule_event_notify(("PlayQueue1", "PlayQueue"))
-            return
+            raise SoapFault(401, "Invalid Action")
 
     async def _plex_user_info_from_pin(self, pin_id: str) -> dict[str, object] | None:
         """Poll Plex PIN auth and convert a successful result to user info."""
