@@ -27,6 +27,7 @@ from .upnp_description import description_xml
 from .utils import setup_logging
 
 LOG = logging.getLogger(__name__)
+RESOURCE_CLEANUP_TIMEOUT = 10.0
 
 
 async def serve(config_path: str) -> None:
@@ -44,63 +45,116 @@ async def serve(config_path: str) -> None:
     setup_logging(cfg.log_level)
     state = RendererState.from_config(cfg)
     mpv = MpvBackend(cfg.mpv_socket, cfg.auto_spawn_mpv)
-    await mpv.start()
+    runners: list[web.AppRunner] = []
+    ssdp: SsdpServer | None = None
+    mdns: MdnsAdvertiser | None = None
+    loop = asyncio.get_running_loop()
+    registered_signals: list[signal.Signals] = []
+    serve_task = asyncio.current_task()
+    assert serve_task is not None
+    signal_requested = False
+    cleaning_up = False
+
+    def request_shutdown() -> None:
+        nonlocal signal_requested
+        # Cancel startup as well as the normal serving wait. Leave these
+        # handlers installed during teardown, when further signals are harmless.
+        if not signal_requested and not cleaning_up:
+            signal_requested = True
+            serve_task.cancel()
+
+    async def cleanup() -> None:
+        # Register resources before their first await, so partially completed
+        # setup receives the same cleanup as a fully running service. One
+        # cleanup failure must not strand the remaining listeners or child.
+        resources = []
+        if mdns is not None:
+            resources.append(("mDNS", mdns.stop))
+        if ssdp is not None:
+            resources.append(("SSDP", ssdp.stop))
+        resources.extend(("HTTP runner", runner.cleanup) for runner in reversed(runners))
+        resources.append(("mpv", mpv.stop_process))
+        for name, close in resources:
+            try:
+                async with asyncio.timeout(RESOURCE_CLEANUP_TIMEOUT):
+                    await close()
+                    if name == "SSDP" and ssdp is not None and ssdp.tasks:
+                        await asyncio.gather(*ssdp.tasks, return_exceptions=True)
+            except Exception:
+                LOG.exception("failed to clean up %s", name)
+
     try:
-        await mpv.stop()
-    except BackendError:
-        state.mark_error()
-        LOG.warning("backend unavailable at startup; control API will report failures")
-    api = HttpApi(cfg, state, mpv)
-    if cfg.channel_balance != "0.0":
+        # Install before the first startup await, while no child/listener can
+        # yet require asynchronous cleanup after SIGINT or SIGTERM.
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, request_shutdown)
+            registered_signals.append(sig)
         try:
-            await mpv.channel_balance(float(cfg.channel_balance))
-        except ValueError:
-            LOG.warning("ignoring invalid persisted channel balance: %s", cfg.channel_balance)
-    api_runner = web.AppRunner(api.app())
-    desc_runner = None
-    await api_runner.setup()
-    api_site = web.TCPSite(api_runner, cfg.bind_address, cfg.http_api_port)
-    await api_site.start()
-    if cfg.upnp_port != cfg.http_api_port:
-        desc_runner = web.AppRunner(api.app())
-        await desc_runner.setup()
-        desc_site = web.TCPSite(desc_runner, cfg.bind_address, cfg.upnp_port)
-        await desc_site.start()
-    port80_runner = None
-    if cfg.mirror_port_80 and cfg.http_api_port != 80 and cfg.upnp_port != 80:
-        port80_runner = web.AppRunner(api.app())
-        await port80_runner.setup()
-        port80_site = web.TCPSite(port80_runner, cfg.bind_address, 80)
-        await port80_site.start()
-    ssdp = SsdpServer(cfg) if cfg.enable_ssdp else None
-    if ssdp:
-        await ssdp.start()
-    mdns = MdnsAdvertiser(cfg)
-    await mdns.start()
-    api.on_rename = mdns.refresh
-    LOG.info("API URL: http://%s:%s/httpapi.asp?command=getStatusEx", cfg.resolved_advertise_ip, cfg.http_api_port)
-    LOG.info("Description URL: %s", cfg.description_url)
-    LOG.info("UUID: uuid:%s", cfg.upnp_uuid)
-    if ssdp:
-        LOG.info("SSDP LOCATION: %s", cfg.description_url)
-    else:
-        LOG.info("SSDP disabled")
-    LOG.info("mpv socket: %s", cfg.mpv_socket)
-    LOG.info("Acceptance: ./scripts/acceptance-open-source-client.sh")
-    LOG.info('Curl: curl "http://%s:%s/httpapi.asp?command=getStatusEx" | jq', cfg.resolved_advertise_ip, cfg.http_api_port)
-    stop = asyncio.Event()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        asyncio.get_running_loop().add_signal_handler(sig, stop.set)
-    await stop.wait()
-    await mdns.stop()
-    if ssdp:
-        await ssdp.stop()
-    await api_runner.cleanup()
-    if desc_runner:
-        await desc_runner.cleanup()
-    if port80_runner:
-        await port80_runner.cleanup()
-    await mpv.stop_process()
+            await mpv.start()
+            await mpv.stop()
+        except BackendError as exc:
+            state.mark_error()
+            LOG.warning("backend unavailable at startup; control API will report failures: %s", exc)
+        api = HttpApi(cfg, state, mpv)
+        if cfg.channel_balance != "0.0":
+            try:
+                await mpv.channel_balance(float(cfg.channel_balance))
+            except ValueError:
+                LOG.warning("ignoring invalid persisted channel balance: %s", cfg.channel_balance)
+            except BackendError:
+                state.mark_error()
+                LOG.warning("could not apply persisted channel balance; backend unavailable")
+        ports = [cfg.http_api_port]
+        if cfg.upnp_port not in ports:
+            ports.append(cfg.upnp_port)
+        if cfg.mirror_port_80 and 80 not in ports:
+            ports.append(80)
+        for port in ports:
+            runner = web.AppRunner(api.app())
+            runners.append(runner)
+            await runner.setup()
+            await web.TCPSite(runner, cfg.bind_address, port).start()
+        if cfg.enable_ssdp:
+            ssdp = SsdpServer(cfg)
+            await ssdp.start()
+        mdns = MdnsAdvertiser(cfg)
+        await mdns.start()
+        api.on_rename = mdns.refresh
+        LOG.info("API URL: http://%s:%s/httpapi.asp?command=getStatusEx", cfg.resolved_advertise_ip, cfg.http_api_port)
+        LOG.info("Description URL: %s", cfg.description_url)
+        LOG.info("UUID: uuid:%s", cfg.upnp_uuid)
+        if ssdp:
+            LOG.info("SSDP LOCATION: %s", cfg.description_url)
+        else:
+            LOG.info("SSDP disabled")
+        LOG.info("mpv socket: %s", cfg.mpv_socket)
+        LOG.info("Acceptance: ./scripts/acceptance-open-source-client.sh")
+        LOG.info('Curl: curl "http://%s:%s/httpapi.asp?command=getStatusEx" | jq', cfg.resolved_advertise_ip, cfg.http_api_port)
+        await asyncio.Event().wait()
+    except asyncio.CancelledError:
+        if not signal_requested:
+            raise
+    finally:
+        cleaning_up = True
+        # Signals are ignored until cleanup completes. Repeated task.cancel()
+        # calls also cannot abandon the independent, bounded teardown task.
+        cleanup_task = asyncio.create_task(cleanup())
+        cancelled_during_cleanup = False
+        try:
+            while not cleanup_task.done():
+                try:
+                    await asyncio.shield(cleanup_task)
+                except asyncio.CancelledError:
+                    cancelled_during_cleanup = True
+            cleanup_task.result()
+        finally:
+            for sig in registered_signals:
+                try:
+                    loop.remove_signal_handler(sig)
+                except Exception:
+                    LOG.exception("failed to remove signal handler %s", sig)
+        if cancelled_during_cleanup and not signal_requested:
+            raise asyncio.CancelledError
 
 
 def api_get(host: str, port: int, command: str) -> None:

@@ -173,3 +173,27 @@ is not a live end-to-end radio playback, Android or hardware certification.
 AP04 published as `792d79c773273255b2eb25307cc814d2a96344ff`.
 Next: finish AP07 lifecycle review fixes, then AP08 bounded owner-respecting
 source recovery.
+
+## AP07 backend ownership and shutdown checkpoint
+
+- Concurrent requests share bounded startup and one spawn attempt. Failed
+  startup does not become a process-spawning loop; the control API remains
+  available with ERROR. External IPC can recover without a renderer restart.
+- Commands have end-to-end deadlines and validate acknowledgements. Shutdown
+  blocks late writes, reaps only owned children, and never sends quit to an
+  externally managed backend.
+- Existing files, symlinks and foreign sockets are preserved. On Linux, an owned
+  socket is removed after reap only with matching peer PID and unchanged inode.
+- SIGINT/SIGTERM are handled during startup and throughout bounded teardown;
+  repeated signals cannot strand a child by interrupting cleanup. Partial
+  HTTP/discovery startup is cleaned up too.
+
+Validation: 938 tests passed with the optional REAL_BACKEND/null lane enabled
+(937 plus one explicit skip by default). The 77 lifecycle tests include actual
+child-interpreter signal delivery with mocked renderer resources. Unix socket
+ownership/protocol cases are deterministic mocks because AF_UNIX creation is
+blocked here. Failed owned spawning requires a renderer restart; an unverified
+stale foreign socket is deliberately not deleted automatically.
+
+AP06 published as `bba255dc81df0257662ac60537f41fc7e38e041f`.
+Next: AP08 bounded station recovery, then meaningful P1 acceptance gaps.

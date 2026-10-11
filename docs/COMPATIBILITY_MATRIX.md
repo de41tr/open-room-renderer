@@ -32,3 +32,8 @@ preserved identity/artwork and bounded anonymous resolution (UNIT/MOCK evidence)
 Concrete episode tracks retain real durations; episode-ID resolution is unsupported.
 Live public endpoint research is separate from the still-unverified end-to-end
 provider playback and Android acceptance.
+
+Backend lifecycle has bounded startup/command/teardown and explicit child/socket
+ownership (UNIT/MOCK plus actual subprocess signal delivery). Production Unix
+IPC remains a separate host acceptance requirement. A failed spawn attempt does
+not automatically respawn; restart the renderer to retry owned spawning.

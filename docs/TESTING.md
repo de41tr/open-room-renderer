@@ -119,3 +119,13 @@ supported. Episode IDs, account media and error clips fail explicitly. The
 resolver validates candidate destinations; later direct mpv playback is still
 mpv-owned network access. Connection-time pinning applies to the optional media
 proxy, not automatically to every backend request.
+
+## Backend lifecycle and service teardown
+
+`test_backend_lifecycle.py` covers one shared startup, failed/missing/refused IPC,
+command deadlines, malformed replies, child reap/kill, external ownership,
+peer-PID/inode guarded socket cleanup, partial startup and late-command races.
+Most cases are UNIT/MOCK. Four child-interpreter tests deliver actual SIGINT or
+SIGTERM during startup/teardown while renderer resources are mocked. They verify
+that cleanup executes instead of the interpreter exiting early on the signal.
+These are not production AF_UNIX or real mpv-process shutdown acceptance.

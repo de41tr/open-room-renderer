@@ -11,9 +11,11 @@ import asyncio
 import json
 import logging
 import os
-import errno
+import stat
+import socket
+import struct
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 LOG = logging.getLogger(__name__)
@@ -56,148 +58,276 @@ class MpvBackend:
     _channel_balance: float = 0.0
     _peq_bands: list[dict[str, float]] | None = None
 
-    async def start(self) -> None:
-        """Ensure the mpv IPC socket exists, spawning mpv when configured.
+    # All callers share startup, including callers with shorter deadlines. A
+    # cancelled HTTP request must not abandon a child being started for others.
+    _startup_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
+    _shutdown_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
+    _reap_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
+    _owned_process: asyncio.subprocess.Process | None = field(default=None, init=False, repr=False)
+    _owned_socket_identity: tuple[int, int] | None = field(default=None, init=False, repr=False)
+    _spawn_attempted: bool = field(default=False, init=False, repr=False)
+    _closed: bool = field(default=False, init=False, repr=False)
+    _startup_error: str = field(default="mpv did not become ready", init=False, repr=False)
+    _startup_timeout: float = field(default=5.0, init=False, repr=False)
+    _shutdown_timeout: float = field(default=3.0, init=False, repr=False)
 
-        Side Effects:
-            May remove a stale socket and start an ``mpv`` subprocess.
+    @staticmethod
+    def _observe_task(task: asyncio.Task[None]) -> None:
+        """Retrieve background failures even if every request timed out."""
+        if not task.cancelled():
+            task.exception()
+
+    async def start(self, timeout: float = 5.0) -> None:
+        """Connect to mpv or make one owned spawn attempt, within ``timeout``.
+
+        Foreign paths are never removed and failed attempts never respawn on
+        each status poll. Restart the renderer to retry spawning; an external socket
+        that becomes available can still be used without restarting.
         """
-
-        if os.path.exists(self.socket_path) and await self._socket_accepts_connections():
-            return
-        if os.path.exists(self.socket_path):
-            LOG.warning("removing stale mpv IPC socket: %s", self.socket_path)
-            try:
-                os.unlink(self.socket_path)
-            except OSError as exc:
-                LOG.warning("could not remove stale mpv socket: %s", exc)
-        if not self.auto_spawn:
-            LOG.warning("mpv IPC socket missing and auto_spawn_mpv=false: %s", self.socket_path)
-            return
+        if self._closed:
+            raise BackendError("mpv backend is shut down")
+        if timeout <= 0:
+            raise BackendError("mpv startup timed out")
+        # No await between observing and publishing the task: atomic within the
+        # event loop, without holding a lock across subprocess/socket I/O.
+        if self._startup_task is None or self._startup_task.done():
+            self._startup_task = asyncio.create_task(self._start_once())
+            self._startup_task.add_done_callback(self._observe_task)
         try:
-            self.process = await asyncio.create_subprocess_exec(
-                "mpv",
-                "--no-video",
-                "--idle=yes",
-                f"--input-ipc-server={self.socket_path}",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
+            async with asyncio.timeout(timeout):
+                await asyncio.shield(self._startup_task)
+        except TimeoutError as exc:
+            raise BackendError("mpv startup timed out") from exc
+
+    def _socket_identity(self) -> tuple[int, int] | None:
+        """Inspect the path without following links or removing foreign files."""
+        try:
+            info = os.lstat(self.socket_path)
         except FileNotFoundError:
-            LOG.error("mpv is not installed or not in PATH")
-            return
-        for _ in range(50):
-            if os.path.exists(self.socket_path):
-                LOG.info("mpv IPC ready at %s", self.socket_path)
-                return
-            await asyncio.sleep(0.1)
-        LOG.warning("mpv did not create IPC socket within timeout")
+            return None
+        if not stat.S_ISSOCK(info.st_mode):
+            raise BackendError("mpv IPC path is not a socket (symlinks are not followed)")
+        return info.st_dev, info.st_ino
 
-    async def _socket_accepts_connections(self) -> bool:
-        """Return whether an existing socket is backed by a live mpv process."""
+    def _socket_exists(self) -> bool:
+        return self._socket_identity() is not None
 
+    async def _start_once(self) -> None:
+        ready = False
         try:
-            reader, writer = await asyncio.open_unix_connection(self.socket_path)
-            writer.close()
-            await writer.wait_closed()
-            return True
-        except OSError:
-            return False
+            async with asyncio.timeout(self._startup_timeout):
+                if self._socket_exists():
+                    # A refused preexisting socket is not evidence of ownership.
+                    # In particular do not launch mpv, which could replace it.
+                    await self._probe_socket()
+                    ready = True
+                    return
+                if not self.auto_spawn:
+                    raise BackendError("mpv IPC socket unavailable; auto-spawn is disabled")
+                if self._spawn_attempted:
+                    raise BackendError(self._startup_error)
+                self._spawn_attempted = True
+                self.process = await asyncio.create_subprocess_exec(
+                    "mpv",
+                    "--no-video",
+                    "--idle=yes",
+                    f"--input-ipc-server={self.socket_path}",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                self._owned_process = self.process
+                while True:
+                    if self.process.returncode is not None:
+                        raise BackendError(f"mpv exited during startup (code {self.process.returncode})")
+                    try:
+                        if self._socket_exists():
+                            identity = self._socket_identity()
+                            peer_pid = await self._probe_socket(owned_identity=identity)
+                            # A path appearing after spawn alone does not prove
+                            # ownership: another server may have raced startup.
+                            # Linux SO_PEERCRED binds it to our actual child.
+                            if (identity is not None and peer_pid is not None
+                                    and peer_pid == self.process.pid
+                                    and self._socket_identity() == identity):
+                                self._owned_socket_identity = identity
+                            ready = True
+                            LOG.info("mpv IPC ready at %s", self.socket_path)
+                            return
+                    except (FileNotFoundError, ConnectionRefusedError):
+                        pass
+                    await asyncio.sleep(0.05)
+        except TimeoutError as exc:
+            self._startup_error = "mpv startup timed out waiting for IPC"
+            raise BackendError(self._startup_error) from exc
+        except FileNotFoundError as exc:
+            self._startup_error = "mpv executable not found" if self._spawn_attempted and self.process is None else "mpv IPC socket unavailable"
+            raise BackendError(self._startup_error) from exc
+        except OSError as exc:
+            self._startup_error = f"mpv startup failed: {redact_sensitive(exc)}"
+            raise BackendError(self._startup_error) from exc
+        except BackendError as exc:
+            self._startup_error = str(exc)
+            raise
+        finally:
+            if not ready and self._owned_process is not None:
+                await self._reap_owned_process()
+
+    async def _probe_socket(self, *, owned_identity: tuple[int, int] | None = None) -> int | None:
+        """Check readiness and, on Linux, identify the connected peer process."""
+        _, writer = await asyncio.open_unix_connection(self.socket_path)
+        try:
+            ipc_socket = writer.get_extra_info("socket")
+            credentials = ipc_socket.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+            peer_pid = struct.unpack("3i", credentials)[0]
+            # Record verified ownership before awaiting transport close, so a
+            # shutdown signal during that await can still clean our socket.
+            if (owned_identity is not None and self._owned_process is not None
+                    and peer_pid == self._owned_process.pid
+                    and self._socket_identity() == owned_identity):
+                self._owned_socket_identity = owned_identity
+            return peer_pid
+        except (AttributeError, OSError, TypeError, struct.error):
+            # Without trustworthy peer credentials, connection is usable but
+            # the path is never ours to remove automatically.
+            return None
+        finally:
+            await self._close_writer(writer, asyncio.get_running_loop().time() + 0.1)
+
+    @staticmethod
+    async def _close_writer(writer: asyncio.StreamWriter, deadline: float) -> None:
+        """Close promptly, aborting a transport that cannot finish by deadline."""
+        writer.close()
+        remaining = deadline - asyncio.get_running_loop().time()
+        try:
+            if remaining <= 0:
+                return
+            await asyncio.wait_for(writer.wait_closed(), min(remaining, 0.1))
+        except (OSError, TimeoutError):
+            pass
+        finally:
+            # close() already sends buffered bytes. abort() prevents a broken
+            # peer from retaining a transport after bounded wait_closed().
+            writer.transport.abort()
+
+    async def _reap_owned_process(self) -> None:
+        process = self._owned_process
+        if process is None:
+            return
+        if self._reap_task is None:
+            self._reap_task = asyncio.create_task(self._terminate_and_wait(process))
+            self._reap_task.add_done_callback(self._observe_task)
+        await asyncio.shield(self._reap_task)
+
+    async def _terminate_and_wait(self, process: asyncio.subprocess.Process) -> None:
+        if process.returncode is None:
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
+        try:
+            await asyncio.wait_for(process.wait(), self._shutdown_timeout)
+        except TimeoutError:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(process.wait(), self._shutdown_timeout)
+            except TimeoutError as exc:
+                raise BackendError("mpv did not exit after kill") from exc
+        # mpv closes its listener without unlinking its pathname on exit. Only
+        # remove the peer-verified socket, after reap and if its identity is
+        # unchanged. Preserve regular files, links and replacement sockets.
+        if self._owned_socket_identity is not None:
+            try:
+                if self._socket_identity() == self._owned_socket_identity:
+                    os.unlink(self.socket_path)
+            except (OSError, BackendError) as exc:
+                LOG.warning("could not clean up owned mpv IPC socket: %s", redact_sensitive(exc))
+            self._owned_socket_identity = None
+        # Keep the process handle on wait failure instead of claiming a reap.
+        self._owned_process = None
+        if self.process is process:
+            self.process = None
 
     async def stop_process(self) -> None:
-        """Terminate the auto-spawned mpv process if this backend started one."""
+        """Reap only our child, escalating to kill and awaiting its exit.
 
-        if self.process and self.process.returncode is None:
-            self.process.terminate()
-            try:
-                await asyncio.wait_for(self.process.wait(), 3)
-            except asyncio.TimeoutError:
-                self.process.kill()
+        No IPC quit is sent: an externally managed mpv is never terminated.
+        Shutdown is idempotent and prevents subsequent request-driven spawning.
+        """
+        self._closed = True
+        if self._shutdown_task is None:
+            self._shutdown_task = asyncio.create_task(self._shutdown())
+            self._shutdown_task.add_done_callback(self._observe_task)
+        try:
+            await asyncio.shield(self._shutdown_task)
+        except asyncio.CancelledError:
+            await asyncio.shield(self._shutdown_task)
+            raise
+
+    async def _shutdown(self) -> None:
+        if self._startup_task is not None:
+            if not self._startup_task.done():
+                self._startup_task.cancel()
+            await asyncio.gather(self._startup_task, return_exceptions=True)
+        await self._reap_owned_process()
 
     async def command(self, args: list[Any], timeout: float = 5.0) -> dict[str, Any]:
-        """Send an mpv command and wait for its matching response.
+        """Send one JSON IPC command with an end-to-end deadline.
 
-        Args:
-            args: mpv JSON IPC command array.
-            timeout: Maximum seconds to wait for the matching request ID.
-
-        Returns:
-            mpv response object, or a small ``{"error": ...}`` dictionary.
+        Startup, connect, drain, event handling, response and close all consume
+        the same budget. Errors remain explicit dictionaries for existing API
+        callers; checked control wrappers turn them into ``BackendError``.
         """
+        return await self._send_command(args, timeout, wait_response=True)
 
-        if not os.path.exists(self.socket_path):
-            await self.start()
-        if not os.path.exists(self.socket_path):
-            return {"error": "mpv IPC socket unavailable"}
-        self._request_id += 1
-        request_id = self._request_id
-        payload = {"command": args, "request_id": request_id}
+    async def command_no_wait(self, args: list[Any], timeout: float = 5.0) -> dict[str, Any]:
+        """Bound connection/write time; success here means sent, not acknowledged."""
+        return await self._send_command(args, timeout, wait_response=False)
+
+    async def _send_command(self, args: list[Any], timeout: float, *, wait_response: bool) -> dict[str, Any]:
+        deadline = asyncio.get_running_loop().time() + timeout
         writer: asyncio.StreamWriter | None = None
         try:
-            reader, writer = await asyncio.open_unix_connection(self.socket_path)
-            writer.write((json.dumps(payload) + "\n").encode())
-            await writer.drain()
-
-            deadline = asyncio.get_running_loop().time() + timeout
-            while True:
-                remaining = max(0.0, deadline - asyncio.get_running_loop().time())
-                if remaining <= 0:
-                    raise asyncio.TimeoutError(f"timed out waiting for mpv response id={request_id}")
-                line = await asyncio.wait_for(reader.readline(), remaining)
-                if not line:
-                    return {"error": "mpv IPC connection closed"}
-                response = json.loads(line.decode() or "{}")
-                if response.get("request_id") == request_id:
-                    return response
-                LOG.debug("ignoring mpv IPC event while waiting for id=%s: %s", request_id, response)
-        except Exception as exc:
-            LOG.warning("mpv IPC command failed %s: %s", args, exc)
-            if isinstance(exc, OSError) and exc.errno in {errno.ECONNREFUSED, errno.ENOENT}:
-                try:
-                    os.unlink(self.socket_path)
-                except OSError:
-                    pass
-                await self.start()
-            return {"error": str(exc)}
+            async with asyncio.timeout_at(deadline):
+                await self.start(timeout=max(0.0, deadline - asyncio.get_running_loop().time()))
+                if self._closed:
+                    raise BackendError("mpv backend is shut down")
+                reader, writer = await asyncio.open_unix_connection(self.socket_path)
+                if self._closed:
+                    raise BackendError("mpv backend is shut down")
+                self._request_id += 1
+                request_id = self._request_id
+                payload = {"command": args, "request_id": request_id}
+                writer.write((json.dumps(payload) + "\n").encode())
+                await writer.drain()
+                if not wait_response:
+                    return {"error": "success"}
+                while True:
+                    line = await reader.readline()
+                    if not line:
+                        raise BackendError("mpv IPC connection closed before acknowledgement")
+                    try:
+                        response = json.loads(line.decode())
+                    except (UnicodeDecodeError, ValueError) as exc:
+                        raise BackendError("mpv IPC returned invalid JSON") from exc
+                    if not isinstance(response, dict):
+                        raise BackendError("mpv IPC returned a non-object response")
+                    if response.get("request_id") == request_id:
+                        if not isinstance(response.get("error"), str):
+                            raise BackendError("mpv IPC response is missing an error status")
+                        return response
+                    LOG.debug("ignoring mpv IPC event while waiting for id=%s", request_id)
+        except TimeoutError:
+            return {"error": "mpv IPC command timed out"}
+        except (BackendError, OSError, ValueError) as exc:
+            error = redact_sensitive(exc) or type(exc).__name__
+            LOG.warning("mpv IPC command %s failed: %s", args[0] if args else "(empty)", error)
+            return {"error": error}
         finally:
             if writer is not None:
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except OSError:
-                    pass
-
-    async def command_no_wait(self, args: list[Any]) -> dict[str, Any]:
-        """Send an mpv command without waiting for the response body."""
-
-        if not os.path.exists(self.socket_path):
-            await self.start()
-        if not os.path.exists(self.socket_path):
-            return {"error": "mpv IPC socket unavailable"}
-        self._request_id += 1
-        payload = {"command": args, "request_id": self._request_id}
-        writer: asyncio.StreamWriter | None = None
-        try:
-            _, writer = await asyncio.open_unix_connection(self.socket_path)
-            writer.write((json.dumps(payload) + "\n").encode())
-            await writer.drain()
-            return {"error": "success"}
-        except Exception as exc:
-            LOG.warning("mpv IPC fire-and-forget command failed %s: %s", args, exc)
-            if isinstance(exc, OSError) and exc.errno in {errno.ECONNREFUSED, errno.ENOENT}:
-                try:
-                    os.unlink(self.socket_path)
-                except OSError:
-                    pass
-                await self.start()
-            return {"error": str(exc)}
-        finally:
-            if writer is not None:
-                writer.close()
-                try:
-                    await writer.wait_closed()
-                except OSError:
-                    pass
+                await self._close_writer(writer, deadline)
 
     async def loadfile(self, url: str, options: dict[str, str] | None = None) -> dict[str, Any]:
         """Load ``url`` into mpv and force playback out of pause state."""
@@ -207,20 +337,20 @@ class MpvBackend:
         if options:
             command.extend([-1, options])
         response = await self.command(command, timeout=3.0)
-        if response.get("error") not in {None, "success"}:
+        if response.get("error") != "success":
             LOG.warning("mpv loadfile returned error url=%s response=%s", redact_sensitive(url), response)
-            return response
+            return {**response, "error": response.get("error") or "mpv loadfile acknowledgement missing"}
         pause_response = await self.command(["set_property", "pause", False], timeout=3.0)
-        if pause_response.get("error") not in {None, "success"}:
+        if pause_response.get("error") != "success":
             LOG.warning("mpv unpause after loadfile returned error url=%s response=%s", redact_sensitive(url), pause_response)
-            return pause_response
+            return {**pause_response, "error": pause_response.get("error") or "mpv unpause acknowledgement missing"}
         return response
 
     async def checked_command(self, args: list[Any]) -> dict[str, Any]:
         """Wait for an acknowledgement; never equate socket write with success."""
         response = await self.command(args, timeout=2.0)
         if response.get("error") != "success":
-            raise BackendError("Backend operation failed")
+            raise BackendError(f"Backend operation failed: {redact_sensitive(response.get('error') or 'missing acknowledgement')}")
         return response
 
     async def pause(self) -> None:
