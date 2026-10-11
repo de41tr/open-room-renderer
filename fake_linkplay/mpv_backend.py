@@ -312,7 +312,15 @@ class MpvBackend:
     async def snapshot(self) -> dict[str, Any]:
         """Read the small set of mpv properties used for renderer state sync."""
 
-        data: dict[str, Any] = {}
+        # Failure of a required control property is different from unavailable
+        # media metadata while idle. Preserve that distinction for the owner.
+        idle = await self.command(["get_property", "idle-active"], timeout=0.5)
+        if idle.get("error") != "success":
+            return {"backend-error": True}
+        pause = await self.command(["get_property", "pause"], timeout=0.5)
+        if pause.get("error") != "success":
+            return {"backend-error": True}
+        data: dict[str, Any] = {"idle-active": idle.get("data"), "pause": pause.get("data")}
         for key in (
             "playback-time",
             "duration",
@@ -321,8 +329,8 @@ class MpvBackend:
             "path",
             "stream-open-filename",
             "core-idle",
-            "idle-active",
-            "pause",
+            "eof-reached",
+            "paused-for-cache",
             "cache-buffering-state",
             "demuxer-cache-state",
             "track-list",

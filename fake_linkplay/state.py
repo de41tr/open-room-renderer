@@ -7,9 +7,20 @@ status shapes expected by local renderer clients.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from .config import Config
+
+
+class PlaybackPhase(StrEnum):
+    COMMAND_ACCEPTED = "COMMAND_ACCEPTED"
+    LOADING = "LOADING"
+    BUFFERING = "BUFFERING"
+    PLAYING = "PLAYING"
+    PAUSED = "PAUSED"
+    STOPPED = "STOPPED"
+    ERROR = "ERROR"
 
 
 @dataclass
@@ -23,7 +34,12 @@ class RendererState:
     cfg: Config
     volume: int
     mute: bool = False
-    status: str = "stop"
+    phase: PlaybackPhase = PlaybackPhase.STOPPED
+    generation: int = 0
+    intent: str = "stop"
+    backend_url: str = ""
+    backend_original_url: str = ""
+    last_error: str = ""
     mode: str = "0"
     loop: str = "0"
     current_url: str = ""
@@ -40,6 +56,40 @@ class RendererState:
     plicount: int = 1
     plicurr: int = 1
 
+    @property
+    def status(self) -> str:
+        """Legacy wire state derived from the authoritative playback phase."""
+        return {
+            PlaybackPhase.PLAYING: "play", PlaybackPhase.PAUSED: "pause",
+            PlaybackPhase.STOPPED: "stop", PlaybackPhase.ERROR: "stop",
+        }.get(self.phase, "transition")
+
+    @status.setter
+    def status(self, value: str) -> None:
+        # Compatibility for existing internal helpers; new code sets a phase.
+        self.phase = {"play": PlaybackPhase.PLAYING, "pause": PlaybackPhase.PAUSED,
+                      "stop": PlaybackPhase.STOPPED, "transition": PlaybackPhase.BUFFERING}[value]
+
+    @property
+    def transport_state(self) -> str:
+        return {"play": "PLAYING", "pause": "PAUSED_PLAYBACK", "stop": "STOPPED",
+                "transition": "TRANSITIONING"}[self.status]
+
+    @property
+    def transport_status(self) -> str:
+        return "ERROR_OCCURRED" if self.phase == PlaybackPhase.ERROR else "OK"
+
+    def accept_command(self, intent: str) -> int:
+        """Invalidate pending observations before issuing a newer owner command."""
+        self.generation += 1
+        self.intent = intent
+        self.last_error = ""
+        return self.generation
+
+    def mark_error(self, message: str = "Backend operation failed") -> None:
+        self.phase = PlaybackPhase.ERROR
+        self.last_error = message
+
     @classmethod
     def from_config(cls, cfg: Config) -> "RendererState":
         """Create initial state with the configured volume clamped to 0..100."""
@@ -50,7 +100,8 @@ class RendererState:
         """Mark the renderer as playing ``url`` and fill basic metadata."""
 
         self.current_url = url
-        self.status = "play"
+        self.phase = PlaybackPhase.PLAYING
+        self.intent = "play"
         self.mode = "10"
         if not self.title:
             self.title = url.rsplit("/", 1)[-1] or "Network stream"
@@ -62,17 +113,19 @@ class RendererState:
     def mark_pause(self) -> None:
         """Mark the transport as paused without changing position."""
 
-        self.status = "pause"
+        self.phase = PlaybackPhase.PAUSED
+        self.intent = "pause"
 
     def mark_transitioning(self) -> None:
         """Mark the transport as buffering/loading for event subscribers."""
 
-        self.status = "transition"
+        self.phase = PlaybackPhase.BUFFERING
 
     def mark_stop(self) -> None:
         """Mark playback stopped and reset the visible position."""
 
-        self.status = "stop"
+        self.phase = PlaybackPhase.STOPPED
+        self.intent = "stop"
         self.curpos = 0
 
     def as_status_ex(self, ip: str) -> dict[str, Any]:
@@ -119,6 +172,9 @@ class RendererState:
             "vol": str(self.volume),
             "mute": "1" if self.mute else "0",
             "status": self.status,
+            "playback_phase": self.phase.value,
+            "playback_generation": str(self.generation),
+            "transport_error": self.last_error,
             "play_state": {"play": "playing", "pause": "pause", "stop": "stop", "transition": "transitioning"}.get(self.status, self.status),
             "mode": self.mode,
             "loop": self.loop,
@@ -182,6 +238,9 @@ class RendererState:
             "mode": self.mode,
             "loop": self.loop,
             "status": self.status,
+            "playback_phase": self.phase.value,
+            "playback_generation": str(self.generation),
+            "transport_error": self.last_error,
             "curpos": str(int(self.curpos)),
             "totlen": str(int(self.totlen)),
             "plicount": str(self.plicount),

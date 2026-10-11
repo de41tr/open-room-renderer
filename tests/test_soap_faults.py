@@ -142,7 +142,11 @@ async def test_backend_rejection_does_not_commit_success_state(api, action, args
     api.state.curpos = 0
     before = asdict(api.state)
     assert fault_code(await api.soap(request(action, args, service))) == "501"
-    assert asdict(api.state) == before
+    after = asdict(api.state)
+    # A rejected owner command still invalidates older in-flight observations.
+    after.pop("generation")
+    before.pop("generation")
+    assert after == before
 
 
 @pytest.mark.asyncio

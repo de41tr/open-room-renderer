@@ -20,7 +20,7 @@ from aiohttp import web
 from .config import load_config
 from .http_api import HttpApi
 from .mdns import MdnsAdvertiser
-from .mpv_backend import MpvBackend
+from .mpv_backend import BackendError, MpvBackend
 from .ssdp import SsdpServer
 from .state import RendererState
 from .upnp_description import description_xml
@@ -45,7 +45,11 @@ async def serve(config_path: str) -> None:
     state = RendererState.from_config(cfg)
     mpv = MpvBackend(cfg.mpv_socket, cfg.auto_spawn_mpv)
     await mpv.start()
-    await mpv.stop()
+    try:
+        await mpv.stop()
+    except BackendError:
+        state.mark_error()
+        LOG.warning("backend unavailable at startup; control API will report failures")
     api = HttpApi(cfg, state, mpv)
     if cfg.channel_balance != "0.0":
         try:

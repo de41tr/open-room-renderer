@@ -515,6 +515,7 @@ def avtransport_response_fields(action: str, state: Any | None = None) -> str | 
     track_metadata = getattr(state, "track_metadata", "")
     track_source = getattr(state, "track_source", "") or ("RadioParadise" if current_uri else "")
     transport_state = {"play": "PLAYING", "pause": "PAUSED_PLAYBACK", "stop": "STOPPED", "transition": "TRANSITIONING"}.get(status, "STOPPED")
+    transport_status = getattr(state, "transport_status", "OK")
     play_medium = getattr(state, "play_medium", "") or ("STATION-NETWORK" if current_uri else "NONE")
     loop_mode = getattr(state, "loop", "0")
     stream_capability = ""
@@ -559,7 +560,7 @@ def avtransport_response_fields(action: str, state: Any | None = None) -> str | 
                 "<RelCount>0</RelCount>",
                 "<AbsCount>0</AbsCount>",
                 f"<CurrentTransportState>{transport_state}</CurrentTransportState>",
-                "<CurrentTransportStatus>OK</CurrentTransportStatus>",
+                f"<CurrentTransportStatus>{transport_status}</CurrentTransportStatus>",
                 "<CurrentSpeed>1</CurrentSpeed>",
                 f"<LoopMode>{escape(str(loop_mode))}</LoopMode>",
                 "<PlayType>0</PlayType>",
@@ -587,7 +588,7 @@ def avtransport_response_fields(action: str, state: Any | None = None) -> str | 
         return "\n".join(
             [
                 f"<CurrentTransportState>{transport_state}</CurrentTransportState>",
-                "<CurrentTransportStatus>OK</CurrentTransportStatus>",
+                f"<CurrentTransportStatus>{transport_status}</CurrentTransportStatus>",
                 "<CurrentSpeed>1</CurrentSpeed>",
             ]
         )

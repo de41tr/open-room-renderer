@@ -32,7 +32,7 @@ from aiohttp import web
 from .config import Config
 from .mpv_backend import BackendError, MpvBackend
 from .soap import MUTATING_ACTIONS, SoapFault, fault_xml, parse_request
-from .state import RendererState
+from .state import PlaybackPhase, RendererState
 from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
 
 LOG = logging.getLogger(__name__)
@@ -130,7 +130,10 @@ class HttpApi:
         self.queue_is_live = True
         self.queue_duration_sec = 0
         self._last_resolve_duration_sec = 0
-        self._play_generation = 0
+        self._backend_lock = asyncio.Lock()
+        self._state_monitor_task: asyncio.Task | None = None
+        self._app_users = 0
+        self._monitor_interval = 0.5
         self._playback_offset_sec = 0
         self._pending_seek_target: int | None = None
         self._pending_seek_generation = 0
@@ -156,6 +159,7 @@ class HttpApi:
         """Build the aiohttp application and route table."""
 
         app = web.Application()
+        app.cleanup_ctx.append(self._state_monitor_context)
         app.add_routes(
             [
                 web.get("/httpapi.asp", self.handle_httpapi),
@@ -180,11 +184,95 @@ class HttpApi:
         )
         return app
 
-    async def sync_mpv_state(self) -> None:
-        """Refresh visible transport position and title from mpv snapshot."""
+    async def _state_monitor_context(self, app):
+        """Share one backend observer between all configured HTTP listeners."""
+        self._app_users += 1
+        if self._state_monitor_task is None:
+            self._state_monitor_task = asyncio.create_task(self._monitor_backend())
+        try:
+            yield
+        finally:
+            self._app_users -= 1
+            if self._app_users == 0 and self._state_monitor_task is not None:
+                task, self._state_monitor_task = self._state_monitor_task, None
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
-        snap = await self.mpv.snapshot()
-        if isinstance(snap.get("playback-time"), (int, float)):
+    async def _monitor_backend(self) -> None:
+        """Observe EOF/failure even when no client is polling status."""
+        while True:
+            await asyncio.sleep(self._monitor_interval)
+            if self.state.phase in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING, PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
+                continue
+            try:
+                await self.sync_mpv_state()
+            except (BackendError, OSError, TimeoutError):
+                self.state.mark_error()
+                self._schedule_event_notify()
+
+    @property
+    def _play_generation(self) -> int:
+        return self.state.generation
+
+    @_play_generation.setter
+    def _play_generation(self, value: int) -> None:
+        self.state.generation = value
+
+    def _accept_playback_command(self, intent: str) -> int:
+        self._pending_seek_generation += 1
+        self._pending_seek_target = None
+        return self.state.accept_command(intent)
+
+    async def sync_mpv_state(self) -> None:
+        """Apply an observation only to the generation that requested it."""
+        generation = self.state.generation
+        try:
+            async with self._backend_lock:
+                snap = await self.mpv.snapshot()
+        except (BackendError, OSError, TimeoutError):
+            if generation == self.state.generation:
+                self.state.mark_error()
+                self._schedule_event_notify()
+            return
+        if generation != self.state.generation:
+            return
+        self._apply_backend_snapshot(snap)
+
+    def _apply_backend_snapshot(self, snap: dict) -> None:
+        """One source of truth for all HTTP, SOAP and event serializers."""
+        old_phase = self.state.phase
+        if self.state.phase in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING}:
+            return
+        if snap.get("backend-error"):
+            self.state.mark_error()
+            if self.state.phase != old_phase:
+                self._schedule_event_notify()
+            return
+        if self.state.phase == PlaybackPhase.ERROR:
+            return
+        observed_url = snap.get("path")
+        if self.state.backend_url and observed_url and observed_url != self.state.backend_url:
+            return
+        if self.state.phase not in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING}:
+            if snap.get("eof-reached") is True or snap.get("idle-active") is True:
+                if not (self.state.intent == "pause" and not self.state.backend_url):
+                    self.state.phase = PlaybackPhase.STOPPED
+                    self.state.curpos = 0
+                    self.state.backend_url = ""
+                    self.state.backend_original_url = ""
+            elif self.state.intent == "stop":
+                # A late active backend snapshot cannot undo an owner stop.
+                pass
+            elif snap.get("pause") is True:
+                self.state.phase = PlaybackPhase.PAUSED
+            elif snap.get("paused-for-cache") is True:
+                self.state.phase = PlaybackPhase.BUFFERING
+            elif self._mpv_snapshot_has_audio(snap):
+                self.state.phase = PlaybackPhase.PLAYING
+        if isinstance(snap.get("playback-time"), (int, float)) and self.state.phase != PlaybackPhase.STOPPED:
             playback_time = self._adjusted_playback_time(snap)
             if self._pending_seek_target is None or abs(playback_time - self._pending_seek_target) <= 2:
                 self.state.curpos = playback_time
@@ -194,8 +282,68 @@ class HttpApi:
             self.state.totlen = self.queue_duration_sec
         elif isinstance(snap.get("duration"), (int, float)) and int(snap["duration"]) > 0:
             self.state.totlen = int(snap["duration"])
-        if snap.get("media-title"):
+        if snap.get("media-title") and self.state.intent != "stop":
             self.state.title = str(snap["media-title"])
+        if self.state.phase != old_phase:
+            self._schedule_event_notify()
+
+    async def _transport_command(self, command: str) -> None:
+        """Serialize mutations and verify the actual backend acknowledgement."""
+        previous_phase, previous_intent = self.state.phase, self.state.intent
+        intent = {"pause": "pause", "resume": "play", "stop": "stop"}[command]
+        generation = self._accept_playback_command(intent)
+        self.state.phase = PlaybackPhase.COMMAND_ACCEPTED
+        try:
+            async with self._backend_lock:
+                if generation != self.state.generation:
+                    raise BackendError("Playback command superseded")
+                pause_unloaded = command == "pause" and self.state.backend_original_url != self.state.current_url
+                effect = "stop" if pause_unloaded else command
+                await self._backend_call(getattr(self.mpv, effect)())
+                snapshot = await self.mpv.snapshot()
+                if generation != self.state.generation:
+                    raise BackendError("Playback command superseded")
+                if snapshot.get("backend-error"):
+                    self.state.mark_error()
+                    raise BackendError("Backend unavailable after command")
+                if effect == "stop" and snapshot.get("idle-active") is False:
+                    raise BackendError("Backend did not stop")
+                if effect == "pause" and snapshot.get("pause") is False:
+                    raise BackendError("Backend did not pause")
+                if command == "resume" and (snapshot.get("pause") is True or snapshot.get("idle-active") is True):
+                    raise BackendError("Backend did not resume")
+                if effect == "stop":
+                    self.state.backend_url = ""
+                    self.state.backend_original_url = ""
+            if generation != self.state.generation:
+                raise BackendError("Playback command superseded")
+            if command == "stop":
+                self.state.mark_stop()
+            elif command == "pause":
+                self.state.mark_pause()
+            else:
+                self.state.phase = PlaybackPhase.PLAYING
+            self._apply_backend_snapshot(snapshot)
+        except (BackendError, OSError, TimeoutError):
+            if generation == self.state.generation and self.state.phase != PlaybackPhase.ERROR:
+                if previous_phase in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING, PlaybackPhase.BUFFERING}:
+                    self.state.mark_error()
+                else:
+                    self.state.phase, self.state.intent = previous_phase, previous_intent
+            raise
+        self._schedule_event_notify()
+
+    async def _seek_command(self, seconds: int) -> None:
+        if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}:
+            raise SoapFault(701, "Transition Not Available")
+        generation = self._accept_playback_command("pause" if self.state.phase == PlaybackPhase.PAUSED else "play")
+        async with self._backend_lock:
+            if generation != self.state.generation:
+                raise BackendError("Playback command superseded")
+            await self._backend_call(self.mpv.seek(seconds))
+        if generation != self.state.generation:
+            raise BackendError("Playback command superseded")
+        self.state.curpos = seconds
 
     async def handle_httpapi(self, request: web.Request) -> web.Response:
         """Handle ``/httpapi.asp`` commands and serialize text/JSON results."""
@@ -227,6 +375,11 @@ class HttpApi:
             return web.Response(status=404, text="Failed", content_type="text/plain")
         try:
             payload = await self.execute(parsed, request.remote or self.cfg.resolved_advertise_ip)
+        except (BackendError, OSError, TimeoutError):
+            LOG.warning("backend command failed")
+            return web.Response(status=502, text="Failed", content_type="text/plain")
+        except (SoapFault, ValueError, TypeError):
+            return web.Response(status=400, text="Failed", content_type="text/plain")
         except Exception:
             LOG.exception("command failed")
             return web.Response(text="Failed", content_type="text/plain")
@@ -260,7 +413,7 @@ class HttpApi:
         if name.startswith("getStatus:ip:"):
             await self.sync_mpv_state()
             return self._with_experimental_sources(self.state.as_status_ex(self.cfg.resolved_advertise_ip))
-        if name == "getPlayerStatus":
+        if name in {"getPlayerStatus", "getPlayerStatusEx"}:
             await self.sync_mpv_state()
             return self.state.as_player_status()
         if name == "getMetaInfo":
@@ -519,31 +672,18 @@ class HttpApi:
             await self._play_url(url)
             self._schedule_event_notify()
             return "OK"
-        if name == "pause":
-            self._pending_seek_generation += 1
-            self._pending_seek_target = None
-            await self._backend_call(self.mpv.pause())
-            self.state.mark_pause()
-            self._schedule_event_notify()
-            return "OK"
-        if name in {"resume", "onepause"}:
-            self._pending_seek_generation += 1
-            self._pending_seek_target = None
-            await self._backend_call(self.mpv.resume())
-            self.state.status = "play"
-            self._schedule_event_notify()
-            return "OK"
-        if name == "stop":
-            self._pending_seek_generation += 1
-            self._pending_seek_target = None
-            await self._backend_call(self.mpv.stop())
-            self.state.mark_stop()
-            self._schedule_event_notify()
+        if name in {"pause", "resume", "onepause", "stop"}:
+            command = "resume" if name == "onepause" else name
+            if command == "resume" and not self.state.current_url:
+                raise BackendError("No media selected")
+            if command == "resume" and (not self.state.backend_url or self.state.intent == "stop" or self.state.backend_original_url != self.state.current_url or self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}):
+                await self._play_url(self.state.current_url)
+            else:
+                await self._transport_command(command)
             return "OK"
         if name == "seek":
             seconds = max(0, int(parsed.args[0]))
-            await self._backend_call(self.mpv.seek(seconds))
-            self.state.curpos = seconds
+            await self._seek_command(seconds)
             return "OK"
         if name == "volume":
             value = max(0, min(100, int(parsed.args[0])))
@@ -1168,47 +1308,54 @@ class HttpApi:
         return payload
 
     async def _play_url(self, url: str) -> None:
-        """Resolve, load, and wait for an audio URL to become playable in mpv."""
-
-        self._play_generation += 1
-        self._pending_seek_generation += 1
-        self._pending_seek_target = None
-        generation = self._play_generation
-        self.state.mark_transitioning()
-        self._schedule_event_notify(("rendertransport1", "AVTransport"))
-        direct_url = self.queue_resolved_url if self.queue_url == url and self.queue_resolved_url else await self._resolve_playback_url(url)
-        if generation != self._play_generation:
-            LOG.info("discarding stale play request generation=%s current=%s url=%s", generation, self._play_generation, url)
-            return
-        if direct_url != url:
-            LOG.info("resolved playback url original=%s resolved=%s", url, direct_url)
-        playback_url = self._backend_playback_url(url, direct_url)
-        mpv_options = self._mpv_playback_options(url, direct_url)
-        self._playback_offset_sec = 0
-        self.state.resolved_url = direct_url
-        LOG.info(
-            "starting playback generation=%s original=%s resolved=%s backend=%s mpv_options=%s source=%s title=%s",
-            generation,
-            url,
-            direct_url,
-            playback_url,
-            mpv_options,
-            self.state.track_source,
-            self.state.title,
-        )
-        response = await self.mpv.loadfile(playback_url, mpv_options)
-        if isinstance(response, dict) and response.get("error") not in {None, "success"}:
-            LOG.warning("mpv refused playback original=%s resolved=%s backend=%s response=%s", url, direct_url, playback_url, response)
-            self.state.mark_stop()
-            raise BackendError("Backend load failed")
-        ready = await self._wait_for_mpv_audio_ready(generation, playback_url)
-        if not ready:
-            LOG.warning("mpv did not report audio-ready original=%s resolved=%s backend=%s", url, direct_url, playback_url)
-            self.state.mark_stop()
-            self._schedule_event_notify(("rendertransport1", "AVTransport"))
-            raise BackendError("Backend did not confirm playback")
-        await self.sync_mpv_state()
-        self.state.mark_playing(url)
+        """Resolve/load once and confirm only this generation's actual audio."""
+        generation = self._accept_playback_command("play")
+        self.state.phase = PlaybackPhase.COMMAND_ACCEPTED
+        self.state.current_url = url
+        self.state.resolved_url = ""
+        self.state.curpos = 0
+        self._schedule_event_notify()
+        try:
+            self.state.phase = PlaybackPhase.LOADING
+            direct_url = self.queue_resolved_url if self.queue_url == url and self.queue_resolved_url else await self._resolve_playback_url(url)
+            if generation != self.state.generation:
+                raise BackendError("Playback command superseded")
+            playback_url = self._backend_playback_url(url, direct_url)
+            mpv_options = self._mpv_playback_options(url, direct_url)
+            async with self._backend_lock:
+                if generation != self.state.generation:
+                    raise BackendError("Playback command superseded")
+                await self._backend_call(self.mpv.loadfile(playback_url, mpv_options))
+                # This records actual backend identity even when a newer pause
+                # superseded the request while the command was in flight.
+                self.state.backend_url = playback_url
+                self.state.backend_original_url = url
+                self._playback_offset_sec = 0
+                if self.state.current_url == url:
+                    self.state.resolved_url = direct_url
+            if generation != self.state.generation:
+                raise BackendError("Playback command superseded")
+            self._playback_offset_sec = 0
+            self.state.resolved_url = direct_url
+            self.state.backend_url = playback_url
+            self.state.phase = PlaybackPhase.BUFFERING
+            self._schedule_event_notify()
+            ready = await self._wait_for_mpv_audio_ready(generation, playback_url)
+            if generation != self.state.generation:
+                raise BackendError("Playback command superseded")
+            if not ready:
+                raise BackendError("Backend did not confirm playback")
+            self.state.mark_playing(url)
+            await self.sync_mpv_state()
+            if generation != self.state.generation:
+                raise BackendError("Playback command superseded")
+            if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING}:
+                raise BackendError("Backend no longer playing")
+        except (BackendError, OSError, TimeoutError):
+            if generation == self.state.generation:
+                self.state.mark_error()
+                self._schedule_event_notify()
+            raise
 
     def _backend_playback_url(self, original_url: str, direct_url: str) -> str:
         # WiiM Home can hand us service profile URLs rather than final media
@@ -1330,9 +1477,16 @@ class HttpApi:
             if generation != self._play_generation:
                 return False
             await asyncio.sleep(0.5)
-            snapshot = await self.mpv.snapshot()
+            async with self._backend_lock:
+                snapshot = await self.mpv.snapshot()
+            if generation != self.state.generation:
+                return False
             last_snapshot = snapshot
-            if self._mpv_snapshot_has_audio(snapshot):
+            if snapshot.get("backend-error"):
+                return False
+            if snapshot.get("path") and snapshot["path"] != playback_url:
+                continue
+            if snapshot.get("idle-active") is not True and self._mpv_snapshot_has_audio(snapshot):
                 LOG.info("mpv audio-ready playback=%s snapshot=%s", playback_url, self._compact_snapshot(snapshot))
                 return True
         LOG.warning("mpv audio-ready timeout playback=%s snapshot=%s", playback_url, self._compact_snapshot(last_snapshot))
@@ -1361,19 +1515,22 @@ class HttpApi:
         ready = await self._wait_for_seek_ready(seek_generation, target, previous_pos)
         if seek_generation != self._pending_seek_generation or self._pending_seek_target != target:
             return
+        if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
+            self._pending_seek_target = None
+            return
         if ready:
             await self.sync_mpv_state()
+            if seek_generation != self._pending_seek_generation:
+                return
             self._pending_seek_target = None
-            if self._pending_seek_final_status == "pause":
-                self.state.mark_pause()
-            else:
-                self.state.status = "play"
+            if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
+                return
+            if self._pending_seek_final_status == "pause" and self.state.phase != PlaybackPhase.PAUSED:
+                self.state.mark_error("Backend did not preserve pause during seek")
         else:
-            self.state.curpos = target
-            self.state.mark_transitioning()
-            LOG.warning("SOAP Seek not ready; keeping TRANSITIONING position=%s", target)
+            self._pending_seek_target = None
+            self.state.mark_error("Seek position not confirmed")
             self._schedule_event_notify(("rendertransport1", "AVTransport"))
-            asyncio.create_task(self._finish_seek_after_buffering(seek_generation, target, target))
             return
         LOG.info("SOAP Seek ready position=%s ready=%s status=%s", self.state.curpos, ready, self.state.status)
         self._schedule_event_notify(("rendertransport1", "AVTransport"))
@@ -1398,11 +1555,18 @@ class HttpApi:
             timeout,
             min_elapsed,
         )
-        while True:
+        while loop.time() < deadline:
             if seek_generation != self._pending_seek_generation:
                 return False
             await asyncio.sleep(0.35)
-            snapshot = await self.mpv.snapshot()
+            async with self._backend_lock:
+                snapshot = await self.mpv.snapshot()
+            if seek_generation != self._pending_seek_generation:
+                return False
+            if snapshot.get("backend-error"):
+                return False
+            if snapshot.get("path") and self.state.backend_url and snapshot["path"] != self.state.backend_url:
+                continue
             last_snapshot = snapshot
             elapsed = loop.time() - started
             if self._snapshot_is_seek_ready(snapshot, target, required_advance, large_seek, elapsed, min_elapsed):
@@ -1434,7 +1598,11 @@ class HttpApi:
         playback_raw = snapshot.get("playback-time")
         if not isinstance(playback_raw, (int, float)):
             return False
-        if snapshot.get("core-idle") is True or snapshot.get("idle-active") is True:
+        if snapshot.get("idle-active") is True:
+            return False
+        if self._pending_seek_final_status == "pause" and snapshot.get("pause") is True:
+            return abs(self._adjusted_playback_time(snapshot) - target) <= 2
+        if snapshot.get("core-idle") is True:
             return False
         buffering = snapshot.get("cache-buffering-state")
         if isinstance(buffering, (int, float)) and 0 <= buffering < 100:
@@ -2455,6 +2623,13 @@ class HttpApi:
         if action == "SetAVTransportURI":
             url = self._xml_text(body, "CurrentURI")
             if url:
+                if self.state.backend_url or self.state.status in {"play", "pause", "transition"}:
+                    await self._transport_command("stop")
+                else:
+                    self._accept_playback_command("stop")
+                self.state.backend_url = ""
+                self.state.resolved_url = ""
+                self.state.mark_stop()
                 self.queue_url = url
                 self.state.current_url = url
                 self.state.title = url.rsplit("/", 1)[-1] or "Network stream"
@@ -2467,39 +2642,22 @@ class HttpApi:
                 self._schedule_event_notify(("rendertransport1", "AVTransport"))
             return
         if action == "Play":
-            self._pending_seek_generation += 1
-            self._pending_seek_target = None
             url = self.queue_url or self.state.current_url
-            if url:
+            if self.state.status == "pause" and self.state.backend_url and self.state.current_url == url:
+                await self._transport_command("resume")
+            elif self.state.status != "play" or self.state.current_url != url:
                 await self._play_url(url)
-                LOG.info("SOAP Play loaded url=%s", url)
-            else:
-                await self._backend_call(self.mpv.resume())
-                self.state.status = "play"
             self._schedule_event_notify()
             return
-        if action == "Pause":
-            self._pending_seek_generation += 1
-            self._pending_seek_target = None
-            await self._backend_call(self.mpv.pause())
-            self.state.mark_pause()
-            self._schedule_event_notify()
-            return
-        if action == "Stop":
-            self._play_generation += 1
-            self._pending_seek_generation += 1
-            self._pending_seek_target = None
-            await self._backend_call(self.mpv.stop())
-            self.state.mark_stop()
-            self._schedule_event_notify()
+        if action in {"Pause", "Stop"}:
+            await self._transport_command(action.lower())
             return
         if action == "Next":
             raise SoapFault(401, "Invalid Action")
         if action == "Previous":
             if not self.state.current_url or self.state.status not in {"play", "pause"}:
                 raise SoapFault(701, "Transition Not Available")
-            await self._backend_call(self.mpv.seek(0))
-            self.state.curpos = 0
+            await self._seek_command(0)
             LOG.info("SOAP Previous restarted current track")
             self._schedule_event_notify(("rendertransport1", "AVTransport"))
             return
@@ -2510,7 +2668,12 @@ class HttpApi:
             self._schedule_event_notify(("rendertransport1", "AVTransport"))
             return
         if action in {"Seek", "SeekForward", "SeekBackward"}:
+            if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}:
+                raise SoapFault(701, "Transition Not Available")
+            observed_generation = self.state.generation
             await self.sync_mpv_state()
+            if observed_generation != self.state.generation:
+                raise BackendError("Playback command superseded")
             final_status = self.state.status if self.state.status in {"play", "pause"} else "play"
             previous_pos = self.state.curpos
             if action == "SeekForward":
@@ -2526,21 +2689,38 @@ class HttpApi:
             if not self.queue_is_live and self.state.totlen > 0:
                 seconds = min(seconds, max(0, self.state.totlen - 1))
             seconds = max(0, int(seconds))
+            generation = self._accept_playback_command(self.state.intent)
+            async with self._backend_lock:
+                if generation != self.state.generation:
+                    raise BackendError("Playback command superseded")
+                if self._should_reload_for_large_seek(seconds, previous_pos):
+                    direct_url = self.queue_resolved_url or self.state.resolved_url
+                    seek_url = self._seek_audio_proxy_url(direct_url, seconds)
+                    LOG.info(
+                        "SOAP %s reloading range proxy position=%s previous=%s direct=%s proxy=%s",
+                        action,
+                        seconds,
+                        previous_pos,
+                        direct_url,
+                        seek_url,
+                    )
+                    await self._backend_call(self.mpv.loadfile(seek_url, self._mpv_seek_reload_options()))
+                    self.state.backend_url = seek_url
+                    self._playback_offset_sec = seconds
+                    if final_status == "pause":
+                        try:
+                            await self._backend_call(self.mpv.pause())
+                        except (BackendError, OSError, TimeoutError):
+                            if generation == self.state.generation:
+                                self.state.mark_error("Backend did not preserve pause during seek")
+                                self._schedule_event_notify()
+                            raise
+                else:
+                    await self._backend_call(self.mpv.seek(seconds))
+            if generation != self.state.generation:
+                raise BackendError("Playback command superseded")
             if self._should_reload_for_large_seek(seconds, previous_pos):
-                direct_url = self.queue_resolved_url or self.state.resolved_url
-                seek_url = self._seek_audio_proxy_url(direct_url, seconds)
-                LOG.info(
-                    "SOAP %s reloading range proxy position=%s previous=%s direct=%s proxy=%s",
-                    action,
-                    seconds,
-                    previous_pos,
-                    direct_url,
-                    seek_url,
-                )
-                await self._backend_call(self.mpv.loadfile(seek_url, self._mpv_seek_reload_options()))
                 self._playback_offset_sec = seconds
-            else:
-                await self._backend_call(self.mpv.seek(seconds))
             self.state.curpos = seconds
             self.state.mark_transitioning()
             self._pending_seek_target = seconds
@@ -2909,7 +3089,7 @@ class HttpApi:
     def _transport_state(self) -> str:
         """Map internal transport state to UPnP AVTransport state names."""
 
-        return {"play": "PLAYING", "pause": "PAUSED_PLAYBACK", "stop": "STOPPED", "transition": "TRANSITIONING"}.get(self.state.status, "STOPPED")
+        return self.state.transport_state
 
     def _schedule_event_notify(self, services: tuple[str, ...] | None = None) -> None:
         """Schedule asynchronous UPnP NOTIFY calls for matching subscribers."""
@@ -2998,7 +3178,7 @@ class HttpApi:
             '<Event xmlns="urn:schemas-upnp-org:metadata-1-0/AVT/">'
             '<InstanceID val="0">'
             f'<TransportState val="{escape(transport_state)}"/>'
-            '<TransportStatus val="OK"/>'
+            f'<TransportStatus val="{self.state.transport_status}"/>'
             '<CurrentTrack val="1"/>'
             f'<CurrentTrackDuration val="{escape(track_duration)}"/>'
             f'<CurrentTrackURI val="{escape(track_uri)}"/>'

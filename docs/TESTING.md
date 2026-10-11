@@ -6,7 +6,7 @@
 .venv/bin/python -m pytest -q
 ```
 
-Current suite: 218 passed on Python 3.12.14. Baseline: 92 passed.
+Current AP02 checkpoint suite: 259 passed on Python 3.12.14. Baseline: 92 passed.
 AP01 alone: 133 passed; the acceptance-state check adds 85 UNIT/MOCK cases.
 `tests/test_soap_faults.py` adds 41 UNIT/MOCK checks for SOAP framing,
 unsupported actions, argument validation, backend rejection, sanitized faults,
@@ -33,3 +33,15 @@ The execution sandbox denies Unix-domain sockets; production JSON IPC integratio
 is NOT_RUN here. Multicast SSDP validation is also unavailable. Do not replace
 production IPC merely to accommodate this sandbox. ARMv7/Odroid, DAC, real audio,
 and actual Android app validation require a suitable separate environment.
+
+## Playback generation and local client coverage
+
+`tests/test_playback_generations.py` checks delayed load/resolve/readiness,
+source mismatch, pause/stop/resume, EOF/error/buffering, bounded seek completion,
+and observer cleanup with a deterministic backend (UNIT/MOCK).
+
+`tests/test_local_client_integration.py` uses real loopback HTTP and installed
+pywiim 2.3.9 with a stateful fake backend (INTEGRATION + MOCK). It exercises
+transport, volume/mute, explicit backend failures and recovery, and asserts
+session/listener/task cleanup. It does not fetch media or perform discovery.
+The installed client's TLS-version deprecation warning is an upstream warning.

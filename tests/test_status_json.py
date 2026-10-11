@@ -11,6 +11,8 @@ class DummyMpv(MpvBackend):
     def __init__(self) -> None:
         super().__init__("/tmp/nonexistent", False)
         self.loaded_url = ""
+        self.idle = True
+        self.paused = False
         self.load_count = 0
         self.load_options: dict[str, str] | None = None
         self.seeked_to = 0
@@ -20,8 +22,9 @@ class DummyMpv(MpvBackend):
 
     async def snapshot(self):  # type: ignore[override]
         return {
-            "idle-active": False,
-            "core-idle": False,
+            "idle-active": self.idle,
+            "core-idle": self.idle,
+            "pause": self.paused,
             "filename": self.loaded_url,
             "playback-time": self.seeked_to,
             "duration": self.duration if self.loaded_url else None,
@@ -33,17 +36,19 @@ class DummyMpv(MpvBackend):
 
     async def loadfile(self, url: str, options: dict[str, str] | None = None) -> None:  # type: ignore[override]
         self.loaded_url = url
+        self.idle = False
+        self.paused = False
         self.load_options = options
         self.load_count += 1
 
     async def pause(self) -> None:  # type: ignore[override]
-        return None
+        self.paused = True
 
     async def resume(self) -> None:  # type: ignore[override]
-        return None
+        self.paused = False
 
     async def stop(self) -> None:  # type: ignore[override]
-        return None
+        self.idle = True
 
     async def seek(self, seconds: int) -> None:  # type: ignore[override]
         self.seeked_to = seconds
@@ -692,6 +697,7 @@ async def test_episode_seek_rel_time_updates_position_and_duration() -> None:
     await api._execute_soap_side_effect("CreateQueue", body)
     assert api.state.totlen == 3600
     assert 'duration="3600"' in api.state.track_metadata
+    await api._play_url(api.queue_url)
     await api._execute_soap_side_effect("Seek", "<Seek><Unit>REL_TIME</Unit><Target>00:00:30</Target></Seek>")
     assert mpv.seeked_to == 30
     assert api.state.curpos == 30

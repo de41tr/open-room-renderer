@@ -30,7 +30,7 @@ ANDROID_APP or HARDWARE validation.
 
 ## Known remaining work
 
-AP02 generation races/EOF and cross-interface state are still open. Queue remains
+AP02 now has a tested generation/state checkpoint (below). Queue remains
 single-item until AP05. SCPD declarations, app handshake, callback leases/policy,
 recovery and backend lifecycle need their planned focused passes. Current tests
 must not be taken as full WiiM Home app compatibility.
@@ -43,3 +43,25 @@ The PyWiiM acceptance check now compares actual transport fields exactly; a
 conflicting, nested or metadata-only states fail. 85 new synthetic cases cover
 the installed pywiim 2.3.9 flat response shapes. Full suite: 218 passed
 (UNIT/MOCK); this is not a real-client/audio acceptance run.
+
+## AP02 checkpoint
+
+- One authoritative phase and playback generation feed HTTP, SOAP and GENA.
+- Serialized backend mutations and source-aware snapshots prevent delayed loads,
+  old observations and seek completions from overwriting newer owner commands.
+- Pause/stop during resolution or loading preserve owner intent; resume loads the
+  selected resource, not a superseded source. Stop is verified by backend readback.
+- A shared observer detects EOF and backend errors without requiring client polls.
+  Failed loads remain ERROR until a new command; real backend identity and source
+  offsets are tracked independently of pending selection.
+- Seek reload preserves actual backend pause. Readiness is bounded and cannot
+  resurrect terminal state or overwrite fresher buffering/paused observations.
+- HTTP getPlayerStatusEx is supported; backend failures return HTTP 502, so real
+  PyWiiM does not treat a text Failed response as successful mutation.
+- Production Unix JSON IPC architecture remains unchanged.
+
+This checkpoint: 259 passed (32 new state UNIT/MOCK cases and 9 INTEGRATION
+cases using real local HTTP + installed pywiim 2.3.9 with a fake audio backend).
+The client tests clean up sessions, listeners and observer tasks. PyWiiM emits
+9 upstream TLS-version deprecation warnings. No actual Android or DAC claim.
+Next: integrate the one-based multi-track queue model and navigation.
