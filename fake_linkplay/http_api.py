@@ -20,6 +20,7 @@ from datetime import datetime
 from html import escape
 from html import unescape as html_unescape
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from urllib.parse import quote
 from urllib.parse import unquote
 from uuid import uuid4
@@ -29,6 +30,7 @@ from aiohttp import ClientSession
 from aiohttp import ClientTimeout
 from aiohttp import web
 
+from .capabilities import capability_fields, configured_sources, service_capability
 from .config import Config
 from .mpv_backend import BackendError, MpvBackend
 from .queue import PlaybackQueue, QueueError, QueueItem, parse_queue_context, serialize_queue_context
@@ -111,12 +113,13 @@ class HttpApi:
     ``MpvBackend`` and serializes visible state through ``RendererState``.
     """
 
-    def __init__(self, cfg: Config, state: RendererState, mpv: MpvBackend) -> None:
+    def __init__(self, cfg: Config, state: RendererState, mpv: MpvBackend, *, on_rename: Callable[[], Awaitable[None]] | None = None) -> None:
         """Create an API handler bound to config, renderer state, and mpv."""
 
         self.cfg = cfg
         self.state = state
         self.mpv = mpv
+        self.on_rename = on_rename
         self.queue_url = ""
         self.queue_title = ""
         self.queue_name = "CurrentQueue"
@@ -153,7 +156,6 @@ class HttpApi:
         self.event_subscribers: dict[str, EventSubscriber] = {}
         self.channel_balance = cfg.channel_balance
         self.device_name_override = ""
-        self.logged_in_stream_services: set[str] = set()
         self.plex_client_id = self._load_or_create_plex_client_id()
         self.plex_user_info = self._load_plex_user_info()
 
@@ -180,6 +182,8 @@ class HttpApi:
                 web.get("/deezer/{tail:.*}", self.deezer_api),
                 web.get("/upnp/control/{service}", self.soap),
                 web.post("/upnp/control/{service}", self.soap),
+                web.post("/upnp/transport", self.soap),
+                web.post("/upnp/rendering", self.soap),
                 web.route("SUBSCRIBE", "/upnp/event/{service}", self.event_subscribe),
                 web.route("UNSUBSCRIBE", "/upnp/event/{service}", self.event_unsubscribe),
             ]
@@ -399,11 +403,11 @@ class HttpApi:
             return web.Response(status=400, text="Failed", content_type="text/plain")
         except Exception:
             LOG.exception("command failed")
-            return web.Response(text="Failed", content_type="text/plain")
+            return web.Response(status=500, text="Failed", content_type="text/plain")
         if isinstance(payload, dict):
             LOG.info("HTTP API response=json keys=%s", ",".join(payload.keys()))
             self._log_http_detail(request, "", 200, json.dumps(payload, separators=(",", ":")))
-            return web.json_response(payload)
+            return web.json_response(payload, status=400 if payload.get("error") == "Failed" else 200)
         LOG.info("HTTP API response=text")
         self._log_http_detail(request, "", 200, str(payload))
         return web.Response(text=str(payload), content_type="text/plain")
@@ -449,14 +453,15 @@ class HttpApi:
         if name == "getDebugInfo":
             return {"status": "OK", "debug": "fake-linkplay"}
         if name.startswith("SetStreamServicesCapability:Active:") or name.startswith("SetStreamServicesCapability:Deactive:"):
-            LOG.info("StreamServicesCapability toggle command=%s", name)
-            return {"status": "0"}
+            return {"error": "Failed", "command": name}
         if self._is_stream_services_capability_command(name):
             return self._stream_services_capability()
-        if name in {"getMvRemoteUpdateStartCheck", "getMvRemoteUpdateStart", "getMvRemoteUpdateStatus"}:
+        if name == "getMvRemoteUpdateStart":
+            return {"error": "Failed", "command": name}
+        if name in {"getMvRemoteUpdateStartCheck", "getMvRemoteUpdateStatus"}:
             return {"status": "0", "update": "none", "progress": "0"}
         if name in {"setTimezone", "setTuneinLocation"} or name.startswith("setTimezone:") or name.startswith("setTuneinLocation:"):
-            return {"status": "0"}
+            return {"error": "Failed", "command": name}
         if name.startswith("setDeviceName:") or name.startswith("setHexDeviceName:"):
             requested_name = self._decode_device_name_command(name)
             if requested_name:
@@ -464,6 +469,8 @@ class HttpApi:
                 self.cfg.friendly_name = requested_name
                 self.cfg.mdns_instance_name = requested_name
                 self._persist_runtime_value("device_name", requested_name)
+                if self.on_rename is not None:
+                    await self.on_rename()
                 LOG.info("Persisted WiiM Home device rename request name=%s", requested_name)
                 self._schedule_event_notify()
             return "OK"
@@ -478,7 +485,7 @@ class HttpApi:
                     "EQBlock": {"Version": "4.3"},
                     "GEQ": {"Version": "4.3"},
                     "PEQ": {"Version": "4.3", "Filters": ["LS", "PK", "HS", "LP", "HP", "OFF"]},
-                    "RC": {"Version": "1.1", "LevelMatch": {"Version": "1.1"}},
+                    "RC": {"Version": "0", "LevelMatch": None},
                     "SoundMode": {"Version": "1.0", "Modes": [], "DefaultMode": ""},
                     "OutputDelay": {
                         "Version": "1.0",
@@ -530,7 +537,7 @@ class HttpApi:
         if name.startswith("getAuxVoltageSupportList"):
             return {"ver": "1.1", "voltage": []}
         if name in {"getSpdifOutMaxCap", "getCoaxOutMaxCap"}:
-            return {"ver": "1.0", "sampleRate": "48000", "bitDepth": "16", "cfgType": "pcm", "multiList": []}
+            return {"ver": "0", "sampleRate": "0", "bitDepth": "0", "cfgType": "", "multiList": []}
         if name == "getSpdifOutSwitchDelayMs":
             return {"status": "0", "delayMs": "0", "delay": "0"}
         if name == "GetFadeFeature":
@@ -674,7 +681,7 @@ class HttpApi:
         if name in {"getAvsDevInfo", "getAlexaCountry", "alexaLanguageListGet", "getAsrStatus"}:
             return {"status": 0, "enable": 0, "login": 0}
         if name.startswith("get") and ("Capability" in name or "Support" in name):
-            return {"status": 0, "result": "OK"}
+            return {"error": "Failed", "command": name}
         if name in {"play", "playlist", "m3u_play"}:
             url = parsed.args[0]
             self.queue_url = url
@@ -1131,34 +1138,7 @@ class HttpApi:
     def _enabled_experimental_sources(self) -> list[dict[str, object]]:
         """Return enabled configured source experiments as app-facing records."""
 
-        sources: list[dict[str, object]] = []
-        for source in self.cfg.experimental_sources:
-            if not source.enabled:
-                continue
-            source_name = source.source or source.name
-            icon = source.icon
-            if icon:
-                icon = icon.replace("{host}", self.cfg.resolved_advertise_ip).replace("{port}", str(self.cfg.http_api_port))
-            else:
-                icon = f"http://{self.cfg.resolved_advertise_ip}:{self.cfg.http_api_port}/icons/{source.id}.svg"
-            sources.append(
-                {
-                    "id": source.id,
-                    "source_id": source.id,
-                    "name": source.name,
-                    "title": source.name,
-                    "source": source_name,
-                    "SourceName": source_name,
-                    "service": source_name,
-                    "url": source.url,
-                    "uri": source.url,
-                    "icon": icon,
-                    "icon_url": icon,
-                    "type": source.type,
-                    "enabled": True,
-                }
-            )
-        return sources
+        return configured_sources(self.cfg)
 
     def _experimental_preset_payloads(self) -> list[dict[str, object]]:
         presets: list[dict[str, object]] = []
@@ -1180,6 +1160,8 @@ class HttpApi:
     def _with_experimental_sources(self, payload: dict[str, object]) -> dict[str, object]:
         """Add configured source/service experiment fields to a status payload."""
 
+        payload = dict(payload)
+        payload.update(capability_fields(self.cfg))
         variant = self.cfg.source_experiment_variant
         sources = self._enabled_experimental_sources()
         if variant == "tunein":
@@ -1195,11 +1177,8 @@ class HttpApi:
             payload["sources"] = sources
             payload["service_list"] = sources
             payload["services"] = sources
-            payload["music_services"] = sources
-            payload["musicServices"] = sources
             payload["streamServicesCapability"] = self._stream_services_capability()
             payload["supported_sources"] = ",".join(str(item["source"]) for item in sources)
-            payload["supported_services"] = ",".join(str(item["service"]) for item in sources)
         if variant in {"radioparadise_replacement", "all"}:
             first = sources[0]
             payload["RadioParadise"] = first["name"]
@@ -1225,107 +1204,10 @@ class HttpApi:
     def _stream_services_capability(self) -> dict[str, object]:
         """Build the StreamServicesCapability response advertised to clients."""
 
-        services: list[dict[str, object]] = [
-            {
-                "id": "RadioParadise2",
-                "version": "1.0",
-                "active": True,
-                "configurable": False,
-                "removable": False,
-            },
-            {
-                "id": "newTuneIn",
-                "version": "1.1",
-                "active": True,
-                "configurable": False,
-                "removable": False,
-            },
-            {
-                "id": "tunein",
-                "version": "1.0",
-                "active": True,
-                "configurable": False,
-                "removable": False,
-            },
-            {
-                "id": "Samba",
-                "version": "1.0",
-                "active": True,
-                "configurable": False,
-                "removable": False,
-            },
-            {
-                "id": "Roon",
-                "version": "1.0",
-                "active": False,
-                "configurable": True,
-                "removable": False,
-            },
-            {
-                "id": "Squeezelite",
-                "version": "1.2",
-                "active": False,
-                "configurable": True,
-                "removable": False,
-            },
-        ]
-        if self.cfg.tunein_minimal_capability:
-            services = [new_tunein_stream_service(self.cfg, modern=self.cfg.enable_plex_service)]
-        if self.cfg.enable_plex_service:
-            add_plex_stream_service(self.cfg, services)
-        add_stream_service_sentinels(self.cfg, services)
-        for source in self._enabled_experimental_sources():
-            services.append(
-                {
-                    "id": source["id"],
-                    "version": "1.0",
-                    "active": True,
-                    "configurable": True,
-                    "removable": False,
-                    "name": source["name"],
-                    "brand": source["name"],
-                    "url": source["url"],
-                    "icon": source["icon"],
-                }
-            )
-        return stream_services_capability(self.cfg, services, "1.4" if self.cfg.enable_plex_service else "1.0")
+        return service_capability(self.cfg)
 
     def _tunein_capability_fields(self) -> dict[str, object]:
-        """Return legacy and modern capability fields that expose TuneIn."""
-
-        capability = self._stream_services_capability()
-        plex_enabled = self.cfg.enable_plex_service
-        plex_legacy_gate = plex_enabled and self.cfg.enable_plex_legacy_gate
-        supported_services = [str(item["id"]) for item in capability["streamServices"] if item.get("active")]
-        if plex_legacy_gate and "PLEX" not in supported_services:
-            supported_services.append("PLEX")
-        music_service_ids = {"newTuneIn", "Plex"}
-        if self.cfg.enable_stream_service_sentinels:
-            music_service_ids.update(str(item["id"]) for item in capability["streamServices"] if item.get("active"))
-        music_services = [
-            {"id": item["id"], "name": item.get("name") or ("TuneIn" if item["id"] == "newTuneIn" else item["id"]), "source": item["id"], "enabled": True}
-            for item in capability["streamServices"]
-            if item.get("active") and item["id"] in music_service_ids
-        ]
-        if plex_legacy_gate:
-            music_services.append({"id": "PLEX", "name": "Plex", "source": "Plex", "enabled": True})
-        streams_value = str(self.cfg.tunein_streams_value)
-        if plex_legacy_gate:
-            streams_value = stream_mask_with_plex(streams_value)
-        payload: dict[str, object] = {
-            "streams": streams_value,
-            "StreamCapability": json.dumps(capability, separators=(",", ":")),
-            "streamServicesCapability": capability,
-            "servicesCapability": capability,
-            "supported_services": ",".join(supported_services),
-            "music_services": music_services,
-            "musicServices": music_services,
-        }
-        if self.cfg.tunein_stream_all_value is not None:
-            payload["streams_all"] = stream_mask_with_plex(self.cfg.tunein_stream_all_value) if plex_legacy_gate else str(self.cfg.tunein_stream_all_value)
-        elif plex_legacy_gate:
-            payload["streams_all"] = streams_value
-        return payload
+        return capability_fields(self.cfg)
 
     async def _play_url(self, url: str) -> None:
         """Resolve/load once and confirm only this generation's actual audio."""
@@ -2204,7 +2086,7 @@ class HttpApi:
         """Serve the PlayQueue SCPD XML."""
 
         LOG.info("HTTP SCPD remote=%s host=%s path=%s", request.remote, request.host, request.path_qs)
-        return web.Response(text=scpd_xml("PlayQueue"), content_type="application/xml")
+        return web.Response(text=scpd_xml("PlayQueue", enable_plex=self.cfg.enable_plex_service), content_type="application/xml")
 
     async def icon(self, request: web.Request) -> web.Response:
         """Serve a generated placeholder SVG icon for source experiments."""
@@ -2227,7 +2109,7 @@ class HttpApi:
         body = await request.text()
         try:
             service, action, action_body = parse_request(
-                request.match_info.get("service", ""),
+                request.match_info.get("service") or {"/upnp/transport": "AVTransport", "/upnp/rendering": "RenderingControl"}.get(getattr(request, "path", ""), ""),
                 request.headers.get("SOAPACTION", ""), body,
             )
             if action in MUTATING_ACTIONS[service]:
@@ -2287,9 +2169,7 @@ class HttpApi:
                 result = json.dumps(user_info, separators=(",", ":"))
                 return f"<Result>{escape(result)}</Result>"
             if account_source == "Deezer2" and self.cfg.enable_stream_service_sentinels:
-                self.logged_in_stream_services.add(account_source)
-                result = json.dumps(self._stream_service_user_info(account_source, logged_in=True), separators=(",", ":"))
-                return f"<Result>{escape(result)}</Result>"
+                raise SoapFault(401, "Invalid Action")
             return playqueue_response_fields(action)
         if action == "GetUserInfo":
             account_source = self._xml_text(body, "AccountSource")
@@ -2336,7 +2216,7 @@ class HttpApi:
                 result = json.dumps(user_info, separators=(",", ":"))
                 return f"<Result>{escape(result)}</Result>"
             if self.cfg.enable_stream_service_sentinels and account_source in {"Deezer2", "SoundCloud"}:
-                user_info = self._stream_service_user_info(account_source, logged_in=account_source in self.logged_in_stream_services)
+                user_info = self._stream_service_user_info(account_source)
                 result = json.dumps(user_info, separators=(",", ":"))
                 return f"<Result>{escape(result)}</Result>"
             result = json.dumps(
@@ -2349,7 +2229,6 @@ class HttpApi:
         if action == "GetQueueIndex":
             return "\n".join(
                 [
-                    f"<QueueName>{escape(self.state.queue.name)}</QueueName>",
                     f"<Count>{self.state.plicount}</Count>",
                     f"<CurrentIndex>{self.state.plicurr}</CurrentIndex>",
                     f"<PreloadingIndex>{self.state.plicurr}</PreloadingIndex>",
@@ -2363,32 +2242,9 @@ class HttpApi:
             return ""
         return playqueue_response_fields(action)
 
-    def _stream_service_user_info(self, account_source: str, *, logged_in: bool) -> dict[str, object]:
+    def _stream_service_user_info(self, account_source: str) -> dict[str, object]:
         """Build synthetic user-info payloads for service experiments."""
 
-        if logged_in:
-            return {
-                "source": account_source,
-                "accountSource": account_source,
-                "msg": "success",
-                "userId": f"local-{account_source.lower()}-user",
-                "userName": f"Local {account_source}",
-                "showName": f"Local {account_source}",
-                "email": "local@example.invalid",
-                "anonUserId": "",
-                "subscription": "premium",
-                "accessToken": f"local-{account_source.lower()}-access-token",
-                "refreshToken": f"local-{account_source.lower()}-refresh-token",
-                "expires": 4102444800,
-                "country": "US",
-                "baseUrl": f"http://{self.cfg.resolved_advertise_ip}:{self.cfg.http_api_port}/",
-                "collection": f"http://{self.cfg.resolved_advertise_ip}:{self.cfg.http_api_port}/deezer/collection",
-                "search": f"http://{self.cfg.resolved_advertise_ip}:{self.cfg.http_api_port}/deezer/search",
-                "sourceVersion": "1.4",
-                "capabilityVersion": "1.4",
-                "replayGain": True,
-                "redirectUrl": "",
-            }
         return {
             "source": account_source,
             "accountSource": account_source,
@@ -2517,9 +2373,9 @@ class HttpApi:
         if action == "GetMute":
             return f"<CurrentMute>{'1' if self.state.mute else '0'}</CurrentMute>"
         if action == "GetChannel":
-            return "<CurrentChannel>0</CurrentChannel>"
+            return "<CurrentChannel>Master</CurrentChannel>"
         if action == "ListPresets":
-            return "<CurrentPresetNameList>FactoryDefaults</CurrentPresetNameList>"
+            return "<CurrentPresetNameList></CurrentPresetNameList>"
         if action in {"SelectPreset", "SetChannel"}:
             return ""
         return None
@@ -3276,8 +3132,16 @@ class HttpApi:
             )
         if service_key in {"playqueue1", "playqueue"}:
             queue_context = self._build_queue_context() or self.queue_context
+            last_change = (
+                '<Event xmlns="urn:schemas-wiimu-com:metadata-1-0/PlayQueue/"><InstanceID val="0">\r\n'
+                f'<CurrentPlayListName val="{escape(self.state.queue.name, quote=True)}"/>\r\n'
+                f'<CurrentIndex val="{self.state.queue.index}"/>\r\n'
+                f'<LoopMode val="{self.state.queue.loop}"/>\r\n'
+                '</InstanceID></Event>'
+            )
             return self._event_propertyset(
                 {
+                    "LastChange": last_change,
                     "QueueContext": queue_context,
                     "CurrentPlayListName": self.state.queue.name,
                     "CurrentIndex": str(self.state.queue.index),

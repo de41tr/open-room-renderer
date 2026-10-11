@@ -77,6 +77,7 @@ async def serve(config_path: str) -> None:
         await ssdp.start()
     mdns = MdnsAdvertiser(cfg)
     await mdns.start()
+    api.on_rename = mdns.refresh
     LOG.info("API URL: http://%s:%s/httpapi.asp?command=getStatusEx", cfg.resolved_advertise_ip, cfg.http_api_port)
     LOG.info("Description URL: %s", cfg.description_url)
     LOG.info("UUID: uuid:%s", cfg.upnp_uuid)

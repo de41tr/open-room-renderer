@@ -19,7 +19,8 @@ SERVICE_TYPES = {
 SERVICE_ALIASES = {
     "avtransport": "AVTransport", "rendertransport1": "AVTransport",
     "avtransport1": "AVTransport", "renderingcontrol": "RenderingControl",
-    "rendercontrol1": "RenderingControl", "connectionmanager": "ConnectionManager",
+    "rendercontrol1": "RenderingControl", "renderingcontrol1": "RenderingControl",
+    "connectionmanager": "ConnectionManager", "connectionmanager1": "ConnectionManager",
     "renderconnmgr1": "ConnectionManager", "playqueue": "PlayQueue",
     "playqueue1": "PlayQueue",
 }

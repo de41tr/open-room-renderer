@@ -12,7 +12,8 @@ wiim_home_profile: true
 
 uuid: null
 discovery_uuid: null
-mdns_instance_name: "Open Room Renderer"
+# Null generates a stable, distinct instance per installation.
+mdns_instance_name: null
 bootid: "000000000000000000000000000000000000"
 security: "http"
 

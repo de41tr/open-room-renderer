@@ -108,8 +108,8 @@ async def test_wiim_home_profile_status_uses_discovery_uuid_and_security() -> No
     assert payload["upnp_uuid"] == "uuid:FF310001BD4CE65900AF9543000000000000"
     assert payload["security"] == "http"
     assert payload["model"] == "MUZO Cobblestone"
-    assert payload["project"] == "WiiM_Pro"
-    assert payload["MAC"] == "02:00:00:00:00:00"
+    assert payload["project"] == "Open_Room_Renderer"
+    assert payload["MAC"] == cfg.wiim_mac
     assert payload["wmrm_capability"] == 0
     assert payload["capability"] == "0x0"
     assert payload["BatteryFlag"] == "0"
@@ -119,7 +119,7 @@ async def test_wiim_home_profile_status_uses_discovery_uuid_and_security() -> No
     assert payload["securemode"] == "0"
     assert payload["upnp_version"] == "1000"
     assert payload["VersionUpdate"] == "0"
-    assert payload["NewVer"] == "4.8.999999"
+    assert payload["NewVer"] == "0.1.0"
     assert payload["preset_key"] == "6"
 
 
@@ -197,13 +197,9 @@ async def test_stream_services_capability_includes_known_control_and_experimenta
     payload = await api.execute(ParsedCommand("getStreamServicesCapability"), "127.0.0.1")
     assert isinstance(payload, dict)
     ids = [item["id"] for item in payload["streamServices"]]
-    assert "RadioParadise2" in ids
-    assert "newTuneIn" in ids
-    assert "tunein" in ids
-    assert "Samba" in ids
-    assert "ARDSounds" in ids
-    tunein = next(item for item in payload["streamServices"] if item["id"] == "newTuneIn")
-    assert tunein["version"] == "1.1"
+    assert ids == ["ARDSounds"]
+    assert payload["streamServices"][0]["experimental"] is True
+
 
 
 @pytest.mark.asyncio
@@ -275,7 +271,7 @@ async def test_plex_service_can_be_added_to_minimal_tunein_capability() -> None:
     plex = status["streamServicesCapability"]["streamServices"][1]
     assert plex["version"] == "1.4"
     assert plex["removable"] is True
-    assert plex["replayGain"] is True
+    assert plex["replayGain"] is False
     assert status["streamServicesCapability"]["streamServices"][0]["version"] == "1.4"
     assert status["supported_services"] == "newTuneIn,Plex"
     assert status["streams"] == "200"
@@ -323,12 +319,13 @@ async def test_stream_service_sentinels_can_be_added_for_manage_gate_diagnostics
     services = status["streamServicesCapability"]["streamServices"]
     assert [item["id"] for item in services] == ["Plex", "newTuneIn", "Deezer2", "SoundCloud", "OPS", "LPRP", "HM", "LPDZ", "SC"]
     assert all(item["version"] == "1.4" for item in services)
-    assert status["supported_services"] == "Plex,newTuneIn,Deezer2,SoundCloud,OPS,LPRP,HM,LPDZ,SC"
-    assert [item["id"] for item in status["music_services"]] == ["Plex", "newTuneIn", "Deezer2", "SoundCloud", "OPS", "LPRP", "HM", "LPDZ", "SC"]
+    assert status["supported_services"] == "Plex,newTuneIn"
+    assert [item["id"] for item in status["music_services"]] == ["Plex", "newTuneIn"]
+    assert all(not item["active"] for item in services[2:])
 
 
 @pytest.mark.asyncio
-async def test_deezer_login_returns_json_user_info_and_updates_get_user_info() -> None:
+async def test_deezer_sentinel_cannot_claim_login_or_premium() -> None:
     cfg = Config(
         uuid="00000000-0000-4000-8000-000000000000",
         advertise_ip="127.0.0.1",
@@ -337,18 +334,14 @@ async def test_deezer_login_returns_json_user_info_and_updates_get_user_info() -
     )
     api = HttpApi(cfg, RendererState.from_config(cfg), DummyMpv())
     login_body = "<u:UserLogin><AccountSource>Deezer2</AccountSource></u:UserLogin>"
-    login_response = api._playqueue_response_fields("UserLogin", login_body)
-    assert login_response is not None
-    assert "local-deezer2-user" in login_response
-    assert "&quot;msg&quot;:&quot;success&quot;" in login_response
-
+    from fake_linkplay.soap import SoapFault
+    with pytest.raises(SoapFault):
+        api._playqueue_response_fields("UserLogin", login_body)
     info_body = "<u:GetUserInfo><AccountSource>Deezer2</AccountSource></u:GetUserInfo>"
     info_response = api._playqueue_response_fields("GetUserInfo", info_body)
-    assert info_response is not None
-    assert "local-deezer2-user" in info_response
-    assert "&quot;subscription&quot;:&quot;premium&quot;" in info_response
-    assert "/deezer/collection" in info_response
-    assert "/deezer/search" in info_response
+    assert "not login" in info_response
+    assert "premium" not in info_response
+    assert "access-token" not in info_response
 
 
 def test_deezer_http_stub_contains_collection_and_drm_free_track() -> None:
@@ -422,7 +415,7 @@ async def test_stream_services_active_toggle_returns_status_only() -> None:
     api = make_api()
     payload = await api.execute(ParsedCommand("SetStreamServicesCapability:Active:Roon"), "127.0.0.1")
     assert isinstance(payload, dict)
-    assert payload == {"status": "0"}
+    assert payload["error"] == "Failed"
 
 
 @pytest.mark.asyncio
@@ -821,17 +814,17 @@ async def test_settings_queries_use_wiim_home_model_shapes() -> None:
 async def test_audio_output_capability_queries_are_typed_disabled_models() -> None:
     api = make_api()
     assert await api.execute(ParsedCommand("getSpdifOutMaxCap"), "127.0.0.1") == {
-        "ver": "1.0",
-        "sampleRate": "48000",
-        "bitDepth": "16",
-        "cfgType": "pcm",
+        "ver": "0",
+        "sampleRate": "0",
+        "bitDepth": "0",
+        "cfgType": "",
         "multiList": [],
     }
     assert await api.execute(ParsedCommand("getCoaxOutMaxCap"), "127.0.0.1") == {
-        "ver": "1.0",
-        "sampleRate": "48000",
-        "bitDepth": "16",
-        "cfgType": "pcm",
+        "ver": "0",
+        "sampleRate": "0",
+        "bitDepth": "0",
+        "cfgType": "",
         "multiList": [],
     }
     assert await api.execute(ParsedCommand("GetFadeFeature"), "127.0.0.1") == {"FadeFeature": 0}

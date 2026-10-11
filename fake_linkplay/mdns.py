@@ -8,9 +8,11 @@ not close enough to client expectations.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import socket
 import struct
+import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -27,13 +29,64 @@ DNS_TYPE_TXT = 16
 DNS_TYPE_SRV = 33
 DNS_TYPE_ANY = 255
 DNS_QU_MASK = 0x8000
+_DNS_CASE_FOLD = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def dns_name_key(name: str) -> str:
+    """DNS ignores ASCII letter case; UTF-8 label bytes otherwise stay intact."""
+
+    return name.translate(_DNS_CASE_FOLD)
+
+
+def escape_label(label: str) -> str:
+    """Escape literal dots/backslashes when joining DNS presentation labels."""
+
+    return label.replace("\\", "\\\\").replace(".", "\\.")
+
+
+def instance_label(name: str) -> str:
+    """Return a precomposed UTF-8 service label within DNS's 63-byte limit."""
+
+    name = unicodedata.normalize("NFC", name)
+    name = "".join(char for char in name if ord(char) >= 32 and ord(char) != 127).strip()
+    name = name or "Open Room Renderer"
+    encoded = name.encode("utf-8")
+    if len(encoded) > 63:
+        suffix = "-" + hashlib.sha256(encoded).hexdigest()[:8]
+        name = encoded[: 63 - len(suffix)].decode("utf-8", errors="ignore") + suffix
+    return name
 
 
 def encode_name(name: str) -> bytes:
-    """Encode a dotted DNS name into label-length wire format."""
+    """Encode an escaped dotted DNS name with UTF-8, bounded wire labels."""
 
-    labels = name.rstrip(".").split(".")
-    return b"".join(bytes([len(label)]) + label.encode("ascii") for label in labels) + b"\x00"
+    if name in {"", "."}:
+        return b"\x00"
+    labels: list[str] = []
+    label = ""
+    escaped = False
+    for char in name:
+        if escaped:
+            label += char
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == ".":
+            labels.append(label)
+            label = ""
+        else:
+            label += char
+    if escaped:
+        raise ValueError("unfinished DNS name escape")
+    if label:
+        labels.append(label)
+    wire_labels = [label.encode("utf-8") for label in labels]
+    if any(not label or len(label) > 63 for label in wire_labels):
+        raise ValueError("DNS labels must be between 1 and 63 bytes")
+    wire = b"".join(bytes([len(label)]) + label for label in wire_labels) + b"\x00"
+    if len(wire) > 255:
+        raise ValueError("DNS name exceeds 255 bytes")
+    return wire
 
 
 def decode_name(data: bytes, offset: int) -> tuple[str, int]:
@@ -44,7 +97,7 @@ def decode_name(data: bytes, offset: int) -> tuple[str, int]:
         offset: Offset where the encoded name starts.
 
     Returns:
-        Lowercase fully-qualified name and the next uncompressed offset.
+        ASCII-case-normalized, escaped name and the next uncompressed offset.
 
     Raises:
         ValueError: If the name or compression pointer is malformed.
@@ -54,6 +107,7 @@ def decode_name(data: bytes, offset: int) -> tuple[str, int]:
     jumped = False
     next_offset = offset
     seen = 0
+    wire_length = 1
     while True:
         if offset >= len(data):
             raise ValueError("dns name offset out of range")
@@ -75,10 +129,19 @@ def decode_name(data: bytes, offset: int) -> tuple[str, int]:
             if not jumped:
                 next_offset = offset
             break
+        if length > 63 or offset + 1 + length > len(data):
+            raise ValueError("invalid DNS label length")
         offset += 1
-        labels.append(data[offset : offset + length].decode("ascii", errors="ignore"))
+        try:
+            label = data[offset : offset + length].decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("invalid UTF-8 DNS label") from exc
+        labels.append(escape_label(label))
+        wire_length += length + 1
+        if wire_length > 255:
+            raise ValueError("DNS name exceeds 255 bytes")
         offset += length
-    return ".".join(labels).lower() + ".", next_offset
+    return dns_name_key(".".join(labels)) + ".", next_offset
 
 
 @dataclass(frozen=True)
@@ -139,6 +202,8 @@ def txt_rr(name: str, props: dict[str, str], ttl: int = 120) -> bytes:
     chunks = []
     for key, value in props.items():
         chunk = f"{key}={value}".encode("utf-8")
+        if len(chunk) > 255:
+            raise ValueError("DNS TXT item exceeds 255 bytes")
         chunks.append(bytes([len(chunk)]) + chunk)
     return rr(name, DNS_TYPE_TXT, DNS_CLASS_CACHE_FLUSH, ttl, b"".join(chunks))
 
@@ -164,15 +229,26 @@ class CustomMdnsProtocol(asyncio.DatagramProtocol):
         self.cfg = cfg
         self.transport: asyncio.DatagramTransport | None = None
         self.service = "_linkplay._tcp.local."
-        self.instance = f"{cfg.linkplay_instance_name}.{self.service}"
-        self.instance_key = self.instance.lower()
-        self.target = "fake-linkplay.local."
-        self.target_key = self.target.lower()
+        self._published_instance = self.instance
+        self.target = cfg.mdns_hostname
+        self.target_key = dns_name_key(self.target)
         self.props = {
             "uuid": cfg.wiim_txt_uuid,
             "bootid": cfg.bootid,
             "security": cfg.security,
         }
+
+    @property
+    def instance(self) -> str:
+        """Read the current name so runtime renames take effect on queries."""
+
+        return f"{escape_label(instance_label(self.cfg.linkplay_instance_name))}.{self.service}"
+
+    @property
+    def instance_key(self) -> str:
+        """Return the current instance name in query-comparison form."""
+
+        return dns_name_key(self.instance)
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """Remember the datagram transport provided by asyncio."""
@@ -195,11 +271,28 @@ class CustomMdnsProtocol(asyncio.DatagramProtocol):
             self.transport.sendto(response, target)
             LOG.debug("mDNS response qname=%s qtype=%s target=%s bytes=%s", question.name, question.qtype, target, len(response))
 
+    def refresh(self) -> None:
+        """Withdraw the old instance after a rename and announce its new name."""
+
+        if not self.transport or self._published_instance == self.instance:
+            return
+        old_instance = self._published_instance
+        goodbye = build_response(0, [
+            ptr_rr(self.service, old_instance, ttl=0),
+            srv_rr(old_instance, self.target, self.cfg.http_api_port, ttl=0),
+            txt_rr(old_instance, self.props, ttl=0),
+        ])
+        self.transport.sendto(goodbye, (MDNS_GROUP, MDNS_PORT))
+        response = self._response_for(0, DnsQuestion(self.service, DNS_TYPE_PTR, DNS_CLASS_IN))
+        if response:
+            self.transport.sendto(response, (MDNS_GROUP, MDNS_PORT))
+            self._published_instance = self.instance
+
     def _response_for(self, packet_id: int, question: DnsQuestion) -> bytes | None:
         """Build a response for one question, or ``None`` if unsupported."""
 
         qtype = question.qtype
-        qname = question.name
+        qname = dns_name_key(question.name)
         service_match = qname == self.service and qtype in {DNS_TYPE_PTR, DNS_TYPE_ANY}
         instance_match = qname == self.instance_key and qtype in {DNS_TYPE_SRV, DNS_TYPE_TXT, DNS_TYPE_ANY}
         target_match = qname == self.target_key and qtype in {DNS_TYPE_A, DNS_TYPE_ANY}
@@ -228,6 +321,7 @@ class CustomMdnsResponder:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
         self._transport: asyncio.DatagramTransport | None = None
+        self._protocol: CustomMdnsProtocol | None = None
 
     async def start(self) -> None:
         """Bind UDP/5353, join the multicast group, and start serving."""
@@ -244,13 +338,19 @@ class CustomMdnsResponder:
         mreq = socket.inet_aton(MDNS_GROUP) + socket.inet_aton("0.0.0.0")
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
         loop = asyncio.get_running_loop()
-        self._transport, _protocol = await loop.create_datagram_endpoint(lambda: CustomMdnsProtocol(self.cfg), sock=sock)
+        self._transport, self._protocol = await loop.create_datagram_endpoint(lambda: CustomMdnsProtocol(self.cfg), sock=sock)
         LOG.info(
             "custom mDNS responder started: %s -> %s:%s",
             f"{self.cfg.linkplay_instance_name}._linkplay._tcp.local.",
-            "fake-linkplay.local.",
+            self.cfg.mdns_hostname,
             self.cfg.http_api_port,
         )
+
+    async def refresh(self) -> None:
+        """Publish a renamed instance without changing its host or identity."""
+
+        if self._protocol:
+            self._protocol.refresh()
 
     async def stop(self) -> None:
         """Close the custom responder transport."""
@@ -267,6 +367,7 @@ class MdnsAdvertiser:
         self.cfg = cfg
         self._zeroconf = None
         self._infos = []
+        self._refresh_lock = asyncio.Lock()
 
     async def start(self) -> None:
         """Start mDNS advertising when enabled in config."""
@@ -278,15 +379,24 @@ class MdnsAdvertiser:
             await self._zeroconf.start()
             return
         try:
-            from zeroconf import ServiceInfo, Zeroconf
+            from zeroconf import Zeroconf
             from zeroconf.asyncio import AsyncZeroconf
         except Exception as exc:
             LOG.warning("mDNS disabled; zeroconf unavailable: %s", exc)
             return
-        ip_bytes = bytes(int(part) for part in self.cfg.resolved_advertise_ip.split("."))
         self._zeroconf = AsyncZeroconf(zc=Zeroconf())
-        for service, port, instance, properties in self._services():
-            info = ServiceInfo(
+        await self._register_services()
+        LOG.info("mDNS advertisements started")
+
+    async def _register_services(self) -> None:
+        """Register a snapshot of the current config using the existing host."""
+
+        from zeroconf import ServiceInfo
+
+        assert self._zeroconf is not None
+        ip_bytes = socket.inet_aton(self.cfg.resolved_advertise_ip)
+        infos = [
+            ServiceInfo(
                 service,
                 f"{instance}.{service}",
                 addresses=[ip_bytes],
@@ -294,29 +404,48 @@ class MdnsAdvertiser:
                 properties=properties,
                 server=self._server_name(),
             )
+            for service, port, instance, properties in self._services()
+        ]
+        for info in infos:
             await self._zeroconf.async_register_service(info, allow_name_change=True)
             self._infos.append(info)
-        LOG.info("mDNS advertisements started")
+
+    async def refresh(self) -> None:
+        """Refresh a runtime rename; callers should invoke after updating cfg.
+
+        Bind this async method to the HTTP rename callback after ``start``.
+        It is a no-op when disabled or stopped and serializes repeated renames.
+        """
+
+        async with self._refresh_lock:
+            if self._zeroconf is None:
+                return
+            if isinstance(self._zeroconf, CustomMdnsResponder):
+                await self._zeroconf.refresh()
+                return
+            for info in list(self._infos):
+                await self._zeroconf.async_unregister_service(info)
+                self._infos.remove(info)
+            await self._register_services()
 
     async def stop(self) -> None:
         """Unregister mDNS services and close advertiser resources."""
 
-        if self._zeroconf:
-            if isinstance(self._zeroconf, CustomMdnsResponder):
-                await self._zeroconf.stop()
-                return
-            for info in self._infos:
-                await self._zeroconf.async_unregister_service(info)
-            await self._zeroconf.async_close()
+        async with self._refresh_lock:
+            if self._zeroconf:
+                if isinstance(self._zeroconf, CustomMdnsResponder):
+                    await self._zeroconf.stop()
+                else:
+                    for info in self._infos:
+                        await self._zeroconf.async_unregister_service(info)
+                    await self._zeroconf.async_close()
+                self._infos.clear()
+                self._zeroconf = None
 
     def _server_name(self) -> str:
         """Return the DNS-SD target host name for published services."""
 
-        if self.cfg.wiim_home_profile:
-            return "fake-linkplay.local."
-        suffix = self.cfg.wiim_uuid[:12] if self.cfg.wiim_home_profile else (self.cfg.uuid or "").replace("-", "")[:12]
-        suffix = suffix or "000000000001"
-        return f"WiiM-Mini-{suffix}.local."
+        return self.cfg.mdns_hostname
 
     def _services(self) -> Iterable[tuple[str, int, str, dict[str, str]]]:
         """Yield DNS-SD service records for the current config profile."""
@@ -329,20 +458,19 @@ class MdnsAdvertiser:
                 "bootid": self.cfg.bootid,
                 "security": self.cfg.security,
             }
-            yield "_linkplay._tcp.local.", self.cfg.http_api_port, self.cfg.linkplay_instance_name, props
-            yield "_http._tcp.local.", self.cfg.http_api_port, self.cfg.linkplay_instance_name, {"path": "/description.xml"}
+            yield "_linkplay._tcp.local.", self.cfg.http_api_port, instance_label(self.cfg.linkplay_instance_name), props
+            yield "_http._tcp.local.", self.cfg.http_api_port, instance_label(self.cfg.linkplay_instance_name), {"path": "/description.xml"}
             return
 
         base = {
-            "uuid": self.cfg.uuid or "",
+            "uuid": self.cfg.upnp_uuid,
             "model": self.cfg.model_name,
             "manufacturer": self.cfg.manufacturer,
             "api_port": str(self.cfg.http_api_port),
             "description": self.cfg.description_url,
         }
-        suffix = (self.cfg.uuid or "").replace("-", "")[:6].upper() or "000001"
-        yield "_linkplay._tcp.local.", self.cfg.http_api_port, self.cfg.friendly_name, base
-        yield "_linkplay._tcp.local.", self.cfg.http_api_port, f"{self.cfg.model_name}-{suffix}", {}
-        yield "_linkplay._tcp.local.", self.cfg.http_api_port, f"WiiM Mini-{suffix}", {"uuid": self.cfg.uuid or ""}
-        yield "_wiim._tcp.local.", self.cfg.http_api_port, self.cfg.friendly_name, base
-        yield "_http._tcp.local.", self.cfg.upnp_port, self.cfg.friendly_name, {"path": "/description.xml"}
+        # The generic publisher treats dots as separators rather than literal
+        # instance-label characters. Keep this label valid for that API too.
+        name = instance_label(self.cfg.linkplay_instance_name.replace(".", "-").replace("\\", "-"))
+        yield "_linkplay._tcp.local.", self.cfg.http_api_port, name, base
+        yield "_http._tcp.local.", self.cfg.upnp_port, name, {"path": "/description.xml"}

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from .capabilities import capability_fields
 from .config import Config
 from .queue import PlaybackQueue
 
@@ -152,28 +153,28 @@ class RendererState:
             "GroupName": self.cfg.linkplay_instance_name if self.cfg.wiim_home_profile else self.cfg.friendly_name,
             "upnp_uuid": f"uuid:{self.cfg.upnp_uuid}",
             "ssid": self.cfg.linkplay_instance_name if self.cfg.wiim_home_profile else "fake-linkplay",
-            "firmware": "4.8.999999" if self.cfg.wiim_home_profile else "4.8.0",
-            "build": "20260518",
-            "project": "WiiM_Pro" if self.cfg.wiim_home_profile else "Fake_Linkplay",
-            "project_build_name": "WiiM_Pro" if self.cfg.wiim_home_profile else self.cfg.model_number,
-            "new_tunein_preset_and_alarm": "1",
-            "Release": "20260518",
-            "FW_Release_version": "4.8.999999" if self.cfg.wiim_home_profile else "4.8.0",
+            "firmware": "0.1.0",
+            "build": "0.1.0",
+            "project": "Open_Room_Renderer",
+            "project_build_name": self.cfg.model_number,
+            "new_tunein_preset_and_alarm": "0",
+            "Release": "0.1.0",
+            "FW_Release_version": "0.1.0",
             "PCB_version": "1",
             "hardware": self.cfg.model_name,
             "model": self.cfg.model_name,
             "security": self.cfg.security,
             "securemode": "0",
             "bootid": self.cfg.bootid,
-            "internet": "1",
+            "internet": "0",
             "netstat": "2",
             "eth": "0",
-            "wifi_channel": "6",
-            "RSSI": "-45",
+            "wifi_channel": "0",
+            "RSSI": "0",
             "apcli0": ip,
             "ip": ip,
-            "MAC": self.cfg.wiim_mac if self.cfg.wiim_home_profile else "02:00:00:00:00:01",
-            "mac": self.cfg.wiim_mac if self.cfg.wiim_home_profile else "02:00:00:00:00:01",
+            "MAC": self.cfg.wiim_mac,
+            "mac": self.cfg.wiim_mac,
             "language": "en_us",
             "region": "US",
             "volume": str(self.volume),
@@ -206,7 +207,7 @@ class RendererState:
             "wmrm_capability": 0,
             "upnp_version": "1000",
             "VersionUpdate": "0",
-            "NewVer": "4.8.999999" if self.cfg.wiim_home_profile else "4.8.0",
+            "NewVer": "0.1.0",
             "service_version": "1.4",
             "preset_key": "6",
             "prompt_status": "0",
@@ -235,6 +236,7 @@ class RendererState:
             "plm_support": self.cfg.legacy_plm_support_value,
             "cap1": "0",
         }
+        common.update(capability_fields(self.cfg))
         return common
 
     def as_player_status(self) -> dict[str, Any]:
@@ -280,8 +282,8 @@ class RendererState:
             "artist": self.artist,
             "album": self.album,
             "albumArtURI": self.album_art_uri,
-            "sampleRate": "44100",
-            "bitDepth": "16",
+            "sampleRate": "0",
+            "bitDepth": "0",
             "stream_url": self.current_url,
             "resolved_stream_url": self.resolved_url,
             "uri": self.current_url,

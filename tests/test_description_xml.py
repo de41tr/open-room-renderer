@@ -125,7 +125,7 @@ def test_avtransport_seen_by_wiim_home_has_structured_responses() -> None:
     assert "<PlayMedium>NONE</PlayMedium>" in media
     assert "<CurrentTransportState>STOPPED</CurrentTransportState>" in info
     assert "<CurrentTransportStatus>OK</CurrentTransportStatus>" in info
-    assert "<InternetAccess>1</InternetAccess>" in info
+    assert "<InternetAccess>0</InternetAccess>" in info
     assert "<CurrentChannel>Master</CurrentChannel>" in info
     assert "<SlaveList>[]</SlaveList>" in info
     assert "<PlayMedium>NETWORK</PlayMedium>" in info

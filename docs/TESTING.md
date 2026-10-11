@@ -6,8 +6,8 @@
 .venv/bin/python -m pytest -q
 ```
 
-Current default suite: 371 passed and 1 explicit REAL_BACKEND skip on Python 3.12.14.
-With the optional libmpv lane enabled: 372 passed. Baseline: 92 passed.
+Current AP03 default suite: 517 passed and 1 explicit REAL_BACKEND skip on Python 3.12.14.
+With the optional libmpv lane enabled: 518 passed. Baseline: 92 passed.
 AP01 alone: 133 passed; the acceptance-state check adds 85 UNIT/MOCK cases.
 `tests/test_soap_faults.py` adds 41 UNIT/MOCK checks for SOAP framing,
 unsupported actions, argument validation, backend rejection, sanitized faults,
@@ -69,3 +69,14 @@ inherited; only command transport is replaced inside the test.
 
 Scope: REAL_BACKEND/null plus local HTTP INTEGRATION. No claim about production
 Unix JSON IPC, GENA callback delivery, acoustic mute/gain, DAC, Android or ARM.
+
+## Discovery and app-shaped handshake
+
+Identity/SSDP/mDNS tests are UNIT/MOCK: generated packet bytes, persisted identity,
+Unicode names, ports/UDNs, and mocked rename refresh. They do not prove multicast
+reachability or handset behavior. `test_app_handshake.py` follows those synthetic
+discovery contracts using actual loopback HTTP, loads every advertised SCPD,
+then exercises local controls and two-track selection with a fake backend.
+`test_upnp_schema.py` compares declared action outputs/types with actual handlers.
+`test_capability_consistency.py` compares complete capability documents across
+HTTP, SOAP control and transport reads. All are independent of vendor clouds.

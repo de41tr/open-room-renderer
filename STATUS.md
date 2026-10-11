@@ -90,3 +90,30 @@ physical DAC, target ARM hardware or actual Android app behavior.
 Known follow-ons: legacy unresolved-provider CreateQueue still needs AP06
 canonical replacement/generation integration. Discovery/SCPDs/capabilities,
 GENA callback lifecycle/security, backend lifecycle and recovery remain open.
+
+## AP03 protocol/discovery checkpoint
+
+- New compatibility installations persist their own FF-prefixed random identity;
+  existing/configured identities are preserved. Names, synthetic MAC-like IDs
+  and DNS hostnames derive from the full identity instead of shared padded tails.
+- SSDP UUID/root/service targets and UTF-8 ServiceName formatting are consistent.
+  mDNS handles bounded Unicode names and refreshes after rename without changing
+  identity. Neutral defaults use independent product/firmware metadata.
+- Every SCPD now declares implemented actions, arguments, types and event fields.
+  Unsupported mutations are absent; optional Plex UserLogin is conditional.
+- All status/capability surfaces use one service list. Default is provider-empty;
+  configured public TuneIn is explicit. Unsupported service sentinels remain
+  inactive, cannot fake a login/premium account, and do not appear as supported.
+  Unknown hardware support and output parameters are no longer invented.
+- A real loopback HTTP handshake follows synthetic discovery, description/SCPDs,
+  legacy reads, queue creation, two different tracks, pause/resume/Next, volume,
+  mute, stop and rename. Its audio backend is a deterministic fake.
+
+Validation: 518 passed with REAL_BACKEND/null enabled, or 517 passed plus one
+explicit skip by default. The real libmpv queue/control lane still passes.
+Multicast packets are tested synthetically; actual LAN discovery and original
+Android application compatibility remain NOT_RUN. Existing non-FF identities
+are intentionally not silently replaced.
+
+AP05 published as `2d6e6ad29f998ab58f57ab38c4d19c93a5662b90`.
+Next: AP04 bounded subscriptions, retries and same-peer callback policy.

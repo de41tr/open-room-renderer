@@ -7,6 +7,7 @@ those changes behind explicit config flags.
 
 from __future__ import annotations
 
+import hashlib
 import uuid as uuidlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,11 +57,11 @@ class Config:
     protocol-facing identity strings from the persisted UUID.
     """
 
-    friendly_name: str = "Pi Linkplay Podcast"
-    manufacturer: str = "Linkplay"
+    friendly_name: str = "Open Room Renderer"
+    manufacturer: str = "Independent"
     manufacturer_url: str = ""
-    model_name: str = "WiiM Mini"
-    model_number: str = "Muzo_Mini"
+    model_name: str = "Linux Room Renderer"
+    model_number: str = "alpha-0.1"
     model_url: str = ""
     uuid: str | None = None
     http_api_port: int = 80
@@ -68,7 +69,7 @@ class Config:
     mirror_port_80: bool = False
     bind_address: str = "0.0.0.0"
     advertise_ip: str | None = None
-    mpv_socket: str = "/tmp/fake-linkplay-mpv.sock"
+    mpv_socket: str = "/tmp/open-room-renderer-mpv.sock"
     auto_spawn_mpv: bool = True
     default_volume: int = 50
     log_level: str = "INFO"
@@ -104,6 +105,12 @@ class Config:
     channel_balance: str = "0.0"
     podcast_presets: list[PodcastPreset] = field(default_factory=list)
     experimental_sources: list[ExperimentalSource] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Normalize configured IDs without replacing their identity."""
+
+        self.uuid = normalize_uuid(self.uuid) or None
+        self.discovery_uuid = normalize_uuid(self.discovery_uuid).upper() or None
 
     @property
     def resolved_advertise_ip(self) -> str:
@@ -143,8 +150,10 @@ class Config:
         """Return the compact compatibility UUID used by app-facing profiles."""
 
         if self.discovery_uuid:
-            return self.discovery_uuid.removeprefix("uuid:").removeprefix("UUID:")
-        compact = (self.uuid or "").replace("-", "").upper()
+            return normalize_uuid(self.discovery_uuid).upper()
+        # Preserve the legacy derived identity for existing/configured UUIDs.
+        # Fresh compatibility installs already persist a full FF-prefixed ID.
+        compact = normalize_uuid(self.uuid).replace("-", "").upper()
         return (compact + "000000000000000000000000000000000000")[:36]
 
     @property
@@ -157,15 +166,27 @@ class Config:
     def upnp_uuid(self) -> str:
         """Return the UUID string used in UPnP UDN and SSDP USN fields."""
 
-        return self.wiim_uuid if self.wiim_home_profile else (self.uuid or "")
+        return self.wiim_uuid if self.wiim_home_profile else normalize_uuid(self.uuid)
 
     @property
     def wiim_mac(self) -> str:
         """Return a deterministic locally administered MAC-like identifier."""
 
-        compact = "".join(ch for ch in self.wiim_uuid.upper() if ch in "0123456789ABCDEF")
-        compact = compact[-10:].rjust(10, "0")
+        # Use the whole identity: legacy padded tails are shared by many IDs.
+        compact = self.identity_suffix[:10].upper()
         return "02:" + ":".join(compact[index : index + 2] for index in range(0, 10, 2))
+
+    @property
+    def identity_suffix(self) -> str:
+        """Return a stable suffix derived from all of this renderer's ID."""
+
+        return hashlib.sha256(self.upnp_uuid.upper().encode("utf-8")).hexdigest()[:12]
+
+    @property
+    def mdns_hostname(self) -> str:
+        """Return an installation-specific hostname unaffected by renames."""
+
+        return f"open-room-renderer-{self.identity_suffix}.local."
 
     @property
     def linkplay_instance_name(self) -> str:
@@ -173,8 +194,10 @@ class Config:
 
         if self.mdns_instance_name:
             return self.mdns_instance_name
-        suffix = self.wiim_uuid[-4:] if self.wiim_uuid else "542C"
-        return f"LinkPlayA31_{suffix}"
+        suffix = self.identity_suffix[:6].upper()
+        if self.wiim_home_profile:
+            return f"LinkPlayA31_{suffix}"
+        return f"{self.friendly_name}-{suffix}"
 
 
 def load_config(path: str | Path) -> Config:
@@ -197,16 +220,31 @@ def load_config(path: str | Path) -> Config:
     presets = [PodcastPreset(**item) for item in raw.pop("podcast_presets", [])]
     experimental_sources = [ExperimentalSource(**item) for item in raw.pop("experimental_sources", [])]
     cfg = Config(**raw, podcast_presets=presets, experimental_sources=experimental_sources)
-    cfg.uuid = cfg.uuid or load_or_create_uuid(cfg.state_dir)
+    cfg.uuid = cfg.uuid or load_or_create_uuid(cfg.state_dir, wiim_home_profile=cfg.wiim_home_profile)
     load_persistent_runtime_state(cfg)
     return cfg
 
 
-def load_or_create_uuid(state_dir: str | Path) -> str:
+def normalize_uuid(value: str | None) -> str:
+    """Strip optional UUID prefix/whitespace and normalize identity casing.
+
+    Standard hyphenated UUIDs retain their conventional lower-case spelling;
+    compact compatibility IDs use upper case. No entropy is added or removed.
+    """
+
+    value = "".join((value or "").split())
+    if value[:5].lower() == "uuid:":
+        value = value[5:]
+    return value.lower() if "-" in value else value.upper()
+
+
+def load_or_create_uuid(state_dir: str | Path, *, wiim_home_profile: bool = False) -> str:
     """Read the stable renderer UUID or create one under ``state_dir``.
 
     Args:
         state_dir: Directory used for local runtime state.
+        wiim_home_profile: Generate a compact FF-prefixed ID on first install.
+            Existing persisted or explicitly configured identities never migrate.
 
     Returns:
         UUID string persisted in ``state_dir/uuid``.
@@ -218,9 +256,19 @@ def load_or_create_uuid(state_dir: str | Path) -> str:
     directory = ensure_dir(state_dir)
     uuid_path = directory / "uuid"
     if uuid_path.exists():
-        return uuid_path.read_text().strip()
-    value = str(uuidlib.uuid4())
-    uuid_path.write_text(value + "\n")
+        value = normalize_uuid(uuid_path.read_text())
+        if not value:
+            raise ValueError(f"Persisted UUID is empty: {uuid_path}")
+        return value
+    entropy = uuidlib.uuid4()
+    # FF is a compatibility discriminator, not an OEM identifier. The remaining
+    # UUID entropy belongs to this installation; do not clone a hardware ID.
+    value = f"FF00{entropy.hex.upper()}" if wiim_home_profile else str(entropy)
+    try:
+        with uuid_path.open("x") as stream:
+            stream.write(value + "\n")
+    except FileExistsError:
+        return load_or_create_uuid(state_dir, wiim_home_profile=wiim_home_profile)
     return value
 
 
