@@ -6,7 +6,8 @@
 .venv/bin/python -m pytest -q
 ```
 
-At the AP01 checkpoint: 133 passed on Python 3.12.14. Baseline: 92 passed.
+Current suite: 218 passed on Python 3.12.14. Baseline: 92 passed.
+AP01 alone: 133 passed; the acceptance-state check adds 85 UNIT/MOCK cases.
 `tests/test_soap_faults.py` adds 41 UNIT/MOCK checks for SOAP framing,
 unsupported actions, argument validation, backend rejection, sanitized faults,
 namespace correctness, client extensions and exactly-once loading.

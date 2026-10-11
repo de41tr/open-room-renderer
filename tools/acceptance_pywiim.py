@@ -145,7 +145,12 @@ class PywiimAcceptance:
                     status = await self._maybe_await(method())
                 text = json.dumps(status, default=str).lower()
                 self.log(f"post-{action} status via {name}: {text[:200]}")
-                return expected in text
+                if not isinstance(status, dict):
+                    return False
+                # pywiim normalizes the raw status/state/player_state fields to
+                # play_status. Keys, metadata, and partial values are not state.
+                states = [status[key] for key in ("play_status", "status", "state", "player_state") if key in status]
+                return bool(states) and all(isinstance(state, str) and state.lower() == expected for state in states)
             except Exception as exc:
                 self.log(f"post-{action} status check via {name} failed: {type(exc).__name__}: {exc}")
         return False

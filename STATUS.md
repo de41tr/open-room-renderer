@@ -34,3 +34,12 @@ AP02 generation races/EOF and cross-interface state are still open. Queue remain
 single-item until AP05. SCPD declarations, app handshake, callback leases/policy,
 recovery and backend lifecycle need their planned focused passes. Current tests
 must not be taken as full WiiM Home app compatibility.
+
+## Client assertion checkpoint
+
+AP01 published as `2e3068ede2b095b572f7249bc7bdaadecdd9641a`, draft PR #1.
+The PyWiiM acceptance check now compares actual transport fields exactly; a
+`play_status` key containing `stop` cannot satisfy a play assertion. Missing,
+conflicting, nested or metadata-only states fail. 85 new synthetic cases cover
+the installed pywiim 2.3.9 flat response shapes. Full suite: 218 passed
+(UNIT/MOCK); this is not a real-client/audio acceptance run.

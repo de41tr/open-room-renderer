@@ -7,8 +7,8 @@
 3. Read STATUS.md and PLAN.md, then run `.venv/bin/python -m pytest -q`.
 4. AP01 code/fault tests are the first checkpoint. Next is AP02 authoritative
    playback phase/generation handling, then AP05 multi-item queue.
-5. A separate exact-state PyWiiM acceptance assertion fix is being reviewed;
-   include it in its own commit, not mixed into AP01.
+5. AP01 is published in draft PR #1 as `2e3068ede2b095b572f7249bc7bdaadecdd9641a`.
+   The exact-state PyWiiM check is the next checkpoint (218 total tests passing).
 6. Keep production mpv JSON IPC. AF_UNIX is denied in this cloud sandbox; use
    fake-backend tests and optional libmpv/null-output validation with honest scope.
 7. Review all changed files and commit content for private data before publishing;
