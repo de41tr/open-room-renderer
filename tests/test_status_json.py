@@ -757,8 +757,11 @@ async def test_live_sync_ignores_mpv_segment_duration() -> None:
 @pytest.mark.asyncio
 async def test_set_play_mode_updates_loop_state() -> None:
     api = make_api()
-    await api._execute_soap_side_effect("SetPlayMode", "<SetPlayMode><NewPlayMode>REPEAT_ALL</NewPlayMode></SetPlayMode>")
-    assert api.state.loop == "2"
+    from fake_linkplay.soap import SoapFault
+    with pytest.raises(SoapFault):
+        await api._execute_soap_side_effect("SetPlayMode", "<SetPlayMode><NewPlayMode>REPEAT_ALL</NewPlayMode></SetPlayMode>")
+    await api._execute_soap_side_effect("SetPlayMode", "<SetPlayMode><NewPlayMode>NORMAL</NewPlayMode></SetPlayMode>")
+    assert api.state.loop == "0"
 
 
 @pytest.mark.asyncio

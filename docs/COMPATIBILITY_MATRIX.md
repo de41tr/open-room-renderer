@@ -6,10 +6,10 @@ This is scoped evidence, not a product certification. Updated 2026-10-11 UTC.
 | --- | --- | --- |
 | SOAP action validation/faults | UNIT/MOCK regression coverage | Actual client/app execution pending |
 | Basic volume/mute/control acknowledgement | UNIT/MOCK + real local PyWiiM HTTP integration with fake backend | Real Unix IPC and DAC readback pending |
-| Successful selected-URI playback | MOCK, exactly one load | Real audio pending |
+| Selected-URI playback/control | MOCK + real libmpv/null through HTTP | Unix IPC and real audio pending |
 | Playback generations/EOF | UNIT/MOCK, generation-race and observer tests | Actual production IPC and hardware pending |
-| Multi-item queue | Not implemented | AP05 planned |
-| Loop/Next SOAP mutations | Explicit unsupported fault | Actual semantics planned with queue |
+| Concrete multi-item queue | UNIT/MOCK + REAL_BACKEND/null indexed/Next/Previous/EOF selection | Legacy unresolved providers need AP06 |
+| Next/Previous; normal loop mode | Actual queue selection; normal mode only | Repeat/shuffle remain unsupported |
 | Discovery and app handshake | Existing static/unit coverage | LAN multicast and Android app pending |
 | GENA lifecycle and callback security | Existing implementation | AP04 review/tests pending |
 | Synthetic WAV/MP3/FLAC decode | REAL_BACKEND, mpv null output | No audible/DAC assertion |

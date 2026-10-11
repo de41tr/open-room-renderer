@@ -30,8 +30,7 @@ ANDROID_APP or HARDWARE validation.
 
 ## Known remaining work
 
-AP02 now has a tested generation/state checkpoint (below). Queue remains
-single-item until AP05. SCPD declarations, app handshake, callback leases/policy,
+AP02 now has a tested generation/state checkpoint (below). AP05 now provides concrete multi-item queues (below). SCPD declarations, app handshake, callback leases/policy,
 recovery and backend lifecycle need their planned focused passes. Current tests
 must not be taken as full WiiM Home app compatibility.
 
@@ -64,4 +63,30 @@ This checkpoint: 259 passed (32 new state UNIT/MOCK cases and 9 INTEGRATION
 cases using real local HTTP + installed pywiim 2.3.9 with a fake audio backend).
 The client tests clean up sessions, listeners and observer tasks. PyWiiM emits
 9 upstream TLS-version deprecation warnings. No actual Android or DAC claim.
-Next: integrate the one-based multi-track queue model and navigation.
+AP02 published as `4a3849e391111e2fb45b95dc7ee6f6aaf30423fb`.
+
+## AP05 and real-backend checkpoint
+
+- Concrete QueueContext tracks are parsed into one bounded queue model; counts
+  and one-based indices come from that model. Empty queues report zero.
+- Create/replace, named indexed play, Next, Previous, Browse and queue-index
+  queries select the actual resource. Finite EOF advances to the next item.
+- Invalid indices/names/XML do not mutate state. Old EOF work is cancelled by
+  newer owner commands. Direct source replacement cannot reuse a stale resolved
+  URL. HTTP, SOAP and event payloads report the same index/resource.
+- Metadata text and provider identity survive XML round trips. Only normal
+  loop mode is supported; repeat/shuffle requests still fail explicitly.
+- An optional test-only libmpv transport exercises the real backend through
+  local HTTP with generated WAVs and null output. It verified actual different
+  resources for indexed play/Next/Previous/EOF, advancing position, pause/resume,
+  volume/mute properties, paused seek, stop/reload and cleanup/cancellation.
+  Event payload consistency was checked; callback delivery is an AP04 task.
+
+Validation: 372 passed with the optional REAL_BACKEND/null lane enabled;
+otherwise 371 passed and 1 explicit skip. Nine upstream PyWiiM TLS deprecation
+warnings remain. This does not verify production Unix IPC, audible output,
+physical DAC, target ARM hardware or actual Android app behavior.
+
+Known follow-ons: legacy unresolved-provider CreateQueue still needs AP06
+canonical replacement/generation integration. Discovery/SCPDs/capabilities,
+GENA callback lifecycle/security, backend lifecycle and recovery remain open.

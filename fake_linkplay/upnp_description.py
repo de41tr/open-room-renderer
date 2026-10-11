@@ -532,7 +532,7 @@ def avtransport_response_fields(action: str, state: Any | None = None) -> str | 
         duration = seconds_to_hms(getattr(state, "totlen", 0))
         return "\n".join(
             [
-                "<NrTracks>1</NrTracks>" if current_uri else "<NrTracks>0</NrTracks>",
+                f"<NrTracks>{getattr(state, 'plicount', 0)}</NrTracks>",
                 f"<MediaDuration>{duration}</MediaDuration>",
                 f"<CurrentURI>{escape(track_uri)}</CurrentURI>",
                 f"<CurrentURIMetaData>{escape(track_metadata)}</CurrentURIMetaData>",
@@ -551,7 +551,7 @@ def avtransport_response_fields(action: str, state: Any | None = None) -> str | 
         info_track_source = track_source or "URL"
         return "\n".join(
             [
-                "<Track>1</Track>" if current_uri else "<Track>0</Track>",
+                f"<Track>{getattr(state, 'plicurr', 0)}</Track>",
                 f"<TrackDuration>{duration}</TrackDuration>",
                 f"<TrackMetaData>{escape(track_metadata)}</TrackMetaData>",
                 f"<TrackURI>{escape(track_uri)}</TrackURI>",
@@ -593,7 +593,7 @@ def avtransport_response_fields(action: str, state: Any | None = None) -> str | 
             ]
         )
     if action == "GetCurrentTransportActions":
-        return "<Actions>Play,Pause,Stop,Seek,Previous</Actions>"
+        return "<Actions>Play,Pause,Stop,Seek,Next,Previous</Actions>"
     return None
 
 

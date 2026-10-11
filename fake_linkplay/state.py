@@ -6,11 +6,12 @@ status shapes expected by local renderer clients.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
 from .config import Config
+from .queue import PlaybackQueue
 
 
 class PlaybackPhase(StrEnum):
@@ -53,8 +54,15 @@ class RendererState:
     play_medium: str = ""
     curpos: int = 0
     totlen: int = 0
-    plicount: int = 1
-    plicurr: int = 1
+    queue: PlaybackQueue = field(default_factory=PlaybackQueue)
+
+    @property
+    def plicount(self) -> int:
+        return self.queue.count
+
+    @property
+    def plicurr(self) -> int:
+        return self.queue.index
 
     @property
     def status(self) -> str:

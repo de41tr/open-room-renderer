@@ -31,6 +31,7 @@ from aiohttp import web
 
 from .config import Config
 from .mpv_backend import BackendError, MpvBackend
+from .queue import PlaybackQueue, QueueError, QueueItem, parse_queue_context, serialize_queue_context
 from .soap import MUTATING_ACTIONS, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
 from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
@@ -134,6 +135,7 @@ class HttpApi:
         self._state_monitor_task: asyncio.Task | None = None
         self._app_users = 0
         self._monitor_interval = 0.5
+        self._queue_advance_task: asyncio.Task | None = None
         self._playback_offset_sec = 0
         self._pending_seek_target: int | None = None
         self._pending_seek_generation = 0
@@ -200,6 +202,13 @@ class HttpApi:
                     await task
                 except asyncio.CancelledError:
                     pass
+                if self._queue_advance_task is not None:
+                    task, self._queue_advance_task = self._queue_advance_task, None
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
 
     async def _monitor_backend(self) -> None:
         """Observe EOF/failure even when no client is polling status."""
@@ -222,6 +231,10 @@ class HttpApi:
         self.state.generation = value
 
     def _accept_playback_command(self, intent: str) -> int:
+        task = self._queue_advance_task
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            self._queue_advance_task = None
+            task.cancel()
         self._pending_seek_generation += 1
         self._pending_seek_target = None
         return self.state.accept_command(intent)
@@ -263,6 +276,9 @@ class HttpApi:
                     self.state.curpos = 0
                     self.state.backend_url = ""
                     self.state.backend_original_url = ""
+                    if old_phase in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING} and self.state.intent == "play" and self.state.queue.index < self.state.queue.count:
+                        if self._queue_advance_task is None or self._queue_advance_task.done():
+                            self._queue_advance_task = asyncio.create_task(self._advance_queue_after_eof(self.state.generation, self.state.queue))
             elif self.state.intent == "stop":
                 # A late active backend snapshot cannot undo an owner stop.
                 pass
@@ -282,7 +298,8 @@ class HttpApi:
             self.state.totlen = self.queue_duration_sec
         elif isinstance(snap.get("duration"), (int, float)) and int(snap["duration"]) > 0:
             self.state.totlen = int(snap["duration"])
-        if snap.get("media-title") and self.state.intent != "stop":
+        selected = self.state.queue.current
+        if snap.get("media-title") and self.state.intent != "stop" and not (selected and selected.title):
             self.state.title = str(snap["media-title"])
         if self.state.phase != old_phase:
             self._schedule_event_notify()
@@ -669,6 +686,9 @@ class HttpApi:
             self.state.play_medium = "STATION-NETWORK"
             self.state.album_art_uri = ""
             self.state.track_metadata = self._didl_metadata(url, self.queue_title, self.queue_source)
+            self.state.queue = PlaybackQueue(items=[QueueItem(url=url,
+                source=self.queue_source, metadata=self.state.track_metadata)], index=1)
+            self._activate_queue_item()
             await self._play_url(url)
             self._schedule_event_notify()
             return "OK"
@@ -1309,6 +1329,10 @@ class HttpApi:
 
     async def _play_url(self, url: str) -> None:
         """Resolve/load once and confirm only this generation's actual audio."""
+        if not self.state.queue.current or self.state.queue.current.url != url:
+            self.state.queue = PlaybackQueue(items=[QueueItem(url=url,
+                source=self.queue_source or self.state.track_source, metadata=self.state.track_metadata,
+                artwork=self.state.album_art_uri)], index=1)
         generation = self._accept_playback_command("play")
         self.state.phase = PlaybackPhase.COMMAND_ACCEPTED
         self.state.current_url = url
@@ -1317,7 +1341,8 @@ class HttpApi:
         self._schedule_event_notify()
         try:
             self.state.phase = PlaybackPhase.LOADING
-            direct_url = self.queue_resolved_url if self.queue_url == url and self.queue_resolved_url else await self._resolve_playback_url(url)
+            selected = self.state.queue.current
+            direct_url = selected.resolved_url if selected and selected.url == url and selected.resolved_url else await self._resolve_playback_url(url)
             if generation != self.state.generation:
                 raise BackendError("Playback command superseded")
             playback_url = self._backend_playback_url(url, direct_url)
@@ -1338,6 +1363,9 @@ class HttpApi:
             self._playback_offset_sec = 0
             self.state.resolved_url = direct_url
             self.state.backend_url = playback_url
+            selected = self.state.queue.current
+            if selected and selected.url == url:
+                selected.resolved_url = direct_url
             self.state.phase = PlaybackPhase.BUFFERING
             self._schedule_event_notify()
             ready = await self._wait_for_mpv_audio_ready(generation, playback_url)
@@ -2205,6 +2233,8 @@ class HttpApi:
             if action in MUTATING_ACTIONS[service]:
                 await self._execute_soap_side_effect(action, action_body)
                 result = self._playqueue_response_fields(action, action_body) if action == "UserLogin" else ""
+                if action in {"CreateQueue", "ReplaceQueue"}:
+                    result = f"<QueueName>{escape(self.state.queue.name)}</QueueName>"
             elif action == "GetControlDeviceInfo":
                 result = get_control_device_info_response_fields(self.cfg, self.cfg.resolved_advertise_ip, self.state)
             elif action == "StreamServicesCapability":
@@ -2217,6 +2247,9 @@ class HttpApi:
                     await self.sync_mpv_state()
                 result = avtransport_response_fields(action, self.state)
             elif service == "PlayQueue":
+                queue_name = self._xml_text(action_body, "QueueName")
+                if queue_name and queue_name != self.state.queue.name:
+                    raise SoapFault(402, "Invalid Args")
                 result = self._playqueue_response_fields(action, action_body)
             elif action == "GetProtocolInfo":
                 result = "<Source></Source><Sink>http-get:*:audio/*:*</Sink>"
@@ -2243,7 +2276,7 @@ class HttpApi:
             # WiiM Home polls BrowseQueue heavily and uses this queue context to
             # decide whether the now-playing controls are actionable. Returning
             # an empty queue after CreateQueue makes play/pause appear broken.
-            queue_context = self.queue_context or self._build_queue_context()
+            queue_context = self._build_queue_context() or self.queue_context
             if queue_context:
                 return f"<QueueContext>{escape(queue_context)}</QueueContext>"
             return playqueue_response_fields(action)
@@ -2316,6 +2349,8 @@ class HttpApi:
         if action == "GetQueueIndex":
             return "\n".join(
                 [
+                    f"<QueueName>{escape(self.state.queue.name)}</QueueName>",
+                    f"<Count>{self.state.plicount}</Count>",
                     f"<CurrentIndex>{self.state.plicurr}</CurrentIndex>",
                     f"<PreloadingIndex>{self.state.plicurr}</PreloadingIndex>",
                     "<CurrentPage>1</CurrentPage>",
@@ -2492,6 +2527,8 @@ class HttpApi:
     def _build_queue_context(self) -> str:
         """Build the Linkplay-style QueueContext XML for the current item."""
 
+        if self.state.queue.items:
+            return serialize_queue_context(self.state.queue)
         url = self.queue_url or self.state.current_url
         if not url:
             return ""
@@ -2546,6 +2583,77 @@ class HttpApi:
             ]
         )
 
+    def _activate_queue_item(self) -> None:
+        """Project the selected canonical queue item into existing serializers."""
+        queue = self.state.queue
+        item = queue.current
+        self.queue_name = queue.name
+        self.queue_url = item.url if item else ""
+        self.queue_resolved_url = item.resolved_url if item else ""
+        self.queue_title = (item.title or queue.list_name or item.url.rsplit("/", 1)[-1]) if item else ""
+        self.queue_source = (item.source or queue.source) if item else queue.source
+        self.queue_search_url = queue.search_url
+        self.queue_pic_url = (item.artwork or queue.artwork) if item else queue.artwork
+        self.queue_quality = queue.quality
+        self.queue_stream_type = item.stream_type if item else ""
+        self.queue_content_type = item.content_type if item else ""
+        self.queue_duration_sec = int(item.duration) if item else 0
+        self.queue_is_live = bool(item and item.stream_type == "station")
+        self.state.current_url = self.queue_url
+        self.state.resolved_url = self.queue_resolved_url
+        self.state.title = self.queue_title
+        self.state.artist = ""
+        self.state.album = ""
+        self.state.album_art_uri = self.queue_pic_url
+        self.state.track_source = self.queue_source
+        self.state.play_medium = "RADIO-NETWORK" if self.queue_is_live else "THIRD-DLNA"
+        self.state.track_metadata = (item.metadata or self._didl_metadata(item.url, self.queue_title, self.queue_source, self.queue_pic_url, self.queue_is_live)) if item else ""
+        self.state.curpos = 0
+        self.state.totlen = self.queue_duration_sec
+        self.queue_context = serialize_queue_context(queue)
+
+    async def _advance_queue_after_eof(self, generation: int, queue: PlaybackQueue) -> None:
+        """Auto-advance only while the original owner intent is still current."""
+        if generation != self.state.generation or self.state.intent != "play" or self.state.queue is not queue:
+            return
+        try:
+            await self._play_queue_index(queue.index + 1, queue.name)
+        except (BackendError, SoapFault, OSError, TimeoutError):
+            # The command path already reports current-generation backend errors.
+            # Superseded auto-advance must not overwrite newer owner state.
+            return
+
+    async def _replace_queue(self, queue: PlaybackQueue) -> None:
+        queue.validate()
+        if self.state.backend_url or self.state.status in {"play", "pause", "transition"}:
+            await self._transport_command("stop")
+        self._accept_playback_command("stop")
+        self.state.mark_stop()
+        self.state.queue = queue
+        self._activate_queue_item()
+        self._schedule_event_notify()
+
+    async def _play_queue_index(self, index: int, queue_name: str = "") -> None:
+        queue = self.state.queue
+        try:
+            if queue_name:
+                queue.require_name(queue_name)
+            queue.validate_index(index)
+            if not queue.items:
+                raise QueueError("Queue is empty")
+        except QueueError:
+            raise SoapFault(711, "Illegal Seek Target") from None
+        if self.state.backend_url or self.state.status in {"play", "pause", "transition"}:
+            await self._transport_command("stop")
+        # Stop may have yielded to a newer CreateQueue/owner command.
+        if self.state.queue is not queue:
+            raise BackendError("Queue command superseded")
+        queue.index = index
+        self._activate_queue_item()
+        await self._play_url(queue.current.url)
+        self.queue_context = serialize_queue_context(queue)
+        self._schedule_event_notify()
+
     @staticmethod
     async def _backend_call(operation):
         """Check adapters returning mpv results as well as exception-based ones."""
@@ -2571,10 +2679,6 @@ class HttpApi:
                 raise SoapFault(717, "Play Speed Not Supported")
             if not (self.queue_url or self.state.current_url):
                 raise SoapFault(701, "Transition Not Available")
-        if action == "PlayQueueWithIndex":
-            index = self._xml_text(body, "Index")
-            if index != "1" or not self.queue_url:
-                raise SoapFault(711, "Illegal Seek Target")
         if action == "Seek" and self._xml_text(body, "Unit") not in {"", "REL_TIME"}:
             raise SoapFault(710, "Seek Mode Not Supported")
         if action == "Seek" and not re.fullmatch(r"\d+:[0-5]\d:[0-5]\d", self._xml_text(body, "Target")):
@@ -2638,6 +2742,10 @@ class HttpApi:
                 self.state.track_metadata = self._metadata_with_art(self.state.track_metadata, self.state.album_art_uri)
                 self.state.play_medium = "STATION-NETWORK" if "radioparadise.com" in url else "THIRD-DLNA"
                 self.state.track_source = "RadioParadise" if "radioparadise.com" in url else "DLNA"
+                self.state.queue = PlaybackQueue(items=[QueueItem(url=url, title=self.state.title,
+                    source=self.state.track_source, metadata=self.state.track_metadata,
+                    artwork=self.state.album_art_uri)], index=1)
+                self._activate_queue_item()
                 LOG.info("SOAP SetAVTransportURI stored url=%s", url)
                 self._schedule_event_notify(("rendertransport1", "AVTransport"))
             return
@@ -2653,8 +2761,12 @@ class HttpApi:
             await self._transport_command(action.lower())
             return
         if action == "Next":
-            raise SoapFault(401, "Invalid Action")
+            await self._play_queue_index(self.state.queue.index + 1)
+            return
         if action == "Previous":
+            if self.state.queue.count > 1:
+                await self._play_queue_index(self.state.queue.index - 1)
+                return
             if not self.state.current_url or self.state.status not in {"play", "pause"}:
                 raise SoapFault(701, "Transition Not Available")
             await self._seek_command(0)
@@ -2662,10 +2774,11 @@ class HttpApi:
             self._schedule_event_notify(("rendertransport1", "AVTransport"))
             return
         if action == "SetPlayMode":
-            mode = self._xml_text(body, "NewPlayMode") or self._xml_text(body, "PlayMode") or "NORMAL"
-            self.state.loop = self._loop_mode_value(mode)
-            LOG.info("SOAP SetPlayMode mode=%s loop=%s", mode, self.state.loop)
-            self._schedule_event_notify(("rendertransport1", "AVTransport"))
+            mode = self._xml_text(body, "NewPlayMode") or self._xml_text(body, "PlayMode")
+            if mode != "NORMAL":
+                raise SoapFault(712, "Play Mode Not Supported")
+            self.state.loop = "0"
+            self.state.queue.loop = 0
             return
         if action in {"Seek", "SeekForward", "SeekBackward"}:
             if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}:
@@ -2732,6 +2845,14 @@ class HttpApi:
             asyncio.create_task(self._finish_seek_after_buffering(seek_generation, seconds, previous_pos))
             return
         if action in {"CreateQueue", "ReplaceQueue"}:
+            context = self._xml_text(body, "QueueContext")
+            try:
+                queue = parse_queue_context(context, name=self._xml_text(body, "QueueName") or None)
+            except QueueError:
+                raise SoapFault(402, "Invalid Args") from None
+            if queue.items or not (queue.source and (queue.stream_id or queue.search_url)):
+                await self._replace_queue(queue)
+                return
             # Built-in services such as TuneIn and Radio Paradise usually pass
             # a Linkplay QueueContext. Preserve source/search/art metadata so
             # later BrowseQueue, GetInfoEx, artwork, and transport state agree.
@@ -2785,8 +2906,14 @@ class HttpApi:
                     self.state.track_metadata = self._metadata_with_duration(self.state.track_metadata, self.queue_duration_sec)
                 self.state.play_medium = "STATION-NETWORK" if "radioparadise.com" in url else self._xml_text(queue_context, "PlayMedium") or "RADIO-NETWORK"
                 self.state.track_source = self.queue_source
-                self.state.plicount = 1
-                self.state.plicurr = 1
+                self.state.queue = PlaybackQueue(
+                    name=self.queue_name, list_name=self.queue_title, source=self.queue_source,
+                    search_url=self.queue_search_url, artwork=self.queue_pic_url, quality=self.queue_quality,
+                    items=[QueueItem(url=self.queue_url, title=self.state.title, source=self.queue_source,
+                                     metadata=self.state.track_metadata, artwork=self.state.album_art_uri,
+                                     stream_type=self.queue_stream_type, content_type=self.queue_content_type,
+                                     duration=self.queue_duration_sec, resolved_url=self.queue_resolved_url)], index=1,
+                )
                 self.queue_context = self._build_queue_context()
                 LOG.info("SOAP CreateQueue stored title=%s url=%s resolved=%s live=%s", self.state.title, url, self.queue_resolved_url, self.queue_is_live)
                 self._schedule_event_notify(("PlayQueue1", "PlayQueue"))
@@ -2797,24 +2924,17 @@ class HttpApi:
                 LOG.info("SOAP %s did not contain a stream URL", action)
             return
         if action == "PlayQueueWithIndex":
-            index = self._xml_text(body, "Index")
-            if index:
-                try:
-                    self.state.plicurr = max(1, int(index))
-                except ValueError:
-                    LOG.info("SOAP PlayQueueWithIndex ignored non-integer index=%s", index)
-            if self.queue_url:
-                if self.queue_title:
-                    self.state.title = self.queue_title
-                await self._play_url(self.queue_url)
-                LOG.info("SOAP PlayQueueWithIndex loaded title=%s url=%s", self.state.title, self.queue_url)
-                self._schedule_event_notify()
+            raw_index = self._xml_text(body, "Index")
+            if not re.fullmatch(r"[0-9]+", raw_index):
+                raise SoapFault(402, "Invalid Args")
+            await self._play_queue_index(int(raw_index), self._xml_text(body, "QueueName"))
             return
         if action == "SetQueueLoopMode":
-            mode = self._xml_text(body, "LoopMode") or self._xml_text(body, "QueueLoopMode") or "0"
-            self.state.loop = self._loop_mode_value(mode)
-            LOG.info("SOAP SetQueueLoopMode mode=%s loop=%s", mode, self.state.loop)
-            self._schedule_event_notify(("PlayQueue1", "PlayQueue", "rendertransport1", "AVTransport"))
+            mode = self._xml_text(body, "LoopMode") or self._xml_text(body, "QueueLoopMode")
+            if mode != "0":
+                raise SoapFault(712, "Play Mode Not Supported")
+            self.state.loop = "0"
+            self.state.queue.loop = 0
             return
         if action in {"SetQueuePolicy", "AppendQueue", "AppendTracksInQueue", "AppendTracksInQueueEx", "RemoveTracksInQueue"}:
             raise SoapFault(401, "Invalid Action")
@@ -3155,10 +3275,14 @@ class HttpApi:
                 }
             )
         if service_key in {"playqueue1", "playqueue"}:
-            queue_context = self.queue_context or self._build_queue_context()
+            queue_context = self._build_queue_context() or self.queue_context
             return self._event_propertyset(
                 {
                     "QueueContext": queue_context,
+                    "CurrentPlayListName": self.state.queue.name,
+                    "CurrentIndex": str(self.state.queue.index),
+                    "LoopMode": str(self.state.queue.loop),
+                    "Count": str(self.state.queue.count),
                     "TrackSource": self.state.track_source,
                     "TrackURI": self.state.resolved_url or self.state.current_url,
                     "TrackTitle": self.state.title,
@@ -3179,7 +3303,7 @@ class HttpApi:
             '<InstanceID val="0">'
             f'<TransportState val="{escape(transport_state)}"/>'
             f'<TransportStatus val="{self.state.transport_status}"/>'
-            '<CurrentTrack val="1"/>'
+            f'<CurrentTrack val="{self.state.plicurr}"/>'
             f'<CurrentTrackDuration val="{escape(track_duration)}"/>'
             f'<CurrentTrackURI val="{escape(track_uri)}"/>'
             f'<CurrentTrackMetaData val="{escape(metadata, quote=True)}"/>'

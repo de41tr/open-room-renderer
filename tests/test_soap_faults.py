@@ -77,7 +77,7 @@ def fault_code(response):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action,service", [
-    ("UnknownAction", "AVTransport"), ("Next", "AVTransport"),
+    ("UnknownAction", "AVTransport"),
     ("SetChannel", "RenderingControl"), ("SelectPreset", "RenderingControl"),
     ("SetQueuePolicy", "PlayQueue"), ("AppendQueue", "PlayQueue"),
     ("AppendTracksInQueue", "PlayQueue"), ("AppendTracksInQueueEx", "PlayQueue"),

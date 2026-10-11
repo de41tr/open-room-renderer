@@ -30,10 +30,10 @@ READ_ACTIONS = {
     "PlayQueue": {"BrowseQueue", "BrowseQueueEx", "GetQueueIndex", "GetQueueLoopMode", "GetKeyMapping", "GetUserInfo"},
 }
 MUTATING_ACTIONS = {
-    "AVTransport": {"SetAVTransportURI", "Play", "Pause", "Stop", "Previous", "Seek", "SeekForward", "SeekBackward"},
+    "AVTransport": {"SetAVTransportURI", "Play", "Pause", "Stop", "Next", "Previous", "Seek", "SeekForward", "SeekBackward", "SetPlayMode"},
     "RenderingControl": {"SetVolume", "SetMute"},
     "ConnectionManager": set(),
-    "PlayQueue": {"CreateQueue", "ReplaceQueue", "PlayQueueWithIndex", "UserLogin"},
+    "PlayQueue": {"CreateQueue", "ReplaceQueue", "PlayQueueWithIndex", "SetQueueLoopMode", "UserLogin"},
 }
 
 
