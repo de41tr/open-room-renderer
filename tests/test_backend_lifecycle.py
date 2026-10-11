@@ -480,9 +480,14 @@ class ServiceHarness:
         self.backend_factory = Mock(return_value=backend)
         monkeypatch.setattr(cli, "MpvBackend", self.backend_factory)
 
+        async def initialize_balance():
+            await self.step("api.initialize_balance")
+            if backend_error == "balance":
+                raise BackendError("synthetic rejected balance")
         def api_factory(_cfg, state, _backend):
             self.state = state
-            return SimpleNamespace(app=lambda: object())
+            self.api = SimpleNamespace(app=lambda: object(), initialize_channel_balance=AsyncMock(side_effect=initialize_balance))
+            return self.api
         monkeypatch.setattr(cli, "HttpApi", api_factory)
         harness = self
 
@@ -537,7 +542,7 @@ class ServiceHarness:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend_error", ["start", "stop", "gain"])
+@pytest.mark.parametrize("backend_error", ["start", "stop", "gain", "balance"])
 async def test_cli_backend_start_failure_keeps_control_api_available(monkeypatch, backend_error):
     harness = ServiceHarness(monkeypatch, backend_error=backend_error)
     await cli.serve("synthetic.yaml")
@@ -889,7 +894,7 @@ def test_real_process_signals_cannot_abandon_startup_or_teardown(phase, signal_n
         cli.load_config = lambda _: Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", enable_ssdp=False)
         cli.setup_logging = lambda _: None
         cli.MpvBackend = lambda *args, **kwargs: SimpleNamespace(start=start_backend, stop=noop, initialize_gain=noop, stop_process=stop_backend)
-        cli.HttpApi = lambda *args: SimpleNamespace(app=lambda: object())
+        cli.HttpApi = lambda *args: SimpleNamespace(app=lambda: object(), initialize_channel_balance=noop)
         cli.web.AppRunner = lambda *args: SimpleNamespace(setup=noop, cleanup=noop)
         cli.web.TCPSite = lambda *args: SimpleNamespace(start=noop)
         cli.MdnsAdvertiser = lambda *args: SimpleNamespace(start=start_mdns, stop=stop_mdns, refresh=noop)
@@ -931,3 +936,13 @@ async def test_shutdown_while_closing_readiness_probe_cleans_verified_owned_sock
     await asyncio.gather(starting, return_exceptions=True)
     unlink.assert_called_once_with(backend.socket_path)
     assert process.waited == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('balance', ['0.0', '0.5'])
+async def test_cli_always_initializes_balance_through_confirmed_api(monkeypatch, balance):
+    harness = ServiceHarness(monkeypatch)
+    harness.cfg.channel_balance = balance
+    await cli.serve('synthetic.yaml')
+    harness.api.initialize_channel_balance.assert_awaited_once()
+    assert harness.events.index('api.initialize_balance') < harness.events.index('site0.start')

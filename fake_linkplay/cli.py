@@ -100,14 +100,13 @@ async def serve(config_path: str) -> None:
             state.mark_error()
             LOG.warning("backend unavailable at startup; control API will report failures: %s", exc)
         api = HttpApi(cfg, state, mpv)
-        if cfg.channel_balance != "0.0":
-            try:
-                await mpv.channel_balance(float(cfg.channel_balance))
-            except ValueError:
-                LOG.warning("ignoring invalid persisted channel balance: %s", cfg.channel_balance)
-            except BackendError:
-                state.mark_error()
-                LOG.warning("could not apply persisted channel balance; backend unavailable")
+        try:
+            # Reconcile even zero with an externally managed backend's old
+            # named graph; publish only through the API's confirmed transaction.
+            await api.initialize_channel_balance()
+        except (BackendError, OSError, ValueError):
+            state.mark_error("Channel balance initialization failed")
+            LOG.warning("could not confirm initial channel balance")
         ports = [cfg.http_api_port]
         if cfg.upnp_port not in ports:
             ports.append(cfg.upnp_port)

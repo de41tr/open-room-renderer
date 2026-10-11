@@ -48,3 +48,9 @@ reconciliation and atomic persistence. Actual HTTP controls have digital PCM
 evidence for cubic gain, exact mute/zero, source retention and restored settings.
 Unknown gain is marked explicitly rather than freshly advertised as confirmed.
 Host mixer, acoustic silence, DAC controls and full service reboot remain untested.
+
+Existing PEQ/balance has transactional configuration readback plus measured
+digital PCM cuts, pass filters, stereo balance silence, reload and failed-native-
+candidate retention. Invalid/unimplemented controls fail instead of succeeding.
+Preset library persistence is tested; active EQ replay on restart remains pending.
+Configuration readback, decoded PCM and physical/acoustic effects remain separate.

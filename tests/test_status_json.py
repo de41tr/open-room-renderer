@@ -973,10 +973,10 @@ async def test_eq_save_and_list_are_ok() -> None:
     payload = await api.execute(ParsedCommand("EQv2GetList:http://moddevices.com/plugins/caps/Eq4p"), "127.0.0.1")
     assert isinstance(payload, dict)
     assert payload["preset"] == ["Flat", "Bass Boost", "Treble Boost"]
-    assert payload["custom"] == ["test"]
+    assert payload["custom"] == []  # Saved on EqNp, so unavailable for Eq4p.
 
     weird = await api.execute(
-        ParsedCommand('EQv2Load:{"pluginURI":"http://moddevices.com/plugins/caps/Eq4p","Name":"{Name=test, Type=custom, channelMode=Stereo, UpdateAt=0}"}'),
+        ParsedCommand('EQv2Load:{"pluginURI":"http://moddevices.com/plugins/caps/EqNp","Name":"{Name=test, Type=custom, channelMode=Stereo, UpdateAt=0}"}'),
         "127.0.0.1",
     )
     assert isinstance(weird, dict)

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import stat
 import socket
@@ -57,6 +58,10 @@ class MpvBackend:
     _request_id: int = 0
     _channel_balance: float = 0.0
     _peq_bands: list[dict[str, float]] | None = None
+    _dsp_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
+    # This verifies mpv's configured af list, not that an idle player's graph
+    # has been accepted by a decoder or produced measured audio samples.
+    _dsp_configuration_confirmed: bool = field(default=False, init=False, repr=False)
     initial_volume: int = field(default=50, kw_only=True)
     initial_mute: bool = field(default=False, kw_only=True)
 
@@ -462,39 +467,190 @@ class MpvBackend:
             raise BackendError(f"Backend {name} confirmation timed out") from exc
 
     async def channel_balance(self, value: float) -> None:
-        """Store stereo balance and reapply the DSP filter graph."""
+        """Confirm a candidate balance/PEQ graph before publishing balance."""
 
-        self._channel_balance = max(-1.0, min(1.0, value))
-        await self.apply_audio_filters()
+        candidate = self.validate_channel_balance(value)
+        async with self._dsp_lock:
+            bands = self.validate_peq_bands(self._peq_bands if self._peq_bands is not None else [])
+            graph = self._build_audio_filter_graph(candidate, bands)
+            await self._apply_audio_filter_graph_locked(graph)
+            self._channel_balance = candidate
 
     async def peq(self, bands: list[dict[str, float]]) -> None:
-        """Store parametric EQ bands and reapply the DSP filter graph."""
+        """Confirm a copied candidate PEQ/balance graph before publishing PEQ."""
 
-        self._peq_bands = bands
-        await self.apply_audio_filters()
+        candidate = self.validate_peq_bands(bands)
+        async with self._dsp_lock:
+            balance = self.validate_channel_balance(self._channel_balance)
+            graph = self._build_audio_filter_graph(balance, candidate)
+            await self._apply_audio_filter_graph_locked(graph)
+            self._peq_bands = candidate
 
     async def apply_audio_filters(self) -> None:
-        """Replace the named mpv audio filter with current balance/PEQ graph."""
+        """Reconfirm the desired graph without changing gain or source state."""
 
-        filters = self._audio_filter_graph()
-        LOG.info("mpv audio filter graph: %s", filters or "(none)")
-        remove_response = await self.command(["af", "remove", "@fake_linkplay_dsp"], timeout=2.0)
-        if remove_response.get("error") not in {None, "success"}:
-            LOG.debug("mpv audio filter remove returned response=%s", remove_response)
-        if filters:
-            add_response = await self.command(["af", "add", f"@fake_linkplay_dsp:lavfi=[{filters}]"], timeout=2.0)
-            if add_response.get("error") not in {None, "success"}:
-                LOG.warning("mpv audio filter add returned response=%s graph=%s", add_response, filters)
+        async with self._dsp_lock:
+            await self._apply_audio_filter_graph_locked(self._audio_filter_graph())
+
+    @staticmethod
+    def _finite_dsp_number(value: object, name: str, minimum: float, maximum: float) -> float:
+        if type(value) not in (int, float):
+            raise BackendError(f"{name} must be a finite number from {minimum:g} to {maximum:g}")
+        try:
+            number = float(value)
+        except OverflowError as exc:
+            raise BackendError(f"{name} is outside its supported range") from exc
+        if not math.isfinite(number) or not minimum <= number <= maximum:
+            raise BackendError(f"{name} must be a finite number from {minimum:g} to {maximum:g}")
+        return number
+
+    @staticmethod
+    def validate_channel_balance(value: object) -> float:
+        """Reject malformed, nonfinite or out-of-range balance without writes."""
+
+        return MpvBackend._finite_dsp_number(value, "Balance", -1.0, 1.0)
+
+    @staticmethod
+    def validate_peq_bands(bands: object) -> list[dict[str, float]]:
+        """Copy up to ten complete bands, with bounded finite numeric values.
+
+        Frequencies are 10..24000 Hz, gain -24..24 dB, and Q 0.1..30.
+        Modes are bypass (-1), low shelf (0), peak (1), high shelf (2),
+        low pass (3), and high pass (5). A zero gain never bypasses pass filters.
+        These input bounds do not promise support at every source sample rate.
+        """
+
+        if not isinstance(bands, list) or len(bands) > 10:
+            raise BackendError("PEQ must be a list of at most 10 bands")
+        result: list[dict[str, float]] = []
+        for band in bands:
+            if not isinstance(band, dict) or set(band) != {"freq", "gain", "q", "mode"}:
+                raise BackendError("Each PEQ band must contain exactly freq, gain, q and mode")
+            candidate = {
+                "freq": MpvBackend._finite_dsp_number(band["freq"], "PEQ frequency", 10.0, 24000.0),
+                "gain": MpvBackend._finite_dsp_number(band["gain"], "PEQ gain", -24.0, 24.0),
+                "q": MpvBackend._finite_dsp_number(band["q"], "PEQ Q", 0.1, 30.0),
+                "mode": MpvBackend._finite_dsp_number(band["mode"], "PEQ mode", -1.0, 5.0),
+            }
+            if candidate["mode"] not in {-1, 0, 1, 2, 3, 5}:
+                raise BackendError("Unsupported PEQ mode; expected -1, 0, 1, 2, 3 or 5")
+            result.append(candidate)
+        return result
+
+    async def _checked_dsp_command(self, args: list[Any]) -> dict[str, Any]:
+        response = await self.command(args, timeout=2.0)
+        if not isinstance(response, dict) or response.get("error") != "success":
+            error = response.get("error") if isinstance(response, dict) else None
+            raise BackendError(f"Backend DSP operation failed: {redact_sensitive(error or 'missing acknowledgement')}")
+        return response
+
+    async def _read_dsp_graph(self) -> str:
+        """Read exactly our enabled lavfi entry, leaving other filters alone."""
+
+        response = await self._checked_dsp_command(["get_property", "af"])
+        entries = response.get("data")
+        if not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries):
+            raise BackendError("Backend DSP readback is not a filter list")
+        matches = [entry for entry in entries if entry.get("label") == "fake_linkplay_dsp"]
+        if not matches:
+            return ""
+        if len(matches) != 1:
+            raise BackendError("Backend DSP readback contains duplicate named filters")
+        entry = matches[0]
+        params = entry.get("params")
+        if (entry.get("name") != "lavfi" or entry.get("enabled") is not True
+                or not isinstance(params, dict) or set(params) != {"graph"}
+                or not isinstance(params["graph"], str) or not params["graph"]):
+            raise BackendError("Backend DSP readback did not confirm an enabled lavfi graph")
+        return params["graph"]
+
+    async def _apply_audio_filter_graph_locked(self, graph: str) -> None:
+        """Replace one label transactionally; an idle af read is configuration.
+
+        mpv replaces an existing label on ``af add``. Removing it first loses
+        the working chain when construction fails. A pre-read supplies the
+        rollback graph and prevents removing an absent label during bypass.
+        A failed or cancelled write can still have reached mpv, so settle its
+        rollback under the same lock before another candidate is allowed in.
+        """
+
+        self._dsp_configuration_confirmed = False
+        try:
+            async with asyncio.timeout(4.0):
+                previous = await self._read_dsp_graph()
+                if previous != graph:
+                    try:
+                        if graph:
+                            await self._checked_dsp_command(["af", "add", f"@fake_linkplay_dsp:lavfi=[{graph}]"])
+                        else:
+                            await self._checked_dsp_command(["af", "remove", "@fake_linkplay_dsp"])
+                        if await self._read_dsp_graph() != graph:
+                            raise BackendError("Backend DSP readback did not confirm the requested graph")
+                    except (BackendError, asyncio.CancelledError) as exc:
+                        restored, cancelled = await self._settle_dsp_rollback(previous)
+                        if cancelled:
+                            raise asyncio.CancelledError
+                        if not restored:
+                            if isinstance(exc, asyncio.CancelledError):
+                                LOG.warning("cancelled DSP update could not confirm previous graph restoration")
+                                raise
+                            raise BackendError("Backend DSP update failed; previous graph restoration is unconfirmed")
+                        raise
+        except TimeoutError as exc:
+            raise BackendError("Backend DSP confirmation timed out") from exc
+        self._dsp_configuration_confirmed = True
+        LOG.info("mpv DSP configuration confirmed: %s", graph or "(bypass)")
+
+    async def _settle_dsp_rollback(self, previous: str) -> tuple[bool, bool]:
+        """Finish bounded restoration even if the caller cancels repeatedly."""
+
+        task = asyncio.create_task(self._restore_dsp_graph(previous))
+        cancelled = False
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                cancelled = True
+        restored = task.result()
+        self._dsp_configuration_confirmed = restored and previous == self._audio_filter_graph()
+        return restored, cancelled
+
+    async def _restore_dsp_graph(self, previous: str) -> bool:
+        """Restore only our label, and explicitly report an unverifiable result."""
+
+        try:
+            async with asyncio.timeout(4.0):
+                try:
+                    actual = await self._read_dsp_graph()
+                except BackendError:
+                    actual = None
+                if actual == previous:
+                    return True
+                if previous:
+                    await self._checked_dsp_command(["af", "add", f"@fake_linkplay_dsp:lavfi=[{previous}]"])
+                elif actual:
+                    await self._checked_dsp_command(["af", "remove", "@fake_linkplay_dsp"])
+                else:
+                    # Never remove a label whose presence is unconfirmed.
+                    return False
+                return await self._read_dsp_graph() == previous
+        except (BackendError, TimeoutError):
+            return False
 
     def _audio_filter_graph(self) -> str:
-        """Build the lavfi graph string for active PEQ and balance settings."""
+        """Build the validated desired graph, without mutating backend state."""
+
+        balance = self.validate_channel_balance(self._channel_balance)
+        bands = self.validate_peq_bands(self._peq_bands if self._peq_bands is not None else [])
+        return self._build_audio_filter_graph(balance, bands)
+
+    @staticmethod
+    def _build_audio_filter_graph(balance: float, bands: list[dict[str, float]]) -> str:
+        """Build one lavfi graph from a validated, private candidate snapshot."""
 
         filters: list[str] = []
-        for band in self._peq_bands or []:
-            gain = float(band.get("gain", 0.0))
-            freq = max(10.0, float(band.get("freq", 1000.0)))
-            q = max(0.1, float(band.get("q", 1.0)))
-            mode = int(float(band.get("mode", 1.0)))
+        for band in bands:
+            gain, freq, q, mode = band["gain"], band["freq"], band["q"], band["mode"]
             if mode == 1 and abs(gain) >= 0.01:
                 filters.append(f"equalizer=f={freq:.3f}:width_type=q:width={q:.3f}:g={gain:.3f}")
             elif mode == 0 and abs(gain) >= 0.01:
@@ -505,9 +661,9 @@ class MpvBackend:
                 filters.append(f"lowpass=f={freq:.3f}:width_type=q:width={q:.3f}")
             elif mode == 5:
                 filters.append(f"highpass=f={freq:.3f}:width_type=q:width={q:.3f}")
-        if abs(self._channel_balance) >= 0.001:
-            left = 1.0 - max(0.0, self._channel_balance)
-            right = 1.0 + min(0.0, self._channel_balance)
+        if abs(balance) >= 0.001:
+            left = 1.0 - max(0.0, balance)
+            right = 1.0 + min(0.0, balance)
             filters.append(f"pan=stereo|c0={left:.3f}*c0|c1={right:.3f}*c1")
         return ",".join(filters)
 

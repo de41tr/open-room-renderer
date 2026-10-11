@@ -267,3 +267,36 @@ concurrent gain confirmation, full-pair reconciliation and resume boundaries.
 AP08 published as `a6b2b2594403bc92709a874fcf00b8848375cab7`.
 Next: existing DSP safety/transactionality and measured filters; active EQ
 restart persistence, metadata/seek and native installation acceptance follow.
+
+## AP12 existing DSP safety checkpoint
+
+- Balance/PEQ reject nonfinite, malformed and out-of-range inputs before they
+  can become gain or alter state. Only implemented band modes, WiFi source and
+  stereo processing are accepted. Zero-gain high/low-pass filters are retained.
+- The backend serializes DSP changes, replaces its named graph atomically and
+  verifies acknowledgement/configuration readback. Rejected/uncertain changes
+  restore the previous graph when possible; unconfirmed rollback is explicit.
+- API mutations and getters share a transaction boundary. Unconfirmed proposals
+  are not visible, cancellation settles safely, and failed commands do not claim
+  active settings. Getters do not select a different plugin.
+- Startup balance, including zero, uses the same confirmed path before listeners
+  start. Desired config and actual state stay distinct on failure and retry.
+- Preset library writes are atomic and bounded like reads. Rename collisions,
+  post-replacement durability errors and oversized candidates preserve consistent
+  state. Saved names are not falsely restored as active EQ on startup.
+- Real HTTP DSP controls into libmpv/PCM measured a requested -12 dB cut at
+  -12.039 dB, exact balance-channel silence, zero-gain pass-filter attenuation,
+  combined EQ/balance, source retention and retained attenuation after a rejected
+  native candidate. Bypass was exact.
+
+Validation: isolated publication snapshot 1390 passed with all seven optional
+REAL_BACKEND cases enabled (1383 plus seven skips by default). Native tests use
+low-level generated input, negative cuts and a file sink; idle filter readback
+is configuration evidence, while decoded PCM proves the tested filter effects.
+No automatic clipping/headroom guarantee or physical audio claim is made. Active
+EQ application across restart is still an AP13 follow-on; the preset library is
+persistent, but it does not silently claim a restored active curve.
+
+AP11 published as `664483c0c2ddb22641f9bd25d42f33d5a11b1f74`.
+Next: metadata consistency, confirmed active-setting restore and seek/install
+acceptance. Native Unix IPC/ARM64 CI is being prepared separately.

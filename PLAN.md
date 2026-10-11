@@ -26,6 +26,6 @@ this execution environment cannot create Unix-domain sockets.
 
 AP01, AP02, AP05, AP03, AP04, AP06, AP07 and AP08 have implementation checkpoints,
 including real libmpv/null control, two-track/callback and interrupted-source
-recovery flows. AP11 now confirms and persists actual digital gain. AP12 DSP correctness is
-next because review found unsafe nonfinite handling and false filter success;
-active EQ restore and metadata/seek/install acceptance follow. This records progress, not full hardware/app acceptance.
+recovery flows. AP11 now confirms and persists actual digital gain. AP12 now validates and transactionally confirms existing DSP, with measured
+PCM effects. Active EQ restore, metadata/seek/install acceptance follow. A
+least-privilege public CI lane is being prepared for real Unix IPC and ARM64. This records progress, not full hardware/app acceptance.

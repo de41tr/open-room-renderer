@@ -7,21 +7,31 @@ from pathlib import Path
 import tempfile
 
 
+class AtomicWriteCommittedError(OSError):
+    """Replacement succeeded, but its directory durability could not be confirmed."""
+
+
 def atomic_write_text(path: Path, value: str) -> None:
     """Replace one owned state file; failures never truncate its previous value."""
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    committed = False
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write(value)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        committed = True
         directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory)
         finally:
             os.close(directory)
+    except OSError as exc:
+        if committed:
+            raise AtomicWriteCommittedError("State replaced; directory durability unconfirmed") from exc
+        raise
     finally:
         Path(temporary).unlink(missing_ok=True)
 

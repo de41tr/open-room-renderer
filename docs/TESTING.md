@@ -178,3 +178,24 @@ zero before any new user command; unmute retains 1/64. This is not a full
 CLI/systemd reboot test. Native pre-initialization defaults are recorded
 separately from the production initialization hook. Host mixer gain is separate;
 these ratios do not describe a physical device's volume scale or acoustic level.
+
+## Existing PEQ and balance
+
+`test_backend_dsp.py` and `test_dsp_api.py` cover strict finite schemas, checked
+replacement/readback, rollback/cancellation, serialized reads, source/channel
+limits, startup balance, library migration, rename collisions, size bounds and
+both pre- and post-replacement storage failures. Idle af readback verifies a
+configured graph, not successful decoder initialization.
+
+`test_libmpv_dsp.py` is optional REAL_BACKEND/digital-PCM. Real HTTP controls use
+generated quiet stereo input and a float file sink, with direct backend source
+loads labeled separately. Measurements include bypass, -12 dB EQ (observed
+-12.039 dB at 1 kHz), exact silent balance endpoints, zero-gain low/high-pass
+attenuation, EQ+balance composition and source retention. A direct native
+nonexistent-filter rejection preserves the measured old graph; this is not a
+claim that every malformed lavfi expression is rejected before playback.
+
+Tests also verify normal/cancellation cleanup. No audible output is opened.
+Positive-gain headroom/clipping prevention and physical channel routing are not
+certified by the negative-cut fixtures. Active EQ restore is not yet implemented;
+only the validated preset library and confirmed balance are persisted.

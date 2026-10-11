@@ -179,7 +179,11 @@ class _LibmpvBackend(MpvBackend):
                 encoded = ("yes" if value else "no") if isinstance(value, bool) else str(value)
                 self._check(self._lib.mpv_set_property_string(self._handle, name.encode(), encoded.encode()))
             else:
-                assert operation in {"loadfile", "seek", "stop"}, args
+                assert operation in {"loadfile", "seek", "stop", "af"}, args
+                if operation == "af":
+                    # DSP acceptance shares this transport, retaining real
+                    # libmpv acknowledgement rather than simulating filters.
+                    assert arguments[0] in {"add", "remove"}, args
                 if operation == "loadfile":
                     assert arguments[0] in self._allowed_media, "Only generated local WAVs may be loaded"
                 assert all(isinstance(arg, (str, int, float)) for arg in args), args

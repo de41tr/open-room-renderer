@@ -12,6 +12,8 @@ import asyncio
 import json
 import ipaddress
 import logging
+import math
+from copy import deepcopy
 import os
 import re
 import time
@@ -37,7 +39,7 @@ from .config import Config
 from .mpv_backend import BackendError, MpvBackend
 from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_target, validate_callback_url
 from .radio import RadioResolution, RadioResolutionError, resolve_station
-from .persistence import save_gain
+from .persistence import AtomicWriteCommittedError, atomic_write_text, save_gain
 from .queue import PlaybackQueue, QueueError, QueueItem, parse_queue_context, serialize_queue_context
 from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
@@ -185,6 +187,10 @@ class HttpApi:
         self._pending_seek_target: int | None = None
         self._pending_seek_generation = 0
         self._pending_seek_final_status = "play"
+        self._dsp_command_lock = asyncio.Lock()
+        self._dsp_backend_confirmed = False
+        self._dsp_backend_attempted = False
+        self._dsp_state_uncertain = False
         self.eq_bands_by_plugin: dict[str, list[dict[str, object]]] = {}
         self.eq_source_bands_by_plugin: dict[str, dict[str, list[dict[str, object]]]] = {}
         self.eq_names_by_plugin: dict[str, str] = {}
@@ -201,7 +207,9 @@ class HttpApi:
         self._event_semaphore = asyncio.Semaphore(8)
         self._event_limit_total = 64
         self._event_limit_peer = 8
-        self.channel_balance = cfg.channel_balance
+        self.cfg.channel_balance = self._normalize_channel_balance(str(cfg.channel_balance))
+        # Configuration is desired state until the startup transaction confirms it.
+        self.channel_balance = "0.0"
         self.device_name_override = ""
         self.plex_client_id = self._load_or_create_plex_client_id()
         self.plex_user_info = self._load_plex_user_info()
@@ -615,6 +623,8 @@ class HttpApi:
         """
 
         name = parsed.name
+        if name.startswith("EQ") or name == "getChannelBalance" or name.startswith("setChannelBalance:"):
+            return await self._run_dsp_command(name)
         if name in {"getStatusEx", "getStatus"}:
             await self.sync_mpv_state()
             return self._with_experimental_sources(self.state.as_status_ex(self.cfg.resolved_advertise_ip))
@@ -731,14 +741,6 @@ class HttpApi:
             return {"status": "0", "delayMs": "0", "delay": "0"}
         if name == "GetFadeFeature":
             return {"FadeFeature": 0}
-        if name == "getChannelBalance":
-            return self.channel_balance
-        if name.startswith("setChannelBalance:"):
-            self.channel_balance = self._normalize_channel_balance(name.split(":", 1)[1] or "0.0")
-            self.cfg.channel_balance = self.channel_balance
-            self._persist_runtime_value("channel_balance", self.channel_balance)
-            await self.mpv.channel_balance(float(self.channel_balance))
-            return "OK"
         if name == "getTotalAudioInsertState":
             return {"status": "0", "insert": "0", "state": "0"}
         if name == "getEndTrackEnable":
@@ -771,87 +773,6 @@ class HttpApi:
             return {"status": "0", "enable": "0", "status": "0"}
         if name == "VOL_LED_SWITCH_GET":
             return {"status": "0", "enable": "0", "status": "0"}
-        if name.startswith("EQSetLV2SourceBand:"):
-            result = self._set_eq_bands(name, source_specific=True)
-            if result.get("status") == "OK":
-                await self._apply_eq_to_mpv()
-            return result
-        if name.startswith("EQSetLV2Band:"):
-            result = self._set_eq_bands(name)
-            if result.get("status") == "OK":
-                await self._apply_eq_to_mpv()
-            return result
-        if name.startswith("EQGetLV2SourceBandEx:"):
-            return self._get_eq_bands(name, source_specific=True)
-        if name.startswith("EQGetLV2SourceBand:"):
-            return self._get_eq_bands(name, source_specific=True)
-        if name.startswith("EQGetLV2Band"):
-            return self._get_eq_bands(name)
-        if name.startswith("EQChangeSourceFX:"):
-            payload = self._json_payload(name, "EQChangeSourceFX:")
-            self.eq_active_source_name = str(payload.get("source_name") or payload.get("source") or self.eq_active_source_name)
-            plugin_uri = str(payload.get("pluginURI") or payload.get("plugin") or self.eq_active_plugin_uri or DEFAULT_EQ_PLUGIN)
-            self.eq_active_plugin_uri = plugin_uri
-            self.eq_enabled = True
-            self._ensure_eq_plugin(plugin_uri, source_specific=True, source_name=self.eq_active_source_name or "wifi")
-            await self._apply_eq_to_mpv()
-            return {"status": "OK"}
-        if name.startswith("EQChangeFX:"):
-            plugin_uri = unquote(name.removeprefix("EQChangeFX:")).strip() or DEFAULT_EQ_PLUGIN
-            self.eq_active_plugin_uri = plugin_uri
-            self.eq_active_source_name = ""
-            self.eq_enabled = True
-            self._ensure_eq_plugin(plugin_uri)
-            LOG.info("EQChangeFX selected plugin=%s", plugin_uri)
-            await self._apply_eq_to_mpv()
-            return {"status": "OK"}
-        if name.startswith("EQv2GetList:") or name.startswith("EQv2GetNewList:"):
-            return self._get_eq_preset_list(name)
-        if name.startswith("EQSourceSave:"):
-            self._save_eq_preset_from_json(name, "EQSourceSave:")
-            self._persist_eq_presets()
-            return {"status": "OK"}
-        if name.startswith("EQSave:"):
-            preset_name = unquote(name.removeprefix("EQSave:")) or "Custom"
-            self.eq_current_preset = preset_name
-            self.eq_presets[preset_name] = {plugin: [dict(band) for band in bands] for plugin, bands in self.eq_bands_by_plugin.items()}
-            for plugin in self.eq_bands_by_plugin:
-                self.eq_names_by_plugin[plugin] = preset_name
-            self._persist_eq_presets()
-            LOG.info("EQSave stored preset=%s plugins=%s", preset_name, ",".join(self.eq_presets[preset_name].keys()))
-            return {"status": "0"}
-        if name.startswith("EQv2SourceLoad:"):
-            self._load_eq_preset(name, "EQv2SourceLoad:", source_specific=True)
-            self.eq_enabled = True
-            await self._apply_eq_to_mpv()
-            return self._get_eq_bands(self._eq_get_command_for_active(source_specific=True), source_specific=True)
-        if name.startswith("EQv2Load:"):
-            self._load_eq_preset(name, "EQv2Load:")
-            self.eq_enabled = True
-            await self._apply_eq_to_mpv()
-            return self._get_eq_bands(self._eq_get_command_for_active(), source_specific=False)
-        if name.startswith("EQSourceOff:"):
-            payload = self._json_payload(name, "EQSourceOff:")
-            self.eq_active_source_name = str(payload.get("source_name") or payload.get("source") or self.eq_active_source_name or "wifi")
-            self.eq_active_plugin_uri = str(payload.get("pluginURI") or self.eq_active_plugin_uri or DEFAULT_EQ_PLUGIN)
-            self.eq_enabled = False
-            await self._apply_eq_to_mpv()
-            return {"status": "OK"}
-        if name.startswith("EQv2Delete:"):
-            self._delete_eq_preset(name)
-            self._persist_eq_presets()
-            return {"status": "0"}
-        if name.startswith("EQv2Rename:"):
-            self._rename_eq_preset(name)
-            self._persist_eq_presets()
-            return {"status": "0"}
-        if name in {"EQOn", "EQOff"}:
-            self.eq_enabled = name == "EQOn"
-            await self._apply_eq_to_mpv()
-            return {"status": "0"}
-        if name.startswith("EQSetChannelMode:"):
-            self._set_eq_channel_mode(name)
-            return {"status": "0"}
         if name == "audio_cast:get_speaker_list":
             return {"status": "0", "speakers": [], "list": []}
         if name == "getStaticIpInfo":
@@ -960,6 +881,142 @@ class HttpApi:
             save_gain(self.cfg.state_dir, self.state.volume, self.state.mute)
             self.cfg.default_volume, self.cfg.default_mute = self.state.volume, self.state.mute
 
+    async def initialize_channel_balance(self) -> None:
+        """Apply configured startup balance through the same confirmed transaction."""
+        await self._run_dsp_command("setChannelBalance:" + self.cfg.channel_balance)
+
+    async def _run_dsp_command(self, name: str) -> dict[str, object] | str:
+        """Serialize DSP reads/writes and hide unconfirmed proposals from clients."""
+        async with self._dsp_command_lock:
+            fields = (
+                "eq_bands_by_plugin", "eq_source_bands_by_plugin", "eq_names_by_plugin",
+                "eq_channel_by_plugin", "eq_active_plugin_uri", "eq_active_source_name",
+                "eq_enabled", "eq_presets", "eq_current_preset", "channel_balance",
+            )
+            before = {field: deepcopy(getattr(self, field)) for field in fields}
+            old_balance = self.cfg.channel_balance
+            self._dsp_backend_confirmed = False
+            self._dsp_backend_attempted = False
+
+            async def transaction() -> dict[str, object] | str:
+                try:
+                    return await self._execute_dsp_command(name)
+                except BaseException as exc:
+                    if self._dsp_backend_attempted and not self._dsp_backend_confirmed:
+                        self._dsp_state_uncertain = not getattr(self.mpv, "_dsp_configuration_confirmed", True)
+                    # Preserve actual confirmed DSP on a subsequent disk error.
+                    # Library-only edits roll back only before file replacement;
+                    # a failed directory fsync leaves committed bytes visible.
+                    if not self._dsp_backend_confirmed and not isinstance(exc, AtomicWriteCommittedError):
+                        for field, value in before.items():
+                            setattr(self, field, value)
+                        self.cfg.channel_balance = old_balance
+                    raise
+
+            task = asyncio.create_task(transaction())
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # HTTP disconnects cannot release serialization while a checked
+                # backend write is unresolved. Finish confirmation/rollback first.
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
+                    except BaseException:
+                        break
+                if not task.cancelled():
+                    task.exception()
+                raise
+
+    async def _execute_dsp_command(self, name: str) -> dict[str, object] | str:
+        """Run one EQ/balance command while its transaction lock is held."""
+        if name == "getChannelBalance":
+            self._require_dsp_readback()
+            return self.channel_balance
+        if name.startswith("setChannelBalance:"):
+            self.channel_balance = self._normalize_channel_balance(name.split(":", 1)[1])
+            self._dsp_backend_attempted = True
+            await self._backend_call(self.mpv.channel_balance(float(self.channel_balance)))
+            self._dsp_backend_confirmed = True
+            self._dsp_state_uncertain = False
+            self.cfg.channel_balance = self.channel_balance
+            atomic_write_text(Path(self.cfg.state_dir) / "channel_balance", self.channel_balance + "\n")
+            return "OK"
+        if name.startswith("EQSetLV2SourceBand:") or name.startswith("EQSetLV2Band:"):
+            result = self._set_eq_bands(name, source_specific=name.startswith("EQSetLV2SourceBand:"))
+            await self._apply_eq_to_mpv()
+            return result
+        if name.startswith("EQGetLV2SourceBandEx:") or name.startswith("EQGetLV2SourceBand:"):
+            return self._get_eq_bands(name, source_specific=True)
+        if name.startswith("EQGetLV2Band"):
+            return self._get_eq_bands(name)
+        if name.startswith("EQChangeSourceFX:"):
+            payload = self._eq_payload(name, "EQChangeSourceFX:")
+            self.eq_active_source_name = str(payload.get("source_name") or payload.get("source") or self.eq_active_source_name or "wifi")
+            plugin_uri = str(payload.get("pluginURI") or payload.get("plugin") or self.eq_active_plugin_uri or DEFAULT_EQ_PLUGIN)
+            self.eq_active_plugin_uri = plugin_uri
+            self.eq_enabled = True
+            self._ensure_eq_plugin(plugin_uri, source_specific=True, source_name=self.eq_active_source_name)
+            await self._apply_eq_to_mpv()
+            return {"status": "OK"}
+        if name.startswith("EQChangeFX:"):
+            plugin_uri = unquote(name.removeprefix("EQChangeFX:")).strip() or DEFAULT_EQ_PLUGIN
+            self.eq_active_plugin_uri = plugin_uri
+            self.eq_active_source_name = ""
+            self.eq_enabled = True
+            self._ensure_eq_plugin(plugin_uri)
+            await self._apply_eq_to_mpv()
+            return {"status": "OK"}
+        if name.startswith("EQv2GetList:") or name.startswith("EQv2GetNewList:"):
+            return self._get_eq_preset_list(name)
+        if name.startswith("EQSourceSave:"):
+            self._save_eq_preset_from_json(name, "EQSourceSave:")
+            self._persist_eq_presets()
+            return {"status": "OK"}
+        if name.startswith("EQSave:"):
+            preset_name = self._normalize_eq_preset_name(unquote(name.removeprefix("EQSave:")))
+            plugin = self.eq_active_plugin_uri
+            if self.eq_active_source_name:
+                bands = self.eq_source_bands_by_plugin.get(self.eq_active_source_name, {}).get(plugin, self._default_eq_bands())
+            else:
+                bands = self.eq_bands_by_plugin.get(plugin, self._default_eq_bands())
+            self.eq_presets.setdefault(preset_name, {})[plugin] = deepcopy(bands)
+            self.eq_current_preset = preset_name
+            self.eq_names_by_plugin[plugin] = preset_name
+            self._persist_eq_presets()
+            return {"status": "0"}
+        if name.startswith("EQv2SourceLoad:") or name.startswith("EQv2Load:"):
+            source_specific = name.startswith("EQv2SourceLoad:")
+            self._load_eq_preset(name, "EQv2SourceLoad:" if source_specific else "EQv2Load:", source_specific=source_specific)
+            self.eq_enabled = True
+            await self._apply_eq_to_mpv()
+            return self._get_eq_bands(self._eq_get_command_for_active(source_specific), source_specific)
+        if name.startswith("EQSourceOff:"):
+            payload = self._eq_payload(name, "EQSourceOff:")
+            self.eq_active_source_name = str(payload.get("source_name") or payload.get("source") or self.eq_active_source_name or "wifi")
+            self.eq_active_plugin_uri = str(payload.get("pluginURI") or self.eq_active_plugin_uri or DEFAULT_EQ_PLUGIN)
+            self.eq_enabled = False
+            await self._apply_eq_to_mpv()
+            return {"status": "OK"}
+        if name.startswith("EQv2Delete:"):
+            self._delete_eq_preset(name)
+            self._persist_eq_presets()
+            return {"status": "0"}
+        if name.startswith("EQv2Rename:"):
+            self._rename_eq_preset(name)
+            self._persist_eq_presets()
+            return {"status": "0"}
+        if name in {"EQOn", "EQOff"}:
+            self.eq_enabled = name == "EQOn"
+            await self._apply_eq_to_mpv()
+            return {"status": "0"}
+        if name.startswith("EQSetChannelMode:"):
+            self._set_eq_channel_mode(name)
+            return {"status": "0"}
+        return {"error": "Failed", "command": name}
+
     async def _apply_eq_to_mpv(self) -> None:
         """Translate active EQ state into mpv PEQ bands."""
 
@@ -967,22 +1024,27 @@ class HttpApi:
         if self.eq_enabled:
             for raw_band in self._active_eq_bands():
                 gain = raw_band["gain"]
-                if abs(gain) >= 0.01:
+                if raw_band["mode"] in {3.0, 5.0} or abs(gain) >= 0.01:
                     bands.append(raw_band)
-        await self.mpv.peq(bands)
+        self._dsp_backend_attempted = True
+        await self._backend_call(self.mpv.peq(bands))
+        self._dsp_backend_confirmed = True
+        self._dsp_state_uncertain = False
+        self.eq_current_preset = self._eq_display_name(self.eq_active_plugin_uri, self._active_eq_records())
 
     def _active_eq_bands(self) -> list[dict[str, float]]:
-        """Return normalized EQ bands for the active plugin/source context."""
+        """Read exactly the active context; never substitute another cached plugin."""
+        return self._eq_filter_bands(self._active_eq_records())
 
-        plugin_uri = self.eq_active_plugin_uri or next(iter(self.eq_bands_by_plugin), "")
+    def _active_eq_records(self) -> list[dict[str, object]]:
+        plugin_uri = self.eq_active_plugin_uri or DEFAULT_EQ_PLUGIN
         if self.eq_active_source_name:
-            source_plugins = self.eq_source_bands_by_plugin.get(self.eq_active_source_name, {})
-            plugin_uri = self.eq_active_plugin_uri if self.eq_active_plugin_uri in source_plugins else next(iter(source_plugins), plugin_uri)
-            if plugin_uri and plugin_uri in source_plugins:
-                return self._eq_filter_bands(source_plugins[plugin_uri])
-        if not plugin_uri:
-            return []
-        return self._eq_filter_bands(self.eq_bands_by_plugin.get(plugin_uri, []))
+            if self.eq_active_source_name != "wifi":
+                raise ValueError("Only wifi EQ is supported")
+            plugins = self.eq_source_bands_by_plugin.get(self.eq_active_source_name, {})
+        else:
+            plugins = self.eq_bands_by_plugin
+        return plugins.get(plugin_uri, self._default_eq_bands())
 
     def _ensure_eq_plugin(self, plugin_uri: str, source_specific: bool = False, source_name: str = "wifi") -> None:
         """Ensure an EQ plugin has a default 10-band parameter set."""
@@ -995,36 +1057,18 @@ class HttpApi:
 
     @staticmethod
     def _eq_filter_bands(bands: list[dict[str, object]]) -> list[dict[str, float]]:
-        """Convert app EQ parameter records into mpv filter band records."""
-
-        grouped: dict[str, dict[str, float]] = {}
-        for item in bands:
-            param_name = item.get("param_name")
-            if not isinstance(param_name, str) or "_" not in param_name:
-                continue
-            band_name, suffix = param_name.rsplit("_", 1)
-            if suffix not in {"freq", "gain", "q", "mode"}:
-                continue
-            try:
-                value = float(item.get("value", 0.0))
-            except (TypeError, ValueError):
-                continue
-            grouped.setdefault(band_name, {})[suffix] = value
-        result: list[dict[str, float]] = []
-        for band_name in sorted(grouped):
-            values = grouped[band_name]
-            mode = int(values.get("mode", 1.0))
-            if mode == -1:
-                continue
-            result.append(
-                {
-                    "freq": max(10.0, values.get("freq", 1000.0)),
-                    "gain": max(-24.0, min(24.0, values.get("gain", 0.0))),
-                    "q": max(0.1, min(30.0, values.get("q", 1.0))),
-                    "mode": float(mode),
-                }
-            )
-        return result
+        """Convert strictly validated canonical parameter records to filters."""
+        records = HttpApi._validated_eq_records(bands, require_complete=True)
+        values = {str(item["param_name"]): item["value"] for item in records}
+        filters = [
+            {suffix: float(values[f"{letter}_{suffix}"]) for suffix in ("freq", "gain", "q", "mode")}
+            for letter in DEFAULT_EQ_BAND_FREQS
+            if values[f"{letter}_mode"] != -1.0
+        ]
+        try:
+            return MpvBackend.validate_peq_bands(filters)
+        except BackendError as exc:
+            raise ValueError("Invalid EQ parameters") from exc
 
     def _persist_runtime_value(self, name: str, value: str) -> None:
         """Persist a small runtime setting under the configured state dir."""
@@ -1054,87 +1098,77 @@ class HttpApi:
 
     @staticmethod
     def _normalize_channel_balance(raw: str) -> str:
-        """Normalize balance input to a stable string in the -1.0..1.0 range."""
-
+        """Accept finite balance or percentage input, without unsafe clamping."""
+        value = float(unquote(raw))
+        if not math.isfinite(value) or abs(value) > 100.0:
+            raise ValueError("Invalid channel balance")
+        if abs(value) > 1.0:
+            value /= 100.0
         try:
-            value = float(unquote(raw))
-        except ValueError:
-            value = 0.0
-        if abs(value) > 1.0 and abs(value) <= 100.0:
-            value = value / 100.0
-        value = max(-1.0, min(1.0, value))
+            value = MpvBackend.validate_channel_balance(value)
+        except BackendError as exc:
+            raise ValueError("Invalid channel balance") from exc
         return f"{value:.3f}".rstrip("0").rstrip(".") if value else "0.0"
 
     def _set_eq_bands(self, command: str, source_specific: bool = False) -> dict[str, object]:
-        """Store EQ band updates from an app JSON command."""
-
+        """Stage a canonical band update for checked backend application."""
         prefix = "EQSetLV2SourceBand:" if source_specific else "EQSetLV2Band:"
-        raw = unquote(command.removeprefix(prefix))
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            LOG.info("EQSetLV2Band invalid JSON: %s", exc)
-            return {"status": "1", "error": "invalid json"}
-        plugin_uri = str(payload.get("pluginURI") or DEFAULT_EQ_PLUGIN)
-        self.eq_active_plugin_uri = plugin_uri
-        source_name = str(payload.get("source_name") or payload.get("source") or "wifi")
-        if not source_specific:
-            self.eq_active_source_name = ""
-        self.eq_names_by_plugin[plugin_uri] = str(payload.get("Name") or self.eq_names_by_plugin.get(plugin_uri) or "Flat")
-        self.eq_channel_by_plugin[plugin_uri] = str(payload.get("channelMode") or self.eq_channel_by_plugin.get(plugin_uri) or "Stereo")
+        payload = self._eq_payload(command, prefix)
         bands = payload.get("EQBand")
         if not isinstance(bands, list):
-            bands = []
+            raise ValueError("EQBand must be a list")
+        plugin_uri = str(payload.get("pluginURI") or DEFAULT_EQ_PLUGIN)
+        source_name = str(payload.get("source_name") or payload.get("source") or "wifi")
         if source_specific:
             source_plugins = self.eq_source_bands_by_plugin.setdefault(source_name, {})
             normalized = self._merge_eq_bands(source_plugins.get(plugin_uri), bands)
             source_plugins[plugin_uri] = normalized
-            self.eq_active_source_name = source_name
         else:
             normalized = self._merge_eq_bands(self.eq_bands_by_plugin.get(plugin_uri), bands)
             self.eq_bands_by_plugin[plugin_uri] = normalized
+        self.eq_active_plugin_uri = plugin_uri
+        self.eq_active_source_name = source_name if source_specific else ""
+        self.eq_channel_by_plugin[plugin_uri] = "Stereo"
         preset_name = str(payload.get("Name") or "")
         if not preset_name:
             preset_name = "Flat" if self._is_flat_eq_bands(normalized) else "Custom"
         self.eq_current_preset = preset_name
         self.eq_names_by_plugin[plugin_uri] = preset_name
-        LOG.info("EQSetLV2Band stored source=%s plugin=%s bands=%s", source_name if source_specific else "", plugin_uri, len(normalized))
+        LOG.info("EQSetLV2Band staged source=%s plugin=%s bands=%s", self.eq_active_source_name, plugin_uri, len(normalized))
         return {"status": "OK"}
 
     def _get_eq_bands(self, command: str, source_specific: bool = False) -> dict[str, object]:
         """Return EQ band state for the requested or active plugin."""
 
+        self._require_dsp_readback()
         plugin_uri = ""
         source_name = ""
         prefix = "EQGetLV2SourceBandEx:" if command.startswith("EQGetLV2SourceBandEx:") else "EQGetLV2SourceBand:" if source_specific else "EQGetLV2Band:"
         if command.startswith(prefix):
             raw = unquote(command.removeprefix(prefix))
             if raw.startswith("{"):
-                payload = self._json_payload(command, prefix)
+                payload = self._eq_payload(command, prefix)
                 plugin_uri = str(payload.get("pluginURI") or "")
                 source_name = str(payload.get("source_name") or payload.get("source") or "")
             else:
                 plugin_uri = raw
         if not plugin_uri:
-            source_plugins = self.eq_source_bands_by_plugin.get(source_name or self.eq_active_source_name or "wifi", {})
-            if self.eq_active_plugin_uri in source_plugins or not source_plugins:
-                plugin_uri = self.eq_active_plugin_uri
-            else:
-                plugin_uri = next(iter(source_plugins), self.eq_active_plugin_uri)
-            plugin_uri = plugin_uri or next(iter(self.eq_bands_by_plugin), DEFAULT_EQ_PLUGIN)
-        self.eq_active_plugin_uri = plugin_uri
+            plugin_uri = self.eq_active_plugin_uri or DEFAULT_EQ_PLUGIN
         if source_specific:
             source_name = source_name or self.eq_active_source_name or "wifi"
-            bands = self.eq_source_bands_by_plugin.setdefault(source_name, {}).setdefault(plugin_uri, self._default_eq_bands())
+            if source_name != "wifi":
+                raise ValueError("Only wifi EQ is supported")
+            bands = self.eq_source_bands_by_plugin.get(source_name, {}).get(plugin_uri, self._default_eq_bands())
         else:
-            bands = self.eq_bands_by_plugin.setdefault(plugin_uri, self._default_eq_bands())
+            source_name = ""
+            bands = self.eq_bands_by_plugin.get(plugin_uri, self._default_eq_bands())
         payload: dict[str, object] = {
             "status": "OK",
-            "EQStat": "On" if self.eq_enabled else "Off",
-            "Name": self.eq_names_by_plugin.get(plugin_uri, self.eq_current_preset or "Flat"),
+            "EQStat": "On" if self.eq_enabled and plugin_uri == self.eq_active_plugin_uri and source_name == self.eq_active_source_name else "Off",
+            "Name": self._eq_display_name(plugin_uri, bands),
             "pluginURI": plugin_uri,
             "channelMode": self.eq_channel_by_plugin.get(plugin_uri, "Stereo"),
-            "EQBand": bands,
+            "EQBand": deepcopy(bands),
             "EQBandL": [],
             "EQBandR": [],
         }
@@ -1149,15 +1183,12 @@ class HttpApi:
 
         raw = unquote(command.split(":", 1)[1]) if ":" in command else ""
         if raw.startswith("{"):
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                payload = {}
+            payload = self._eq_payload(command, command.split(":", 1)[0] + ":")
             plugin_uri = str(payload.get("pluginURI") or payload.get("plugin") or self.eq_active_plugin_uri or DEFAULT_EQ_PLUGIN)
         else:
             plugin_uri = raw or self.eq_active_plugin_uri or DEFAULT_EQ_PLUGIN
-        self._ensure_eq_plugin(plugin_uri)
-        names = [self._normalize_eq_preset_name(name) for name in sorted(self.eq_presets.keys())]
+        names = [self._normalize_eq_preset_name(name) for name in sorted(self.eq_presets)
+                 if plugin_uri in self.eq_presets[name]]
         if plugin_uri.endswith("/Eq4p") or plugin_uri.endswith("/Eq10HP"):
             return {"status": "OK", "preset": ["Flat", "Bass Boost", "Treble Boost"], "custom": names, "pluginURI": plugin_uri}
         presets = [self._eq_list_item(name, "preset") for name in ("Flat", "Bass Boost", "Treble Boost")]
@@ -1165,29 +1196,25 @@ class HttpApi:
         return {"status": "OK", "preset": presets, "custom": custom, "pluginURI": plugin_uri}
 
     def _save_eq_preset_from_json(self, command: str, prefix: str) -> None:
-        """Persist the currently active EQ bands under a user-visible name."""
-
-        payload = self._json_payload(command, prefix)
+        """Save cached bands without silently switching the active DSP context."""
+        payload = self._eq_payload(command, prefix)
         name = self._normalize_eq_preset_name(str(payload.get("Name") or payload.get("name") or "Custom"))
         plugin_uri = str(payload.get("pluginURI") or self.eq_active_plugin_uri or DEFAULT_EQ_PLUGIN)
         source_name = str(payload.get("source_name") or payload.get("source") or self.eq_active_source_name or "")
-        self.eq_current_preset = name
-        self.eq_active_plugin_uri = plugin_uri
         if source_name:
-            self.eq_active_source_name = source_name
-            source_plugins = self.eq_source_bands_by_plugin.get(source_name, {})
-            bands = source_plugins.get(plugin_uri, self.eq_bands_by_plugin.get(plugin_uri, self._default_eq_bands()))
+            bands = self.eq_source_bands_by_plugin.get(source_name, {}).get(plugin_uri, self._default_eq_bands())
         else:
             bands = self.eq_bands_by_plugin.get(plugin_uri, self._default_eq_bands())
-        self.eq_presets.setdefault(name, {})[plugin_uri] = [dict(band) for band in bands]
-        self.eq_names_by_plugin[plugin_uri] = name
-        self.eq_channel_by_plugin[plugin_uri] = str(payload.get("channelMode") or self.eq_channel_by_plugin.get(plugin_uri) or "Stereo")
+        self.eq_presets.setdefault(name, {})[plugin_uri] = deepcopy(bands)
+        if plugin_uri == self.eq_active_plugin_uri and source_name == self.eq_active_source_name:
+            self.eq_current_preset = name
+            self.eq_names_by_plugin[plugin_uri] = name
         LOG.info("EQSourceSave stored preset=%s plugin=%s source=%s", name, plugin_uri, source_name)
 
     def _load_eq_preset(self, command: str, prefix: str, source_specific: bool = False) -> None:
         """Load a saved or built-in EQ preset into the active plugin context."""
 
-        payload = self._json_payload(command, prefix)
+        payload = self._eq_payload(command, prefix)
         name = self._normalize_eq_preset_name(str(payload.get("Name") or payload.get("name") or self.eq_current_preset or "Flat"))
         plugin_uri = str(payload.get("pluginURI") or DEFAULT_EQ_PLUGIN)
         source_name = str(payload.get("source_name") or payload.get("source") or self.eq_active_source_name or "wifi")
@@ -1206,7 +1233,8 @@ class HttpApi:
         elif name == "Treble Boost":
             bands = self._preset_eq_bands({"i_gain": 3.0, "j_gain": 5.0})
         else:
-            bands = self.eq_bands_by_plugin.get(plugin_uri, self._default_eq_bands())
+            raise ValueError("Unknown EQ preset for plugin")
+        bands = self._merge_eq_bands(None, bands)
         if source_specific:
             self.eq_source_bands_by_plugin.setdefault(source_name, {})[plugin_uri] = bands
         else:
@@ -1241,64 +1269,85 @@ class HttpApi:
         return name or "Custom"
 
     def _load_persisted_eq_presets(self) -> None:
+        """Load a validated preset library, never claim it is already applied."""
         try:
             path = Path(self.cfg.state_dir) / "eq_presets.json"
-            payload = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
-            return
-        if not isinstance(payload, dict):
-            return
-        presets = payload.get("presets")
-        if isinstance(presets, dict):
+            with path.open("rb") as stream:
+                encoded = stream.read(1024 * 1024 + 1)
+            if len(encoded) > 1024 * 1024:
+                raise ValueError("EQ preset document is too large")
+            payload = json.loads(encoded, parse_constant=self._reject_eq_constant)
+            if (not isinstance(payload, dict) or type(payload.get("version", 1)) is not int
+                    or payload.get("version", 1) != 1):
+                raise ValueError("Unsupported EQ preset document")
+            presets = payload.get("presets")
+            if not isinstance(presets, dict):
+                raise ValueError("Invalid EQ preset library")
             loaded: dict[str, dict[str, list[dict[str, object]]]] = {}
             for name, plugins in presets.items():
                 if not isinstance(name, str) or not isinstance(plugins, dict):
-                    continue
+                    raise ValueError("Invalid EQ preset")
                 clean_name = self._normalize_eq_preset_name(name)
-                loaded.setdefault(clean_name, {})
+                if clean_name in loaded:
+                    raise ValueError("Duplicate EQ preset name")
+                loaded[clean_name] = {}
                 for plugin_uri, bands in plugins.items():
-                    if isinstance(plugin_uri, str) and isinstance(bands, list):
-                        loaded[clean_name][plugin_uri] = [dict(band) for band in bands if isinstance(band, dict)]
+                    if not isinstance(plugin_uri, str) or not plugin_uri:
+                        raise ValueError("Invalid EQ plugin")
+                    loaded[clean_name][plugin_uri] = self._merge_eq_bands(None, bands)
             self.eq_presets = loaded
-        current = payload.get("current")
-        if isinstance(current, str):
-            self.eq_current_preset = self._normalize_eq_preset_name(current)
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError, TypeError, UnicodeError, RecursionError) as exc:
+            LOG.warning("could not load EQ preset library: %s", exc)
 
     def _persist_eq_presets(self) -> None:
-        try:
-            state_dir = Path(self.cfg.state_dir)
-            state_dir.mkdir(parents=True, exist_ok=True)
-            payload = {"current": self.eq_current_preset, "presets": self.eq_presets}
-            (state_dir / "eq_presets.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-        except OSError as exc:
-            LOG.warning("could not persist EQ presets: %s", exc)
+        # This document is a library, not a claim that a preset is active after
+        # restart. Active DSP replay requires separate backend confirmation.
+        payload = {"version": 1, "presets": self.eq_presets}
+        encoded = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
+        if len(encoded.encode("utf-8")) > 1024 * 1024:
+            raise ValueError("EQ preset library exceeds its persisted size limit")
+        atomic_write_text(Path(self.cfg.state_dir) / "eq_presets.json", encoded)
 
     def _delete_eq_preset(self, command: str) -> None:
-        payload = self._json_payload(command, "EQv2Delete:")
-        name = str(payload.get("Name") or payload.get("name") or "")
+        payload = self._eq_payload(command, "EQv2Delete:")
+        raw_name = str(payload.get("Name") or payload.get("name") or "")
+        name = self._normalize_eq_preset_name(raw_name) if raw_name else ""
         if name:
             self.eq_presets.pop(name, None)
             if self.eq_current_preset == name:
                 self.eq_current_preset = ""
+            for plugin, preset_name in list(self.eq_names_by_plugin.items()):
+                if preset_name == name:
+                    del self.eq_names_by_plugin[plugin]
 
     def _rename_eq_preset(self, command: str) -> None:
-        payload = self._json_payload(command, "EQv2Rename:")
-        old_name = str(payload.get("Name") or payload.get("name") or "")
-        new_name = str(payload.get("newName") or payload.get("NewName") or "")
-        if old_name and new_name and old_name in self.eq_presets:
-            self.eq_presets[new_name] = self.eq_presets.pop(old_name)
-            if self.eq_current_preset == old_name:
-                self.eq_current_preset = new_name
-            for plugin, preset_name in list(self.eq_names_by_plugin.items()):
-                if preset_name == old_name:
-                    self.eq_names_by_plugin[plugin] = new_name
+        payload = self._eq_payload(command, "EQv2Rename:")
+        raw_old = str(payload.get("Name") or payload.get("name") or "")
+        raw_new = str(payload.get("newName") or payload.get("NewName") or "")
+        if not raw_old.strip() or not raw_new.strip():
+            raise ValueError("EQ rename requires both preset names")
+        old_name = self._normalize_eq_preset_name(raw_old)
+        new_name = self._normalize_eq_preset_name(raw_new)
+        if old_name not in self.eq_presets:
+            raise ValueError("Unknown EQ preset")
+        if new_name != old_name and new_name in self.eq_presets:
+            raise ValueError("EQ preset name already exists")
+        self.eq_presets[new_name] = self.eq_presets.pop(old_name)
+        if self.eq_current_preset == old_name:
+            self.eq_current_preset = new_name
+        for plugin, preset_name in list(self.eq_names_by_plugin.items()):
+            if preset_name == old_name:
+                self.eq_names_by_plugin[plugin] = new_name
 
     def _set_eq_channel_mode(self, command: str) -> None:
         raw = unquote(command.removeprefix("EQSetChannelMode:"))
-        payload = self._json_payload(command, "EQSetChannelMode:") if raw.startswith("{") else {}
+        payload = self._eq_payload(command, "EQSetChannelMode:") if raw.startswith("{") else {}
         plugin_uri = str(payload.get("pluginURI") or DEFAULT_EQ_PLUGIN)
-        self.eq_active_plugin_uri = plugin_uri
-        channel_mode = str(payload.get("channelMode") or raw or "Stereo")
+        channel_mode = str(payload.get("channelMode") or (raw if not payload else "Stereo") or "Stereo")
+        if channel_mode != "Stereo":
+            raise ValueError("Only Stereo EQ is supported")
         self.eq_channel_by_plugin[plugin_uri] = channel_mode
 
     @staticmethod
@@ -1349,25 +1398,89 @@ class HttpApi:
         return True
 
     def _merge_eq_bands(self, current: list[dict[str, object]] | None, updates: list[object]) -> list[dict[str, object]]:
-        """Merge partial EQ updates while preserving canonical 10-band order."""
+        """Validate partial changes and retain exactly forty canonical records."""
+        base = self._validated_eq_records(current if current is not None else self._default_eq_bands(), require_complete=True)
+        changed = self._validated_eq_records(updates)
+        merged = {str(item["param_name"]): item for item in base}
+        merged.update({str(item["param_name"]): item for item in changed})
+        return [merged[f"{letter}_{suffix}"] for letter in DEFAULT_EQ_BAND_FREQS
+                for suffix in ("freq", "gain", "q", "mode")]
 
-        merged = {str(item.get("param_name")): dict(item) for item in (current or self._default_eq_bands()) if isinstance(item.get("param_name"), str)}
-        for item in updates:
-            if not isinstance(item, dict):
-                continue
-            param_name = item.get("param_name")
-            if isinstance(param_name, str):
-                merged[param_name] = dict(item)
-        ordered: list[dict[str, object]] = []
-        for letter in DEFAULT_EQ_BAND_FREQS:
-            for suffix in ("freq", "gain", "q", "mode"):
-                key = f"{letter}_{suffix}"
-                if key in merged:
-                    ordered.append(merged[key])
-        for key, item in merged.items():
-            if not re.fullmatch(r"[a-j]_(freq|gain|q|mode)", key):
-                ordered.append(item)
-        return ordered
+    @staticmethod
+    def _validated_eq_records(bands: object, *, require_complete: bool = False) -> list[dict[str, object]]:
+        if not isinstance(bands, list) or len(bands) > 40:
+            raise ValueError("EQBand must contain at most forty parameters")
+        result: list[dict[str, object]] = []
+        seen: set[str] = set()
+        limits = {"freq": (10.0, 24000.0), "gain": (-24.0, 24.0), "q": (0.1, 30.0)}
+        for item in bands:
+            if not isinstance(item, dict) or set(item) != {"param_name", "value"}:
+                raise ValueError("Invalid EQ parameter record")
+            key = item["param_name"]
+            if not isinstance(key, str) or not re.fullmatch(r"[a-j]_(freq|gain|q|mode)", key) or key in seen:
+                raise ValueError("Invalid or duplicate EQ parameter name")
+            raw = item["value"]
+            if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+                raise ValueError("EQ parameter must be numeric")
+            try:
+                value = float(raw)
+            except (ValueError, OverflowError) as exc:
+                raise ValueError("EQ parameter must be a finite number") from exc
+            if not math.isfinite(value):
+                raise ValueError("EQ parameter must be finite")
+            suffix = key.split("_", 1)[1]
+            if suffix == "mode":
+                if value not in {-1.0, 0.0, 1.0, 2.0, 3.0, 5.0}:
+                    raise ValueError("Unsupported EQ filter mode")
+            elif not limits[suffix][0] <= value <= limits[suffix][1]:
+                raise ValueError("EQ parameter outside supported range")
+            seen.add(key)
+            result.append({"param_name": key, "value": value})
+        if require_complete and len(result) != 40:
+            raise ValueError("Incomplete EQ parameter set")
+        return result
+
+    @staticmethod
+    def _reject_eq_constant(value: str) -> object:
+        raise ValueError("Non-finite EQ JSON value")
+
+    @classmethod
+    def _eq_payload(cls, command: str, prefix: str) -> dict[str, object]:
+        raw = unquote(command.removeprefix(prefix))
+        if len(raw) > 128 * 1024:
+            raise ValueError("EQ request is too large")
+        try:
+            payload = json.loads(raw, parse_constant=cls._reject_eq_constant)
+        except RecursionError as exc:
+            raise ValueError("EQ request nesting is too deep") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("EQ request must be an object")
+        for field in ("source_name", "source"):
+            if field in payload and payload[field] != "wifi":
+                raise ValueError("Only wifi EQ is supported")
+        if "channelMode" in payload and payload["channelMode"] != "Stereo":
+            raise ValueError("Only Stereo EQ is supported")
+        for field in ("pluginURI", "plugin", "Name", "name", "newName", "NewName"):
+            if field in payload and not isinstance(payload[field], str):
+                raise ValueError("EQ identifier must be text")
+        for field in ("EQBandL", "EQBandR"):
+            if field in payload and payload[field] != []:
+                raise ValueError("Per-channel EQ is unsupported")
+        return payload
+
+    def _require_dsp_readback(self) -> None:
+        if self._dsp_state_uncertain:
+            raise BackendError("Backend DSP state is unconfirmed")
+
+    def _eq_display_name(self, plugin: str, bands: list[dict[str, object]]) -> str:
+        name = self.eq_names_by_plugin.get(plugin, "")
+        if name and self.eq_presets.get(name, {}).get(plugin) == bands:
+            return name
+        if name in {"Bass Boost", "Treble Boost"}:
+            expected = self._preset_eq_bands({"a_gain": 5.0, "b_gain": 3.0} if name == "Bass Boost" else {"i_gain": 3.0, "j_gain": 5.0})
+            if bands == expected:
+                return name
+        return "Flat" if self._is_flat_eq_bands(bands) else "Custom"
 
     def _enabled_experimental_sources(self) -> list[dict[str, object]]:
         """Return enabled configured source experiments as app-facing records."""
