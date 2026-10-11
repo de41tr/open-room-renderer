@@ -84,6 +84,29 @@ class EventSubscriber:
     task: asyncio.Task | None = field(default=None, repr=False, compare=False)
 
 
+class SourcePlaybackError(BackendError):
+    """Source resolution/readiness failed without a backend control failure."""
+
+    def __init__(self, message: str, category: str = "source_unready") -> None:
+        super().__init__(message)
+        self.category = category
+
+
+@dataclass
+class StationRecovery:
+    """One owner selection's finite retry budget, including successful retries."""
+
+    generation: int
+    queue: PlaybackQueue
+    item: QueueItem
+    index: int
+    url: str
+    backend_url: str
+    attempts: int = 0
+    invalidated: bool = False
+    category: str = "unexpected_idle"
+
+
 def parse_command(command: str) -> ParsedCommand:
     """Parse the HTTP ``command`` query parameter into a stable command name.
 
@@ -148,6 +171,10 @@ class HttpApi:
         self._app_users = 0
         self._monitor_interval = 0.5
         self._queue_advance_task: asyncio.Task | None = None
+        self._station_recovery: StationRecovery | None = None
+        self._station_recovery_task: asyncio.Task | None = None
+        self._station_recovery_loading = False
+        self._station_recovery_delays = (0.5, 1.0, 2.0)
         self._playback_offset_sec = 0
         self._pending_seek_target: int | None = None
         self._pending_seek_generation = 0
@@ -214,6 +241,10 @@ class HttpApi:
         finally:
             self._app_users -= 1
             if self._app_users == 0 and self._state_monitor_task is not None:
+                # Invalidate before any cleanup await. An in-flight load keeps
+                # the backend lock until its actual identity has been recorded.
+                self._invalidate_station_recovery()
+                recovery_task = self._station_recovery_task
                 event_tasks = [subscriber.task for subscriber in self.event_subscribers.values() if subscriber.task and not subscriber.task.done()]
                 self.event_subscribers.clear()
                 for event_task in event_tasks:
@@ -226,6 +257,10 @@ class HttpApi:
                     await task
                 except asyncio.CancelledError:
                     pass
+                if recovery_task is not None:
+                    await asyncio.gather(recovery_task, return_exceptions=True)
+                    if self._station_recovery_task is recovery_task:
+                        self._station_recovery_task = None
                 if self._queue_advance_task is not None:
                     task, self._queue_advance_task = self._queue_advance_task, None
                     task.cancel()
@@ -244,8 +279,7 @@ class HttpApi:
             try:
                 await self.sync_mpv_state()
             except (BackendError, OSError, TimeoutError):
-                self.state.mark_error()
-                self._schedule_event_notify()
+                self._mark_backend_failure()
 
     @property
     def _play_generation(self) -> int:
@@ -256,6 +290,7 @@ class HttpApi:
         self.state.generation = value
 
     def _accept_playback_command(self, intent: str) -> int:
+        self._invalidate_station_recovery()
         task = self._queue_advance_task
         if task is not None and task is not asyncio.current_task() and not task.done():
             self._queue_advance_task = None
@@ -265,6 +300,113 @@ class HttpApi:
         self._proxy_sources.clear()
         return self.state.accept_command(intent)
 
+    def _invalidate_station_recovery(self) -> None:
+        recovery, self._station_recovery = self._station_recovery, None
+        if recovery is not None:
+            recovery.invalidated = True
+        task = self._station_recovery_task
+        if (task is not None and task is not asyncio.current_task() and not task.done()
+                and not self._station_recovery_loading):
+            task.cancel()
+
+    def _arm_station_recovery(self) -> None:
+        item = self.state.queue.current
+        if item and item.stream_type == "station" and item.duration == 0:
+            self._station_recovery = StationRecovery(
+                self.state.generation, self.state.queue, item, self.state.queue.index, item.url, self.state.backend_url)
+
+    def _station_recovery_is_current(self, recovery: StationRecovery) -> bool:
+        return (not recovery.invalidated and self._station_recovery is recovery
+                and recovery.generation == self.state.generation and self.state.intent == "play"
+                and self.state.queue is recovery.queue and self.state.queue.index == recovery.index
+                and self.state.queue.current is recovery.item
+                and recovery.item.stream_type == "station" and recovery.item.duration == 0
+                and recovery.item.url == self.state.current_url == recovery.url)
+
+    def _station_source_has_audio(self, recovery: StationRecovery, snapshot: dict) -> bool:
+        """Require the captured actual source, not a stale/foreign active path."""
+        return (bool(recovery.backend_url) and snapshot.get("path") == recovery.backend_url
+                and snapshot.get("idle-active") is False and snapshot.get("pause") is False
+                and snapshot.get("eof-reached") is not True and snapshot.get("paused-for-cache") is not True
+                and self._mpv_snapshot_has_audio(snapshot))
+
+    def _mark_backend_failure(self) -> None:
+        self._invalidate_station_recovery()
+        self.state.mark_error("Backend control failed")
+        LOG.warning("playback failure category=backend_control generation=%s", self.state.generation)
+        self._schedule_event_notify()
+
+    def _recover_station_after_end(self, category: str) -> None:
+        recovery = self._station_recovery
+        if recovery is None or not self._station_recovery_is_current(recovery):
+            self.state.phase = PlaybackPhase.STOPPED
+            return
+        self.state.phase = PlaybackPhase.BUFFERING
+        self.state.last_error = ("Station source ended; retry pending" if category == "source_eof"
+                                 else "Station source idle; retry pending")
+        if self._station_recovery_task is None or self._station_recovery_task.done():
+            recovery.category = category
+            if recovery.attempts >= len(self._station_recovery_delays):
+                self._exhaust_station_recovery(recovery)
+            else:
+                self._station_recovery_task = asyncio.create_task(self._retry_station(recovery))
+
+    def _exhaust_station_recovery(self, recovery: StationRecovery) -> None:
+        self.state.mark_error("Station source unavailable: recovery exhausted")
+        LOG.warning("station recovery category=%s outcome=exhausted generation=%s attempts=%s",
+                    recovery.category, recovery.generation, recovery.attempts)
+        self._schedule_event_notify()
+
+    async def _retry_station(self, recovery: StationRecovery) -> None:
+        try:
+            while self._station_recovery_is_current(recovery):
+                if recovery.attempts >= len(self._station_recovery_delays):
+                    self._exhaust_station_recovery(recovery)
+                    return
+                await asyncio.sleep(self._station_recovery_delays[recovery.attempts])
+                if not self._station_recovery_is_current(recovery):
+                    return
+                try:
+                    async with self._backend_lock:
+                        if not self._station_recovery_is_current(recovery):
+                            return
+                        snapshot = await self.mpv.snapshot()
+                    if not self._station_recovery_is_current(recovery):
+                        return
+                    if snapshot.get("backend-error"):
+                        raise BackendError("Backend control failed before recovery")
+                    if self._station_source_has_audio(recovery, snapshot):
+                        self._apply_backend_snapshot(snapshot)
+                        LOG.info("station recovery category=%s outcome=already_active generation=%s attempts=%s",
+                                 recovery.category, recovery.generation, recovery.attempts)
+                        self._schedule_event_notify()
+                        return
+                    recovery.attempts += 1
+                    LOG.info("station recovery category=%s generation=%s attempt=%s",
+                             recovery.category, recovery.generation, recovery.attempts)
+                    await self._load_playback_url(recovery.url, recovery.generation, recovery=recovery)
+                except SourcePlaybackError:
+                    if not self._station_recovery_is_current(recovery):
+                        return
+                    self.state.phase = PlaybackPhase.BUFFERING
+                    self.state.last_error = "Station source unavailable; retry pending"
+                    self._schedule_event_notify()
+                    continue
+                except (BackendError, OSError, TimeoutError):
+                    # A failed control channel is not evidence to reload a source.
+                    if self._station_recovery_is_current(recovery):
+                        self._mark_backend_failure()
+                    return
+                if self._station_recovery_is_current(recovery):
+                    self.state.last_error = ""
+                    LOG.info("station recovery category=%s outcome=recovered generation=%s attempts=%s",
+                             recovery.category, recovery.generation, recovery.attempts)
+                    self._schedule_event_notify()
+                return
+        finally:
+            if self._station_recovery_task is asyncio.current_task():
+                self._station_recovery_task = None
+
     async def sync_mpv_state(self) -> None:
         """Apply an observation only to the generation that requested it."""
         generation = self.state.generation
@@ -273,8 +415,7 @@ class HttpApi:
                 snap = await self.mpv.snapshot()
         except (BackendError, OSError, TimeoutError):
             if generation == self.state.generation:
-                self.state.mark_error()
-                self._schedule_event_notify()
+                self._mark_backend_failure()
             return
         if generation != self.state.generation:
             return
@@ -286,14 +427,16 @@ class HttpApi:
         if self.state.phase in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING}:
             return
         if snap.get("backend-error"):
-            self.state.mark_error()
-            if self.state.phase != old_phase:
-                self._schedule_event_notify()
+            self._mark_backend_failure()
             return
         if self.state.phase == PlaybackPhase.ERROR:
             return
         observed_url = snap.get("path")
-        if self.state.backend_url and observed_url and observed_url != self.state.backend_url:
+        recovery = self._station_recovery
+        expected_url = self.state.backend_url
+        if not expected_url and recovery and self._station_recovery_is_current(recovery):
+            expected_url = recovery.backend_url
+        if expected_url and observed_url and observed_url != expected_url:
             return
         if self.state.phase not in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING}:
             if snap.get("eof-reached") is True or snap.get("idle-active") is True:
@@ -302,7 +445,11 @@ class HttpApi:
                     self.state.curpos = 0
                     self.state.backend_url = ""
                     self.state.backend_original_url = ""
-                    if old_phase in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING} and self.state.intent == "play" and self.state.queue.index < self.state.queue.count:
+                    selected = self.state.queue.current
+                    station = bool(selected and selected.stream_type == "station" and selected.duration == 0)
+                    if station and old_phase in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING} and self.state.intent == "play":
+                        self._recover_station_after_end("source_eof" if snap.get("eof-reached") is True else "unexpected_idle")
+                    elif not station and old_phase in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING} and self.state.intent == "play" and self.state.queue.index < self.state.queue.count:
                         if self._queue_advance_task is None or self._queue_advance_task.done():
                             self._queue_advance_task = asyncio.create_task(self._advance_queue_after_eof(self.state.generation, self.state.queue))
             elif self.state.intent == "stop":
@@ -314,6 +461,12 @@ class HttpApi:
                 self.state.phase = PlaybackPhase.BUFFERING
             elif self._mpv_snapshot_has_audio(snap):
                 self.state.phase = PlaybackPhase.PLAYING
+                recovery = self._station_recovery
+                if (recovery and self._station_recovery_is_current(recovery)
+                        and self._station_source_has_audio(recovery, snap)):
+                    self.state.backend_url = recovery.backend_url
+                    self.state.backend_original_url = recovery.url
+                    self.state.last_error = ""
         if isinstance(snap.get("playback-time"), (int, float)) and self.state.phase != PlaybackPhase.STOPPED:
             playback_time = self._adjusted_playback_time(snap)
             if self._pending_seek_target is None or abs(playback_time - self._pending_seek_target) <= 2:
@@ -366,6 +519,7 @@ class HttpApi:
                 self.state.mark_pause()
             else:
                 self.state.phase = PlaybackPhase.PLAYING
+                self._arm_station_recovery()
             self._apply_backend_snapshot(snapshot)
         except (BackendError, OSError, TimeoutError):
             if generation == self.state.generation and self.state.phase != PlaybackPhase.ERROR:
@@ -1245,26 +1399,48 @@ class HttpApi:
         self.state.resolved_url = ""
         self.state.curpos = 0
         self._schedule_event_notify()
+        await self._load_playback_url(url, generation)
+
+    async def _load_playback_url(self, url: str, generation: int, *, recovery: StationRecovery | None = None) -> None:
+        """Share load/readiness with retries without accepting a new owner command."""
+        def current() -> bool:
+            return (generation == self.state.generation
+                    and (recovery is None or self._station_recovery_is_current(recovery)))
+
         try:
+            if not current():
+                raise BackendError("Playback command superseded")
             self.state.phase = PlaybackPhase.LOADING
             selected = self.state.queue.current
-            direct_url = selected.resolved_url if selected and selected.url == url and selected.resolved_url else await self._resolve_playback_url(url)
-            if generation != self.state.generation:
+            if selected and selected.url == url and selected.resolved_url:
+                direct_url = selected.resolved_url
+            else:
+                try:
+                    direct_url = await self._resolve_playback_url(url)
+                except (BackendError, OSError, TimeoutError):
+                    raise SourcePlaybackError("Source resolution failed", "source_resolution") from None
+            if not current():
                 raise BackendError("Playback command superseded")
             playback_url = self._backend_playback_url(url, direct_url)
             mpv_options = self._mpv_playback_options(url, direct_url)
             async with self._backend_lock:
-                if generation != self.state.generation:
+                if not current():
                     raise BackendError("Playback command superseded")
-                await self._backend_call(self.mpv.loadfile(playback_url, mpv_options))
-                # This records actual backend identity even when a newer pause
-                # superseded the request while the command was in flight.
-                self.state.backend_url = playback_url
-                self.state.backend_original_url = url
-                self._playback_offset_sec = 0
-                if self.state.current_url == url:
-                    self.state.resolved_url = direct_url
-            if generation != self.state.generation:
+                if recovery is not None:
+                    self._station_recovery_loading = True
+                try:
+                    await self._backend_call(self.mpv.loadfile(playback_url, mpv_options))
+                    # Record actual backend identity even if a newer owner
+                    # command arrived during the bounded, locked mutation.
+                    self.state.backend_url = playback_url
+                    self.state.backend_original_url = url
+                    self._playback_offset_sec = 0
+                    if self.state.current_url == url:
+                        self.state.resolved_url = direct_url
+                finally:
+                    if recovery is not None:
+                        self._station_recovery_loading = False
+            if not current():
                 raise BackendError("Playback command superseded")
             self._playback_offset_sec = 0
             self.state.resolved_url = direct_url
@@ -1275,20 +1451,34 @@ class HttpApi:
             self.state.phase = PlaybackPhase.BUFFERING
             self._schedule_event_notify()
             ready = await self._wait_for_mpv_audio_ready(generation, playback_url)
-            if generation != self.state.generation:
+            if not current():
                 raise BackendError("Playback command superseded")
             if not ready:
-                raise BackendError("Backend did not confirm playback")
+                raise SourcePlaybackError("Source did not confirm playback")
+            # An idle observation during readiness may have cleared identity.
+            # Audio confirmation belongs to this still-current loaded source.
+            self.state.backend_url = playback_url
+            self.state.backend_original_url = url
+            if recovery is None:
+                self._arm_station_recovery()
             self.state.mark_playing(url)
             await self.sync_mpv_state()
-            if generation != self.state.generation:
+            if not current():
                 raise BackendError("Playback command superseded")
+            if recovery is not None and not self.state.backend_url:
+                raise SourcePlaybackError("Station source ended during recovery", "source_eof")
             if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING}:
                 raise BackendError("Backend no longer playing")
+        except SourcePlaybackError as exc:
+            if current():
+                LOG.warning("playback failure category=%s generation=%s", exc.category, generation)
+                if recovery is None:
+                    self.state.mark_error(str(exc))
+                    self._schedule_event_notify()
+            raise
         except (BackendError, OSError, TimeoutError):
-            if generation == self.state.generation:
-                self.state.mark_error()
-                self._schedule_event_notify()
+            if current():
+                self._mark_backend_failure()
             raise
 
     def _backend_playback_url(self, original_url: str, direct_url: str) -> str:
@@ -1461,7 +1651,7 @@ class HttpApi:
                 return False
             last_snapshot = snapshot
             if snapshot.get("backend-error"):
-                return False
+                raise BackendError("Backend control failed during readiness")
             if snapshot.get("path") and snapshot["path"] != playback_url:
                 continue
             if snapshot.get("idle-active") is not True and self._mpv_snapshot_has_audio(snapshot):

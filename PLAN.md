@@ -24,6 +24,7 @@ this execution environment cannot create Unix-domain sockets.
 
 ## Checkpoints reached
 
-AP01, AP02, AP05, AP03, AP04, AP06 and AP07 have tested implementation checkpoints,
-including real libmpv/null control and two-track/callback flows. AP08 is next;
-P1 follows. This records progress, not full hardware/app acceptance.
+AP01, AP02, AP05, AP03, AP04, AP06, AP07 and AP08 have implementation checkpoints,
+including real libmpv/null control, two-track/callback and interrupted-source
+recovery flows. P1 gain/DSP correctness is next because review found mismatched
+startup gain and unsafe nonfinite DSP handling; metadata/seek/install follow. This records progress, not full hardware/app acceptance.

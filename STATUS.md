@@ -197,3 +197,37 @@ stale foreign socket is deliberately not deleted automatically.
 
 AP06 published as `bba255dc81df0257662ac60537f41fc7e38e041f`.
 Next: AP08 bounded station recovery, then meaningful P1 acceptance gaps.
+
+## AP08 established-station recovery checkpoint
+
+- An explicitly marked live station that reaches EOF/unexpected idle gets one
+  generation-bound recovery task and a lifetime budget of three delayed reloads.
+  The budget is not replenished by repeated observations or successful retries.
+- Pause, stop, queue/index replacement and newer sources invalidate pending work.
+  A bounded in-flight backend mutation records its actual identity before a newer
+  owner command runs. Volume, mute, metadata and queue index are preserved.
+- Native audio returning during backoff prevents a redundant reload only when
+  actual resource identity and active audio are confirmed. Unrelated paths cannot
+  restore playback. Source resolution, EOF/idle and control failures are distinct.
+- Finite/unknown-duration media never gain automatic station retries; normal
+  finite queue EOF advance remains unchanged. Exhaustion remains ERROR.
+
+The optional REAL_BACKEND/null fixture used an actual loopback HTTP server to
+truncate generated WAV audio, reject the next renderer reload with HTTP503, then
+restore audio. Actual decoded position resumed without client status polling.
+Separate real cases verified stop/pause during backoff and teardown; volume37,
+mute and queue index2 survived recovery. This is controlled local source failure,
+not a real WAN outage, production Unix IPC, audible output or handset test.
+
+Scope limits: recovery starts after initial audio has been confirmed (or owner
+resume succeeds). A never-playable initial station still fails explicitly.
+Sustained cache-stall detection is deferred; ordinary buffering does not trigger
+a reload. Public provider URL refresh is also outside this checkpoint.
+
+Validation: the isolated AP08 publication snapshot passed 999 tests with all
+five optional REAL_BACKEND/null cases enabled (994 plus five skips by default).
+Nine upstream PyWiiM TLS deprecation warnings remain.
+
+AP07 published as `aa3d455d5c80195a2f3e3ccce351b8b8a7702a9c`.
+Next: confirmed/persistent digital gain, then existing DSP safety and practical
+metadata/seek/install acceptance gaps.

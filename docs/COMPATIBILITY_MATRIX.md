@@ -37,3 +37,8 @@ Backend lifecycle has bounded startup/command/teardown and explicit child/socket
 ownership (UNIT/MOCK plus actual subprocess signal delivery). Production Unix
 IPC remains a separate host acceptance requirement. A failed spawn attempt does
 not automatically respawn; restart the renderer to retry owned spawning.
+
+Established explicit live stations now have bounded owner-respecting EOF/idle
+recovery (UNIT/MOCK and actual local HTTP outage/return with REAL_BACKEND/null).
+Initial load failure, sustained cache stalls and provider URL refresh remain
+separate limitations; finite/unknown media are never silently restarted.

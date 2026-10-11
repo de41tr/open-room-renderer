@@ -129,3 +129,22 @@ Most cases are UNIT/MOCK. Four child-interpreter tests deliver actual SIGINT or
 SIGTERM during startup/teardown while renderer resources are mocked. They verify
 that cleanup executes instead of the interpreter exiting early on the signal.
 These are not production AF_UNIX or real mpv-process shutdown acceptance.
+
+## Established-station source recovery
+
+`test_station_recovery.py` covers generation/queue/item identity, finite retry
+budget, owner commands during every wait/load phase, native matching-source
+return, failure categories and cleanup (UNIT/MOCK). Finite EOF behavior stays
+separate from explicitly declared station recovery.
+
+`test_libmpv_recovery.py` is an additional optional REAL_BACKEND/null lane under
+the same ORR_TEST_LIBMPV_PATH environment variable. Each case runs in a bounded
+child interpreter. An actual loopback HTTP server disconnects generated PCM,
+returns HTTP503 to a renderer reload, then restores media. Backend load counts
+distinguish renderer retries from native reconnects, and independent libmpv
+position confirms advancing decoded audio. No status-poll loop drives recovery.
+Stop, pause, retained gain/index and resource cleanup are separately checked.
+
+Initial never-playable stations fail without automatic recovery; cache-stall
+detection and provider/CDN refresh remain deferred. No WAN, Unix IPC, acoustic,
+DAC, ARM or Android certification follows from these local tests.
