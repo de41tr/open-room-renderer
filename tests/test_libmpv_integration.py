@@ -91,8 +91,15 @@ def _decode_node(node: _Node) -> Any:
 class _LibmpvBackend(MpvBackend):
     """Test-only command adapter; production control/snapshot code is inherited."""
 
-    def __init__(self, library_path: str, media_paths: tuple[Path, Path]) -> None:
-        super().__init__("unused-test-only-no-ipc", auto_spawn=False)
+    def __init__(
+        self, library_path: str, media_paths: tuple[Path, Path], *,
+        pcm_output: Path | None = None,
+        initial_volume: int = 50, initial_mute: bool = False,
+    ) -> None:
+        super().__init__(
+            "unused-test-only-no-ipc", auto_spawn=False,
+            initial_volume=initial_volume, initial_mute=initial_mute,
+        )
         self._allowed_media = {str(path.resolve()) for path in media_paths}
         self._lib = ct.CDLL(library_path)
         self._handle: int | None = None
@@ -116,11 +123,22 @@ class _LibmpvBackend(MpvBackend):
         if not self._handle:
             raise RuntimeError("mpv_create returned NULL")
         try:
-            for name, value in {
+            options = {
                 "config": "no", "terminal": "no", "video": "no", "ao": "null",
                 "idle": "yes", "ytdl": "no", "load-scripts": "no",
                 "input-default-bindings": "no",
-            }.items():
+            }
+            if pcm_output is not None:
+                # A digital-only sink for the optional gain acceptance lane.
+                # Raw native-endian float avoids s16 rounding/dither obscuring
+                # exact mute and low-amplitude gain. Never select a device AO.
+                options.update({
+                    "ao": "pcm", "ao-pcm-file": str(pcm_output.resolve()),
+                    "ao-pcm-waveheader": "no", "ao-pcm-append": "yes",
+                    "audio-format": "float", "audio-samplerate": "16000",
+                    "audio-channels": "stereo", "gapless-audio": "no",
+                })
+            for name, value in options.items():
                 self._check(self._lib.mpv_set_option_string(self._handle, name.encode(), value.encode()))
             self._check(self._lib.mpv_initialize(self._handle))
         except BaseException:

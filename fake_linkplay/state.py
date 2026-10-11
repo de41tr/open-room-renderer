@@ -36,6 +36,7 @@ class RendererState:
     cfg: Config
     volume: int
     mute: bool = False
+    gain_confirmed: bool = True
     phase: PlaybackPhase = PlaybackPhase.STOPPED
     generation: int = 0
     intent: str = "stop"
@@ -103,7 +104,7 @@ class RendererState:
     def from_config(cls, cfg: Config) -> "RendererState":
         """Create initial state with the configured volume clamped to 0..100."""
 
-        return cls(cfg=cfg, volume=max(0, min(100, int(cfg.default_volume))))
+        return cls(cfg=cfg, volume=max(0, min(100, int(cfg.default_volume))), mute=cfg.default_mute)
 
     def mark_playing(self, url: str) -> None:
         """Mark the renderer as playing ``url`` and fill basic metadata."""
@@ -179,6 +180,7 @@ class RendererState:
             "region": "US",
             "volume": str(self.volume),
             "vol": str(self.volume),
+            "gain_confirmed": self.gain_confirmed,
             "mute": "1" if self.mute else "0",
             "status": self.status,
             "playback_phase": self.phase.value,
@@ -256,6 +258,7 @@ class RendererState:
             "plicount": str(self.plicount),
             "plicurr": str(self.plicurr),
             "vol": str(self.volume),
+            "gain_confirmed": self.gain_confirmed,
             "mute": "1" if self.mute else "0",
             "Title": self.title,
             "Artist": self.artist,

@@ -42,3 +42,9 @@ Established explicit live stations now have bounded owner-respecting EOF/idle
 recovery (UNIT/MOCK and actual local HTTP outage/return with REAL_BACKEND/null).
 Initial load failure, sustained cache stalls and provider URL refresh remain
 separate limitations; finite/unknown media are never silently restarted.
+
+Volume/mute now use confirmed full-pair backend readback, pre-load/resume
+reconciliation and atomic persistence. Actual HTTP controls have digital PCM
+evidence for cubic gain, exact mute/zero, source retention and restored settings.
+Unknown gain is marked explicitly rather than freshly advertised as confirmed.
+Host mixer, acoustic silence, DAC controls and full service reboot remain untested.

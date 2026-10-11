@@ -57,6 +57,16 @@ class MpvBackend:
     _request_id: int = 0
     _channel_balance: float = 0.0
     _peq_bands: list[dict[str, float]] | None = None
+    initial_volume: int = field(default=50, kw_only=True)
+    initial_mute: bool = field(default=False, kw_only=True)
+
+    # Desired gain starts with configuration and advances only after confirmed
+    # writes. A failed/cancelled write may have reached mpv, so the next load
+    # must restore the last confirmed desired values before it can play.
+    _desired_volume: int = field(init=False, repr=False)
+    _desired_mute: bool = field(init=False, repr=False)
+    _gain_initialized: bool = field(default=False, init=False, repr=False)
+    _gain_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
     # All callers share startup, including callers with shorter deadlines. A
     # cancelled HTTP request must not abandon a child being started for others.
@@ -70,6 +80,15 @@ class MpvBackend:
     _startup_error: str = field(default="mpv did not become ready", init=False, repr=False)
     _startup_timeout: float = field(default=5.0, init=False, repr=False)
     _shutdown_timeout: float = field(default=3.0, init=False, repr=False)
+
+    @property
+    def gain_confirmed(self) -> bool:
+        """Whether this backend has completed its own gain readback path."""
+        return self._gain_initialized
+
+    def __post_init__(self) -> None:
+        self._desired_volume = max(0, min(100, int(self.initial_volume)))
+        self._desired_mute = bool(self.initial_mute)
 
     @staticmethod
     def _observe_task(task: asyncio.Task[None]) -> None:
@@ -330,7 +349,16 @@ class MpvBackend:
                 await self._close_writer(writer, deadline)
 
     async def loadfile(self, url: str, options: dict[str, str] | None = None) -> dict[str, Any]:
-        """Load ``url`` into mpv and force playback out of pause state."""
+        """Confirm desired gain before every load, then play out of pause."""
+
+        async with self._gain_lock:
+            # External mpv may have restarted or changed since the last load.
+            # Never trust cached initialization when beginning another source.
+            await self._initialize_gain_locked(force=True)
+            return await self._loadfile_locked(url, options)
+
+    async def _loadfile_locked(self, url: str, options: dict[str, str] | None) -> dict[str, Any]:
+        """Keep source loading serialized with gain initialization and changes."""
 
         LOG.info("mpv loadfile replace url=%s options=%s", redact_sensitive(url), options or {})
         command: list[Any] = ["loadfile", url, "replace"]
@@ -359,9 +387,11 @@ class MpvBackend:
         await self.checked_command(["set_property", "pause", True])
 
     async def resume(self) -> None:
-        """Resume playback."""
+        """Confirm the complete desired gain before resuming playback."""
 
-        await self.checked_command(["set_property", "pause", False])
+        async with self._gain_lock:
+            await self._initialize_gain_locked(force=True)
+            await self.checked_command(["set_property", "pause", False])
 
     async def stop(self) -> None:
         """Stop the current mpv item."""
@@ -374,14 +404,62 @@ class MpvBackend:
         await self.checked_command(["seek", seconds, "absolute"])
 
     async def volume(self, value: int) -> None:
-        """Set mpv volume."""
+        """Set and read back mpv volume without changing the desired mute."""
 
-        await self.checked_command(["set_property", "volume", value])
+        if type(value) is not int or not 0 <= value <= 100:
+            raise BackendError("Volume must be an integer from 0 to 100")
+        async with self._gain_lock:
+            await self._apply_gain_locked(value, self._desired_mute)
 
     async def mute(self, value: bool) -> None:
-        """Set mpv mute state."""
+        """Set and read back mpv mute without changing the desired volume."""
 
-        await self.checked_command(["set_property", "mute", value])
+        if type(value) is not bool:
+            raise BackendError("Mute must be a boolean")
+        async with self._gain_lock:
+            await self._apply_gain_locked(self._desired_volume, value)
+
+    async def initialize_gain(self) -> None:
+        """Apply configured/confirmed gain, including after deferred startup."""
+
+        async with self._gain_lock:
+            await self._initialize_gain_locked()
+
+    async def _initialize_gain_locked(self, *, force: bool = False) -> None:
+        if self._gain_initialized and not force:
+            return
+        await self._apply_gain_locked(self._desired_volume, self._desired_mute)
+
+    async def _apply_gain_locked(self, volume: int, mute: bool) -> None:
+        """Confirm a complete candidate pair before publishing either value."""
+
+        # External mpv can reset either property independently. Every gain
+        # operation restores both, even when only one was requested to change.
+        # Invalidate before awaiting: partial writes and cancellations are not
+        # a confirmed pair and must not advance either cached desired value.
+        self._gain_initialized = False
+        # Apply a requested mute first; when unmuting, establish volume first.
+        values = [("volume", volume), ("mute", mute)]
+        if mute:
+            values.reverse()
+        for name, value in values:
+            await self._set_gain_property_locked(name, value)
+        self._desired_volume, self._desired_mute = volume, mute
+        self._gain_initialized = True
+
+    async def _set_gain_property_locked(self, name: str, value: int | bool) -> None:
+        """Acknowledge and verify a gain property within one bounded budget."""
+
+        try:
+            async with asyncio.timeout(2.0):
+                await self.checked_command(["set_property", name, value])
+                response = await self.checked_command(["get_property", name])
+            actual = response.get("data")
+            correct_type = type(actual) is bool if name == "mute" else type(actual) in (int, float)
+            if not correct_type or actual != value:
+                raise BackendError(f"Backend {name} readback did not confirm the requested value")
+        except TimeoutError as exc:
+            raise BackendError(f"Backend {name} confirmation timed out") from exc
 
     async def channel_balance(self, value: float) -> None:
         """Store stereo balance and reapply the DSP filter graph."""

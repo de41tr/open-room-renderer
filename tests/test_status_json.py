@@ -751,6 +751,7 @@ async def test_previous_restarts_current_track() -> None:
 
 def test_rendering_response_fields_reflect_volume_and_mute() -> None:
     api = make_api()
+    api.state.gain_confirmed = True  # Serializer fixture supplies confirmed values.
     api.state.volume = 42
     api.state.mute = True
     assert "<CurrentVolume>42</CurrentVolume>" == api._rendering_response_fields("GetVolume")
@@ -888,10 +889,11 @@ async def _identity_resolver(url: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_volume_is_clamped() -> None:
+async def test_out_of_range_volume_does_not_raise_gain() -> None:
     api = make_api()
-    assert await api.execute(ParsedCommand("volume", ("150",)), "127.0.0.1") == "OK"
-    assert api.state.volume == 100
+    with pytest.raises(ValueError):
+        await api.execute(ParsedCommand("volume", ("150",)), "127.0.0.1")
+    assert api.state.volume == 50
 
 
 @pytest.mark.asyncio

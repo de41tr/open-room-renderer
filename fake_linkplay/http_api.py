@@ -37,6 +37,7 @@ from .config import Config
 from .mpv_backend import BackendError, MpvBackend
 from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_target, validate_callback_url
 from .radio import RadioResolution, RadioResolutionError, resolve_station
+from .persistence import save_gain
 from .queue import PlaybackQueue, QueueError, QueueItem, parse_queue_context, serialize_queue_context
 from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
@@ -149,6 +150,8 @@ class HttpApi:
 
         self.cfg = cfg
         self.state = state
+        if state.phase == PlaybackPhase.ERROR or getattr(mpv, "gain_confirmed", True) is False:
+            state.gain_confirmed = False
         self.mpv = mpv
         self.on_rename = on_rename
         self.queue_url = ""
@@ -165,6 +168,9 @@ class HttpApi:
         self.queue_is_live = True
         self.queue_duration_sec = 0
         self._backend_lock = asyncio.Lock()
+        self._gain_command_lock = asyncio.Lock()
+        self._gain_operations = 0
+        self._gain_uncertain = not self.state.gain_confirmed
         self._proxy_sources: dict[str, int] = {}
         self._proxy_semaphore = asyncio.Semaphore(4)
         self._state_monitor_task: asyncio.Task | None = None
@@ -332,6 +338,7 @@ class HttpApi:
 
     def _mark_backend_failure(self) -> None:
         self._invalidate_station_recovery()
+        self.state.gain_confirmed = False
         self.state.mark_error("Backend control failed")
         LOG.warning("playback failure category=backend_control generation=%s", self.state.generation)
         self._schedule_event_notify()
@@ -495,7 +502,11 @@ class HttpApi:
                     raise BackendError("Playback command superseded")
                 pause_unloaded = command == "pause" and self.state.backend_original_url != self.state.current_url
                 effect = "stop" if pause_unloaded else command
-                await self._backend_call(getattr(self.mpv, effect)())
+                operation = getattr(self.mpv, effect)()
+                if effect == "resume":
+                    await self._gain_reconciling_call(operation)
+                else:
+                    await self._backend_call(operation)
                 snapshot = await self.mpv.snapshot()
                 if generation != self.state.generation:
                     raise BackendError("Playback command superseded")
@@ -891,18 +902,63 @@ class HttpApi:
             await self._seek_command(seconds)
             return "OK"
         if name == "volume":
-            value = max(0, min(100, int(parsed.args[0])))
-            await self._backend_call(self.mpv.volume(value))
-            self.state.volume = value
-            self._schedule_event_notify(("rendercontrol1", "RenderingControl"))
+            if not parsed.args or not re.fullmatch(r"[0-9]{1,3}", parsed.args[0]):
+                raise ValueError("Invalid volume")
+            value = int(parsed.args[0])
+            if not 0 <= value <= 100:
+                raise ValueError("Invalid volume")
+            await self._set_confirmed_gain(volume=value)
             return "OK"
         if name == "mute":
-            value = parsed.args[0] == "1"
-            await self._backend_call(self.mpv.mute(value))
-            self.state.mute = value
-            self._schedule_event_notify(("rendercontrol1", "RenderingControl"))
+            if not parsed.args or parsed.args[0] not in {"0", "1"}:
+                raise ValueError("Invalid mute")
+            await self._set_confirmed_gain(mute=parsed.args[0] == "1")
             return "OK"
         return {"error": "Failed", "command": name}
+
+    async def _gain_reconciling_call(self, operation) -> None:
+        """Do not advertise known gain while any reconciling operation is pending."""
+        self._gain_operations += 1
+        self.state.gain_confirmed = False
+        try:
+            await self._backend_call(operation)
+        except BaseException:
+            self._gain_uncertain = True
+            raise
+        else:
+            self._gain_uncertain = False
+        finally:
+            self._gain_operations -= 1
+            self.state.gain_confirmed = self._gain_operations == 0 and not self._gain_uncertain
+
+    async def _set_confirmed_gain(self, *, volume: int | None = None, mute: bool | None = None) -> None:
+        """Publish and persist only backend-confirmed gain, in command order."""
+        async with self._gain_command_lock:
+            try:
+                if volume is not None:
+                    await self._gain_reconciling_call(self.mpv.volume(volume))
+                if mute is not None:
+                    await self._gain_reconciling_call(self.mpv.mute(mute))
+            except (BackendError, OSError, TimeoutError, asyncio.CancelledError):
+                # A write may have reached the backend before acknowledgement
+                # was lost. ERROR does not assert silence or successful rollback.
+                self.state.gain_confirmed = False
+                self._invalidate_station_recovery()
+                self.state.mark_error("Gain confirmation failed; actual output unknown; showing last confirmed settings")
+                self._schedule_event_notify()
+                raise
+            if volume is not None:
+                self.state.volume = volume
+            if mute is not None:
+                self.state.mute = mute
+            if self.state.last_error.startswith("Gain confirmation failed;"):
+                self.state.last_error = "Gain confirmed; transport requires a new command"
+            # The backend changed even if storage subsequently fails. Keep its
+            # confirmed readback visible, notify clients, and report the failed
+            # persistence instead of promising that restart will retain it.
+            self._schedule_event_notify(("rendercontrol1", "RenderingControl"))
+            save_gain(self.cfg.state_dir, self.state.volume, self.state.mute)
+            self.cfg.default_volume, self.cfg.default_mute = self.state.volume, self.state.mute
 
     async def _apply_eq_to_mpv(self) -> None:
         """Translate active EQ state into mpv PEQ bands."""
@@ -1429,7 +1485,7 @@ class HttpApi:
                 if recovery is not None:
                     self._station_recovery_loading = True
                 try:
-                    await self._backend_call(self.mpv.loadfile(playback_url, mpv_options))
+                    await self._gain_reconciling_call(self.mpv.loadfile(playback_url, mpv_options))
                     # Record actual backend identity even if a newer owner
                     # command arrived during the bounded, locked mutation.
                     self.state.backend_url = playback_url
@@ -2674,8 +2730,12 @@ class HttpApi:
         """Return RenderingControl SOAP response fields."""
 
         if action == "GetVolume":
+            if not self.state.gain_confirmed:
+                raise SoapFault(501, "Action Failed")
             return f"<CurrentVolume>{escape(str(self.state.volume))}</CurrentVolume>"
         if action == "GetMute":
+            if not self.state.gain_confirmed:
+                raise SoapFault(501, "Action Failed")
             return f"<CurrentMute>{'1' if self.state.mute else '0'}</CurrentMute>"
         if action == "GetChannel":
             return "<CurrentChannel>Master</CurrentChannel>"
@@ -2869,10 +2929,8 @@ class HttpApi:
                 if not raw.isdecimal() or not 0 <= int(raw) <= 100:
                     raise SoapFault(402, "Invalid Args")
                 value = int(raw)
-                await self._backend_call(self.mpv.volume(value))
-                self.state.volume = value
+                await self._set_confirmed_gain(volume=value)
                 LOG.info("SOAP SetVolume applied value=%s", value)
-                self._schedule_event_notify(("rendercontrol1", "RenderingControl"))
             return
         if action == "SetMute":
             raw = self._xml_text(body, "DesiredMute")
@@ -2880,10 +2938,8 @@ class HttpApi:
                 if raw.strip().lower() not in {"0", "1", "true", "false"}:
                     raise SoapFault(402, "Invalid Args")
                 value = raw.strip().lower() in {"1", "true"}
-                await self._backend_call(self.mpv.mute(value))
-                self.state.mute = value
+                await self._set_confirmed_gain(mute=value)
                 LOG.info("SOAP SetMute applied value=%s", value)
-                self._schedule_event_notify(("rendercontrol1", "RenderingControl"))
             return
         if action == "SetChannel":
             raise SoapFault(401, "Invalid Action")
@@ -2980,7 +3036,7 @@ class HttpApi:
                         direct_url,
                         seek_url,
                     )
-                    await self._backend_call(self.mpv.loadfile(seek_url, self._mpv_seek_reload_options()))
+                    await self._gain_reconciling_call(self.mpv.loadfile(seek_url, self._mpv_seek_reload_options()))
                     self.state.backend_url = seek_url
                     self._playback_offset_sec = seconds
                     if final_status == "pause":
@@ -3419,6 +3475,11 @@ class HttpApi:
         service_key = service.lower()
         device_name = self.cfg.linkplay_instance_name if self.cfg.wiim_home_profile else self.cfg.friendly_name
         if service_key in {"rendercontrol1", "renderingcontrol"}:
+            if not self.state.gain_confirmed:
+                return self._event_propertyset({
+                    "LastChange": '<Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/"><InstanceID val="0"/></Event>',
+                    "DeviceName": device_name, "GroupName": device_name,
+                })
             last_change = (
                 '<Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/">'
                 '<InstanceID val="0">'

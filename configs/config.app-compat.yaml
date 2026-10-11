@@ -30,6 +30,7 @@ advertise_ip: null
 mpv_socket: "/tmp/open-room-renderer-mpv.sock"
 auto_spawn_mpv: true
 default_volume: 50
+default_mute: false
 log_level: "INFO"
 state_dir: ".state/app-compat"
 

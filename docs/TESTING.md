@@ -140,7 +140,7 @@ separate from explicitly declared station recovery.
 `test_libmpv_recovery.py` is an additional optional REAL_BACKEND/null lane under
 the same ORR_TEST_LIBMPV_PATH environment variable. Each case runs in a bounded
 child interpreter. An actual loopback HTTP server disconnects generated PCM,
-returns HTTP503 to a renderer reload, then restores media. Backend load counts
+returns HTTP 503 to a renderer reload, then restores media. Backend load counts
 distinguish renderer retries from native reconnects, and independent libmpv
 position confirms advancing decoded audio. No status-poll loop drives recovery.
 Stop, pause, retained gain/index and resource cleanup are separately checked.
@@ -148,3 +148,33 @@ Stop, pause, retained gain/index and resource cleanup are separately checked.
 Initial never-playable stations fail without automatic recovery; cache-stall
 detection and provider/CDN refresh remain deferred. No WAN, Unix IPC, acoustic,
 DAC, ARM or Android certification follows from these local tests.
+
+## Confirmed gain and measured digital output
+
+`test_backend_gain.py`, `test_gain_api.py` and `test_gain_persistence.py` cover
+paired acknowledgement/readback, startup/load/resume, external backend resets,
+cancellation, atomic saved settings, malformed input and uncertain gain reporting.
+Backend confirmation failure is different from a subsequent storage failure.
+SOAP gain reads fault and GENA omits gain values while confirmation is unknown.
+
+`test_libmpv_gain.py` adds an optional REAL_BACKEND/digital-PCM lane using the
+same ORR_TEST_LIBMPV_PATH opt-in. Real loopback HTTP controls production gain
+methods; inherited backend loads feed a float PCM file sink. Fast file output
+is not presented as HTTP play/readiness acceptance. The null lane covers that.
+Each native run has a child-process timeout and checks normal/cancel cleanup.
+
+Measured with mpv 0.40 and generated stereo tones peaking at 500/32768:
+
+| UI volume | Measured amplitude ratio | Gain |
+| --- | --- | --- |
+| 0 | exactly 0 | digital silence |
+| 25 | 0.015625 (1/64) | -36.1236 dB |
+| 50 | 0.125 (1/8) | -18.0618 dB |
+| 100 | 1 | 0 dB |
+
+Mute is exact zero at either tested source, including after changing volume.
+Fresh Config/RendererState/backend reconstruction reads saved 25 + mute and emits
+zero before any new user command; unmute retains 1/64. This is not a full
+CLI/systemd reboot test. Native pre-initialization defaults are recorded
+separately from the production initialization hook. Host mixer gain is separate;
+these ratios do not describe a physical device's volume scale or acoustic level.

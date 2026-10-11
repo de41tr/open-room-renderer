@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 
 from .utils import detect_lan_ip, ensure_dir
+from .persistence import load_gain
 
 
 @dataclass(slots=True)
@@ -72,6 +73,7 @@ class Config:
     mpv_socket: str = "/tmp/open-room-renderer-mpv.sock"
     auto_spawn_mpv: bool = True
     default_volume: int = 50
+    default_mute: bool = False
     log_level: str = "INFO"
     state_dir: str = ".state"
     enable_mdns: bool = False
@@ -110,6 +112,8 @@ class Config:
     def __post_init__(self) -> None:
         """Normalize configured IDs without replacing their identity."""
 
+        if type(self.default_mute) is not bool:
+            raise ValueError("default_mute must be boolean")
         self.uuid = normalize_uuid(self.uuid) or None
         self.discovery_uuid = normalize_uuid(self.discovery_uuid).upper() or None
 
@@ -284,6 +288,9 @@ def load_persistent_runtime_state(cfg: Config) -> None:
     """
 
     directory = ensure_dir(cfg.state_dir)
+    gain = load_gain(directory)
+    if gain is not None:
+        cfg.default_volume, cfg.default_mute = gain
     device_name_path = directory / "device_name"
     if device_name_path.exists():
         device_name = sanitize_persistent_text(device_name_path.read_text())

@@ -416,10 +416,19 @@ async def test_cancelled_command_closes_transport_and_propagates(monkeypatch):
 @pytest.mark.parametrize("responses", [[{"error": "loading failed"}], [{"error": "success"}, {"error": "unpause failed"}]])
 async def test_loadfile_and_unpause_failures_remain_visible(responses):
     backend = short_backend(auto_spawn=False)
-    backend.command = AsyncMock(side_effect=responses)
+    backend.command = AsyncMock(side_effect=mock_gain_responses() + responses)
     assert await backend.loadfile("https://media.example.test/synthetic.wav") == responses[-1]
-    assert backend.command.await_count == len(responses)
+    assert backend.command.await_count == 4 + len(responses)
+    assert backend.command.await_args_list[4].args[0][0] == "loadfile"
     await backend.stop_process()
+
+
+def mock_gain_responses():
+    """Confirm gain before injecting failures specific to source loading."""
+    return [
+        {"error": "success"}, {"error": "success", "data": 50},
+        {"error": "success"}, {"error": "success", "data": False},
+    ]
 
 
 @pytest.mark.asyncio
@@ -445,6 +454,7 @@ class ServiceHarness:
         self.block = block
         self.cleanup_error = cleanup_error
         cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", http_api_port=18080, upnp_port=18081, mirror_port_80=True, enable_ssdp=True)
+        self.cfg = cfg
         monkeypatch.setattr(cli, "load_config", lambda _: cfg)
         monkeypatch.setattr(cli, "setup_logging", lambda _: None)
         backend = SimpleNamespace()
@@ -458,11 +468,17 @@ class ServiceHarness:
                 raise BackendError("synthetic refused socket")
         async def backend_close():
             await self.step("backend.close")
+        async def backend_gain():
+            await self.step("backend.initialize_gain")
+            if backend_error == "gain":
+                raise BackendError("synthetic unconfirmed gain")
         backend.start = AsyncMock(side_effect=backend_start)
         backend.stop = AsyncMock(side_effect=backend_stop)
+        backend.initialize_gain = AsyncMock(side_effect=backend_gain)
         backend.stop_process = AsyncMock(side_effect=backend_close)
         self.backend = backend
-        monkeypatch.setattr(cli, "MpvBackend", lambda *args: backend)
+        self.backend_factory = Mock(return_value=backend)
+        monkeypatch.setattr(cli, "MpvBackend", self.backend_factory)
 
         def api_factory(_cfg, state, _backend):
             self.state = state
@@ -521,7 +537,7 @@ class ServiceHarness:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("backend_error", ["start", "stop"])
+@pytest.mark.parametrize("backend_error", ["start", "stop", "gain"])
 async def test_cli_backend_start_failure_keeps_control_api_available(monkeypatch, backend_error):
     harness = ServiceHarness(monkeypatch, backend_error=backend_error)
     await cli.serve("synthetic.yaml")
@@ -533,10 +549,27 @@ async def test_cli_backend_start_failure_keeps_control_api_available(monkeypatch
     assert all(task.done() for task in harness.tasks)
     if backend_error == "start":
         harness.backend.stop.assert_not_awaited()
+    if backend_error in {"start", "stop"}:
+        harness.backend.initialize_gain.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stage", ["backend.start", "runner0.setup", "site0.start", "runner1.setup", "site1.start", "runner2.setup", "site2.start", "ssdp.start", "mdns.start"])
+@pytest.mark.parametrize("muted", [False, True])
+async def test_cli_initializes_configured_gain_after_stopping_backend(monkeypatch, muted):
+    harness = ServiceHarness(monkeypatch)
+    harness.cfg.default_volume = 37
+    harness.cfg.default_mute = muted
+    await cli.serve("synthetic.yaml")
+    harness.backend_factory.assert_called_once_with(
+        harness.cfg.mpv_socket, harness.cfg.auto_spawn_mpv,
+        initial_volume=37, initial_mute=muted,
+    )
+    assert harness.events[:3] == ["backend.start", "backend.stop", "backend.initialize_gain"]
+    harness.backend.initialize_gain.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["backend.start", "backend.initialize_gain", "runner0.setup", "site0.start", "runner1.setup", "site1.start", "runner2.setup", "site2.start", "ssdp.start", "mdns.start"])
 async def test_cli_cleans_every_partially_started_resource_after_failure(monkeypatch, stage):
     harness = ServiceHarness(monkeypatch, fail=stage)
     with pytest.raises(RuntimeError, match="synthetic"):
@@ -552,7 +585,7 @@ async def test_cli_cleans_every_partially_started_resource_after_failure(monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stage", ["backend.start", "runner0.setup", "site1.start", "ssdp.start", "mdns.start"])
+@pytest.mark.parametrize("stage", ["backend.start", "backend.initialize_gain", "runner0.setup", "site1.start", "ssdp.start", "mdns.start"])
 async def test_cli_cancellation_awaits_partial_start_cleanup(monkeypatch, stage):
     harness = ServiceHarness(monkeypatch, block=stage)
     task = asyncio.create_task(cli.serve("synthetic.yaml"))
@@ -635,9 +668,10 @@ async def test_shutdown_cancellation_still_awaits_owned_child(monkeypatch, ipc):
 @pytest.mark.parametrize("responses", [[{}], [{"error": "success"}, {}]])
 async def test_loadfile_requires_explicit_acknowledgement(responses):
     backend = short_backend(auto_spawn=False)
-    backend.command = AsyncMock(side_effect=responses)
+    backend.command = AsyncMock(side_effect=mock_gain_responses() + responses)
     assert "acknowledgement missing" in (await backend.loadfile("https://media.example.test/synthetic.wav"))["error"]
-    assert backend.command.await_count == len(responses)
+    assert backend.command.await_count == 4 + len(responses)
+    assert backend.command.await_args_list[4].args[0][0] == "loadfile"
     await backend.stop_process()
 
 
@@ -854,7 +888,7 @@ def test_real_process_signals_cannot_abandon_startup_or_teardown(phase, signal_n
             print("cleanup_finished", flush=True)
         cli.load_config = lambda _: Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", enable_ssdp=False)
         cli.setup_logging = lambda _: None
-        cli.MpvBackend = lambda *args: SimpleNamespace(start=start_backend, stop=noop, stop_process=stop_backend)
+        cli.MpvBackend = lambda *args, **kwargs: SimpleNamespace(start=start_backend, stop=noop, initialize_gain=noop, stop_process=stop_backend)
         cli.HttpApi = lambda *args: SimpleNamespace(app=lambda: object())
         cli.web.AppRunner = lambda *args: SimpleNamespace(setup=noop, cleanup=noop)
         cli.web.TCPSite = lambda *args: SimpleNamespace(start=noop)

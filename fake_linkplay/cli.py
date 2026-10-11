@@ -44,7 +44,10 @@ async def serve(config_path: str) -> None:
     cfg = load_config(config_path)
     setup_logging(cfg.log_level)
     state = RendererState.from_config(cfg)
-    mpv = MpvBackend(cfg.mpv_socket, cfg.auto_spawn_mpv)
+    mpv = MpvBackend(
+        cfg.mpv_socket, cfg.auto_spawn_mpv,
+        initial_volume=state.volume, initial_mute=state.mute,
+    )
     runners: list[web.AppRunner] = []
     ssdp: SsdpServer | None = None
     mdns: MdnsAdvertiser | None = None
@@ -92,6 +95,7 @@ async def serve(config_path: str) -> None:
         try:
             await mpv.start()
             await mpv.stop()
+            await mpv.initialize_gain()
         except BackendError as exc:
             state.mark_error()
             LOG.warning("backend unavailable at startup; control API will report failures: %s", exc)

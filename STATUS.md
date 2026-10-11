@@ -213,10 +213,10 @@ Next: AP08 bounded station recovery, then meaningful P1 acceptance gaps.
   finite queue EOF advance remains unchanged. Exhaustion remains ERROR.
 
 The optional REAL_BACKEND/null fixture used an actual loopback HTTP server to
-truncate generated WAV audio, reject the next renderer reload with HTTP503, then
+truncate generated WAV audio, reject the next renderer reload with HTTP 503, then
 restore audio. Actual decoded position resumed without client status polling.
-Separate real cases verified stop/pause during backoff and teardown; volume37,
-mute and queue index2 survived recovery. This is controlled local source failure,
+Separate real cases verified stop/pause during backoff and teardown; volume 37,
+mute and queue index 2 survived recovery. This is controlled local source failure,
 not a real WAN outage, production Unix IPC, audible output or handset test.
 
 Scope limits: recovery starts after initial audio has been confirmed (or owner
@@ -231,3 +231,39 @@ Nine upstream PyWiiM TLS deprecation warnings remain.
 AP07 published as `aa3d455d5c80195a2f3e3ccce351b8b8a7702a9c`.
 Next: confirmed/persistent digital gain, then existing DSP safety and practical
 metadata/seek/install acceptance gaps.
+
+## AP11 confirmed digital gain checkpoint
+
+- Startup applies configured/persisted volume and mute before audio can load.
+  Every load and resume reconciles the complete desired pair, including after an
+  externally managed backend restarts at its native defaults.
+- Volume/mute operations acknowledge and read back both properties in safe order.
+  A failed/cancelled confirmation cannot commit a proposed pair or bypass the
+  next playback check. HTTP invalid volume/mute no longer clamps into a louder
+  setting or silently unmutes.
+- Both protocols use one ordered confirmed-state path. Gain is saved atomically
+  in a bounded versioned local document; corrupt/unknown saved gain fails closed.
+  Disk failure is reported separately from successful backend application.
+- Uncertain output is explicitly flagged: gain_confirmed=false, SOAP gain reads
+  fault, and GENA omits unknown gain values. A gain-command failure reports ERROR
+  without claiming that actual audio is silent. Transport errors remain until a
+  new owner transport command; reconfirmed gain clears contradictory wording.
+- Actual HTTP gain controls were measured through libmpv into float PCM files:
+  volume 25=1/64 amplitude, volume 50=1/8, volume 100=unity. Mute and volume 0 produce
+  exact digital zero. Mute survives volume and source changes. Fresh persisted
+  config/state/backend reconstruction restores 25 + mute before the first decoded
+  sample; unmute then measures 1/64.
+
+This is REAL_BACKEND/digital-PCM with generated low-amplitude input and a file
+sink. It does not measure host mixer/DAC/acoustic output or full systemd reboot.
+Fast PCM source loads are explicitly direct backend loads, while gain commands
+use real HTTP; the separate null lane still verifies HTTP playback readiness.
+
+Validation: the isolated AP11 snapshot passed 1130 tests with all six optional
+REAL_BACKEND cases enabled (1124 plus six skips by default). Nine upstream
+PyWiiM TLS deprecation warnings remain. Independent review covered failed and
+concurrent gain confirmation, full-pair reconciliation and resume boundaries.
+
+AP08 published as `a6b2b2594403bc92709a874fcf00b8848375cab7`.
+Next: existing DSP safety/transactionality and measured filters; active EQ
+restart persistence, metadata/seek and native installation acceptance follow.

@@ -146,6 +146,13 @@ async def test_backend_rejection_does_not_commit_success_state(api, action, args
     # A rejected owner command still invalidates older in-flight observations.
     after.pop("generation")
     before.pop("generation")
+    if action in {"SetVolume", "SetMute"}:
+        assert after["phase"].value == "ERROR"
+        assert after["gain_confirmed"] is False
+        assert "actual output unknown" in after["last_error"]
+        for field in ("phase", "gain_confirmed", "last_error"):
+            after.pop(field)
+            before.pop(field)
     assert after == before
 
 
