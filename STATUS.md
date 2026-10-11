@@ -28,7 +28,7 @@ Validation for this checkpoint: 133 tests passed (UNIT/MOCK), including 41 new
 SOAP/backend regressions. `git diff --check` passed. No new REAL_AUDIO,
 ANDROID_APP or HARDWARE validation.
 
-## Known remaining work
+## Earlier checkpoint limitations (superseded below)
 
 AP02 now has a tested generation/state checkpoint (below). AP05 now provides concrete multi-item queues (below). SCPD declarations, app handshake, callback leases/policy,
 recovery and backend lifecycle need their planned focused passes. Current tests
@@ -117,3 +117,32 @@ are intentionally not silently replaced.
 
 AP05 published as `2d6e6ad29f998ab58f57ab38c4d19c93a5662b90`.
 Next: AP04 bounded subscriptions, retries and same-peer callback policy.
+
+## AP04 and network-boundary checkpoint
+
+- GENA initial subscribe, renewal, deduplication, unsubscribe and expiry now have
+  bounded peer-bound leases. A temporary failure keeps the subscription and
+  retries its unchanged payload/sequence; later changes use the next sequence.
+- Delivery is ordered/coalesced per SID, limited globally/per peer, and cleaned
+  up on expiry, unsubscribe and shutdown. Callback redirects are never followed.
+  LastChange handles both XML layers, Unicode and whitespace correctly.
+- Callbacks target only the actual request peer's literal IP. Invalid rename
+  text cannot persist an XML-breaking device name.
+- The media proxy is disabled by default, local-backend-only and selected-source-
+  bound. Each redirect is independently validated and DNS-pinned. Unsafe local,
+  metadata and unapproved private targets are rejected; no client credentials or
+  environment proxy settings are forwarded. Setup, concurrency and redirects
+  are bounded. See SECURITY.md for explicit LAN media exceptions and limits.
+- The real libmpv/null workflow now also verifies actual GENA callback delivery
+  for backend volume/mute and the selected second track. The local app-shaped
+  handshake exercises HTTP, SOAP and callbacks together with its fake backend.
+
+Validation: the exact AP04 publication snapshot passed 740 tests with the
+REAL_BACKEND/null lane enabled (739 plus one explicit skip by default). Nine
+upstream PyWiiM TLS deprecation warnings remain. Proxy integration uses local
+fixtures with explicitly mocked approved routing; forbidden destinations are
+rejected without being contacted.
+
+AP03 published as `99d771d0142934f63d534493e7e7c93b68f664ca`.
+Next: AP06 canonical header-only provider resolution; AP07 lifecycle work is
+independent and in progress; AP08 owner-respecting recovery follows.

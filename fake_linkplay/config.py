@@ -101,6 +101,7 @@ class Config:
     plex_user_info_mode: str = "not_login"
     enable_stream_service_sentinels: bool = False
     proxy_on_demand_audio: bool = False
+    proxy_allowed_lan_hosts: list[str] = field(default_factory=list)
     range_seek_reload: bool = False
     channel_balance: str = "0.0"
     podcast_presets: list[PodcastPreset] = field(default_factory=list)

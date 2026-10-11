@@ -236,12 +236,26 @@ async def _exercise_real_backend(
         api = HttpApi(cfg, RendererState.from_config(cfg), backend)
         # These are known finite test media, rather than the default live radio.
         api.queue_is_live = False
-        runner = web.AppRunner(api.app(), shutdown_timeout=1)
+        notifications = []
+        async def receive_event(request):
+            props = {node.tag: node.text or "" for prop in ET.fromstring(await request.text()) for node in prop}
+            notifications.append((request.headers.get("SID"), props))
+            return web.Response()
+        app = api.app()
+        app.router.add_route("NOTIFY", "/_fixture_events", receive_event)
+        runner = web.AppRunner(app, shutdown_timeout=1)
         await runner.setup()
         await web.SockSite(runner, listener).start()
         monitor = api._state_monitor_task
         assert monitor is not None and not monitor.done()
         async with ClientSession(timeout=ClientTimeout(total=12), trust_env=False) as session:
+            subscriptions = {}
+            for service in ("AVTransport", "RenderingControl", "PlayQueue"):
+                async with session.request("SUBSCRIBE", f"http://127.0.0.1:{port}/upnp/event/{service}", headers={"NT": "upnp:event", "CALLBACK": f"<http://127.0.0.1:{port}/_fixture_events>", "TIMEOUT": "Second-60"}) as response:
+                    assert response.status == 200
+                    subscriptions[service] = response.headers["SID"]
+            def event_matches(service, predicate):
+                return any(sid == subscriptions[service] and predicate(props) for sid, props in notifications)
             async def command(value: str) -> Any:
                 async with session.get(f"http://127.0.0.1:{port}/httpapi.asp", params={"command": value}) as response:
                     body = await response.text()
@@ -289,10 +303,11 @@ async def _exercise_real_backend(
             assert backend.read_property("mute") is True
             payload = await status("pause")
             assert payload["vol"] == "37" and payload["mute"] == "1", payload
+            await _eventually("GENA volume/mute delivery", lambda: event_matches("RenderingControl", lambda props: props.get("Volume") == "37" and props.get("Mute") == "1"))
             assert await command("setPlayerCmd:mute:0") == "OK"
             assert backend.read_property("mute") is False
             assert (await status("pause"))["mute"] == "0"
-            evidence["volume_mute"] = {"volume": 37, "mute_on_off": True}
+            evidence["volume_mute"] = {"volume": 37, "mute_on_off": True, "gena_delivery": True}
 
             assert await command("setPlayerCmd:seek:8") == "OK"
             await _eventually("paused seek", lambda: abs(backend.read_property("playback-time") - 8) < 0.2)
@@ -357,13 +372,15 @@ async def _exercise_real_backend(
             assert "<Track>2</Track>" in await soap("GetPositionInfo")
             assert "<CurrentIndex>2</CurrentIndex>" in await soap("GetQueueIndex", service="PlayQueue")
             assert "<CurrentIndex>2</CurrentIndex>" in api._event_body("PlayQueue")
+            await _eventually("GENA actual second resource", lambda: event_matches("PlayQueue", lambda props: props.get("CurrentIndex") == "2" and props.get("TrackURI") == str(tracks[1])))
+            await _eventually("GENA transport second resource", lambda: event_matches("AVTransport", lambda props: '<CurrentTrack val="2"/>' in props.get("LastChange", "") and str(tracks[1]) in props.get("LastChange", "")))
             await soap("Previous")
             assert backend.read_property("path") == str(tracks[0])
             assert await command("setPlayerCmd:seek:29") == "OK"
             await _eventually("queue EOF selects second actual file", lambda: backend.read_property("path") == str(tracks[1]), timeout=5)
             await _eventually("queue EOF confirms playback", lambda: api.state.status == "play", timeout=5)
             assert (await status("play"))["plicurr"] == "2"
-            evidence["queue"] = {"distinct_resources": True, "next_previous": True, "eof_advance": True, "http_soap_event_index": 2}
+            evidence["queue"] = {"distinct_resources": True, "next_previous": True, "eof_advance": True, "http_soap_event_index": 2, "gena_callback_delivery": True}
             await command("setPlayerCmd:stop")
     finally:
         try:

@@ -21,3 +21,9 @@ P2 service integrations and synchronized multiroom are deferred. No proprietary
 material, credentials, original identifiers, captures or binaries belong here.
 Keep the production Unix-socket mpv design; use deterministic test doubles where
 this execution environment cannot create Unix-domain sockets.
+
+## Checkpoints reached
+
+AP01, AP02, AP05, AP03 and AP04 have tested implementation checkpoints, including
+real libmpv/null control and two-track/callback flows. AP06, AP07 and AP08 are next;
+P1 follows. This records progress, not full hardware/app acceptance.

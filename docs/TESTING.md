@@ -6,8 +6,8 @@
 .venv/bin/python -m pytest -q
 ```
 
-Current AP03 default suite: 517 passed and 1 explicit REAL_BACKEND skip on Python 3.12.14.
-With the optional libmpv lane enabled: 518 passed. Baseline: 92 passed.
+AP04 checkpoint default suite: 739 passed and 1 explicit REAL_BACKEND skip on Python 3.12.14.
+With the optional libmpv lane enabled: 740 passed. Baseline: 92 passed.
 AP01 alone: 133 passed; the acceptance-state check adds 85 UNIT/MOCK cases.
 `tests/test_soap_faults.py` adds 41 UNIT/MOCK checks for SOAP framing,
 unsupported actions, argument validation, backend rejection, sanitized faults,
@@ -68,7 +68,7 @@ cleanup after success/cancellation. Production control/snapshot methods are
 inherited; only command transport is replaced inside the test.
 
 Scope: REAL_BACKEND/null plus local HTTP INTEGRATION. No claim about production
-Unix JSON IPC, GENA callback delivery, acoustic mute/gain, DAC, Android or ARM.
+Unix JSON IPC, acoustic mute/gain, DAC, Android or ARM.
 
 ## Discovery and app-shaped handshake
 
@@ -80,3 +80,17 @@ then exercises local controls and two-track selection with a fake backend.
 `test_upnp_schema.py` compares declared action outputs/types with actual handlers.
 `test_capability_consistency.py` compares complete capability documents across
 HTTP, SOAP control and transport reads. All are independent of vendor clouds.
+
+## Callback and proxy verification
+
+`test_gena_lifecycle.py` exercises real local subscription/NOTIFY HTTP: transient
+failure and immutable retries, ordered coalescing, renewal, expiry, peer binding,
+redirect refusal, limits, sequence wrap, XML/rename safety and cleanup.
+`test_app_handshake.py` and the optional libmpv lane now verify actual callback
+delivery, including queue index/resource agreement and volume/mute updates.
+
+`test_network_policy.py` uses deterministic DNS answers. `test_proxy_security.py`
+uses real local HTTP fixtures with explicitly mocked approved routing, checks
+each redirect, blocked destinations, selected-source/loopback gating, range and
+compressed-byte preservation, sanitization and resource limits. The suite never
+contacts real metadata endpoints or internal administrative services.

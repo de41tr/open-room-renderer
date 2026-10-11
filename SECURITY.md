@@ -24,3 +24,32 @@ For now, report security/privacy issues privately to the maintainer through the 
 ## Public Logs
 
 Raw logs are not safe by default. The project redacts common sensitive values, but redaction is best effort. Review logs manually before sharing.
+
+## Local callback and media-proxy boundaries
+
+This is an unauthenticated local-network renderer. Do not expose its control
+ports to the Internet. A renderer firewall does not control a phone/app's own
+network traffic.
+
+GENA callbacks must be one HTTP URL with a literal IP matching the request's
+transport peer. Forwarded headers, arbitrary DNS names, other hosts, credentials,
+fragments, metadata/link-local addresses and redirects are refused. Legitimate
+same-peer LAN callbacks are allowed; loopback callbacks require a loopback peer.
+Leases are 30–1800 seconds, capped at 64 total and 8 per peer, with at most 8
+concurrent deliveries. Transient failures retry with backoff within the lease;
+410/412 reject the lease. A retry keeps its payload/sequence, then coalesced new
+state receives the next sequence. Expiry/unsubscribe/shutdown cancel work.
+
+The audio proxy is disabled unless an explicit proxy/seek option is enabled.
+It serves only the local loopback backend and currently selected media, never
+arbitrary caller URLs. Every redirect's DNS answers are checked and pinned;
+loopback, link-local, metadata, multicast, reserved and unapproved private
+addresses are refused. `proxy_allowed_lan_hosts` may name exact trusted LAN media
+hosts, with no wildcards; it cannot allow forbidden address classes. Client
+cookies/authorization and environment proxy settings are never forwarded.
+
+There are at most four proxy streams, a 20-second setup deadline, bounded
+redirects and socket timeouts. Proxy mode needs the HTTP listener to accept
+loopback connections (the default wildcard bind does). Tests use only synthetic
+addresses and local fixtures; no cloud metadata or internal-admin endpoints
+are contacted by the test suite.

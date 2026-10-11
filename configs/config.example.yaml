@@ -19,6 +19,8 @@ source_experiment_variant: "none"
 legacy_capability_value: "0x0"
 legacy_plm_support_value: "0"
 proxy_on_demand_audio: false
+# Exact LAN media hosts only; loopback/metadata destinations stay forbidden.
+proxy_allowed_lan_hosts: []
 range_seek_reload: false
 podcast_presets:
   - name: "Test MP3"

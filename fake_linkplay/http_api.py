@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ipaddress
 import logging
 import os
 import re
+import time
 from dataclasses import asdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC
 from datetime import datetime
 from html import escape
@@ -22,19 +24,20 @@ from html import unescape as html_unescape
 from pathlib import Path
 from collections.abc import Awaitable, Callable
 from urllib.parse import quote
-from urllib.parse import unquote
+from urllib.parse import unquote, urljoin
 from uuid import uuid4
 
 from aiohttp import ClientError
 from aiohttp import ClientSession
-from aiohttp import ClientTimeout
+from aiohttp import ClientTimeout, TCPConnector
 from aiohttp import web
 
 from .capabilities import capability_fields, configured_sources, service_capability
 from .config import Config
 from .mpv_backend import BackendError, MpvBackend
+from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_target, validate_callback_url
 from .queue import PlaybackQueue, QueueError, QueueItem, parse_queue_context, serialize_queue_context
-from .soap import MUTATING_ACTIONS, SoapFault, fault_xml, parse_request
+from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
 from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
 
@@ -74,6 +77,10 @@ class EventSubscriber:
     callback_url: str
     service: str
     seq: int = 0
+    peer_ip: str = ""
+    expires_at: float = float("inf")
+    dirty: bool = False
+    task: asyncio.Task | None = field(default=None, repr=False, compare=False)
 
 
 def parse_command(command: str) -> ParsedCommand:
@@ -135,6 +142,8 @@ class HttpApi:
         self.queue_duration_sec = 0
         self._last_resolve_duration_sec = 0
         self._backend_lock = asyncio.Lock()
+        self._proxy_sources: dict[str, int] = {}
+        self._proxy_semaphore = asyncio.Semaphore(4)
         self._state_monitor_task: asyncio.Task | None = None
         self._app_users = 0
         self._monitor_interval = 0.5
@@ -154,6 +163,11 @@ class HttpApi:
         self.eq_current_preset = ""
         self._load_persisted_eq_presets()
         self.event_subscribers: dict[str, EventSubscriber] = {}
+        self._event_clock = time.monotonic
+        self._event_retry_base = 0.5
+        self._event_semaphore = asyncio.Semaphore(8)
+        self._event_limit_total = 64
+        self._event_limit_peer = 8
         self.channel_balance = cfg.channel_balance
         self.device_name_override = ""
         self.plex_client_id = self._load_or_create_plex_client_id()
@@ -200,6 +214,12 @@ class HttpApi:
         finally:
             self._app_users -= 1
             if self._app_users == 0 and self._state_monitor_task is not None:
+                event_tasks = [subscriber.task for subscriber in self.event_subscribers.values() if subscriber.task and not subscriber.task.done()]
+                self.event_subscribers.clear()
+                for event_task in event_tasks:
+                    event_task.cancel()
+                if event_tasks:
+                    await asyncio.gather(*event_tasks, return_exceptions=True)
                 task, self._state_monitor_task = self._state_monitor_task, None
                 task.cancel()
                 try:
@@ -218,6 +238,7 @@ class HttpApi:
         """Observe EOF/failure even when no client is polling status."""
         while True:
             await asyncio.sleep(self._monitor_interval)
+            self._prune_expired_subscribers()
             if self.state.phase in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING, PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
                 continue
             try:
@@ -241,6 +262,7 @@ class HttpApi:
             task.cancel()
         self._pending_seek_generation += 1
         self._pending_seek_target = None
+        self._proxy_sources.clear()
         return self.state.accept_command(intent)
 
     async def sync_mpv_state(self) -> None:
@@ -464,6 +486,8 @@ class HttpApi:
             return {"error": "Failed", "command": name}
         if name.startswith("setDeviceName:") or name.startswith("setHexDeviceName:"):
             requested_name = self._decode_device_name_command(name)
+            if not requested_name or len(requested_name) > 128 or re.search(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]", requested_name):
+                raise ValueError("Invalid device name")
             if requested_name:
                 self.device_name_override = requested_name
                 self.cfg.friendly_name = requested_name
@@ -1315,6 +1339,7 @@ class HttpApi:
         return self._bitrate_bps_from_url_or_headers(direct_url, {}) > 0
 
     def _local_audio_proxy_url(self, url: str) -> str:
+        self._proxy_sources[url] = self.state.generation
         return f"http://127.0.0.1:{self.cfg.http_api_port}/proxy/audio?url={quote(url, safe='')}"
 
     def _seek_audio_proxy_url(self, url: str, start_seconds: int) -> str:
@@ -1877,63 +1902,110 @@ class HttpApi:
             return 0
         return max(0, hours * 3600 + minutes * 60 + seconds)
 
-    async def proxy_audio(self, request: web.Request) -> web.StreamResponse:
-        """Proxy on-demand audio with optional second-to-byte range shifting."""
+    def _proxy_source_allowed(self, url: str) -> bool:
+        if self.state.intent == "stop":
+            return False
+        selected = self.state.queue.current
+        allowed = {self.state.current_url, self.state.resolved_url}
+        if selected:
+            allowed.update((selected.url, selected.resolved_url))
+        return bool(url) and (url in allowed or self._proxy_sources.get(url) == self.state.generation)
 
+    async def _open_proxy_source(self, original_url: str, headers: dict[str, str]):
+        """Validate and pin every redirect hop; never forward client credentials."""
+        url = original_url
+        seen: set[str] = set()
+        for _ in range(6):
+            if not self._proxy_source_allowed(original_url):
+                raise NetworkPolicyError("Media selection changed")
+            target = await resolve_proxy_target(url, self.cfg.proxy_allowed_lan_hosts)
+            if target.url in seen:
+                raise NetworkPolicyError("Redirect loop")
+            seen.add(target.url)
+            if not self._proxy_source_allowed(original_url):
+                raise NetworkPolicyError("Media selection changed")
+            connector = TCPConnector(resolver=PinnedResolver(target), use_dns_cache=False, limit=1)
+            session = ClientSession(timeout=ClientTimeout(total=None, sock_connect=10, sock_read=30),
+                headers=headers, connector=connector, trust_env=False, auto_decompress=False)
+            upstream = None
+            try:
+                upstream = await session.get(target.url, allow_redirects=False)
+                if upstream.status not in {301, 302, 303, 307, 308}:
+                    return session, upstream
+                location = upstream.headers.get("Location", "")
+                if not location:
+                    raise NetworkPolicyError("Redirect has no destination")
+                url = urljoin(target.url, location)
+            except BaseException:
+                if upstream is not None:
+                    upstream.release()
+                await session.close()
+                raise
+            upstream.release()
+            await session.close()
+        raise NetworkPolicyError("Too many redirects")
+
+    async def proxy_audio(self, request: web.Request) -> web.StreamResponse:
+        """Serve only selected media to the local backend, with SSRF-safe hops."""
+        if not (self.cfg.proxy_on_demand_audio or self.cfg.range_seek_reload):
+            return web.Response(status=404)
+        try:
+            if not ipaddress.ip_address(request.remote or "").is_loopback:
+                return web.Response(status=403, text="Local backend only")
+        except ValueError:
+            return web.Response(status=403)
         url = request.query.get("url", "")
-        if not url.startswith(("http://", "https://")):
-            return web.Response(status=400, text="missing or invalid url")
+        if not self._proxy_source_allowed(url):
+            return web.Response(status=403, text="Media is not selected")
         range_header = request.headers.get("Range", "")
-        start_seconds = self._parse_nonnegative_int(request.query.get("start", "0"))
-        base_offset = self._byte_offset_for_seconds(url, start_seconds)
+        start = request.query.get("start", "0")
+        if not re.fullmatch(r"[0-9]{1,12}", start) or (range_header and not re.fullmatch(r"bytes=(?:[0-9]{1,18}-[0-9]{0,18}|-[0-9]{1,18})", range_header)):
+            return web.Response(status=400, text="Invalid range")
+        base_offset = self._byte_offset_for_seconds(url, int(start))
+        if base_offset and range_header.startswith("bytes=-"):
+            return web.Response(status=400, text="Unsupported shifted suffix range")
         upstream_range = self._shift_range_header(range_header, base_offset)
-        if not upstream_range and base_offset > 0:
+        if not upstream_range and base_offset:
             upstream_range = f"bytes={base_offset}-"
-        LOG.info(
-            "audio proxy remote=%s range=%s upstream_range=%s start=%s base_offset=%s url=%s",
-            request.remote,
-            range_header,
-            upstream_range,
-            start_seconds,
-            base_offset,
-            url,
-        )
-        timeout = ClientTimeout(total=None, sock_connect=10, sock_read=30)
-        upstream_headers = {"User-Agent": "Linkplay/4.8"}
+        upstream_headers = {"User-Agent": "OpenRoomRenderer/0.1"}
         if upstream_range:
             upstream_headers["Range"] = upstream_range
-        session = ClientSession(timeout=timeout, headers=upstream_headers)
-        upstream = None
+        if self._proxy_semaphore.locked():
+            return web.Response(status=503, text="Media proxy busy")
+        session = upstream = response = None
         try:
-            upstream = await session.get(url, allow_redirects=True)
-            if upstream.status >= 400:
-                text = await upstream.text(errors="ignore")
-                LOG.warning("audio proxy upstream error status=%s url=%s body=%s", upstream.status, url, self._preview(text))
-                upstream.release()
-                await session.close()
-                return web.Response(status=502, text=f"upstream status {upstream.status}")
-            content_type = upstream.headers.get("Content-Type", "audio/mpeg")
-            headers = {
-                "Content-Type": content_type,
-                "Cache-Control": "no-store",
-                "Accept-Ranges": upstream.headers.get("Accept-Ranges", "bytes"),
-            }
-            for header in ("Content-Length", "Content-Range"):
-                if upstream.headers.get(header):
-                    headers[header] = upstream.headers[header]
-            response = web.StreamResponse(status=206 if upstream.status == 206 else 200, headers=headers)
-            await response.prepare(request)
-            async for chunk in upstream.content.iter_chunked(64 * 1024):
-                await response.write(chunk)
-            await response.write_eof()
-            return response
-        except (ClientError, TimeoutError, OSError, ConnectionResetError) as exc:
-            LOG.warning("audio proxy failed url=%s error=%s", self._redact_sensitive_text(url), exc)
-            return web.Response(status=502, text=f"proxy failed: {exc}")
+            async with self._proxy_semaphore:
+                async with asyncio.timeout(20):
+                    session, upstream = await self._open_proxy_source(url, upstream_headers)
+                if upstream.status not in {200, 206}:
+                    return web.Response(status=502, text="Upstream media unavailable")
+                headers = {"Content-Type": upstream.headers.get("Content-Type", "application/octet-stream"),
+                    "Cache-Control": "no-store", "Accept-Ranges": upstream.headers.get("Accept-Ranges", "bytes")}
+                for header in ("Content-Length", "Content-Range", "Content-Encoding"):
+                    if upstream.headers.get(header):
+                        headers[header] = upstream.headers[header]
+                response = web.StreamResponse(status=upstream.status, headers=headers)
+                await response.prepare(request)
+                async for chunk in upstream.content.iter_chunked(64 * 1024):
+                    if not self._proxy_source_allowed(url):
+                        response.force_close()
+                        return response
+                    await response.write(chunk)
+                await response.write_eof()
+                return response
+        except NetworkPolicyError:
+            return web.Response(status=403, text="Media destination refused")
+        except (ClientError, TimeoutError, OSError):
+            LOG.warning("audio proxy request failed")
+            if response is not None and response.prepared:
+                response.force_close()
+                return response
+            return web.Response(status=502, text="Media proxy failed")
         finally:
             if upstream is not None:
                 upstream.release()
-            await session.close()
+            if session is not None:
+                await session.close()
 
     async def deezer_root(self, request: web.Request) -> web.Response:
         """Return the synthetic Deezer experiment root payload."""
@@ -2994,43 +3066,88 @@ class HttpApi:
                 return as_milliseconds
         return seconds
 
-    async def event_subscribe(self, request: web.Request) -> web.Response:
-        """Register or renew a UPnP event callback subscription."""
+    @staticmethod
+    def _event_service(value: str) -> str | None:
+        service = SERVICE_ALIASES.get(value.lower())
+        return service if service in {"AVTransport", "RenderingControl", "PlayQueue"} else None
 
-        service = request.match_info.get("service", "")
-        LOG.info(
-            "SUBSCRIBE remote=%s host=%s path=%s service=%s callback=%s timeout=%s",
-            request.remote,
-            request.host,
-            request.path_qs,
-            service,
-            request.headers.get("Callback", ""),
-            request.headers.get("Timeout", ""),
-        )
-        sid = request.headers.get("SID") or f"uuid:{uuid4()}"
-        callback = self._callback_url(request.headers.get("Callback", ""))
-        if callback:
-            self._drop_duplicate_subscribers(callback, service, keep_sid=sid)
-            self.event_subscribers[sid] = EventSubscriber(sid=sid, callback_url=callback, service=service)
-            self._schedule_event_notify((service,))
-        return web.Response(
-            status=200,
-            body=b"",
-            headers={
-                "SID": sid,
-                "TIMEOUT": "Second-1800",
-                "SERVER": "Linux/2.6.21 UPnP/1.0 Linkplay/1.0",
-                "Content-Length": "0",
-            },
-        )
+    @staticmethod
+    def _event_lease(value: str) -> int:
+        value = value or "Second-1800"
+        if value.lower() == "second-infinite":
+            return 1800
+        match = re.fullmatch(r"Second-([0-9]{1,10})", value, re.IGNORECASE)
+        if not match:
+            raise ValueError("Invalid subscription timeout")
+        return max(30, min(1800, int(match[1])))
+
+    def _remove_subscriber(self, sid: str) -> None:
+        subscriber = self.event_subscribers.pop(sid, None)
+        if subscriber and subscriber.task and subscriber.task is not asyncio.current_task():
+            subscriber.task.cancel()
+
+    def _prune_expired_subscribers(self) -> None:
+        now = self._event_clock()
+        for sid, subscriber in list(self.event_subscribers.items()):
+            if subscriber.expires_at <= now:
+                self._remove_subscriber(sid)
+
+    async def event_subscribe(self, request: web.Request) -> web.Response:
+        """Validate new subscriptions or renew a same-peer service lease."""
+        service = self._event_service(request.match_info.get("service", ""))
+        if service is None:
+            return web.Response(status=404)
+        self._prune_expired_subscribers()
+        peer = request.remote or ""
+        sid = request.headers.get("SID", "")
+        callback = request.headers.get("CALLBACK", "")
+        nt = request.headers.get("NT", "")
+        try:
+            lease = self._event_lease(request.headers.get("TIMEOUT", ""))
+        except ValueError:
+            return web.Response(status=400)
+        if sid:
+            if callback or nt:
+                return web.Response(status=400)
+            subscriber = self.event_subscribers.get(sid)
+            if subscriber is None or subscriber.peer_ip != peer or subscriber.service != service:
+                return web.Response(status=412)
+            subscriber.expires_at = self._event_clock() + lease
+        else:
+            if nt.lower() != "upnp:event" or not callback:
+                return web.Response(status=400)
+            try:
+                callback = validate_callback_url(callback, peer)
+            except NetworkPolicyError:
+                return web.Response(status=412)
+            subscriber = next((item for item in self.event_subscribers.values()
+                if item.peer_ip == peer and item.service == service and item.callback_url == callback), None)
+            if subscriber is None:
+                if len(self.event_subscribers) >= self._event_limit_total or sum(item.peer_ip == peer for item in self.event_subscribers.values()) >= self._event_limit_peer:
+                    return web.Response(status=503)
+                sid = f"uuid:{uuid4()}"
+                subscriber = EventSubscriber(sid=sid, callback_url=callback, service=service,
+                    peer_ip=peer, expires_at=self._event_clock() + lease)
+                self.event_subscribers[sid] = subscriber
+            else:
+                sid = subscriber.sid
+                subscriber.expires_at = self._event_clock() + lease
+            self._schedule_subscriber_notify(subscriber)
+        return web.Response(status=200, body=b"", headers={"SID": sid,
+            "TIMEOUT": f"Second-{lease}", "SERVER": "Linux UPnP/1.0 OpenRoomRenderer/0.1"})
 
     async def event_unsubscribe(self, request: web.Request) -> web.Response:
-        """Remove a UPnP event callback subscription."""
-
-        LOG.info("UNSUBSCRIBE remote=%s host=%s path=%s sid=%s", request.remote, request.host, request.path_qs, request.headers.get("SID", ""))
+        service = self._event_service(request.match_info.get("service", ""))
+        if service is None:
+            return web.Response(status=404)
+        self._prune_expired_subscribers()
         sid = request.headers.get("SID", "")
-        if sid:
-            self.event_subscribers.pop(sid, None)
+        if not sid or request.headers.get("CALLBACK") or request.headers.get("NT"):
+            return web.Response(status=400)
+        subscriber = self.event_subscribers.get(sid)
+        if subscriber is None or subscriber.peer_ip != (request.remote or "") or subscriber.service != service:
+            return web.Response(status=412)
+        self._remove_subscriber(sid)
         return web.Response(status=200)
 
     @staticmethod
@@ -3068,45 +3185,66 @@ class HttpApi:
         return self.state.transport_state
 
     def _schedule_event_notify(self, services: tuple[str, ...] | None = None) -> None:
-        """Schedule asynchronous UPnP NOTIFY calls for matching subscribers."""
-
-        if not self.event_subscribers:
-            return
-        selected = {service.lower() for service in services} if services else set()
+        """Coalesce changes while keeping one ordered delivery task per SID."""
+        self._prune_expired_subscribers()
+        selected = {self._event_service(service) for service in services} if services else set()
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
         for subscriber in list(self.event_subscribers.values()):
-            if selected and subscriber.service.lower() not in selected:
+            if selected and self._event_service(subscriber.service) not in selected:
                 continue
-            loop.create_task(self._notify_event_subscriber(subscriber))
+            self._schedule_subscriber_notify(subscriber)
+
+    def _schedule_subscriber_notify(self, subscriber: EventSubscriber) -> None:
+        subscriber.dirty = True
+        if subscriber.task is None or subscriber.task.done():
+            subscriber.task = asyncio.create_task(self._notify_event_subscriber(subscriber))
+
+    def _subscriber_active(self, subscriber: EventSubscriber) -> bool:
+        return self.event_subscribers.get(subscriber.sid) is subscriber and subscriber.expires_at > self._event_clock()
 
     async def _notify_event_subscriber(self, subscriber: EventSubscriber) -> None:
-        """Send one UPnP event notification to a subscriber callback."""
-
-        body = self._event_body(subscriber.service)
-        seq = subscriber.seq
-        subscriber.seq += 1
-        headers = {
-            "HOST": re.sub(r"^https?://", "", subscriber.callback_url).split("/", 1)[0],
-            "CONTENT-TYPE": 'text/xml; charset="utf-8"',
-            "NT": "upnp:event",
-            "NTS": "upnp:propchange",
-            "SID": subscriber.sid,
-            "SEQ": str(seq),
-        }
+        """Retry transient failures within the lease, without redirects or reordering."""
+        failures = 0
         try:
-            timeout = ClientTimeout(total=1.5)
-            async with ClientSession(timeout=timeout) as session:
-                async with session.request("NOTIFY", subscriber.callback_url, data=body.encode("utf-8"), headers=headers) as response:
-                    await response.read()
-                    LOG.info("NOTIFY service=%s sid=%s callback=%s status=%s seq=%s", subscriber.service, subscriber.sid, subscriber.callback_url, response.status, seq)
-                    if response.status in {404, 410, 412}:
-                        self.event_subscribers.pop(subscriber.sid, None)
-                        LOG.info("dropped rejected event subscriber service=%s sid=%s status=%s", subscriber.service, subscriber.sid, response.status)
-        except (ClientError, TimeoutError, OSError) as exc:
-            LOG.info("NOTIFY failed service=%s sid=%s callback=%s error=%s", subscriber.service, subscriber.sid, subscriber.callback_url, exc)
+            while self._subscriber_active(subscriber) and (subscriber.dirty or failures):
+                if not failures:
+                    subscriber.dirty = False
+                    body = self._event_body(subscriber.service)
+                headers = {"CONTENT-TYPE": 'text/xml; charset="utf-8"', "NT": "upnp:event",
+                    "NTS": "upnp:propchange", "SID": subscriber.sid, "SEQ": str(subscriber.seq)}
+                success = False
+                try:
+                    async with self._event_semaphore:
+                        if not self._subscriber_active(subscriber):
+                            break
+                        remaining = subscriber.expires_at - self._event_clock()
+                        timeout = ClientTimeout(total=min(1.5, remaining))
+                        async with ClientSession(timeout=timeout, trust_env=False) as session:
+                            async with session.request("NOTIFY", subscriber.callback_url, data=body.encode("utf-8"), headers=headers, allow_redirects=False) as response:
+                                await response.content.read(4096)
+                                success = 200 <= response.status < 300
+                                if response.status in {410, 412}:
+                                    self._remove_subscriber(subscriber.sid)
+                                LOG.debug("GENA delivery service=%s status=%s seq=%s", subscriber.service, response.status, subscriber.seq)
+                except (ClientError, TimeoutError, OSError):
+                    pass
+                if not self._subscriber_active(subscriber):
+                    break
+                if success:
+                    subscriber.seq = 1 if subscriber.seq == 0xFFFFFFFF else subscriber.seq + 1
+                    failures = 0
+                else:
+                    failures += 1
+                    delay = min(30.0, self._event_retry_base * 2 ** min(failures - 1, 8))
+                    await asyncio.sleep(min(delay, max(0, subscriber.expires_at - self._event_clock())))
+        finally:
+            if subscriber.expires_at <= self._event_clock():
+                self.event_subscribers.pop(subscriber.sid, None)
+            if subscriber.task is asyncio.current_task():
+                subscriber.task = None
 
     def _event_body(self, service: str) -> str:
         """Build the XML propertyset body for a UPnP event service."""
@@ -3117,7 +3255,7 @@ class HttpApi:
             last_change = (
                 '<Event xmlns="urn:schemas-upnp-org:metadata-1-0/RCS/">'
                 '<InstanceID val="0">'
-                f'<Volume channel="Master" val="{escape(str(self.state.volume))}"/>'
+                f'<Volume channel="Master" val="{self._event_attribute(str(self.state.volume))}"/>'
                 f'<Mute channel="Master" val="{"1" if self.state.mute else "0"}"/>'
                 "</InstanceID></Event>"
             )
@@ -3134,7 +3272,7 @@ class HttpApi:
             queue_context = self._build_queue_context() or self.queue_context
             last_change = (
                 '<Event xmlns="urn:schemas-wiimu-com:metadata-1-0/PlayQueue/"><InstanceID val="0">\r\n'
-                f'<CurrentPlayListName val="{escape(self.state.queue.name, quote=True)}"/>\r\n'
+                f'<CurrentPlayListName val="{self._event_attribute(self.state.queue.name)}"/>\r\n'
                 f'<CurrentIndex val="{self.state.queue.index}"/>\r\n'
                 f'<LoopMode val="{self.state.queue.loop}"/>\r\n'
                 '</InstanceID></Event>'
@@ -3168,11 +3306,11 @@ class HttpApi:
             f'<TransportState val="{escape(transport_state)}"/>'
             f'<TransportStatus val="{self.state.transport_status}"/>'
             f'<CurrentTrack val="{self.state.plicurr}"/>'
-            f'<CurrentTrackDuration val="{escape(track_duration)}"/>'
-            f'<CurrentTrackURI val="{escape(track_uri)}"/>'
-            f'<CurrentTrackMetaData val="{escape(metadata, quote=True)}"/>'
-            f'<RelativeTimePosition val="{escape(rel_time)}"/>'
-            f'<A_ARG_TYPE_SeekTarget val="{escape(rel_time)}"/>'
+            f'<CurrentTrackDuration val="{self._event_attribute(track_duration)}"/>'
+            f'<CurrentTrackURI val="{self._event_attribute(track_uri)}"/>'
+            f'<CurrentTrackMetaData val="{self._event_attribute(metadata)}"/>'
+            f'<RelativeTimePosition val="{self._event_attribute(rel_time)}"/>'
+            f'<A_ARG_TYPE_SeekTarget val="{self._event_attribute(rel_time)}"/>'
             '<CurrentTransportActions val="Play,Stop,Pause,Seek,Next,Previous"/>'
             f'<PlaybackStorageMedium val="{escape(self.state.play_medium or "NETWORK")}"/>'
             "</InstanceID></Event>"
@@ -3195,12 +3333,23 @@ class HttpApi:
         )
 
     @staticmethod
+    def _event_attribute(value: str) -> str:
+        """Keep XML attribute whitespace distinct through both XML layers."""
+        return escape(value, quote=True).replace("\r", "&#13;").replace("\n", "&#10;").replace("\t", "&#9;")
+
+    @staticmethod
     def _event_propertyset(properties: dict[str, str]) -> str:
         """Wrap event property values in a UPnP event propertyset."""
 
         items = ["<?xml version=\"1.0\" encoding=\"utf-8\"?>", '<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">']
         for key, value in properties.items():
-            items.append(f"<e:property><{key}>{escape(value)}</{key}></e:property>")
+            # XML 1.0 cannot represent these code points, even as references.
+            # Preserve ordinary Unicode/music text; replace only invalid XML.
+            value = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]", "\ufffd", value)
+            if key == "LastChange":
+                value = value.replace(" />", "/>").replace("/><", "/>\r\n<")
+            encoded = escape(value).replace("\r", "&#13;")
+            items.append(f"<e:property><{key}>{encoded}</{key}></e:property>")
         items.append("</e:propertyset>")
         return "".join(items)
 

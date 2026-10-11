@@ -59,6 +59,8 @@ plex_user_info_mode: "not_login"
 enable_stream_service_sentinels: false
 
 proxy_on_demand_audio: false
+# Exact LAN media hosts only; loopback/metadata destinations stay forbidden.
+proxy_allowed_lan_hosts: []
 range_seek_reload: false
 channel_balance: "0.0"
 

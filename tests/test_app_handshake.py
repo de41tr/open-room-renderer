@@ -1,4 +1,5 @@
 """INTEGRATION/MOCK protocol handshake; synthetic discovery, no Android app."""
+import asyncio
 import json
 from unittest.mock import AsyncMock
 from html import escape
@@ -31,10 +32,20 @@ async def test_discovery_contract_description_handshake_and_two_track_controls(t
     backend = HandshakeBackend()
     api = HttpApi(cfg, RendererState.from_config(cfg), backend)
     runner = web.AppRunner(api.app())
+    notifications = []
+    async def callback(request):
+        notifications.append((request.headers.get("SID"), await request.text()))
+        return web.Response()
+    callback_app = web.Application()
+    callback_app.router.add_route("NOTIFY", "/events", callback)
+    callback_runner = web.AppRunner(callback_app)
     await runner.setup()
+    await callback_runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
+    callback_site = web.TCPSite(callback_runner, "127.0.0.1", 0)
     try:
         await site.start()
+        await callback_site.start()
         cfg.http_api_port = cfg.upnp_port = site._server.sockets[0].getsockname()[1]
         base = cfg.api_base_url
         discovery = response_packet(cfg, "urn:schemas-upnp-org:device:MediaRenderer:1").decode()
@@ -45,6 +56,21 @@ async def test_discovery_contract_description_handshake_and_two_track_controls(t
         assert mdns[1] == cfg.http_api_port
         assert mdns[3]["uuid"] == "uuid:" + cfg.upnp_uuid
         async with ClientSession() as client:
+            callback_url = f"http://127.0.0.1:{callback_site._server.sockets[0].getsockname()[1]}/events"
+            subscriptions = {}
+            for service in ("AVTransport", "RenderingControl", "PlayQueue"):
+                async with client.request("SUBSCRIBE", base + "/upnp/event/" + service, headers={"NT": "upnp:event", "CALLBACK": f"<{callback_url}>", "TIMEOUT": "Second-60"}) as response:
+                    assert response.status == 200
+                    subscriptions[service] = response.headers["SID"]
+            async def event_matches(service, predicate):
+                async with asyncio.timeout(2):
+                    while True:
+                        for sid, body in reversed(notifications):
+                            if sid == subscriptions[service]:
+                                props = {node.tag: node.text or "" for prop in ET.fromstring(body) for node in prop}
+                                if predicate(props):
+                                    return props
+                        await asyncio.sleep(0.005)
             async with client.get(base + "/description.xml") as response:
                 assert response.status == 200
                 descriptor = ET.fromstring(await response.text())
@@ -87,11 +113,17 @@ async def test_discovery_contract_description_handshake_and_two_track_controls(t
             assert backend.url == second
             position = await soap("GetPositionInfo")
             assert position["Track"] == "2" and position["TrackURI"] == second
+            queue_event = await event_matches("PlayQueue", lambda props: props.get("CurrentIndex") == "2")
+            assert queue_event["TrackURI"] == second and queue_event["Count"] == "2"
+            transport_event = await event_matches("AVTransport", lambda props: '<CurrentTrack val="2"/>' in props.get("LastChange", ""))
+            assert second in transport_event["LastChange"]
             await soap("SetVolume", "<InstanceID>0</InstanceID><Channel>Single</Channel><DesiredVolume>7</DesiredVolume><ControlSource>WiiMApp</ControlSource>", "RenderingControl", "/upnp/rendering")
             await soap("SetMute", "<InstanceID>0</InstanceID><Channel>Master</Channel><DesiredMute>1</DesiredMute>", "RenderingControl")
             assert api.state.volume == 7 and api.state.mute
+            await event_matches("RenderingControl", lambda props: props.get("Volume") == "7" and props.get("Mute") == "1")
             await soap("Stop")
             assert backend.idle
+            await event_matches("AVTransport", lambda props: 'TransportState val="STOPPED"' in props.get("LastChange", "") and second in props.get("LastChange", ""))
             async with client.get(base + "/httpapi.asp", params={"command": "getPlayerStatusEx"}) as response:
                 status = await response.json()
             assert status["status"] == "stop" and status["plicurr"] == "2"
@@ -104,6 +136,10 @@ async def test_discovery_contract_description_handshake_and_two_track_controls(t
             assert list(MdnsAdvertiser(cfg)._services())[0][2] == "Café Room"
             renamed = await soap("GetControlDeviceInfo", service="RenderingControl")
             assert json.loads(renamed["Status"])["DeviceName"] == "Café Room"
+            for service, sid in subscriptions.items():
+                async with client.request("UNSUBSCRIBE", base + "/upnp/event/" + service, headers={"SID": sid}) as response:
+                    assert response.status == 200
     finally:
         await runner.cleanup()
+        await callback_runner.cleanup()
     assert api._state_monitor_task is None
