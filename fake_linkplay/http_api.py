@@ -484,7 +484,9 @@ class HttpApi:
         }.get(category, "Station source idle; retry pending")
         if self._station_recovery_task is None or self._station_recovery_task.done():
             recovery.category = category
-            if recovery.attempts >= len(self._station_recovery_delays) and category != "source_stall":
+            # Only a confirmed whole-player idle is already silent. EOF can
+            # leave an active source, just like a stalled open connection.
+            if recovery.attempts >= len(self._station_recovery_delays) and category == "unexpected_idle":
                 self._exhaust_station_recovery(recovery)
             else:
                 self._station_recovery_task = asyncio.create_task(self._retry_station(recovery))
@@ -538,15 +540,14 @@ class HttpApi:
         try:
             while self._station_recovery_is_current(recovery):
                 if recovery.attempts >= len(self._station_recovery_delays):
-                    if recovery.category == "source_stall":
-                        try:
-                            if not await self._silence_exhausted_station(recovery):
-                                return
-                        except (BackendError, OSError, TimeoutError):
-                            if self._station_recovery_owns_selection(recovery):
-                                self._mark_backend_failure()
-                                self.state.last_error = "Backend control failed; playback silence not confirmed"
+                    try:
+                        if not await self._silence_exhausted_station(recovery):
                             return
+                    except (BackendError, OSError, TimeoutError):
+                        if self._station_recovery_owns_selection(recovery):
+                            self._mark_backend_failure()
+                            self.state.last_error = "Backend control failed; playback silence not confirmed"
+                        return
                     self._exhaust_station_recovery(recovery)
                     return
                 await asyncio.sleep(self._station_recovery_delays[recovery.attempts])
@@ -2477,7 +2478,7 @@ class HttpApi:
         await self._load_playback_url(url, generation)
 
     async def _load_playback_url(self, url: str, generation: int, *, recovery: StationRecovery | None = None) -> bool:
-        """Load and confirm audio; False means a stale stall retry was deferred."""
+        """Load and confirm audio; False means a stale recovery was deferred."""
         def current() -> bool:
             return (generation == self.state.generation
                     and (recovery is None or self._station_recovery_is_current(recovery)))
@@ -2535,21 +2536,34 @@ class HttpApi:
                 raise BackendError("Playback command superseded")
             self.state.phase = PlaybackPhase.LOADING
             selected = self.state.queue.current
-            if selected and selected.url == url and selected.resolved_url:
+            station_id = ""
+            resolution_failed = False
+            provenance = selected._radio_station if selected else None
+            refresh_id = (provenance[1] if provenance and provenance[0] == url
+                          and selected.stream_type == "station" and selected.duration == 0
+                          and (recovery is not None or selected._radio_resolution_attempted) else "")
+            if selected and selected.url == url and selected.resolved_url and not refresh_id:
                 direct_url = selected.resolved_url
             else:
                 try:
-                    direct_url = await self._resolve_playback_url(url)
-                except (BackendError, OSError, TimeoutError):
-                    raise SourcePlaybackError("Source resolution failed", "source_resolution") from None
+                    resolution = (await self._resolve_station_id(refresh_id) if refresh_id
+                                  else await self._resolve_playback_url(url))
+                    if isinstance(resolution, RadioResolution):
+                        direct_url, station_id = resolution.url, resolution.station_id
+                    else:
+                        direct_url = resolution
+                except (RadioResolutionError, BackendError, OSError, TimeoutError):
+                    # A source can resume while even a failed refresh yields.
+                    # Recheck it under the same mutation fence before charging
+                    # this attempt or publishing terminal failure.
+                    direct_url = ""
+                    resolution_failed = True
             if not current():
                 raise BackendError("Playback command superseded")
-            playback_url = self._backend_playback_url(url, direct_url)
-            mpv_options = self._mpv_playback_options(url, direct_url)
             async with self._backend_lock:
                 if not current():
                     raise BackendError("Playback command superseded")
-                if recovery is not None and recovery.category == "source_stall":
+                if recovery is not None:
                     # Resolution and lock acquisition can both yield. Recheck
                     # progress at the mutation boundary, not only at backoff.
                     snapshot = await self.mpv.snapshot()
@@ -2558,19 +2572,42 @@ class HttpApi:
                     if snapshot.get("backend-error"):
                         raise BackendError("Backend control failed before recovery load")
                     self.state.phase = PlaybackPhase.BUFFERING
+                    if self._station_source_has_audio(recovery, snapshot):
+                        self._apply_backend_snapshot(snapshot)
+                        self.state.last_error = ""
+                        self._schedule_event_notify()
+                        return False
                     if not self._station_stall_retry_needed(recovery, snapshot):
                         return False
                     self.state.phase = PlaybackPhase.LOADING
+                if resolution_failed:
+                    raise SourcePlaybackError("Source resolution failed", "source_resolution") from None
+                if station_id and selected and not selected.stream_type and selected.duration == 0:
+                    # The successful resolver result proves this is live radio
+                    # before optional finite-media backend routing is chosen.
+                    selected.stream_type = "station"
+                    self.queue_stream_type = "station"
+                    self.queue_is_live = True
+                    self.state.play_medium = "RADIO-NETWORK"
+                    self.state.totlen = 0
+                playback_url = self._backend_playback_url(url, direct_url)
+                mpv_options = self._mpv_playback_options(url, direct_url)
                 if recovery is not None:
                     self._station_recovery_loading = True
                 try:
                     load_identity = (self.state.backend_url, self.state.backend_original_url)
                     load_attempted = True
+                    if selected and (station_id or provenance and provenance[0] == url):
+                        # Only entering the guarded mutation consumes the
+                        # initially materialized target, even if ACK fails.
+                        selected._radio_resolution_attempted = True
                     await self._gain_reconciling_call(self.mpv.loadfile(playback_url, mpv_options))
                     # Record actual backend identity even if a newer owner
                     # command arrived during the bounded, locked mutation.
                     self.state.backend_url = playback_url
                     self.state.backend_original_url = url
+                    if recovery is not None:
+                        recovery.backend_url = playback_url
                     self._native_output_uncertain = False
                     load_identity = (playback_url, url)
                     self._playback_offset_sec = 0
@@ -2587,6 +2624,10 @@ class HttpApi:
             selected = self.state.queue.current
             if selected and selected.url == url:
                 selected.resolved_url = direct_url
+                if station_id:
+                    selected._radio_station = (url, station_id)
+                self.queue_resolved_url = direct_url
+                self.queue_context = serialize_queue_context(self.state.queue)
                 if not selected.metadata:
                     self.state.track_metadata = self._didl_metadata(
                         direct_url, self.state.title, self.queue_source, self.queue_pic_url,
@@ -2731,12 +2772,12 @@ class HttpApi:
     async def _resolve_station_id(self, station_id: str) -> RadioResolution:
         return await resolve_station(station_id)
 
-    async def _resolve_playback_url(self, url: str) -> str:
+    async def _resolve_playback_url(self, url: str) -> str | RadioResolution:
         """Resolve recognized public station references, never arbitrary JSON."""
         station_id = self._radio_station_from_url(url)
         if station_id:
             try:
-                return (await self._resolve_station_id(station_id)).url
+                return await self._resolve_station_id(station_id)
             except RadioResolutionError:
                 raise BackendError("Public station resolution failed") from None
         try:
@@ -2774,6 +2815,7 @@ class HttpApi:
             stream_type="station", content_type=queue.content_type or result.content_type,
             duration=0,
         )]
+        queue.items[0]._radio_station = (result.url, station_id)
         queue.index = 1
         await self._replace_queue(queue)
 

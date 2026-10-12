@@ -43,6 +43,10 @@ class QueueItem:
     artist: str = ""
     album: str = ""
     title_is_fallback: bool = False
+    # Local resolver provenance. Never parsed from or emitted into queue XML;
+    # provider names, IDs and search URLs cannot authorize a refresh.
+    _radio_station: tuple[str, str] | None = field(default=None, init=False, repr=False)
+    _radio_resolution_attempted: bool = field(default=False, init=False, repr=False)
 
 
 @dataclass(frozen=True)

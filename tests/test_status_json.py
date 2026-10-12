@@ -475,7 +475,7 @@ async def test_tunein_create_queue_resolves_station_and_preserves_provider_metad
 
 
 @pytest.mark.asyncio
-async def test_play_after_stop_reloads_existing_queue_url() -> None:
+async def test_play_after_stop_refreshes_existing_public_station() -> None:
     api = make_api()
     direct_url = "https://media.example.test/station.mp3"
     context = (
@@ -493,7 +493,8 @@ async def test_play_after_stop_reloads_existing_queue_url() -> None:
     assert api.mpv.loaded_url == direct_url
     assert api.state.status == "play"
     assert api.state.track_source == "newTuneIn"
-    api._resolve_station_id.assert_awaited_once_with("s12345")
+    assert api._resolve_station_id.await_count == 2
+    assert all(call.args == ("s12345",) for call in api._resolve_station_id.await_args_list)
 
 
 @pytest.mark.asyncio

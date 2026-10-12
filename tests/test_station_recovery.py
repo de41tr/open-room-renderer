@@ -1,6 +1,6 @@
 """UNIT/MOCK station recovery: source retry never outranks owner transport intent."""
 import asyncio
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -417,7 +417,7 @@ async def test_captured_identity_is_rechecked_before_retry(api, identity_change)
     if identity_change == "queue":
         api.state.queue = PlaybackQueue(name=queue.name, items=list(queue.items), index=1)
     elif identity_change == "item":
-        queue.items[0] = QueueItem(**asdict(queue.items[0]))
+        queue.items[0] = replace(queue.items[0])
     elif identity_change == "index":
         queue.index = 2
     elif identity_change == "url":
