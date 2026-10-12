@@ -200,3 +200,94 @@ def test_tone_fit_rejects_corrupted_source_identity(corruption):
     elif corruption == 'noise':
         values = [random.randrange(-500, 501) for value in values]
     assert sum(abs(value - 500) < 7 for value in tone_amplitudes(values, 440)) / 7 < .8
+
+
+def synthetic_tone(frequency=733, gain=.5, seconds=.7, phase_jumps=()):
+    import math
+    from tools.acceptance_snapcast import RATE
+    return [round(500 * gain * math.sin(2 * math.pi * frequency *
+        (index + sum(jump for start, jump in phase_jumps if index >= start)) / RATE))
+        for index in range(round(seconds * RATE))]
+
+
+@pytest.mark.parametrize('gain', [0, .125, .5, 1])
+@pytest.mark.parametrize('frequency', [440, 733])
+def test_pcm_summary_keeps_existing_gain_and_mute_gates(gain, frequency):
+    from tools.acceptance_snapcast import channel_measurement, assert_channel_measurement
+    value = channel_measurement(synthetic_tone(frequency, gain), frequency, gain)
+    assert_channel_measurement(value, gain, 'synthetic', 0, 0)
+    assert value['tone_windows']['count'] == 7
+    assert len(value['tone_windows']['detail']) == 7
+    assert value['tone_windows']['detail_truncated'] is False
+
+
+def test_two_phase_jumps_remain_a_failure_with_all_window_evidence():
+    from tools.acceptance_snapcast import RATE, channel_measurement, assert_channel_measurement
+    # Same failure shape as ARM's 5/7 result is possible without a gain error.
+    # This synthetic demonstration is not evidence of the original cause.
+    samples = synthetic_tone(phase_jumps=((RATE // 4, 16), (RATE * 9 // 20, 16)))
+    value = channel_measurement(samples, 733, .5)
+    assert abs(value['rms'] - 250 / 2**.5) < 2.5
+    assert abs(value['tone_amplitude'] - 250) < 3.5
+    assert value['tone_window_match_fraction'] == 5 / 7
+    detail = value['tone_windows']['detail']
+    assert [window['index'] for window in detail if not window['matching']] == [2, 4]
+    assert all(window['residual_rms'] > 50 for window in detail if not window['matching'])
+    assert value['longest_zero_run_frames'] < 3
+    with pytest.raises(AssertionError):
+        assert_channel_measurement(value, .5, 'synthetic', 0, 1)
+
+
+@pytest.mark.parametrize('fault', ['gain', 'frequency', 'silence', 'noise', 'dropout', 'mute_leak'])
+def test_pcm_diagnostics_do_not_bypass_any_signal_gate(fault):
+    import random
+    from tools.acceptance_snapcast import RATE, channel_measurement, assert_channel_measurement
+    samples = synthetic_tone(440 if fault == 'frequency' else 733, .25 if fault == 'gain' else .5)
+    gain = .5
+    if fault == 'silence':
+        samples = [0] * len(samples)
+    elif fault == 'noise':
+        rng = random.Random(1)
+        samples = [rng.randrange(-250, 251) for _ in samples]
+    elif fault == 'dropout':
+        samples[RATE // 5:RATE * 2 // 5] = [0] * (RATE // 5)
+    elif fault == 'mute_leak':
+        samples = [0] * len(samples)
+        samples[-1] = 1
+        gain = 0
+    value = channel_measurement(samples, 733, gain)
+    with pytest.raises(AssertionError):
+        assert_channel_measurement(value, gain, 'synthetic', 0, 1)
+    if fault == 'dropout':
+        assert value['longest_zero_run_frames'] >= RATE // 5
+
+
+def test_window_diagnostic_detail_is_bounded_without_discarding_gate_samples():
+    from tools.acceptance_snapcast import channel_measurement, assert_channel_measurement
+    samples = synthetic_tone(seconds=2)
+    # Damage beyond the 16-window diagnostic detail cap still changes the gate.
+    samples[len(samples) * 3 // 4:] = [0] * (len(samples) // 4)
+    value = channel_measurement(samples, 733, .5)
+    assert len(value['tone_windows']['detail']) == 16
+    assert value['tone_windows']['count'] == 20
+    assert value['tone_windows']['detail_truncated'] is True
+    assert value['tone_window_match_fraction'] == .75
+    with pytest.raises(AssertionError):
+        assert_channel_measurement(value, .5, 'synthetic', 0, 1)
+
+
+def test_client_log_diagnostics_allowlist_only_bounded_counts(tmp_path):
+    import json
+    from tools.acceptance_snapcast import client_log_summary
+    path = tmp_path / 'client.log'
+    previous = b'(Stream) No chunks available\n'
+    path.write_bytes(previous + b'private-host SECRET https://example.test?token=SECRET\n'
+        b'(Stream) pShortBuffer->full() && (abs(shortMedian_) > 5): 6\n'
+        b'(Stream) No chunks available\n')
+    summary = client_log_summary(path, len(previous))
+    assert summary['events']['no_chunks'] == 1
+    assert summary['events']['hard_sync_short'] == 1
+    assert 'SECRET' not in json.dumps(summary)
+    assert 'private-host' not in json.dumps(summary)
+    assert client_log_summary(path, 0, limit=30)['tail_truncated'] is True
+    assert client_log_summary(tmp_path / 'absent', 0) == {'available': False}

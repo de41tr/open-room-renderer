@@ -87,7 +87,7 @@ def assert_reconnected_status(state, stream_id, client_ids, group_id, percent):
     assert_measurement_state(state, stream_id, client_ids, {frozenset(client_ids): False}, percent)
 
 
-def tone_amplitudes(samples, frequency):
+def tone_windows(samples, frequency):
     """Fit independent 100 ms tone windows, allowing clock-correction phase jumps.
 
     A single whole-capture projection assumes phase continuity, which Snapclient
@@ -107,9 +107,74 @@ def tone_amplitudes(samples, frequency):
         xc = sum(value * c for value, c in zip(window, cosine))
         xs = sum(value * v for value, v in zip(window, sine))
         real, imag = (xc * ss - xs * cs) / determinant, (xs * cc - xc * cs) / determinant
-        result.append(math.hypot(real, imag))
+        energy = sum(value * value for value in window)
+        result.append({'amplitude': math.hypot(real, imag),
+            'rms': math.sqrt(energy / count),
+            'residual_rms': math.sqrt(max(0, (energy - real * xc - imag * xs) / count)),
+            'phase_radians': math.atan2(real, imag)})
     assert len(result) >= 5, 'Too few complete tone windows'
     return result
+
+
+def tone_amplitudes(samples, frequency):
+    return [window['amplitude'] for window in tone_windows(samples, frequency)]
+
+
+def channel_measurement(samples, frequency, gain):
+    """Calculate all original acceptance quantities plus bounded diagnostics."""
+    windows = tone_windows(samples, frequency)
+    amplitudes = [window['amplitude'] for window in windows]
+    tolerance = max(1.8, gain * 7)
+    matching = [abs(value - 500 * gain) < tolerance for value in amplitudes]
+    longest_zero_run = zero_run = 0
+    for value in samples:
+        zero_run = 0 if value else zero_run + 1
+        longest_zero_run = max(longest_zero_run, zero_run)
+    return {'rms': math.sqrt(sum(value * value for value in samples) / len(samples)),
+        'peak': max(map(abs, samples)), 'nonzero': sum(value != 0 for value in samples),
+        'tone_amplitude': statistics.median(amplitudes),
+        'tone_window_match_fraction': sum(matching) / len(windows),
+        'tone_windows': {'frames_per_window': RATE // 10, 'count': len(windows),
+            'matched': sum(matching), 'min_amplitude': min(amplitudes), 'max_amplitude': max(amplitudes),
+            'detail': [dict(index=index, matching=matching[index], **window)
+                       for index, window in enumerate(windows[:16])],
+            'detail_truncated': len(windows) > 16},
+        'longest_zero_run_frames': longest_zero_run}
+
+
+def assert_channel_measurement(value, gain, label, client, channel):
+    """Keep the gain, source-identity, and exact digital-mute gates unchanged."""
+    if gain == 0:
+        assert value['peak'] == 0 and value['nonzero'] == 0, (label, client, channel, value['peak'])
+    else:
+        assert abs(value['rms'] - 500/math.sqrt(2)*gain) < max(1.1, gain*5), (label, client, channel, value['rms'], gain)
+        assert abs(value['tone_amplitude'] - 500*gain) < max(1.8, gain*7) and value['tone_window_match_fraction'] >= .8, (
+            label, client, channel, value['tone_amplitude'], gain, value['tone_window_match_fraction'])
+
+
+def client_log_summary(path, offset, limit=65536):
+    """Count fixed Snapclient event markers, never publish raw log content.
+
+    These are observed upstream log events, not a diagnosis or a pass gate.
+    Missing markers cannot prove that no corrections or underruns occurred.
+    """
+    markers = {'no_chunks': b'(Stream) No chunks available',
+        'insufficient_frames': b'Not enough frames available, requested frames:',
+        'hard_sync_long': b'pBuffer->full() && (abs(median_) > 2)',
+        'hard_sync_short': b'pShortBuffer->full() && (abs(shortMedian_) > 5)',
+        'hard_sync_mini': b'pMiniBuffer->full() && (abs(pMiniBuffer->mean()) > 50)',
+        'hard_sync_age': b'abs(age > 500)',
+        'output_buffer_exceeds_stream_buffer': b'outputBufferDacTime > bufferMs:'}
+    try:
+        with path.open('rb') as source:
+            end = os.fstat(source.fileno()).st_size
+            source.seek(max(offset, end - limit))
+            data = source.read(limit)
+        return {'bytes_since_capture_start': max(0, end - offset),
+            'tail_truncated': end - offset > limit,
+            'events': {name: data.count(marker) for name, marker in markers.items()}}
+    except OSError:
+        return {'available': False}
 
 
 def ipc_summary(args, response, elapsed):
@@ -182,6 +247,8 @@ filter = *:info
     ipc_commands = deque(maxlen=12)
     ipc_failures = deque(maxlen=12)
     server_identity_verified = False
+    measurement = None
+    measurement_logs = []
     backend, runner, session = None, None, None
     evidence = {'lane': 'REAL_BACKEND/SAME_HOST_SNAPCAST_DIGITAL',
                 'source': 'synthetic 48 kHz signed-16-bit stereo, 440/733 Hz, peak 500',
@@ -279,8 +346,10 @@ filter = *:info
             return json.loads(body) if response.content_type == 'application/json' else body
 
     async def measure(label, gains, *, groups, percent, settle=.8, source_status='playing', upstream_mute=None, upstream_stopped=False):
-        nonlocal phase
+        nonlocal phase, measurement, measurement_logs
         phase = label
+        measurement = {'phase': label, 'pcm': []}
+        measurement_logs = []
         async def checked_state():
             assert all(child.poll() is None for child in processes.values()), 'Owned audio process exited'
             state = await status()
@@ -298,32 +367,39 @@ filter = *:info
         paths = [directory / f'client-{i}.pcm' for i in range(2)]
         offsets = [path.stat().st_size for path in paths]
         assert all(offset % 4 == 0 for offset in offsets)
+        for i in range(2):
+            suffix = '-reconnect' if f'client-{i}-reconnect' in processes else ''
+            log_path = directory / f'client-{i}{suffix}.log'
+            measurement_logs.append((log_path, log_path.stat().st_size))
+        capture_started = time.monotonic()
         await asyncio.sleep(.7)
-        result = []
-        for i, (path, offset, gain) in enumerate(zip(paths, offsets, gains)):
+        # Freeze both file extents before analysis; CPU time spent inspecting
+        # client 0 must not extend client 1's measurement interval.
+        ends = [path.stat().st_size for path in paths]
+        measurement['capture_seconds'] = time.monotonic() - capture_started
+        measurement['captures'] = [{'client_index': i, 'offset_bytes': start, 'end_bytes': end,
+            'captured_bytes': end - start} for i, (start, end) in enumerate(zip(offsets, ends))]
+        captures = []
+        for path, offset, end in zip(paths, offsets, ends):
             with path.open('rb') as pcm:
                 pcm.seek(offset)
-                raw = pcm.read()
+                captures.append(pcm.read(end - offset))
+        result = []
+        for i, (raw, gain) in enumerate(zip(captures, gains)):
+            assert len(raw) % 4 == 0, (label, i, 'Partial stereo frame', len(raw))
             samples = array('h')
             samples.frombytes(raw)
             assert len(samples) >= RATE, (label, i, len(samples))
-            channels = []
-            for channel, hz in enumerate((440, 733)):
-                x = samples[channel::2]
-                rms = math.sqrt(sum(v*v for v in x) / len(x))
-                peak = max(map(abs, x))
-                zeros = sum(v == 0 for v in x)
-                amplitudes = tone_amplitudes(x, hz)
-                amplitude = statistics.median(amplitudes)
-                tolerance = max(1.8, gain * 7)
-                matching = sum(abs(value - 500 * gain) < tolerance for value in amplitudes) / len(amplitudes)
-                if gain == 0:
-                    assert peak == 0 and zeros == len(x), (label, i, channel, peak)
-                else:
-                    assert abs(rms - 500/math.sqrt(2)*gain) < max(1.1, gain*5), (label, i, channel, rms, gain)
-                    assert abs(amplitude - 500*gain) < tolerance and matching >= .8, (label, i, channel, amplitude, gain, matching)
-                channels.append({'rms': rms, 'peak': peak, 'tone_amplitude': amplitude, 'tone_window_match_fraction': matching, 'nonzero': len(x)-zeros})
+            channels = [channel_measurement(samples[channel::2], hz, gain)
+                        for channel, hz in enumerate((440, 733))]
+            measurement['pcm'].append({'client_index': i, 'frames': len(samples)//2,
+                                       'expected_gain': gain, 'channels': channels})
             result.append({'client': client_ids[i], 'frames': len(samples)//2, 'expected_gain': gain, 'channels': channels})
+        # Retain all four channel summaries before evaluating any gate. A
+        # failing first client must not hide a shared upstream signal defect.
+        for i, client in enumerate(result):
+            for channel, value in enumerate(client['channels']):
+                assert_channel_measurement(value, client['expected_gain'], label, i, channel)
         native_after = await native_position() if upstream_mute is not None else None
         if native_before is not None:
             assert native_after > native_before + .3, 'Native source did not advance during PCM capture'
@@ -422,6 +498,10 @@ filter = *:info
         """Publish aggregate allowlisted state only; raw upstream logs stay private."""
         diagnostic = {'phase': phase, 'process_returncodes': {name: child.poll() for name, child in processes.items()},
                       'recent_ipc': list(ipc_commands), 'failed_ipc': list(ipc_failures), 'pcm': []}
+        if measurement is not None:
+            diagnostic['measurement'] = measurement
+            diagnostic['measurement']['client_log_events'] = [client_log_summary(path, offset)
+                                                               for path, offset in measurement_logs]
         for index in range(2):
             path = directory / f'client-{index}.pcm'
             size = path.stat().st_size if path.exists() else 0
