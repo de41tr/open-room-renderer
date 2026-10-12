@@ -7,11 +7,14 @@ Service/backend recreation checks durable favorites and absence of startup audio
 Controlled radio JSON resolution saves a stable reference and recalls a new local
 target after restart; it makes no WAN/provider availability claim. One actual CLI
 stable-ID recall survives slot compaction without a list-before-play lookup.
+A real CLI target repair preserves current playback, takes effect only on explicit
+same-ID recall, and survives restart with its explicit keep-metadata policy.
 """
 from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from copy import deepcopy
 import hashlib
 import json
 import locale
@@ -47,6 +50,17 @@ async def _renderer(library, directory, tracks, urls, receipts, cleanup, control
                  enable_ssdp=False, enable_mdns=False)
     api = HttpApi(cfg, RendererState.from_config(cfg), backend)
 
+    read_body = api.favorites_api._body
+
+    async def observe_body(request):
+        # Observe the production decoder's result without consuming its stream.
+        payload = await read_body(request)
+        if request.method == "PUT":
+            request["fixture_control_record"]["json"] = payload
+        return payload
+
+    api.favorites_api._body = observe_body
+
     async def callback(request):
         properties = {node.tag.rsplit("}", 1)[-1]: node.text or ""
                       for prop in ET.fromstring(await request.text()) for node in prop}
@@ -56,9 +70,13 @@ async def _renderer(library, directory, tracks, urls, receipts, cleanup, control
     @web.middleware
     async def record_control(request, handler):
         if request.path != "/fixture-events":
-            control_requests.append({"method": request.method, "path": request.raw_path,
-                                     "content_length": request.content_length,
-                                     "transfer_encoding": request.headers.get("Transfer-Encoding")})
+            recorded = {"method": request.method, "path": request.raw_path,
+                        "content_length": request.content_length,
+                        "transfer_encoding": request.headers.get("Transfer-Encoding")}
+            if request.method == "PUT":
+                recorded["content_type"] = request.headers.get("Content-Type")
+            request["fixture_control_record"] = recorded
+            control_requests.append(recorded)
         return await handler(request)
 
     app = api.app()
@@ -107,6 +125,23 @@ async def _decoded(backend, url):
         current if (current := sample()) and current["native_id"] == first["native_id"]
         and current["position"] > first["position"] + .08 else None))
     return {**later, "first_position": first["position"]}
+
+
+async def _cli(server, *arguments):
+    root = Path(__file__).resolve().parents[1]
+    child = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "fake_linkplay.cli", "favorites", *arguments,
+        "--host", "127.0.0.1", "--port", str(server.port), cwd=root,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        async with asyncio.timeout(4):
+            stdout, stderr = await child.communicate()
+    finally:
+        if child.returncode is None:
+            child.kill()
+            await child.wait()
+    assert child.returncode == 0 and not stderr, (child.returncode, stdout, stderr)
+    return json.loads(stdout)
 
 
 async def _exercise(library: str, directory: Path) -> dict:
@@ -309,6 +344,69 @@ async def _exercise(library: str, directory: Path) -> dict:
                     "acknowledgement": acknowledgement, "decoded": recalled,
                     "received_favorite_event": True, "child_reaped": process.returncode == 0}
 
+                # Repair the compacted favorite while its OLD target is decoding.
+                # Library edits must not mutate the detached current queue or ask
+                # the backend/resolver to act; only a later explicit recall may.
+                before = await _decoded(backend, urls[1])
+                state_fields = ("generation", "phase", "intent", "current_url", "resolved_url",
+                                "backend_url", "backend_original_url", "title", "artist", "album",
+                                "album_art_uri", "track_metadata", "track_source", "play_medium")
+                state_before = {key: getattr(api.state, key) for key in state_fields}
+                queue, queue_before = api.state.queue, deepcopy(api.state.queue)
+                commands, playlist = list(backend.commands), backend.read_property("playlist")
+                requests_before, resolutions_before = list(requests), list(resolutions)
+                marker = len(control_requests)
+                target_ack = await _cli(server, "set-url", saved["id"], urls[0], "--metadata", "keep")
+                assert target_ack == {"request_acknowledged": True, "favorite_id": saved["id"],
+                                      "metadata": "keep"}
+                target_body = json.dumps({"url": urls[0], "metadata": "keep"}, separators=(",", ":"))
+                target_requests = control_requests[marker:]
+                assert target_requests == [{"method": "PUT", "path": BASE + "/" + saved["id"] + "/target",
+                    "content_length": len(target_body.encode("utf-8")), "transfer_encoding": None,
+                    "content_type": "application/json", "json": {"url": urls[0], "metadata": "keep"}}]
+                continuity = await _decoded(backend, urls[1])
+                assert continuity["native_id"] == before["native_id"]
+                assert continuity["first_position"] >= before["position"]
+                assert continuity["position"] > before["position"]
+                assert backend.commands == commands and backend.read_property("playlist") == playlist
+                assert api.state.queue is queue and api.state.queue == queue_before
+                assert {key: getattr(api.state, key) for key in state_fields} == state_before
+                assert requests == requests_before and resolutions == resolutions_before
+                await wire(server, urls[1])
+                repaired = {**saved, "url": urls[0]}
+                persisted[0] = repaired
+                await listing(server, persisted)
+                repaired_disk = (directory / "state" / "favorites.json").read_bytes()
+                repaired_records = json.loads(repaired_disk)["favorites"]
+                assert repaired_records == [{**stored[0], "url": urls[0]}, stored[1]]
+                assert repaired_disk != disk
+                disk = repaired_disk
+
+                marker = len(control_requests)
+                recall_ack = await _cli(server, "play", saved["id"])
+                assert recall_ack == {"request_acknowledged": True, "favorite_id": saved["id"]}
+                recall_requests = control_requests[marker:]
+                assert recall_requests == [{"method": "POST", "path": BASE + "/" + saved["id"] + "/play",
+                                            "content_length": 0, "transfer_encoding": None}]
+                repaired_playback = await _decoded(backend, urls[0])
+                assert repaired_playback["native_id"] != continuity["native_id"]
+                assert repaired_playback["first_position"] < continuity["position"]
+                recall_loads = [command for command in backend.commands[len(commands):]
+                                if (command.get("name") if isinstance(command, dict) else command[0]) == "loadfile"]
+                assert len(recall_loads) == 1
+                await wire(server, urls[0])
+                assert (directory / "state" / "favorites.json").read_bytes() == disk
+                assert resolutions == resolutions_before
+                evidence["target_repair"] = {"favorite_id": saved["id"], "slot": repaired["slot"],
+                    "name": repaired["name"], "old_url": urls[1], "new_url": urls[0], "metadata_policy": "keep",
+                    "metadata": metadata, "request": target_requests, "acknowledgement": target_ack,
+                    "before": before, "continuity": continuity, "native_mutations_during_edit": 0,
+                    "media_requests_during_edit": 0, "resolver_calls_during_edit": 0,
+                    "state_and_queue_unchanged": True, "same_id_recall_requests": recall_requests,
+                    "recalled": repaired_playback, "explicit_recall_native_loads": len(recall_loads),
+                    "cli_children_reaped": 2,
+                    "stable_identity_and_metadata_on_disk": True}
+
             # Recreate both the real native handle and HttpApi from the same
             # state directory, while the independent media server stays up.
             requests_before = list(requests)
@@ -324,9 +422,12 @@ async def _exercise(library: str, directory: Path) -> dict:
                 evidence["restart"] = {"library_restored": True, "no_automatic_audio": True,
                                        "observed_seconds": api._monitor_interval + .05}
                 assert await http(server, "MCUKeyShortClick:1:1") == "OK"
-                evidence["decoded"].append(await _decoded(backend, urls[1]))
-                await wire(server, urls[1])
+                evidence["decoded"].append(await _decoded(backend, urls[0]))
+                await wire(server, urls[0])
                 await listing(server, persisted)
+                evidence["target_repair"]["restart"] = {"library_restored": True,
+                    "no_automatic_audio": True, "decoded": evidence["decoded"][-1],
+                    "metadata_retained": True, "saved_bytes_unchanged": True}
                 station_target[0] = urls[1]
                 client = pywiim.WiiMClient(host="127.0.0.1", port=server.port, protocol="http",
                     timeout=4, capabilities={"retry_count": 1, "supports_metadata": False,
@@ -380,6 +481,8 @@ def test_real_favorites_client_playback_edits_and_restart(tmp_path):
     assert len(evidence["decoded"]) == 3 and len(evidence["cleanup"]) == 2 and evidence["no_pending_tasks"]
     assert len(evidence["radio"]["decoded"]) == 2 and evidence["radio"]["resolver_calls"] == 2
     assert evidence["stable_id_cli"]["child_reaped"] and evidence["stable_id_cli"]["received_favorite_event"]
+    assert evidence["target_repair"]["cli_children_reaped"] == 2
+    assert evidence["target_repair"]["restart"]["no_automatic_audio"]
     print(json.dumps(evidence, sort_keys=True))
 
 
