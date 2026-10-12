@@ -57,3 +57,8 @@ publish the independently reviewed failed-load cleanup and explicit-interface
 discovery/playback acceptance. The previous clocked run failed calibration,
 so no valid queue-gap measurement exists yet. Keep19:00 UTC stabilization and
 20:00 UTC stop on2026-10-12.
+
+Failed/unready-load cleanup now has independently reviewed same-owner Stop/idle
+confirmation, including observer-error and shutdown. Native nested-playlist
+regression is included in the explicit libmpv CI lane. Continue discovery
+acceptance, valid clocked measurement and bounded long-run stability next.

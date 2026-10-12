@@ -294,7 +294,12 @@ async def test_local_client_backend_failure_is_not_success(
         else:
             await action(argument)
 
-    assert backend.calls[-1][0] == operation
+    if operation == "loadfile":
+        # An unsuccessful acknowledgement may follow an applied load. Cleanup
+        # checks Stop, and must not retry or silently start a different source.
+        assert backend.calls == [("loadfile", MEDIA_URL), ("stop", None)]
+    else:
+        assert backend.calls[-1][0] == operation
     status = await assert_transport(client, expected_state)
     assert status["volume"] == 50
     assert status["mute"] is False
@@ -302,8 +307,9 @@ async def test_local_client_backend_failure_is_not_success(
     assert backend.mute_value is False
     if operation == "loadfile":
         assert status["playback_phase"] == "ERROR"
-        assert status["transport_error"]
-        assert backend.idle
+        assert status["transport_error"] == "Backend control failed"
+        assert status["stream_url"] == MEDIA_URL
+        assert backend.idle and backend.url == ""
 
 
 @pytest.mark.asyncio

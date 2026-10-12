@@ -1,6 +1,6 @@
 # Compatibility matrix
 
-This is scoped evidence, not a product certification. Updated 2026-10-11 UTC.
+This is scoped evidence, not a product certification. Updated 2026-10-12 UTC.
 
 | Area | Evidence | Remaining limit |
 | --- | --- | --- |
@@ -13,7 +13,7 @@ This is scoped evidence, not a product certification. Updated 2026-10-11 UTC.
 | Discovery/identity and app-shaped handshake | UNIT/MOCK discovery + actual local HTTP handshake with fake backend; truthful typed SCPDs | LAN multicast and actual Android app pending |
 | GENA lifecycle/callback safety | Real local subscribe/renew/notify/expiry tests; actual callbacks in REAL_BACKEND/null workflow | Actual Android parser/client pending |
 | Synthetic WAV/MP3/FLAC decode | REAL_BACKEND, mpv null output | No audible/DAC assertion |
-| Linux AArch64 | Native Ubuntu CI: build/dependencies, Unix IPC, null/PCM tests | Not a physical audio board or full native service install |
+| Linux AArch64 | Native Ubuntu CI: build/dependencies, Unix IPC, null/PCM tests | Native isolated installation verified; physical board/service boot untested |
 | Linux ARMv7 / Odroid XU4 | Architectural target | HARDWARE not run |
 | Spotify/TIDAL/AirPlay/Cast/multiroom | Unsupported/deferred | No cloud login or provisioning performed |
 
@@ -36,7 +36,7 @@ provider playback and Android acceptance.
 
 Backend lifecycle has bounded startup/command/teardown and explicit child/socket
 ownership (UNIT/MOCK plus actual subprocess signal delivery). Production Unix
-IPC remains a separate host acceptance requirement. A failed spawn attempt does
+IPC is verified on native x86_64 and AArch64 CI; target-host acceptance remains. A failed spawn attempt does
 not automatically respawn; restart the renderer to retry owned spawning.
 
 Established explicit live stations now have bounded owner-respecting EOF/idle
@@ -53,7 +53,7 @@ Host mixer, acoustic silence, DAC controls and full service reboot remain untest
 Existing PEQ/balance has transactional configuration readback plus measured
 digital PCM cuts, pass filters, stereo balance silence, reload and failed-native-
 candidate retention. Invalid/unimplemented controls fail instead of succeeding.
-Preset library persistence is tested; active EQ replay on restart remains pending.
+Preset library persistence and active EQ replay on fresh backend startup are tested.
 Configuration readback, decoded PCM and physical/acoustic effects remain separate.
 
 The standard Ubuntu x86_64/ARM64 jobs both passed actual production Unix IPC
@@ -100,15 +100,17 @@ HLS, redirects, ICY and first-level M3U/PLS. The container is the canonical queu
 resource; native children retain proven container ownership and final EOF alone
 advances the top-level queue. Entry loading reports BUFFERING and foreign-source
 controls cannot falsely succeed. Nested playlists remain unsupported because
-outer provenance is lost; an inner decoder can remain active after readiness
-failure until stopped. Owner-fenced failure cleanup is being added separately.
+outer provenance is lost. Owner-fenced failed-load cleanup now confirms Stop
+and actual idle before reporting a controlled readiness failure; failed cleanup
+remains explicitly uncertain. Actual nested-M3U decoding and cleanup are tested.
 
 Per-load native options now use named arguments shared by mpv0.37 and0.40,
-avoiding the positional insertion-index change in0.38. Actual0.40 start/options/
-reset and gain checks passed; the new production0.37 case awaits CI. This fixes
+avoiding the positional insertion-index change in0.38. Actual0.40 and native CI0.37 start/options/
+reset and gain checks passed. This fixes
 option transport compatibility, not approximate byte-range timestamp accuracy.
 
 AP16 now has a reviewed clocked digital transition probe with a2ms reported
 tolerance, known-silence calibration and equal/mixed-rate/pause cases. Its first
-native execution is pending; no gapless capability is advertised. A passing
+native run failed calibration; a strict isolated-capture repair is under test.
+No valid gap measurement or gapless capability is advertised. A passing
 measurement test must not be confused with a WITHIN_TOLERANCE audio result.

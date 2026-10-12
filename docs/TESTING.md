@@ -343,3 +343,28 @@ reports bounded aggregate diagnostics. Rewinds are not a proven cause. Strict
 marker counts,125ms calibration and2ms tolerance are unchanged. The exact
 repair snapshot passed1759 default tests with17 explicit native skips. Native
 retry remains pending; do not describe this as gapless playback verification.
+
+## Failed source loads stop only their own active decoder
+
+A failed/unready load or cancellation now performs bounded checked Stop and
+actual idle confirmation when that load may have reached the backend. Resolver
+failures before any load leave old playback untouched. Newer source owners are
+fenced; physical cleanup remains eligible if the same generation's recovery
+token is invalidated or shutdown begins. Failed Stop/readback preserves explicit
+backend-control uncertainty instead of claiming silence or retrying the source.
+
+An actual libmpv nested-M3U fixture demonstrates the original problem: the inner
+MP3 is decoding while outer-source readiness fails. With cleanup the HTTP502
+returns only after confirmed idle and cleared actual identity; a subsequent
+valid source plays. Nested playlist ancestry is still unsupported. Independent
+review covered observer-error, shutdown and newer-owner interleavings.
+
+Rebased exact cleanup snapshot: 1811 passed with real libmpv cases enabled;
+four explicit Unix-IPC/clocked cases skipped locally. The new nested-playlist
+cleanup case is included in the native CI libmpv lane.
+
+Clocked retry run38192155611 passed all preexisting lanes, but the new optional
+audio-parameter diagnostic raced lazy output creation before calibration. A
+bounded optional-metadata sampler now records unavailable values without
+bypassing any strict PCM checks (22 focused tests passed, one native skip).
+The next native run must establish calibration and renderer measurements.

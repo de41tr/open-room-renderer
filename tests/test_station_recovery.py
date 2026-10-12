@@ -583,3 +583,7 @@ async def test_last_listener_shutdown_invalidates_and_drains_recovery(api, stage
     assert api._station_recovery_task is None
     assert api._state_monitor_task is None
     assert loads(api) == [STATION] * (1 if stage == "backoff" else 2)
+    assert api.mpv.idle
+    assert api.state.backend_url == api.state.backend_original_url == ""
+    assert [command for command, _ in api.mpv.calls if command == "stop"] == (
+        [] if stage == "backoff" else ["stop"])

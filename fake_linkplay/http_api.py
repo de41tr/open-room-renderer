@@ -1892,6 +1892,54 @@ class HttpApi:
             return (generation == self.state.generation
                     and (recovery is None or self._station_recovery_is_current(recovery)))
 
+        queue, item, index = self.state.queue, self.state.queue.current, self.state.queue.index
+        load_attempted = False
+        load_identity: tuple[str, str] | None = None
+
+        def owns_selection() -> bool:
+            # Retry eligibility can be revoked by shutdown/control failure
+            # without transferring ownership of an already-applied load.
+            return (generation == self.state.generation
+                    and self.state.intent == "play" and self.state.current_url == url
+                    and self.state.queue is queue and queue.current is item and queue.index == index
+                    and (item is None or item.url == url))
+
+        def owns_load() -> bool:
+            # Native playlist ancestry may be unprovable. Ownership comes from
+            # our serialized mutation, never a permissive native path match.
+            identity = (self.state.backend_url, self.state.backend_original_url)
+            return (load_attempted and owns_selection()
+                    and identity in {load_identity, ("", "")})
+
+        async def silence_failed_load() -> None:
+            if not owns_load():
+                return
+            # Include lock acquisition, Stop acknowledgement and idle readback
+            # in one finite budget. Stay in the caller task, including when its
+            # cancellation interrupted a load that may already have applied.
+            async with asyncio.timeout(3.0), self._backend_lock:
+                if not owns_load():
+                    return
+                if recovery is not None:
+                    self._station_recovery_loading = True
+                try:
+                    await self._backend_call(self.mpv.stop())
+                    # Once Stop is issued, retain the lock until its actual
+                    # result is known. A newer owner may select/accept now but
+                    # cannot mutate the backend until this lock is released.
+                    while True:
+                        snapshot = await self.mpv.snapshot()
+                        if snapshot.get("backend-error"):
+                            raise BackendError("Backend unavailable during playback cleanup")
+                        if snapshot.get("idle-active") is True:
+                            self.state.backend_url = ""
+                            self.state.backend_original_url = ""
+                            return
+                        await asyncio.sleep(0.05)
+                finally:
+                    if recovery is not None:
+                        self._station_recovery_loading = False
+
         try:
             if not current():
                 raise BackendError("Playback command superseded")
@@ -1914,11 +1962,14 @@ class HttpApi:
                 if recovery is not None:
                     self._station_recovery_loading = True
                 try:
+                    load_identity = (self.state.backend_url, self.state.backend_original_url)
+                    load_attempted = True
                     await self._gain_reconciling_call(self.mpv.loadfile(playback_url, mpv_options))
                     # Record actual backend identity even if a newer owner
                     # command arrived during the bounded, locked mutation.
                     self.state.backend_url = playback_url
                     self.state.backend_original_url = url
+                    load_identity = (playback_url, url)
                     self._playback_offset_sec = 0
                     if self.state.current_url == url:
                         self.state.resolved_url = direct_url
@@ -1961,16 +2012,32 @@ class HttpApi:
                 raise SourcePlaybackError("Station source ended during recovery", "source_eof")
             if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING}:
                 raise BackendError("Backend no longer playing")
-        except SourcePlaybackError as exc:
-            if current():
-                LOG.warning("playback failure category=%s generation=%s", exc.category, generation)
-                if recovery is None:
-                    self.state.mark_error(str(exc))
-                    self._schedule_event_notify()
-            raise
-        except (BackendError, OSError, TimeoutError):
-            if current():
-                self._mark_backend_failure()
+        except (BackendError, OSError, TimeoutError, asyncio.CancelledError) as exc:
+            try:
+                await silence_failed_load()
+            except (BackendError, OSError, TimeoutError, asyncio.CancelledError) as cleanup_error:
+                if owns_selection():
+                    self._mark_backend_failure()
+                    self.state.last_error = "Backend control failed; playback silence not confirmed"
+                if isinstance(exc, asyncio.CancelledError):
+                    raise exc
+                if isinstance(cleanup_error, asyncio.CancelledError):
+                    raise
+                raise BackendError("Playback cleanup did not confirm silence") from cleanup_error
+            if owns_selection():
+                if isinstance(exc, SourcePlaybackError):
+                    LOG.warning("playback failure category=%s generation=%s", exc.category, generation)
+                    if recovery is None:
+                        self.state.mark_error(str(exc))
+                        self._schedule_event_notify()
+                elif isinstance(exc, asyncio.CancelledError) or not current():
+                    # An observer may already have diagnosed backend failure
+                    # and cancelled this retry. Cleanup must retain that cause.
+                    if self.state.phase != PlaybackPhase.ERROR:
+                        self.state.mark_error("Playback cancelled before confirmation")
+                        self._schedule_event_notify()
+                elif self.state.phase != PlaybackPhase.ERROR:
+                    self._mark_backend_failure()
             raise
 
     def _backend_playback_url(self, original_url: str, direct_url: str) -> str:

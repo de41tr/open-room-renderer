@@ -29,6 +29,10 @@ class FakeAudioBackend:
             raise BackendError("Synthetic load failure")
         self.url, self.idle = url, False
 
+    async def stop(self):
+        self.calls.append(("stop", None))
+        self.url, self.idle = "", True
+
     async def snapshot(self):
         return {"path": self.url, "idle-active": self.idle, "pause": False,
                 "playback-time": 0, "duration": 120 if self.url else None,
@@ -104,6 +108,11 @@ async def test_failed_backend_preset_does_not_claim_playing(tmp_path):
             assert response.status == 502
         assert api.state.transport_status == "ERROR_OCCURRED"
         assert api.state.status != "play"
+        assert api.state.current_url == SECOND
+        assert api.state.last_error == "Backend control failed"
+        assert api.state.backend_url == api.state.backend_original_url == ""
+        assert backend.idle and backend.url == ""
+        assert backend.calls == [("loadfile", SECOND), ("stop", None)]
 
 
 @pytest.mark.asyncio
@@ -182,7 +191,12 @@ async def test_failed_replacement_keeps_new_selected_target_but_reports_error(tm
         assert api.state.current_url == SECOND
         assert api.state.transport_status == "ERROR_OCCURRED"
         assert api.state.status != "play"
-        assert backend.url == FIRST  # Old actual resource is not relabeled success.
+        # A load error cannot prove that the requested mutation was unapplied.
+        # Checked cleanup silences it without reverting the selected preset.
+        assert backend.idle and backend.url == ""
+        assert api.state.backend_url == api.state.backend_original_url == ""
+        assert api.state.last_error == "Backend control failed"
+        assert backend.calls == [("loadfile", FIRST), ("loadfile", SECOND), ("stop", None)]
 
 
 @pytest.mark.asyncio
