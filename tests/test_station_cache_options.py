@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES
 from fake_linkplay.queue import PlaybackQueue, QueueItem
 from test_station_recovery import api, eof, finish
 from test_station_url_refresh import FIRST, FRESH, select
@@ -11,7 +12,11 @@ from test_station_url_refresh import FIRST, FRESH, select
 SOURCE = "https://radio.example.test/live"
 DIRECT = "https://media.example.test/resolved"
 NEXT = "https://media.example.test/next"
-HISTORY = {"demuxer-max-back-bytes": "0"}
+HISTORY = {"demuxer-max-back-bytes": str(LIVE_STATION_BACK_BYTES), "demuxer-donate-buffer": "no"}
+
+
+def test_live_history_limit_is_positive_and_bounded():
+    assert LIVE_STATION_BACK_BYTES == 1024 * 1024
 
 
 @pytest.mark.parametrize("stream_type,duration,expected", [

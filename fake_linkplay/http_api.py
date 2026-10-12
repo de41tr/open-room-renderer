@@ -36,7 +36,7 @@ from aiohttp import web
 from .capabilities import configured_presets, capability_fields, configured_sources, service_capability
 from .config import Config
 from .log_safety import redact_media_urls
-from .mpv_backend import BackendError, MpvBackend
+from .mpv_backend import LIVE_STATION_HISTORY_OPTIONS, BackendError, MpvBackend
 from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_target, validate_callback_url
 from .radio import RadioResolution, RadioResolutionError, resolve_station
 from .persistence import (AtomicWriteCommittedError, atomic_write_text, encode_active_dsp,
@@ -2750,7 +2750,7 @@ class HttpApi:
         return direct_url
 
     def _mpv_playback_options(self, original_url: str, direct_url: str) -> dict[str, str]:
-        """Keep unused backward history out of explicitly live station loads."""
+        """Bound live history while retaining native timed-metadata transitions."""
         # This helper also checks prospective native successors. Only the
         # canonical current item may supply policy; a resolved URL or stale
         # queue-wide live flag must not classify an unrelated load as radio.
@@ -2759,7 +2759,7 @@ class HttpApi:
                 and item.stream_type == "station" and item.duration == 0):
             # Per-file options reset on the next load. Leave forward buffering,
             # ordinary media seeking and the user's native defaults unchanged.
-            return {"demuxer-max-back-bytes": "0"}
+            return dict(LIVE_STATION_HISTORY_OPTIONS)
         return {}
 
     @staticmethod

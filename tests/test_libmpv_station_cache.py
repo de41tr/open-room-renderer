@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from fake_linkplay.config import Config
+from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES
 from fake_linkplay.http_api import HttpApi, ParsedCommand
 from fake_linkplay.queue import PlaybackQueue, QueueItem
 from fake_linkplay.state import PlaybackPhase, RendererState
@@ -25,7 +26,7 @@ from test_libmpv_integration import _eventually, _write_tone
 from test_libmpv_recovery import _StationBackend
 
 
-CACHE_KEYS = ("demuxer-max-back-bytes", "demuxer-max-bytes", "demuxer-readahead-secs", "cache", "cache-secs")
+CACHE_KEYS = ("demuxer-max-back-bytes", "demuxer-donate-buffer", "demuxer-max-bytes", "demuxer-readahead-secs", "cache", "cache-secs")
 
 
 async def _exercise(library: str, directory: Path) -> dict[str, Any]:
@@ -54,7 +55,7 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
         await api._replace_queue(queue)
         await api._play_queue_index(1, queue.name)
         selected = queue.current
-        station_options = {**defaults, "demuxer-max-back-bytes": 0}
+        station_options = {**defaults, "demuxer-max-back-bytes": LIVE_STATION_BACK_BYTES, "demuxer-donate-buffer": False}
         assert options() == station_options
         assert backend.read_property("option-info/demuxer-max-back-bytes/set-locally") is True
         assert api.state.current_url == api.state.backend_original_url == api.state.backend_url == selected.url

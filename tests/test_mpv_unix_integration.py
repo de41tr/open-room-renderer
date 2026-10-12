@@ -35,6 +35,7 @@ import pytest
 from aiohttp import ClientSession, ClientTimeout, web
 
 from fake_linkplay.config import Config
+from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES
 from fake_linkplay.http_api import HttpApi
 from fake_linkplay.mpv_backend import BackendError, MpvBackend
 from fake_linkplay.state import RendererState
@@ -351,7 +352,7 @@ async def test_real_unix_ipc_controls_queue_eof_and_external_ownership(native_wo
 
                     # Prove the per-file history option also crosses real JSON
                     # IPC, not only the separately tested libmpv node adapter.
-                    cache_keys = ("demuxer-max-back-bytes", "demuxer-max-bytes",
+                    cache_keys = ("demuxer-max-back-bytes", "demuxer-donate-buffer", "demuxer-max-bytes",
                                   "demuxer-readahead-secs", "cache", "cache-secs")
                     defaults = {key: await _property(backend, "options/" + key) for key in cache_keys}
                     assert defaults["demuxer-max-back-bytes"] > 0
@@ -360,7 +361,7 @@ async def test_real_unix_ipc_controls_queue_eof_and_external_ownership(native_wo
                     await soap("PlayQueueWithIndex", "<QueueName>CurrentQueue</QueueName><Index>1</Index>", "PlayQueue")
                     assert await _property(backend, "path") == str(tracks[0])
                     observed = {key: await _property(backend, "options/" + key) for key in cache_keys}
-                    assert observed == {**defaults, "demuxer-max-back-bytes": 0}
+                    assert observed == {**defaults, "demuxer-max-back-bytes": LIVE_STATION_BACK_BYTES, "demuxer-donate-buffer": False}
                     assert await _property(backend, "option-info/demuxer-max-back-bytes/set-locally") is True
                     before = await _property(backend, "playback-time")
                     await _eventually("station policy decoded progression", progressing)

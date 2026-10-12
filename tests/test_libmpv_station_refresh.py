@@ -21,6 +21,7 @@ import pytest
 from aiohttp import ClientSession, ClientTimeout, web
 
 from fake_linkplay.config import Config
+from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES
 from fake_linkplay.http_api import HttpApi
 from fake_linkplay.queue import QueueItem
 from fake_linkplay.radio import resolve_station
@@ -112,7 +113,8 @@ async def _exercise(library: str, directory: Path, selection: str, staging: bool
             api.state.queue.items.append(QueueItem(str(tracks[1]), duration=2))
             await api.sync_mpv_state()
             assert api._native_stage is None and len(backend.read_property("playlist")) == 1
-            assert backend.read_property("options/demuxer-max-back-bytes") == 0
+            assert backend.read_property("options/demuxer-max-back-bytes") == LIVE_STATION_BACK_BYTES
+            assert backend.read_property("options/demuxer-donate-buffer") is False
             selected, generation = api.state.queue.current, api.state.generation
             canonical = first if selection == "header" else reference
             before = backend.read_property("playback-time")
@@ -136,9 +138,10 @@ async def _exercise(library: str, directory: Path, selection: str, staging: bool
             assert backend.read_property("volume") == pytest.approx(37, abs=.01)
             assert backend.read_property("mute") is True
             if api.state.phase == PlaybackPhase.PLAYING:
-                assert backend.read_property("options/demuxer-max-back-bytes") == 0
+                assert backend.read_property("options/demuxer-max-back-bytes") == LIVE_STATION_BACK_BYTES
+                assert backend.read_property("options/demuxer-donate-buffer") is False
                 assert {key: backend.read_property("options/" + key) for key in cache_defaults} == cache_defaults
-                evidence["station_history_disabled_forward_cache_unchanged"] = True
+                evidence["station_history_bounded_forward_cache_unchanged"] = True
             evidence.update(refreshed_decoded_progress=True, resolver_calls=len(resolutions),
                             renderer_loads=len(backend.loads), retry_attempts=1,
                             old_url_requests=len(fixture.requests), new_url_requests=len(fresh_requests),

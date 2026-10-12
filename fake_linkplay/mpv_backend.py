@@ -21,6 +21,15 @@ from typing import Any
 
 from .log_safety import redact_media_urls
 
+# A finite history preserves mpv's timed ICY transitions. Zero can prune an
+# update before playback observes it. Disable donation so unused forward
+# capacity cannot silently enlarge this backward-history budget.
+LIVE_STATION_BACK_BYTES = 1024 * 1024
+LIVE_STATION_HISTORY_OPTIONS = {
+    "demuxer-max-back-bytes": str(LIVE_STATION_BACK_BYTES),
+    "demuxer-donate-buffer": "no",
+}
+
 LOG = logging.getLogger(__name__)
 
 

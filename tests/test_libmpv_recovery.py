@@ -24,6 +24,7 @@ import pytest
 from aiohttp import ClientSession, ClientTimeout, web
 
 from fake_linkplay.config import Config
+from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES
 from fake_linkplay.http_api import HttpApi
 from fake_linkplay.queue import PlaybackQueue, QueueItem, serialize_queue_context
 from fake_linkplay.state import PlaybackPhase, RendererState
@@ -146,7 +147,8 @@ async def _exercise(library: str, directory: Path, scenario: str) -> dict[str, A
             selected = api.state.queue.current
             assert selected is not None and selected.stream_type == "station" and selected.duration == 0
             assert backend.read_property("current-ao") == "null"
-            assert backend.read_property("options/demuxer-max-back-bytes") == 0
+            assert backend.read_property("options/demuxer-max-back-bytes") == LIVE_STATION_BACK_BYTES
+            assert backend.read_property("options/demuxer-donate-buffer") is False
             assert backend.read_property("path") == station_url
             before = backend.read_property("playback-time")
             await _eventually("initial decoded station progress", lambda: backend.read_property("playback-time") > before + 0.25)
@@ -214,9 +216,10 @@ async def _exercise(library: str, directory: Path, scenario: str) -> dict[str, A
             assert backend.read_property("mute") is True
             assert backend.loads == [station_url] * len(backend.loads)
             if api.state.phase == PlaybackPhase.PLAYING:
-                assert backend.read_property("options/demuxer-max-back-bytes") == 0
+                assert backend.read_property("options/demuxer-max-back-bytes") == LIVE_STATION_BACK_BYTES
+                assert backend.read_property("options/demuxer-donate-buffer") is False
                 assert {key: backend.read_property("options/" + key) for key in cache_defaults} == cache_defaults
-                evidence["station_history_disabled_forward_cache_unchanged"] = True
+                evidence["station_history_bounded_forward_cache_unchanged"] = True
             evidence.update(renderer_loads=len(backend.loads), http_requests=fixture.requests,
                             preserved={"volume": 37, "mute": True, "index": 2},
                             client_status_polls=0)
