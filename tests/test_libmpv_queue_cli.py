@@ -6,6 +6,8 @@ native identity and advancing decoded PCM, with HTTP/SOAP/received GENA agreemen
 Client-only mode, navigation, mute and paused seek commands use the same path.
 Saving that paused queue is a single read-only GET; its private authored file
 restores stopped until an explicit play request selects the saved source.
+Offline append/remove/move preserve that paused source and produce new private
+files; the edited order also restores stopped until explicitly played.
 This optional lane does not certify production Unix IPC, physical audio, shuffle
 traversal or endurance; those have separate tests. No external media is fetched.
 """
@@ -140,8 +142,9 @@ async def _exercise(library: str, directory: Path) -> dict:
                     assert response.status == 200
                     return await response.json()
 
-            async def wire(name, index, phase, mode, loop, marker):
-                url = urls[index - 1]
+            async def wire(name, index, phase, mode, loop, marker, expected_urls=None):
+                wire_urls = urls if expected_urls is None else expected_urls
+                url = wire_urls[index - 1]
                 status = await player_status()
                 http_phase = "PAUSED" if phase == "PAUSED_PLAYBACK" else phase
                 assert (status["plicurr"], status["plicount"], status["loop"], status["uri"],
@@ -155,7 +158,7 @@ async def _exercise(library: str, directory: Path) -> dict:
                 context = (await soap("BrowseQueue", "PlayQueue", ""))["QueueContext"]
                 queue = parse_queue_context(context)
                 assert (queue.name, queue.index, queue.loop) == (name, index, loop)
-                assert [item.url for item in queue.items] == urls, "Canonical order/URL bytes changed"
+                assert [item.url for item in queue.items] == wire_urls, "Canonical order/URL bytes changed"
 
                 def agrees(service, properties):
                     change = _attributes(properties.get("LastChange", "<none/>"))
@@ -170,7 +173,7 @@ async def _exercise(library: str, directory: Path) -> dict:
                     return (properties.get("CurrentIndex") == str(index)
                             and properties.get("LoopMode") == str(loop) and properties.get("TrackURI") == url
                             and (event_queue.name, event_queue.index, event_queue.loop) == (name, index, loop)
-                            and [item.url for item in event_queue.items] == urls)
+                            and [item.url for item in event_queue.items] == wire_urls)
 
                 received = {}
                 for service in ("AVTransport", "PlayQueue"):
@@ -365,6 +368,58 @@ async def _exercise(library: str, directory: Path) -> dict:
                 "file_mode": "0600", "pause_preserved": True, "queue_unchanged": True,
                 "native_mutations": 0, "resolver_calls": 0, "media_requests": 0, "soap_requests": 0}
 
+            # Each offline edit writes a distinct file without touching this
+            # paused renderer or any earlier input. Duplicate A stays explicit;
+            # selected B follows its occurrence through removal and movement.
+            appended, removed, edited = (directory / name for name in (
+                "appended.json", "removed.json", "edited.json"))
+            edited_urls = [urls[2], urls[1], urls[0]]
+            edits = (("append", saved, appended, (urls[0],), [*urls, urls[0]], 2),
+                     ("remove", appended, removed, ("--index", "1"), urls[1:] + urls[:1], 1),
+                     ("move", removed, edited, ("--from-index", "1", "--to-index", "2"), edited_urls, 2))
+            def file_snapshot(path):
+                info = path.stat()
+                return (path.read_bytes(), info.st_dev, info.st_ino, info.st_mode,
+                        info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_nlink)
+
+            unchanged_files, edit_steps = {saved: file_snapshot(saved)}, []
+            request_marker, commands = len(control_requests), len(backend.commands)
+            edit_position = backend.read_property("playback-time")
+            resolutions.clear()
+            api._resolve_playback_url = record_resolution
+            try:
+                for command, source, output, arguments, ordered_urls, selected in edits:
+                    assert not output.exists()
+                    assert await cli("playlist", command, source, output, *arguments, remote=False) == (
+                        "Edited URL playlist saved. Playback was not changed.")
+                    assert all(file_snapshot(path) == snapshot for path, snapshot in unchanged_files.items())
+                    document = {**saved_document, "urls": ordered_urls, "index": selected}
+                    output_bytes = output.read_bytes()
+                    assert decode_playlist(output_bytes) == document
+                    assert output_bytes == (json.dumps(document, ensure_ascii=False,
+                        allow_nan=False, indent=2) + "\n").encode("utf-8")
+                    assert output.stat().st_mode & 0o777 == 0o600
+                    assert control_requests[request_marker:] == [] and not resolutions
+                    assert len(requests) == media_requests and backend.commands[commands:] == []
+                    assert api.state.generation == generation and api.state.queue is queue
+                    assert vars(api.state.queue) == queue_before
+                    assert api.state.intent == "pause" and api.state.phase == PlaybackPhase.PAUSED
+                    assert backend.read_property("playlist") == native_playlist
+                    assert backend.read_property("path") == urls[1] and backend.read_property("pause") is True
+                    edit_after_position = backend.read_property("playback-time")
+                    assert abs(edit_after_position - edit_position) < .03
+                    unchanged_files[output] = file_snapshot(output)
+                    edit_steps.append({"command": command, "count": len(ordered_urls), "index": selected,
+                                       "file_mode": "0600", "input_unchanged": True,
+                                       "canonical_url_bytes_unchanged": True})
+            finally:
+                api._resolve_playback_url = original_resolver
+            edited_bytes = edited.read_bytes()
+            edit_evidence = {"steps": edit_steps, "native_id": native_playlist[0]["id"],
+                "generation": generation, "before_position": edit_position, "after_position": edit_after_position,
+                "pause_preserved": True, "queue_unchanged": True, "http_requests": 0,
+                "native_mutations": 0, "resolver_calls": 0, "media_requests": 0}
+
             playlist = directory / "authored.json"
             await cli("playlist", "create", playlist, "--name", "Authored queue", "--start-index", "3",
                       "--mode", "shuffle-repeat-all", *urls, remote=False)
@@ -420,6 +475,30 @@ async def _exercise(library: str, directory: Path) -> dict:
                 "observed_stopped_seconds": quiet_seconds, "extra_loads_before_play": 0,
                 "explicit_play_loads": 1, "native_id": restored["native_id"],
                 "saved_bytes_unchanged": True}
+
+            # Keep both original authored/saved restore proofs above intact.
+            # The edited order is a separate stopped restore and explicit Play.
+            marker, loads = len(receipts), len(_loads(backend.commands))
+            await cli("playlist", "restore", edited)
+            assert len(_loads(backend.commands)) == loads
+            assert backend.read_property("idle-active") is True and backend.read_property("playlist") == []
+            await wire("Explicit queue", 2, "STOPPED", "NORMAL", 4, marker, expected_urls=edited_urls)
+            await asyncio.sleep(quiet_seconds)
+            assert len(_loads(backend.commands)) == loads
+            assert backend.read_property("idle-active") is True and backend.read_property("playlist") == []
+            assert api.state.phase == PlaybackPhase.STOPPED
+            assert edited.read_bytes() == edited_bytes
+            marker = len(receipts)
+            await cli("playlist", "restore", edited, "--play")
+            edited_restored = await decoded(2)
+            await wire("Explicit queue", 2, "PLAYING", "NORMAL", 4, marker, expected_urls=edited_urls)
+            assert len(_loads(backend.commands)) == loads + 1
+            assert edited_restored["native_id"] not in {entry["native_id"] for entry in evidence["decoded"][:-1]}
+            assert all(file_snapshot(path) == snapshot for path, snapshot in unchanged_files.items())
+            evidence["cases"]["offline_edits_and_restore"] = {**edit_evidence,
+                "restore": {"index": 2, "mode": "normal", "observed_stopped_seconds": quiet_seconds,
+                            "extra_loads_before_play": 0, "explicit_play_loads": 1,
+                            "native_id": edited_restored["native_id"], "all_file_inputs_unchanged": True}}
             # A real CLI Stop also leaves no native playlist that can advance.
             assert await cli("stop") == "OK"
             assert backend.read_property("idle-active") is True and backend.read_property("playlist") == []
@@ -458,8 +537,8 @@ def test_real_queue_cli_and_authored_playlist(tmp_path):
         cwd=root, env=env, text=True, capture_output=True, timeout=20, check=False)
     assert completed.returncode == 0, f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
     evidence = json.loads(completed.stdout)
-    assert evidence["cleanup"]["no_pending_tasks"] and len(evidence["cases"]) == 10
-    assert evidence["cleanup"]["cli_children_reaped"] == 19
+    assert evidence["cleanup"]["no_pending_tasks"] and len(evidence["cases"]) == 11
+    assert evidence["cleanup"]["cli_children_reaped"] == 24
     print(json.dumps(evidence, sort_keys=True))
 
 
