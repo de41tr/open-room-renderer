@@ -509,6 +509,16 @@ bounds. HTTP(S) URL bytes are preserved; whitespace, userinfo and reserved rende
 proxy targets are rejected. Raw CR queue names are rejected because they cannot
 round-trip through the existing server's SOAP acknowledgement.
 
+`playlist import-m3u INPUT OUTPUT --name NAME` is an offline converter into that
+same authored JSON format, with index 1 and normal mode. It accepts only the
+[documented UTF-8 URL-list subset](../GETTING_STARTED.md#multi-track-queues-and-authored-playlists):
+optional exact EXTM3U, simple paired EXTINF (discarded), explicit human comments
+and exact HTTP(S) URL lines. Unknown directives, including HLS and player options,
+fail closed. It neither fetches nor expands remote content, and makes no remote
+playability or valid-boundary truncation claim. An `.m3u8` suffix does not decide
+acceptance. The input, generated JSON and complete SOAP request have independent
+1 MiB limits. Existing output, including aliases of input, cannot be overwritten.
+
 Files require an existing parent directory, private 0600 temporary writes and
 atomic publication. Creation never clobbers an existing destination; overwrite
 requires its explicit flag. Known final symlinks/nonregular files are rejected;

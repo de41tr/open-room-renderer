@@ -5,8 +5,8 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint 3e2455f passed all three jobs, verified at
-   12:31:26 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38248110922
+   Latest completed checkpoint d91140d passed all three jobs, verified at
+   13:19:16 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38252634049
    Python floor uses complete bounded groups on the same runner, preserving the
    3-minute step/8-minute job; both native jobs retain all existing gates.
    The prior 763f7f7 remains failed solely for its floor time budget.
@@ -145,8 +145,7 @@ Both are independently reviewed; final local 3235/69 default checks pass on both
 Python minors, and full native groups 20+43 pass on 0.37/0.40. Verify their hosted
 result after publication. No long runs are active or planned. A browser controller
 is deferred because the isolated fixture could not be reached from the cloud
-browser or a separate shell; this is not proof of a browser policy block. Do not
-retry the policy-denied failed-tab cleanup. Assess useful CLI multi-track queue/
+browser or a separate shell; this is not proof of a browser policy block. Assess useful CLI multi-track queue/
 saved-playlist commands using existing protocol contracts instead of waiting.
 
 11:46 UTC: b69a60a is published and all three hosted jobs passed, verified at
@@ -188,8 +187,8 @@ scheduling repair. Final default suites pass 3674/70; exact 16-command native
 flow passes both 0.37/0.40 with the original 20s bound. No renderer core changes.
 Stable-ID favorite recall is in a separate private candidate; finish independent
 review and short native proof before integrating, and merge its CLI guard with
-the new transport guard. Browser UI remains deferred; do not replace supported
-browser interaction with a shell automation route. No extra multihour tests.
+the new transport guard. Browser UI remains deferred because browser acceptance has not been established.
+No extra multihour tests.
 
 12:53 UTC: transport head 0b6defa is published and hash-verified, but PR head/CI
 still lag at 3e2455f. Parent independently confirmed the mismatch. No blind repush,
@@ -200,3 +199,21 @@ preset-helper extraction separately from the new route/CLI, then native test and
 unchanged-budget third CLI-file partition, then docs. Helper-only baseline passes
 137 focused/native checks. Keep configured IDs explicitly positional within config.
 A strict offline M3U import is being assessed only; browser UI remains deferred.
+
+13:38 UTC: d91140d and all three standard jobs are green; the earlier PR/branch
+lag is resolved without blind retry. Strict offline M3U import passed independent
+review and is running final integrated defaults on both supported Python minors.
+Keep the byte-reader extraction separate; no playback/core change or new native
+sweep is needed for an offline converter. Next high-value investigation is actual
+standard DmrDevice binding, SOAP controls and parsed GENA, which current HTTP
+pywiim acceptance does not exercise. Reproduce before fixing; preserve vendor
+compatibility where intended. Browser UI remains deferred. Stabilization begins
+19:00 UTC; stop active work at 20:00 UTC today.
+
+13:42 UTC: final M3U integration passes 3729/70 defaults on Python 3.12 (180.38s)
+and 3586 +143/70 on Python 3.11 (140.84s/42.23s), all existing caps unchanged.
+Isolated byte-reader extraction passes 202 existing tests. Publish extraction,
+feature/tests and docs separately in one checkpoint, then verify hosted CI.
+The standard-client diagnostic confirmed all three gaps on the unchanged baseline
+in both profiles. A separate private protocol-adapter correction is underway;
+do not fold unreviewed compatibility changes into this offline-file checkpoint.

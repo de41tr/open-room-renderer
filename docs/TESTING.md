@@ -1736,3 +1736,41 @@ At 12:50 UTC the published transport branch 0b6defa was hash-verified, while the
 head ref remained 3e2455f and its new CI was absent. Local success is not a substitute
 for that missing hosted result. Subsequent checkpoints must keep the distinction
 explicit until synchronization and CI actually complete.
+
+
+## Offline M3U URL-list import
+
+`tests/test_playlist_m3u.py` checks the strict pure parser: exact URL bytes/order
+and duplicates, UTF-8/BOM/newline rules, header/EXTINF pairing and duration syntax,
+restricted human comments, directive rejection, and independent input/count
+boundaries. It does not interpret `.m3u8` suffixes or fetch nested content.
+
+`tests/test_playlist_m3u_cli.py` blocks client/session/socket construction during
+in-process imports. It checks validation before temporary-file creation, including
+an invalid last URL, input/JSON byte expansion and full SOAP escaping limits;
+private 0600 output; existing destinations and input aliases; bounded subprocess
+rejection of FIFO, symlink, directory and character-device inputs; private argument
+and I/O failures; and truthful pre/postcommit outcomes. Existing authored JSON
+restore still rejects a BOM and never guesses that an M3U file should be imported.
+
+`tests/test_playlist_m3u_renderer.py` supplies one LOCAL HTTP + MOCK round trip:
+import leaves an active queue/backend untouched, then the separate existing
+restore sends one replacement with the exact imported URLs, index 1/normal,
+and leaves playback stopped without resolving or loading the new media. No new
+native sweep is implied by this file-only converter; existing authored-JSON native
+playback evidence remains separately scoped above. No remote playability, nested
+playlist expansion, universal M3U/HLS support, or detection of source truncation
+at a valid URL boundary is claimed.
+
+Final integrated offline-import defaults pass 3729 tests /70 opt-in skips on
+Python 3.12 (180.38s). The unchanged bounded Python 3.11 recipe passes 3586 +143
+/70 in 140.84s/42.23s. Both retain the existing 32 warnings. The reader-only
+extraction separately passes all 202 existing authored-file/CLI tests (19.90s).
+Production source digest:
+`992efeb75ab56b5763457cb60fc72d5bb80f1d0981a9131feecaca6cff2c2891`.
+
+The preceding d91140d checkpoint passed all three standard jobs, verified at
+13:19:16 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38252634049 .
+That includes the earlier transport changes and resolves the recorded PR/branch
+synchronization lag; 0b6defa still has no observed standalone CI result. This
+new offline-import checkpoint is hosted-verification-pending until observed.

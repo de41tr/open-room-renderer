@@ -423,6 +423,46 @@ already exist. Existing files are preserved unless you explicitly pass
 symlinks and nonregular files are rejected. Keep these files private: URL query
 strings can contain secrets even when usernames/passwords are rejected.
 
+To convert a local M3U URL list into that same JSON format:
+
+```sh
+open-room-renderer playlist import-m3u stations.m3u8 stations.json --name "Stations"
+open-room-renderer playlist restore stations.json
+```
+
+`import-m3u` is an **offline, strict subset** converter. It never fetches media,
+resolves nested playlists, contacts a renderer or starts playback. The new file
+selects index 1 and mode `normal`. The output must not already exist, including
+an alias of the input; this command has no overwrite, play, host, mode or
+format-detection options. Use `restore` separately when you want to replace the
+renderer queue. The same private, atomic file publication rules apply.
+
+Supported input:
+
+- UTF-8, with at most one BOM at the very beginning; LF or CRLF line endings.
+  UTF-16, invalid UTF-8, embedded/repeated BOMs, NUL and bare CR are rejected.
+- 1–1000 absolute HTTP(S) URL lines, with no trimming or normalization. Order,
+  duplicates, percent-escape case, query strings, fragments and Unicode
+  composition are preserved. Relative paths, local schemes, credentials and
+  reserved renderer proxy targets are rejected by the existing queue validator.
+- An optional exact `#EXTM3U` header once, before any entries. With that header,
+  simple `#EXTINF:duration,title` records may precede URLs. Duration must be `-1`
+  or ASCII digits optionally followed by a dot and more digits, such as `0` or
+  `12.5`; attributes, signs other than `-1`, and exponent notation are unsupported.
+  Each record needs one URL; consecutive or orphan records fail. Titles may be
+  empty or contain commas. **Titles and durations are discarded.**
+- Empty lines and human comments consisting of `#` or beginning with `# `.
+  These may also appear between an EXTINF record and its URL. All other hash
+  directives are rejected, including HLS `#EXT-X-*`, `#EXTVLCOPT` and `#KODIPROP`.
+
+A final valid URL does not require a newline. A valid-looking file ending cannot
+prove that the source was not truncated. An `.m3u8` filename or URL suffix alone
+neither proves HLS content nor makes it invalid. Import does not verify remote
+playability, expiration or nested content. Input bytes (including comments and
+metadata), output JSON bytes and the full escaped SOAP request each have an
+independent 1 MiB limit, checked before any output temporary is created. Metadata
+is never silently interpreted as player configuration or authentication options.
+
 `restore` validates the complete file and escaped request before contacting the
 renderer, replaces the queue once, and leaves it stopped unless `--play` is given.
 It is not automatic startup restore. Limits are 1–1000 HTTP(S) URLs, a 1 MiB file,

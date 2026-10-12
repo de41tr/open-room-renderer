@@ -4,40 +4,40 @@ Optimize useful, verified user workflows per hour, not test/commit/line counts.
 All work stays on the autonomous branch and draft PR; no merge or release.
 Stabilization starts 2026-10-12 19:00 UTC; active work ends at 20:00 UTC.
 
-## Current decision (2026-10-12 12:56 UTC)
+## Current decision (2026-10-12 13:38 UTC)
 
-- **COMPLETE locally / CONTINUE hosted verification:** common transport controls
-  are published and stable-ID favorite recall is fully reviewed/tested. Actual
-  native source, mute, paused-seek and compaction evidence establishes useful
-  workflows. PR synchronization remains behind the verified branch; do not label
-  that missing hosted result green, retry writes blindly or change PR state.
-- **CONTINUE:** publish naturally completed stable-ID recall, keeping its tiny
-  existing-helper extraction separate and preserving all old playback logic.
-  The old numeric public-client surface remains distinct from stable managed IDs.
-- **PIVOT:** strict offline M3U URL-list import into existing authored JSON files.
-  It removes manual transcription without fetching media or changing the backend.
-  Estimate 45–60 minutes; reuse existing safe reads/no-clobber writes and complete
-  SOAP-size validation. Reject HLS/player directives instead of ignoring their
-  semantics; disclose discarded EXTINF metadata and the strict subset.
-- **DEFER:** browser controller. Installed executables are not successful supported
-  browser QA. No alternative exposure, permission change or unsupported automation.
-- **DEFER:** extra multihour tests, broad core extraction and provider-account
-  experiments. Hardware remains unavailable; useful software work continues.
+- **COMPLETE:** stable-ID favorite recall and common transport controls now have
+  full standard CI green at d91140d. Branch/PR synchronization is restored. Earlier
+  failed/missing checkpoints retain their original evidence.
+- **CONTINUE:** reviewed strict offline M3U URL-list import, with final integrated
+  defaults passing on both supported Python minors. It avoids manual URL transcription with a small pure parser and
+  unchanged safe file publication/restore. No playback changes or native sweep.
+- **PIVOT next:** reproduce standard DmrDevice interoperability using the installed
+  client. The bounded diagnostic reproduced description, required-argument and
+  event-endpoint failures on the unchanged baseline in both profiles. These
+  block actual standard-client controls/subscriptions. Correct only those
+  confirmed gaps through bounded protocol adapters and unchanged core logic.
+- **DEFER:** per-instance audio-device override. Owned mpv already honors its normal
+  service-account mpv.conf, documented in getting started. A new YAML override
+  mainly helps multiple instances, while attached external mpv needs explicit
+  semantics. This is not a missing basic DAC-selection capability.
+- **DEFER:** browser controller without established acceptance, additional multihour
+  runs, major core decomposition and provider-account experiments. Hardware remains
+  unavailable; useful software work continues.
 
 Priority order: critical regressions/security and green CI; useful new local
 features; targeted low-risk refactoring; special tests only with high information
 value; documentation and later hardware preparation. Existing quality gates stay.
 
-Review next around 14:01–14:31 UTC, or after the next package finishes earlier,
-then about every 90–120 minutes and after major packages. Record value, effort,
-risk and CONTINUE/PIVOT/DEFER; green counts alone are not functional completion.
+Review next after the next major package, or around 15:08–15:38 UTC. Record
+value, effort, risk and CONTINUE/PIVOT/DEFER; green counts alone are not completion.
 
 ## Open proposals (maximum five)
 
 | Proposal | Category | Value / effort / risk | Next action |
 |---|---|---|---|
-| Hosted verification of completed client checkpoints | A_AUTONOM | Functional work has exact local/native evidence; synchronization is delayed | Monitor PR/CI; publish only naturally completed tested checkpoints with honest pending status. |
-| Offline M3U URL-list import | A_AUTONOM | Avoid manual URL transcription; 45–60min, bounded format/file risk | Implement strict no-network subset using existing authored-file and request validation. |
+| Standard UPnP client interoperability | A_AUTONOM | Three reproduced real-client blockers; 45–60min bounded adapter correction | Preserve red evidence and aliases; review exact typed-control/event acceptance before publication. |
+| Offline M3U URL-list import | A_AUTONOM | Avoid manual transcription; reviewed small parser, bounded file risk | Finish integrated validation, publish and require full standard CI. |
 | Optional local controller page | A_AUTONOM / DEFER | Useful, but installed browsers alone do not establish supported QA | Keep deferred until a supported interaction route is genuinely verified. |
 | Further player-core / eventing decomposition | B_AWAITING_DECISION | Potential maintenance gain; major scope and ownership/timing risk | Defer this round. Present a concrete boundary/migration plan for explicit later decision; do other authorized work meanwhile. |
 | Merge or release | C_APPROVAL_REQUIRED | Distribution decision, not an implementation milestone | Do not act. Requires separate explicit authorization; current instruction prohibits it. Silence is not consent. |

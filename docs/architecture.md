@@ -256,6 +256,7 @@ Experimental:
 The renderer-owned queue and authored-playlist CLI keeps new responsibilities
 outside HttpApi: `queue_client.py` frames and validates existing SOAP operations;
 `playlist_files.py` owns the strict authored format and safe local publication;
+`playlist_m3u.py` decodes the strict offline URL-list subset without I/O;
 `playlist_cli.py` composes validation/file/client steps. `transport_client.py`
 frames existing HTTP controls and checks their bounded acknowledgements. No backend, recovery or
 queue-staging logic moves into these adapters. Live queue export is deliberately

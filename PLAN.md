@@ -155,3 +155,12 @@ and both Python-minor suites pass. Next bounded investigation: easier CLI queue
 load/show/play and explicit saved-playlist restore through existing SOAP actions.
 Defer the controller page until genuine browser verification is available; no
 network exposure, aliases/tunnels, dependency installation or policy bypass.
+
+
+13:38 UTC: stable-ID favorites and transport controls have full standard CI green
+at d91140d. Complete reviewed offline M3U import through final integrated defaults
+and its own publication/CI, keeping its small byte-reader extraction separate.
+Then prioritize a bounded standard UPnP-client reproduction over another local
+convenience: description/SCPD binding, typed SOAP and client-parsed LastChange are
+not covered by the existing HTTP pywiim flow. No new dependency, major player-core
+change, browser workaround or multihour run. Keep 19:00/20:00 UTC boundaries.
