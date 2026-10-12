@@ -150,6 +150,7 @@ async def _exercise_digital_dsp(
             auto_spawn_mpv=False, enable_ssdp=False, enable_mdns=False,
         )
         api = HttpApi(cfg, RendererState.from_config(cfg), backend)
+        await api.initialize_channel_balance()
         runner = web.AppRunner(api.app(), shutdown_timeout=1)
         await runner.setup()
         await web.SockSite(runner, listener).start()

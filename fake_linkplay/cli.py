@@ -101,12 +101,13 @@ async def serve(config_path: str) -> None:
             LOG.warning("backend unavailable at startup; control API will report failures: %s", exc)
         api = HttpApi(cfg, state, mpv)
         try:
-            # Reconcile even zero with an externally managed backend's old
-            # named graph; publish only through the API's confirmed transaction.
+            # Restore the complete active EQ/balance graph, including bypass,
+            # before listeners. Backend load/resume will retry this desired
+            # graph if startup is temporarily unavailable.
             await api.initialize_channel_balance()
         except (BackendError, OSError, ValueError):
-            state.mark_error("Channel balance initialization failed")
-            LOG.warning("could not confirm initial channel balance")
+            state.mark_error("DSP initialization failed")
+            LOG.warning("could not confirm initial active DSP state")
         ports = [cfg.http_api_port]
         if cfg.upnp_port not in ports:
             ports.append(cfg.upnp_port)

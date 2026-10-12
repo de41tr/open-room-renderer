@@ -85,6 +85,12 @@ position is approximate; shifted-range HTTP behavior has synthetic coverage.
 AP14 neutral startup/client ports default to8080 and identity persists. Explicit
 app-compat/port80 is separate; no launcher automatically elevates to root.
 Temporary native installation/import/uninstall and static systemd-unit checks
-passed on x86_64. Native AArch64 installer execution is added to CI, pending its
-first result. Neither that nor existing AArch64 playback CI proves ARMv7 or a
+passed on x86_64. Native AArch64 installer execution passed in
+[run38188925897](https://github.com/de41tr/open-room-renderer/actions/runs/38188925897). Neither that nor existing AArch64 playback CI proves ARMv7 or a
 Pi/XU4/systemd-reboot/DAC deployment. See GETTING_STARTED.md for exact profiles.
+
+AP13 now restores the complete confirmed active EQ/balance/bypass context,
+including before deferred load/resume/unmute. Corrupt saved state fails closed.
+Fresh native-handle digital PCM confirms the tested cut/balance and bypass
+restore; this is not a full-service reboot or acoustic/DAC claim. Explicit mute
+and zero volume remain usable if DSP restoration fails.

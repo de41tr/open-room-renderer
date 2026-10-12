@@ -16,7 +16,7 @@ from typing import Any
 import yaml
 
 from .utils import detect_lan_ip, ensure_dir
-from .persistence import load_gain
+from .persistence import load_active_dsp, load_gain
 
 
 @dataclass(slots=True)
@@ -298,7 +298,10 @@ def load_persistent_runtime_state(cfg: Config) -> None:
             cfg.friendly_name = device_name
             cfg.mdns_instance_name = device_name
     channel_balance_path = directory / "channel_balance"
-    if channel_balance_path.exists():
+    active_dsp = load_active_dsp(directory)
+    if active_dsp is not None:
+        cfg.channel_balance = str(active_dsp["balance"])
+    elif channel_balance_path.exists():
         cfg.channel_balance = sanitize_persistent_text(channel_balance_path.read_text()) or "0.0"
 
 

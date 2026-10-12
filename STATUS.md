@@ -436,3 +436,33 @@ AP10 published as `349a56ccafb707e9ee2052335cdaf439e1c27c31`. Both native jobs
 in [run38188276268](https://github.com/de41tr/open-room-renderer/actions/runs/38188276268)
 passed1590 default tests, seven libmpv cases and two actual Unix IPC cases,
 including observed seek positions before HTTP/SOAP replies.
+
+## AP13 active DSP restore checkpoint
+
+A bounded, versioned active-state file now stores the complete confirmed EQ
+curve, plugin/source/name, bypass and balance. Startup replays the complete
+graph before exposing active settings. Deferred load/resume and output-enabling
+gain reconcile desired DSP before audio can resume; explicit mute/zero remain
+accessible if a saved graph cannot be restored. Corrupt/unknown saved state
+fails closed instead of silently selecting flat output.
+
+Independent review found and resolved four real gaps: unmute after a failed
+restore, stale uncertainty after successful backend replay, malformed legacy
+balance overriding valid complete state, and invalid preset names committing
+before validation. Library-only edits and pre/post-replacement storage failures
+remain distinct from actual confirmed audio settings.
+
+Exact snapshot rebased on the native-install checkpoint: 1692 passed with all
+eight optional libmpv cases enabled; two native Unix IPC cases skipped locally.
+Independent AP13-only review passed1658 default and401 focused tests. Digital
+PCM from fresh Config/API/backend/native handles reproduced the original
+-12dB cut plus half-channel balance (-18.059dB normalized attenuation), including
+deferred first-load restore. Restored bypass retained balance and the cached
+curve/name/source. These are digital sample tests, not acoustic or systemd
+reboot acceptance. The new restore case is added to both native CI jobs.
+
+AP14 is published as `324469c1a8afb72b277735e268e59196edcc6b10`; its
+[run38188925897](https://github.com/de41tr/open-room-renderer/actions/runs/38188925897)
+passed both architectures, including the new real installed-package/identity/
+manifest-uninstall step. This establishes native AArch64 installation evidence,
+not ARMv7, hardware or systemd boot.

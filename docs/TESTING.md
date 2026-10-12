@@ -271,3 +271,17 @@ real isolated package installation/import/config identity/description/uninstall
 on its standard x86_64/AArch64 runners, separately from actual Unix IPC playback.
 ARMv7, systemd boot, physical ALSA/DAC and original Android remain untested.
 AP14 rebased isolated default suite: 1616 passed, nine explicit native skips.
+
+## Active DSP restore
+
+`test_active_dsp_persistence.py` covers strict versioned state, startup/deferred
+restore, output-enabling gain gates, emergency silence, exact-state recovery,
+legacy precedence, name validation and storage/cancellation boundaries.
+`test_libmpv_dsp_restore.py` reconstructs native handles and measures preserved
+cut/balance/bypass from generated low-level PCM; all handles close. It is added
+to CI's explicit libmpv lane. AP13 rebased snapshot: 1692 passed with eight real
+libmpv cases; two production Unix IPC cases skipped locally. Physical gain,
+full process/systemd reboot and hardware remain separate acceptance work.
+
+Native installation CI run38188925897 passed on both x86_64 and AArch64,
+including isolated installed-package import, stable identity and owned uninstall.

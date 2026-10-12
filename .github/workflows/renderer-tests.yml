@@ -63,7 +63,8 @@ jobs:
           export ORR_TEST_LIBMPV_PATH="$(readlink -f "$library")"
           .venv-ci/bin/python -m pytest -q -s \
             tests/test_libmpv_integration.py tests/test_libmpv_gain.py \
-            tests/test_libmpv_dsp.py tests/test_libmpv_recovery.py
+            tests/test_libmpv_dsp.py tests/test_libmpv_recovery.py \
+            tests/test_libmpv_dsp_restore.py
 
       - name: Run explicit production Unix IPC and lifecycle lane
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}

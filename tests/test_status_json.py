@@ -11,6 +11,10 @@ from fake_linkplay.state import RendererState
 
 
 class DummyMpv(MpvBackend):
+    # This lightweight state double bypasses real backend commands entirely.
+    # Real startup/retry graph confirmation is exercised by the DSP peer tests.
+    stage_initial_dsp = None
+
     def __init__(self) -> None:
         super().__init__("/tmp/nonexistent", False)
         self.loaded_url = ""
@@ -22,6 +26,16 @@ class DummyMpv(MpvBackend):
         self.duration = 3600
         self.channel_balance_value = 0.0
         self.peq_bands: list[dict[str, float]] = []
+
+    @property
+    def confirmed_dsp(self):
+        return self.channel_balance_value, self.peq_bands
+
+
+    async def configure_dsp(self, balance, bands):
+        await self.channel_balance(balance)
+        await self.peq(bands)
+
 
     async def snapshot(self):  # type: ignore[override]
         return {
@@ -897,8 +911,8 @@ async def test_out_of_range_volume_does_not_raise_gain() -> None:
 
 
 @pytest.mark.asyncio
-async def test_eq_lv2_bands_are_stored_and_returned() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1")
+async def test_eq_lv2_bands_are_stored_and_returned(tmp_path) -> None:
+    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1", state_dir=str(tmp_path))
     mpv = DummyMpv()
     api = HttpApi(cfg, RendererState.from_config(cfg), mpv)
     command = (

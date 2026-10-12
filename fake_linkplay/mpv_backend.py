@@ -62,6 +62,7 @@ class MpvBackend:
     # This verifies mpv's configured af list, not that an idle player's graph
     # has been accepted by a decoder or produced measured audio samples.
     _dsp_configuration_confirmed: bool = field(default=False, init=False, repr=False)
+    _dsp_managed: bool = field(default=False, init=False, repr=False)
     initial_volume: int = field(default=50, kw_only=True)
     initial_mute: bool = field(default=False, kw_only=True)
 
@@ -90,6 +91,29 @@ class MpvBackend:
     def gain_confirmed(self) -> bool:
         """Whether this backend has completed its own gain readback path."""
         return self._gain_initialized
+
+    @property
+    def confirmed_dsp(self) -> tuple[float, list[dict[str, float]]] | None:
+        """A defensive snapshot only after our complete graph readback."""
+        if not self._dsp_configuration_confirmed:
+            return None
+        return self._channel_balance, self.validate_peq_bands(self._peq_bands or [])
+
+
+    def stage_initial_dsp(self, balance: float, bands: list[dict[str, float]]) -> None:
+        """Stage validated startup intent without advertising backend success.
+
+        Called before listeners or playback. Subsequent loads/resumes must
+        reconcile this complete graph even when the initial backend was absent.
+        """
+        if self._dsp_managed or self._dsp_lock.locked():
+            raise BackendError("Initial DSP has already been staged")
+        candidate_balance = self.validate_channel_balance(balance)
+        candidate_bands = self.validate_peq_bands(bands)
+        self._channel_balance, self._peq_bands = candidate_balance, candidate_bands
+        self._dsp_managed = True
+        self._dsp_configuration_confirmed = False
+
 
     def __post_init__(self) -> None:
         self._desired_volume = max(0, min(100, int(self.initial_volume)))
@@ -354,13 +378,17 @@ class MpvBackend:
                 await self._close_writer(writer, deadline)
 
     async def loadfile(self, url: str, options: dict[str, str] | None = None) -> dict[str, Any]:
-        """Confirm desired gain before every load, then play out of pause."""
+        """Confirm desired DSP and gain before every load, then leave pause."""
 
-        async with self._gain_lock:
-            # External mpv may have restarted or changed since the last load.
-            # Never trust cached initialization when beginning another source.
-            await self._initialize_gain_locked(force=True)
-            return await self._loadfile_locked(url, options)
+        # A single lock order (DSP, then gain) prevents a restored cut from
+        # disappearing between confirmation and the first decoded sample.
+        async with self._dsp_lock:
+            if self._dsp_managed:
+                await self._apply_audio_filter_graph_locked(self._audio_filter_graph())
+            async with self._gain_lock:
+                # External mpv may have restarted or changed since the last load.
+                await self._initialize_gain_locked(force=True)
+                return await self._loadfile_locked(url, options)
 
     async def _loadfile_locked(self, url: str, options: dict[str, str] | None) -> dict[str, Any]:
         """Keep source loading serialized with gain initialization and changes."""
@@ -392,11 +420,14 @@ class MpvBackend:
         await self.checked_command(["set_property", "pause", True])
 
     async def resume(self) -> None:
-        """Confirm the complete desired gain before resuming playback."""
+        """Confirm the complete desired DSP and gain before resuming playback."""
 
-        async with self._gain_lock:
-            await self._initialize_gain_locked(force=True)
-            await self.checked_command(["set_property", "pause", False])
+        async with self._dsp_lock:
+            if self._dsp_managed:
+                await self._apply_audio_filter_graph_locked(self._audio_filter_graph())
+            async with self._gain_lock:
+                await self._initialize_gain_locked(force=True)
+                await self.checked_command(["set_property", "pause", False])
 
     async def stop(self) -> None:
         """Stop the current mpv item."""
@@ -413,6 +444,15 @@ class MpvBackend:
 
         if type(value) is not int or not 0 <= value <= 100:
             raise BackendError("Volume must be an integer from 0 to 100")
+        if value != 0:
+            async with self._dsp_lock:
+                if self._dsp_managed:
+                    await self._apply_audio_filter_graph_locked(self._audio_filter_graph())
+                async with self._gain_lock:
+                    await self._apply_gain_locked(value, self._desired_mute)
+            return
+        # Emergency silence must remain possible when a saved cut cannot be
+        # restored. The complete pair applies zero before any desired unmute.
         async with self._gain_lock:
             await self._apply_gain_locked(value, self._desired_mute)
 
@@ -421,14 +461,25 @@ class MpvBackend:
 
         if type(value) is not bool:
             raise BackendError("Mute must be a boolean")
+        if not value:
+            async with self._dsp_lock:
+                if self._dsp_managed:
+                    await self._apply_audio_filter_graph_locked(self._audio_filter_graph())
+                async with self._gain_lock:
+                    await self._apply_gain_locked(self._desired_volume, value)
+            return
+        # Mute is confirmed before the volume write and cannot enable output.
         async with self._gain_lock:
             await self._apply_gain_locked(self._desired_volume, value)
 
     async def initialize_gain(self) -> None:
         """Apply configured/confirmed gain, including after deferred startup."""
 
-        async with self._gain_lock:
-            await self._initialize_gain_locked()
+        async with self._dsp_lock:
+            if self._dsp_managed:
+                await self._apply_audio_filter_graph_locked(self._audio_filter_graph())
+            async with self._gain_lock:
+                await self._initialize_gain_locked()
 
     async def _initialize_gain_locked(self, *, force: bool = False) -> None:
         if self._gain_initialized and not force:
@@ -471,6 +522,7 @@ class MpvBackend:
 
         candidate = self.validate_channel_balance(value)
         async with self._dsp_lock:
+            self._dsp_managed = True
             bands = self.validate_peq_bands(self._peq_bands if self._peq_bands is not None else [])
             graph = self._build_audio_filter_graph(candidate, bands)
             await self._apply_audio_filter_graph_locked(graph)
@@ -481,10 +533,22 @@ class MpvBackend:
 
         candidate = self.validate_peq_bands(bands)
         async with self._dsp_lock:
+            self._dsp_managed = True
             balance = self.validate_channel_balance(self._channel_balance)
             graph = self._build_audio_filter_graph(balance, candidate)
             await self._apply_audio_filter_graph_locked(graph)
             self._peq_bands = candidate
+
+    async def configure_dsp(self, balance: float, bands: list[dict[str, float]]) -> None:
+        """Apply a complete validated balance/PEQ candidate as one transaction."""
+        candidate_balance = self.validate_channel_balance(balance)
+        candidate_bands = self.validate_peq_bands(bands)
+        async with self._dsp_lock:
+            self._dsp_managed = True
+            graph = self._build_audio_filter_graph(candidate_balance, candidate_bands)
+            await self._apply_audio_filter_graph_locked(graph)
+            self._channel_balance, self._peq_bands = candidate_balance, candidate_bands
+
 
     async def apply_audio_filters(self) -> None:
         """Reconfirm the desired graph without changing gain or source state."""

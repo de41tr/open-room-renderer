@@ -9,7 +9,8 @@
    and independently reviewed (1458 passed with seven real libmpv cases).
    AP10 confirmed-seek work is implemented and independently reviewed, with
    isolated default/native-null validation. Active EQ restore, native install
-   and playlist-source fixes are implemented but still in review/integration.
+   and playlist-source fixes are implemented; AP13 is independently reviewed
+   and its rebased snapshot passed1692 with eight real libmpv cases.
    AP14 installation is independently reviewed and has an isolated1616-pass
    default snapshot; publication adds native installer CI acceptance. Native IPC/ARM64 CI
    passed at the preceding published checkpoint; monitor each new commit's CI.
@@ -32,7 +33,10 @@
    `84d7caeda4f3c4fc823217305fc0a6529735b2a7`; both CI architectures passed.
    AP10 is published as `349a56ccafb707e9ee2052335cdaf439e1c27c31`, with
    native CI run38188276268 passed on both architectures.
-   Preserve active EQ restore, native install, format and log privacy changes.
+   AP14 is published as `324469c1a8afb72b277735e268e59196edcc6b10`;
+   native installation CI run38188925897 passed both architectures.
+   Preserve pending playlist/format, log privacy, clocked-transition measurement
+   and native load-option compatibility changes. Monitor each new CI revision.
 6. Keep production mpv JSON IPC. AF_UNIX is denied in this cloud sandbox; use
    fake-backend tests and optional libmpv/null-output validation with honest scope.
 7. Review all changed files and commit content for private data before publishing;

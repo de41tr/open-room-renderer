@@ -38,7 +38,8 @@ from .config import Config
 from .mpv_backend import BackendError, MpvBackend
 from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_target, validate_callback_url
 from .radio import RadioResolution, RadioResolutionError, resolve_station
-from .persistence import AtomicWriteCommittedError, atomic_write_text, save_gain
+from .persistence import (AtomicWriteCommittedError, atomic_write_text, encode_active_dsp,
+                          load_active_dsp, save_gain, validate_eq_records)
 from .queue import PlaybackQueue, QueueError, QueueItem, parse_didl_metadata, parse_queue_context, serialize_queue_context
 from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
@@ -193,6 +194,8 @@ class HttpApi:
         self._dsp_backend_confirmed = False
         self._dsp_backend_attempted = False
         self._dsp_state_uncertain = False
+        self._dsp_active_confirmed = False
+        self._dsp_library_committed = False
         self.eq_bands_by_plugin: dict[str, list[dict[str, object]]] = {}
         self.eq_source_bands_by_plugin: dict[str, dict[str, list[dict[str, object]]]] = {}
         self.eq_names_by_plugin: dict[str, str] = {}
@@ -209,9 +212,23 @@ class HttpApi:
         self._event_semaphore = asyncio.Semaphore(8)
         self._event_limit_total = 64
         self._event_limit_peer = 8
-        self.cfg.channel_balance = self._normalize_channel_balance(str(cfg.channel_balance))
+        self._pending_dsp_restore = load_active_dsp(cfg.state_dir)
+        desired_balance = (self._pending_dsp_restore["balance"]
+                           if self._pending_dsp_restore is not None else cfg.channel_balance)
+        self.cfg.channel_balance = self._normalize_channel_balance(str(desired_balance))
         # Configuration is desired state until the startup transaction confirms it.
         self.channel_balance = "0.0"
+        # Loading the library never activates it. A separate, strictly validated
+        # owned snapshot supplies restart intent, published only after readback.
+        stage_dsp = getattr(self.mpv, "stage_initial_dsp", None)
+        if callable(stage_dsp):
+            if self._pending_dsp_restore is None:
+                self._pending_dsp_restore = self._active_dsp_snapshot()
+                self._pending_dsp_restore["balance"] = float(self.cfg.channel_balance)
+            desired = self._pending_dsp_restore
+            stage_dsp(desired["balance"], self._snapshot_eq_filters(desired))
+        if self._pending_dsp_restore is not None:
+            self._dsp_state_uncertain = True
         self.device_name_override = ""
         self.plex_client_id = self._load_or_create_plex_client_id()
         self.plex_user_info = self._load_plex_user_info()
@@ -1103,12 +1120,78 @@ class HttpApi:
             self.cfg.default_volume, self.cfg.default_mute = self.state.volume, self.state.mute
 
     async def initialize_channel_balance(self) -> None:
-        """Apply configured startup balance through the same confirmed transaction."""
-        await self._run_dsp_command("setChannelBalance:" + self.cfg.channel_balance)
+        """Restore the complete startup DSP graph before publishing listeners.
+
+        The legacy method name remains for callers. Minimal test backends with
+        no complete-graph hook can initialize balance only when no active state
+        was saved; a saved curve is never silently replaced by that fallback.
+        """
+        if self._pending_dsp_restore is not None:
+            await self._run_dsp_command("__initializeDSP")
+        else:
+            await self._run_dsp_command("setChannelBalance:" + self.cfg.channel_balance)
+
+    def _active_dsp_snapshot(self) -> dict[str, object]:
+        """Only the active context is restart state; inactive caches stay local."""
+        return {
+            "version": 1, "plugin": self.eq_active_plugin_uri,
+            "source": self.eq_active_source_name, "enabled": self.eq_enabled,
+            "name": self._eq_display_name(self.eq_active_plugin_uri, self._active_eq_records()),
+            "balance": float(self.channel_balance), "bands": deepcopy(self._active_eq_records()),
+        }
+
+    @classmethod
+    def _snapshot_eq_filters(cls, snapshot: dict[str, object]) -> list[dict[str, float]]:
+        if not snapshot["enabled"]:
+            return []
+        return [band for band in cls._eq_filter_bands(snapshot["bands"])
+                if band["mode"] in {3.0, 5.0} or abs(band["gain"]) >= 0.01]
+
+    def _publish_restored_dsp(self) -> None:
+        """Advance frontend caches only after the staged complete graph exists."""
+        desired = self._pending_dsp_restore
+        if desired is None:
+            return
+        plugin, source = desired["plugin"], desired["source"]
+        self.eq_active_plugin_uri, self.eq_active_source_name = plugin, source
+        plugins = self.eq_source_bands_by_plugin.setdefault(source, {}) if source else self.eq_bands_by_plugin
+        plugins[plugin] = deepcopy(desired["bands"])
+        self.eq_names_by_plugin[plugin] = desired["name"]
+        self.eq_channel_by_plugin[plugin] = "Stereo"
+        self.eq_enabled = desired["enabled"]
+        self.channel_balance = self._normalize_channel_balance(str(desired["balance"]))
+        self.cfg.channel_balance = self.channel_balance
+        self.eq_current_preset = self._eq_display_name(plugin, plugins[plugin])
+        self._pending_dsp_restore = None
+        self._dsp_active_confirmed = True
+        self._dsp_state_uncertain = False
+
+    def _refresh_restored_dsp(self) -> None:
+        """Reconcile only matching complete backend truth, without new I/O."""
+        desired = self._pending_dsp_restore
+        actual = getattr(self.mpv, "confirmed_dsp", None)
+        if desired is not None:
+            if actual == (desired["balance"], self._snapshot_eq_filters(desired)):
+                self._publish_restored_dsp()
+        elif self._dsp_state_uncertain and self._dsp_active_confirmed:
+            # A failed runtime update may have rolled back onto a graph reset
+            # by external mpv. Load/resume or a checked gain change can later
+            # restore our old desired graph; an unrelated confirmed candidate
+            # must never clear the API's uncertainty about that old state.
+            expected = self._active_dsp_snapshot()
+            if actual == (expected["balance"], self._snapshot_eq_filters(expected)):
+                self._dsp_state_uncertain = False
+
+    def _persist_active_dsp(self) -> None:
+        """Never persist a library-only proposal or a still-unconfirmed restore."""
+        if self._dsp_active_confirmed and not self._dsp_state_uncertain and self._pending_dsp_restore is None:
+            self._require_dsp_readback()
+            atomic_write_text(Path(self.cfg.state_dir) / "active_dsp.json", encode_active_dsp(self._active_dsp_snapshot()))
 
     async def _run_dsp_command(self, name: str) -> dict[str, object] | str:
         """Serialize DSP reads/writes and hide unconfirmed proposals from clients."""
         async with self._dsp_command_lock:
+            self._refresh_restored_dsp()
             fields = (
                 "eq_bands_by_plugin", "eq_source_bands_by_plugin", "eq_names_by_plugin",
                 "eq_channel_by_plugin", "eq_active_plugin_uri", "eq_active_source_name",
@@ -1118,6 +1201,7 @@ class HttpApi:
             old_balance = self.cfg.channel_balance
             self._dsp_backend_confirmed = False
             self._dsp_backend_attempted = False
+            self._dsp_library_committed = False
 
             async def transaction() -> dict[str, object] | str:
                 try:
@@ -1128,7 +1212,8 @@ class HttpApi:
                     # Preserve actual confirmed DSP on a subsequent disk error.
                     # Library-only edits roll back only before file replacement;
                     # a failed directory fsync leaves committed bytes visible.
-                    if not self._dsp_backend_confirmed and not isinstance(exc, AtomicWriteCommittedError):
+                    if (not self._dsp_backend_confirmed and not self._dsp_library_committed
+                            and not isinstance(exc, AtomicWriteCommittedError)):
                         for field, value in before.items():
                             setattr(self, field, value)
                         self.cfg.channel_balance = old_balance
@@ -1153,16 +1238,34 @@ class HttpApi:
 
     async def _execute_dsp_command(self, name: str) -> dict[str, object] | str:
         """Run one EQ/balance command while its transaction lock is held."""
+        if name == "__initializeDSP":
+            desired = self._pending_dsp_restore
+            if desired is None:
+                return "OK"
+            configure = getattr(self.mpv, "configure_dsp", None)
+            if not callable(configure):
+                raise BackendError("Backend cannot restore the complete saved DSP state")
+            self._dsp_backend_attempted = True
+            await self._backend_call(configure(desired["balance"], self._snapshot_eq_filters(desired)))
+            self._dsp_backend_confirmed = True
+            self._publish_restored_dsp()
+            self._persist_active_dsp()
+            return "OK"
+        if self._pending_dsp_restore is not None and not name.startswith(("EQv2GetList:", "EQv2GetNewList:")):
+            raise BackendError("Saved DSP restore is not yet confirmed")
         if name == "getChannelBalance":
             self._require_dsp_readback()
             return self.channel_balance
         if name.startswith("setChannelBalance:"):
             self.channel_balance = self._normalize_channel_balance(name.split(":", 1)[1])
+            encode_active_dsp(self._active_dsp_snapshot())
             self._dsp_backend_attempted = True
             await self._backend_call(self.mpv.channel_balance(float(self.channel_balance)))
             self._dsp_backend_confirmed = True
             self._dsp_state_uncertain = False
+            self._dsp_active_confirmed = True
             self.cfg.channel_balance = self.channel_balance
+            self._persist_active_dsp()
             atomic_write_text(Path(self.cfg.state_dir) / "channel_balance", self.channel_balance + "\n")
             return "OK"
         if name.startswith("EQSetLV2SourceBand:") or name.startswith("EQSetLV2Band:"):
@@ -1241,6 +1344,7 @@ class HttpApi:
     async def _apply_eq_to_mpv(self) -> None:
         """Translate active EQ state into mpv PEQ bands."""
 
+        encode_active_dsp(self._active_dsp_snapshot())
         bands: list[dict[str, float]] = []
         if self.eq_enabled:
             for raw_band in self._active_eq_bands():
@@ -1251,7 +1355,9 @@ class HttpApi:
         await self._backend_call(self.mpv.peq(bands))
         self._dsp_backend_confirmed = True
         self._dsp_state_uncertain = False
+        self._dsp_active_confirmed = True
         self.eq_current_preset = self._eq_display_name(self.eq_active_plugin_uri, self._active_eq_records())
+        self._persist_active_dsp()
 
     def _active_eq_bands(self) -> list[dict[str, float]]:
         """Read exactly the active context; never substitute another cached plugin."""
@@ -1482,6 +1588,8 @@ class HttpApi:
 
     @staticmethod
     def _normalize_eq_preset_name(name: str) -> str:
+        if any(ord(char) < 32 for char in name):
+            raise ValueError("Invalid EQ preset name")
         name = name.strip()
         if name.startswith("{") and name.endswith("}") and "Name=" in name:
             match = re.search(r"(?:^|\{|,\s*)Name=([^,}]+)", name)
@@ -1530,6 +1638,8 @@ class HttpApi:
         if len(encoded.encode("utf-8")) > 1024 * 1024:
             raise ValueError("EQ preset library exceeds its persisted size limit")
         atomic_write_text(Path(self.cfg.state_dir) / "eq_presets.json", encoded)
+        self._dsp_library_committed = True
+        self._persist_active_dsp()
 
     def _delete_eq_preset(self, command: str) -> None:
         payload = self._eq_payload(command, "EQv2Delete:")
@@ -1629,37 +1739,7 @@ class HttpApi:
 
     @staticmethod
     def _validated_eq_records(bands: object, *, require_complete: bool = False) -> list[dict[str, object]]:
-        if not isinstance(bands, list) or len(bands) > 40:
-            raise ValueError("EQBand must contain at most forty parameters")
-        result: list[dict[str, object]] = []
-        seen: set[str] = set()
-        limits = {"freq": (10.0, 24000.0), "gain": (-24.0, 24.0), "q": (0.1, 30.0)}
-        for item in bands:
-            if not isinstance(item, dict) or set(item) != {"param_name", "value"}:
-                raise ValueError("Invalid EQ parameter record")
-            key = item["param_name"]
-            if not isinstance(key, str) or not re.fullmatch(r"[a-j]_(freq|gain|q|mode)", key) or key in seen:
-                raise ValueError("Invalid or duplicate EQ parameter name")
-            raw = item["value"]
-            if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
-                raise ValueError("EQ parameter must be numeric")
-            try:
-                value = float(raw)
-            except (ValueError, OverflowError) as exc:
-                raise ValueError("EQ parameter must be a finite number") from exc
-            if not math.isfinite(value):
-                raise ValueError("EQ parameter must be finite")
-            suffix = key.split("_", 1)[1]
-            if suffix == "mode":
-                if value not in {-1.0, 0.0, 1.0, 2.0, 3.0, 5.0}:
-                    raise ValueError("Unsupported EQ filter mode")
-            elif not limits[suffix][0] <= value <= limits[suffix][1]:
-                raise ValueError("EQ parameter outside supported range")
-            seen.add(key)
-            result.append({"param_name": key, "value": value})
-        if require_complete and len(result) != 40:
-            raise ValueError("Incomplete EQ parameter set")
-        return result
+        return validate_eq_records(bands, require_complete=require_complete)
 
     @staticmethod
     def _reject_eq_constant(value: str) -> object:
@@ -1690,7 +1770,8 @@ class HttpApi:
         return payload
 
     def _require_dsp_readback(self) -> None:
-        if self._dsp_state_uncertain:
+        self._refresh_restored_dsp()
+        if self._dsp_state_uncertain or getattr(self.mpv, "confirmed_dsp", False) is None:
             raise BackendError("Backend DSP state is unconfirmed")
 
     def _eq_display_name(self, plugin: str, bands: list[dict[str, object]]) -> str:

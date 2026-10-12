@@ -30,7 +30,8 @@ recovery flows. AP11 now confirms and persists actual digital gain. AP12 now val
 PCM effects. AP09 preserves canonical and opaque metadata across client surfaces.
 AP10 confirms actual seeks, including pause/resume and stale-command rejection.
 AP14 provides reviewed native installation and stable unprivileged profiles.
-Active EQ restore and native playlist identity are in integration; clocked
-transition measurement follows the local format acceptance work. The
+AP13 restores complete confirmed active DSP, including deferred startup.
+Native playlist identity and log privacy are in integration; clocked transition
+measurement and mpv version-specific load options follow format acceptance. The
 least-privilege public CI lane passed real Unix IPC on x86_64 and ARM64.
 This records progress, not full hardware/app acceptance.
