@@ -101,11 +101,12 @@ def decode_playlist(encoded: bytes) -> dict[str, object]:
     return validate_playlist(payload)
 
 
-def load_playlist(path: str | Path) -> dict[str, object]:
+def read_playlist_bytes(path: str | Path) -> bytes:
     """Bound reads and reject special files without blocking or following links.
 
     Final-component symlinks are rejected. The opened descriptor, rather than a
     racy pathname precheck, determines whether the input is a regular file.
+    Read one extra byte so the format decoder can reject an oversized input.
     """
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
@@ -123,7 +124,12 @@ def load_playlist(path: str | Path) -> dict[str, object]:
     finally:
         if descriptor is not None:
             os.close(descriptor)
-    return decode_playlist(encoded)
+    return encoded
+
+
+def load_playlist(path: str | Path) -> dict[str, object]:
+    """Read and validate the authored JSON format, without accepting a BOM."""
+    return decode_playlist(read_playlist_bytes(path))
 
 
 def _check_overwrite_target(path: Path) -> None:
