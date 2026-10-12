@@ -4,40 +4,34 @@ Optimize useful, verified user workflows per hour, not test/commit/line counts.
 All work stays on the autonomous branch and draft PR; no merge or release.
 Stabilization starts 2026-10-12 19:00 UTC; active work ends at 20:00 UTC.
 
-## Current decision (2026-10-12 17:00 UTC)
+## Final stabilization decision (2026-10-12)
 
-- **COMPLETE:** offline playlist capture/import/edit/restore, stable-ID favorites,
-  explicit target repair and bounded SSDP candidate discovery have full hosted
-  checkpoints. Discovery's actual console/multicast case passes both architectures.
-- **COMPLETE:** legacy endpoint/session isolation has full standard CI green at
-  a7e8d8, verified 16:38 UTC. Valid wire/output behavior and existing redirect
-  rejection are preserved; all prior native gates remain green.
-- **CONTINUE narrowly:** the original-acceptance review found no retained native
-  malformed-audio load failure case. One short null-output failure/explicit-recovery
-  case now passes exact reviewed source on libmpv 0.37/0.40 (15.52s each),
-  within its 45-minute budget from 16:45 UTC. Both final default suites pass;
-  require full hosted CI. This closes a
-  concrete AP07 evidence gap; it is not a new feature or a long-running test.
-  Physical missing-output-device acceptance stays pending.
-- **PIVOT:** final operator-document consistency, acceptance boundaries and clean
-  stabilization. Five concrete documentation errors are corrected without runtime
-  changes. Do not invent cosmetic features or special tests merely to fill time.
-- **DEFER:** DSP CLI, browser UI without established QA, rich bookmarks, per-instance
-  DAC YAML, extra multihour runs and major core/provider work. The remaining choices
-  and hardware plan belong in the final handover, not an unbounded late redesign.
+- **COMPLETE:** the published local workflows, legacy request isolation and final
+  malformed-format/recovery acceptance have full standard CI green at 1d05480,
+  verified at 17:16 UTC. The last addition changed tests, CI wiring and docs; runtime source
+  remains unchanged from a7e8d8. No existing gate or cap was weakened.
+- **COMPLETE:** all 20 original acceptance packages have a scoped review; actual
+  missing observations remain explicit. The required practical constraints, debts,
+  missing features, decisions and later hardware plan are recorded below.
+- **STABILIZE:** from 19:00 UTC, verify the documentation-only final handover, its
+  complete CI and branch/PR/checkout agreement. No further justified low-risk
+  runtime defect emerged. Do not invent a feature or test merely to fill time.
+- **STOP:** active work ends at 20:00 UTC. No automatic continuation, merge, release or
+  provider-account action follows from this record. A later task must establish
+  its own scope; hardware/app availability remains unknown.
 
 Priority order: critical regressions/security and green CI; useful new local
 features; targeted low-risk refactoring; special tests only with high information
 value; documentation and later hardware preparation. Existing quality gates stay.
 
-Review the bounded AP07 result, then during the 19:00 UTC stabilization window. Record value,
-effort, risk and CONTINUE/PIVOT/DEFER; green counts alone are not completion.
+The final review values verified user workflows and explicit limits over counts.
+The remaining proposals below are for later explicit decisions, not unfinished
+permission to extend this autonomous window.
 
 ## Open proposals (maximum five)
 
 | Proposal | Category | Value / effort / risk | Next action |
 |---|---|---|---|
-| Native malformed-media failure/recovery | A_AUTONOM | Reviewed short case and both final default suites pass; production unchanged | Publish after full suites, verify hosted CI; keep missing-device/Unix limits explicit. |
 | Further player-core / eventing decomposition | B_AWAITING_DECISION | Potential maintenance gain; major scope and ownership/timing risk | Defer this round. Present a concrete boundary/migration plan for explicit later decision; do other authorized work meanwhile. |
 | Merge or release | C_APPROVAL_REQUIRED | Distribution decision, not an implementation milestone | Do not act. Requires separate explicit authorization; current instruction prohibits it. Silence is not consent. |
 

@@ -1,6 +1,9 @@
 # Compatibility matrix
 
 This is scoped evidence, not a product certification. Updated 2026-10-12 UTC.
+Application/test checkpoint `1d05480` passed all three standard jobs, verified
+at 17:16 UTC: [recorded CI](https://github.com/de41tr/open-room-renderer/actions/runs/38281381125).
+The final handover update changes documentation only.
 
 | Area | Evidence | Remaining limit |
 | --- | --- | --- |
@@ -654,7 +657,8 @@ and minute/second values 0–59; seek execution and ownership are unchanged.
 
 This is a scoped completion map, not a claim that every original acceptance
 criterion is complete. Software implementation below is unchanged from `a7e8d8`;
-the separately identified malformed-media test extends its acceptance evidence.
+the separately identified malformed-media test extends its acceptance evidence
+and passed both hosted native architectures at 1d05480.
 Physical/original-app acceptance
 and provider-account work remain separate. Detailed commands and evidence are in
 [TESTING.md](TESTING.md); the current verified head is in [STATUS.md](../STATUS.md).

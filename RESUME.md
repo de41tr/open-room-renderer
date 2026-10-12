@@ -1,12 +1,15 @@
-# Resume development
+# Handover and resume boundaries
 
-1. Recheck latest user instructions and UTC time. Stabilization only from
-   2026-10-12 19:00 UTC; stop active work at 20:00 UTC. Do not infer unattended work.
+1. This autonomous work window ends 2026-10-12 20:00 UTC. Formal stabilization
+   starts at 19:00 UTC. After 20:00 UTC, do not resume or continue automatically.
+   Wait for a new explicit task; this file is a handover, not standing authority.
+   Recheck the latest user instructions and UTC time before any later work.
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint a7e8d8 passed all three jobs, verified at
-   16:38 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38277056416
+   Latest completed application/test checkpoint 1d05480 passed all three jobs,
+   verified at 17:16 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38281381125
+   The final handover commit changes documentation only; verify its own CI in PR #1.
    Python floor uses complete bounded groups on the same runner, preserving the
    3-minute step/8-minute job; both native jobs retain all existing gates.
    The prior 763f7f7 remains failed solely for its floor time budget.
@@ -50,11 +53,11 @@
    reproduced: native segment503 EOF and path-before-decoder readiness. Reviewed
    tests-only corrections preserve acceptance. Integrated native replay passes:
    eleven affected cases on both 0.37/0.40. Final publication including the
-   installer floor passed 2368 default tests /62 skips and 274 Python3.11
+   installer floor passed 2368 default tests /62 skips and 274 Python 3.11
    targeted tests.
    The new 2fc8296 hosted result passed all gates.
    The reviewed duplicate saved-gain rejection is locally verified: 2336 default
-   passes /62 skips and 216 Python3.11 focused passes. It changes persistence
+   passes /62 skips and 216 Python 3.11 focused passes. It changes persistence
    only; immutable long-run source/production hashes remain their original ones.
    The actual mpv 0.35.1 audit found missing playlist ancestry: M3U/PLS HTTP
    Play fails 502 under strict ownership. Upstream added it only in 0.37; the
@@ -66,18 +69,18 @@
    admitted-load boundary repair restores owned cleanup; all 47 local native
    cases passed on 0.37/0.40 before the separate terminal-error delta, followed by
    seven affected native passes per version afterward. Final 2682 /65 default and
-   392 Python3.11 focused checks passed. Verify the next hosted result. Keep this failure visible. Atomic rename and
+   392 Python 3.11 focused checks passed. Verify the next hosted result. Keep this failure visible. Atomic rename and
    duplicate EQ-field rejection are separate reviewed changes. Ordinary-load
    terminal-error preservation has its own reviewed correction; root-ACK causal
    ownership now has a reviewed narrow correction. The original unrestricted
    parentless-root guard was rejected: merge-files creates owned EDL. The revised
    guard excludes EDL and retains owned cleanup. Final combined local suites
-   passed 2759 /66 on Python3.11/3.12 and 60 selected libmpv cases on 0.37/0.40
+   passed 2759 /66 on Python 3.11/3.12 and 60 selected libmpv cases on 0.37/0.40
    (47 actual native, 13 unit). Full standard CI must pass before extraction. Keep raw-writer/unpause/Stop
    race, missing-ACK/container/range/restart exclusions explicit. Atomic identity
    creation and coherent cleanup sampling are separately reviewed changes.
    Navigation/action/foreign-observation fixes are integrated and reviewed. Final
-   Python3.12/3.13 default suites passed 2602 /65 skips; Python3.11 focused 435.
+   Python3.12/3.13 default suites passed 2602 /65 skips; Python 3.11 focused 435.
    Native0.37 control/recovery/stall/ownership passed 17; 0.40 targeted cases passed 6.
    Check the new hosted result independently. Stop/Pause intent survives transient
    phases; empty Pause rejects without mutation; action lists remain shared.
@@ -119,7 +122,7 @@ decisions. Existing branch, publication, safety and deadline limits remain.
 
 
 Current functional handoff (10:34 UTC): Repeat One / All is reviewed and integrated.
-Final local default suites passed 2952/67 on Python3.11/3.12; full selected native
+Final local default suites passed 2952/67 on Python 3.11/3.12; full selected native
 lanes passed 61 on 0.37/0.40. Hosted CI passed all three jobs, verified at 10:51:21 UTC. Default
 mode reports 4; explicit 0 now means Repeat All, 1 Repeat One. Keep the documented public
 client dialect and original-app limit. Native staging remains normal-only with
@@ -320,3 +323,23 @@ unclaimed. Final defaults pass 4412/73 on 3.12 (200.58s), 4162+250/73 on 3.11
 Publish test/workflow and docs separately, verify full CI, then continue bounded
 quality work until formal stabilization at 19:00 UTC and stop at 20:00 UTC.
 No main-branch edits, merge or release.
+
+## Final handover record
+
+The final runtime/test source is 1d054809a836eb844fd67fa833c24cccba3dc505, with
+full native x86_64/AArch64 and Python 3.11 CI green in run 38281381125. Runtime
+files remain identical to a7e8d8; digest:
+6abaedb03144f6bd23545300a232c58fb7fc4a9be003e2d8061fbd90cd71d734.
+The malformed-format case passed on both hosted native architectures with
+error -17, cross-surface non-playing state, explicit recovery and all cleanup;
+all 66 selected libmpv checks and later gates passed. Keep its ctypes/null scope
+distinct from production-Unix malformed-media or physical missing-device proof.
+
+Use the current STATUS, compatibility overview and strategic next-phase assessment
+for final results, commands, three-category limitations and decisions. Hardware/app
+availability is unknown; do not wait indefinitely or repeatedly request access.
+The older frozen four-hour source remains its own endurance result. No new
+large feature or long-running test is planned in stabilization. At 20:00 UTC stop
+owned active work and report the verified head, draft PR, exact CI and clean state.
+After 20:00 UTC no automatic continuation is authorized. Main/merge/release remain
+prohibited unless a later explicit instruction supplies that separate authority.

@@ -4,21 +4,21 @@ Branch: `dot/renderer-autonomous-20261012`; base: `3672b9838e9c39ae8191613108f0d
 Work window ends 2026-10-12 20:00 UTC. Stabilization only after 19:00 UTC.
 No main-branch edits, merge, or release.
 
-## Current acceptance and handover package (17:00 UTC)
+## Final stabilization plan
 
-Legacy-isolation checkpoint `a7e8d8` has complete standard CI green. A final
-requirements-to-evidence review of all 20 original packages identified one
-worthwhile native gap: intentionally malformed media. The new short test now
-passes exact reviewed source on libmpv 0.37/0.40; runtime code is unchanged.
-Final default suites pass both Python minors. Publish test/CI wiring separately
-from the reviewed acceptance map, operator links and next-phase handover, then
-verify complete standard CI without changing any cap or existing assertion.
+Application/test checkpoint `1d05480` has full standard CI green, including the
+reviewed malformed-format failure/explicit-recovery case on both native
+architectures. Runtime source remains unchanged from a7e8d8. The original 20-AP
+scope map, operator commands and required next-phase assessment are published.
+No further justified low-risk runtime correction emerged from that bounded review.
 
-Continue only meaningful bounded quality work and operational consistency;
-do not add speculative features or artificial tests. Preserve prior failures and
-frozen-source endurance scope. Physical/original-app acceptance and provider
-integrations remain separate, with no known hardware availability date.
-Formal stabilization starts 19:00 UTC; active work ends 20:00 UTC today.
+During formal stabilization from 19:00 UTC, verify this documentation-only handover,
+its complete CI, branch/PR agreement and clean checkout. Do not begin new features
+or artificial test campaigns. Preserve prior failures and frozen-source endurance
+scope. Main changes, merge, release, provider accounts and unavailable hardware
+acceptance remain outside this task. Stop active work at 20:00 UTC and leave no
+owned development test running. After 20:00 UTC, do not continue automatically;
+wait for a new explicit task. This plan is a handover, not a recurring instruction.
 
 ## Ordered work
 

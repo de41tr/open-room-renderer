@@ -1,38 +1,49 @@
 # Development status
 
-Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
+Final handover for the autonomous work window ending 2026-10-12 20:00 UTC.
+This is scoped software evidence, not a compatibility certification.
 
-## Current acceptance-only candidate (17:00 UTC)
+## Final stabilization handover
 
-The original 20 work packages now have an explicit scoped completion map in
-[the compatibility matrix](docs/COMPATIBILITY_MATRIX.md#original-work-package-acceptance-overview).
-It distinguishes local implementation, missing named cases, physical/original-app
-acceptance and deferred services. Stale active-DSP-restore and seek-target prose
-is corrected; no unsupported observation is promoted to a pass.
+Application/test checkpoint **1d054809a836eb844fd67fa833c24cccba3dc505** passed
+all three standard jobs, verified at 17:16 UTC on 2026-10-12:
+https://github.com/de41tr/open-room-renderer/actions/runs/38281381125 .
+Both native architectures passed 4412 default cases /73 explicit opt-in skips,
+all 66 selected libmpv checks (53 actual native cases plus 13 helpers), and every
+production-Unix/client/stress/install/clocked/discovery/Snapcast stage. Python
+3.11 groups passed 4162+250 in 141.41s/90.38s. Existing warnings and caps remain.
+This final documentation update does not change application, tests or workflow.
+After publication, verify this documentation-only handover's own CI in the draft PR.
 
-One concrete AP07 gap now has real native evidence: malformed generated WAVE
-bytes receive a successful load-command acknowledgement but then produce native
-format error -17, HTTP 502 and matching received GENA/SOAP read state
-STOPPED/ERROR_OCCURRED. Native source/playlist/progress are empty; a four-second
-observation sees no retry. Only explicit valid selection/Play creates a new
-native entry and advancing playback time, with gain/mute unchanged. All owned
-resources close. Exact final libmpv 0.37/0.40 runs pass in 15.52s each.
-This is test ctypes/null format-recognition evidence, not a malformed-media Unix
-IPC, physical missing-device, mid-stream corruption or acoustic claim.
+The local workflow now includes real multitrack queues, repeat/shuffle and
+confirmed transport controls; editable stable-ID favorites; private URL-playlist
+capture/import/editing/stopped restore; and bounded unauthenticated discovery
+hints. Earlier core checkpoints provide truthful faults/state, owned recovery,
+metadata preservation, confirmed gain/DSP and persistent independent identity.
+Unsupported services or hardware controls do not become advertised functionality.
 
-Runtime source is unchanged from a7e8d8. Final combined defaults pass 4412/73
-opt-in skips on Python 3.12 (200.58s), and 4162+250/73 on Python 3.11
-(130.87s/74.49s), retaining 32 existing warnings. The native group adds only this
-one case: 23+43=66 checks, comprising 53 actual native cases and 13 helpers.
-Existing workflow stages, runners and caps remain. Require full hosted CI after
-publication. No new large feature or long-running test is planned.
+The final acceptance addition proves malformed-format failure after a successful
+native load acknowledgement: error -17, HTTP 502 and matching SOAP-read/received-
+GENA STOPPED/ERROR_OCCURRED, followed only by explicit valid-source recovery.
+It passed actual libmpv 0.37 on x86_64/AArch64 with complete cleanup; the exact
+local x86_64 test also passed 0.40. This uses test ctypes/null transport. Physical
+missing-device, mid-stream corruption and a malformed-media production-Unix case
+remain unclaimed. Runtime source is unchanged from a7e8d8.
 
-The [next-phase assessment](docs/STRATEGIC_REVIEW.md#next-phase-assessment)
-contains three practical constraints, debts and missing features, decisions and
-the existing later hardware plan. Formal stabilization starts 19:00 UTC; active
-work ends 20:00 UTC today. Main is unchanged and the PR remains a draft.
+- [Reproducible local two-source command](docs/TESTING.md#reproduce-the-local-two-source-acceptance)
+- [All 20 original packages and their remaining acceptance limits](docs/COMPATIBILITY_MATRIX.md#original-work-package-acceptance-overview)
+- [Three practical constraints, technical debts, missing features and next decisions](docs/STRATEGIC_REVIEW.md#next-phase-assessment)
+- [Later 45–60 minute hardware/app session](docs/TESTING.md#deferred-xu4--dac--original-app-acceptance)
 
-## Latest verified hosted checkpoint (16:38 UTC)
+**HARDWARE_ACCEPTANCE_PENDING:** physical ARMv7 XU4/ALSA/DAC, physical LAN,
+original app, service boot and two-host synchronization remain outside the
+verified scope. The four-hour radio result belongs to its older frozen source.
+The branch remains `dot/renderer-autonomous-20261012`; main was not changed and
+[PR #1](https://github.com/de41tr/open-room-renderer/pull/1) remains a draft.
+Formal stabilization begins at 19:00 UTC; stop active work at 20:00 UTC. This handover
+is not authorization for automatic continuation after that time, merging or release.
+
+## Preceding legacy-client checkpoint (16:38 UTC)
 
 Legacy-isolation head `a7e8d8` passed all three jobs, verified at 16:38 UTC:
 https://github.com/de41tr/open-room-renderer/actions/runs/38277056416 .
@@ -1465,7 +1476,7 @@ is absent. Empty Pause fails before backend mutation. Static SCPDs are unchanged
 Exact integrated default suites passed 2534 tests /64 opt-in skips on Python3.12
 (74.35s) and Python3.13 (73.66s); Python3.11 focused checks passed 315 in 8.49s.
 Integrated native control/navigation/uncertainty replay passed five cases on
-both actual libmpv0.37 and 0.40, 19.57s each. The new navigation pair uses default
+both actual libmpv 0.37 and 0.40, 19.57s each. The new navigation pair uses default
 0.5s observation cadence and takes about 8s; it joins normal hosted CI without
 changing its 15-minute cap. New hosted results remain pending publication.
 
@@ -1495,7 +1506,7 @@ existing fences. Explicit checked Stop/Play recovery remains functional.
 
 The exact combined snapshot passed 2602 default tests /65 skips on Python3.12
 in 74.82s and Python3.13 in 73.94s; Python3.11 focused checks passed 435 in 5.35s.
-Actual libmpv0.37 control/navigation/ownership/recovery/stall cases passed 17 in
+Actual libmpv 0.37 control/navigation/ownership/recovery/stall cases passed 17 in
 163.80s; 0.40 navigation/ownership/staging/uncertainty passed 6 in 40.30s. The new
 ownership proof uses the unchanged 0.5s observer, records scheduled event content
 before status reads and proves continued untouched foreign playback. This is

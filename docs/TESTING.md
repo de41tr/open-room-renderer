@@ -6,20 +6,22 @@
 .venv/bin/python -m pytest -q
 ```
 
-Latest completed native CI checkpoint: `a7e8d8`, verified 2026-10-12 16:38 UTC
-on Ubuntu 24.04 x86_64 and AArch64, with actual mpv/libmpv 0.37.0. All three
-standard jobs passed: 4412 default cases /72 explicit opt-in skips, the complete
-65-check libmpv lane (52 actual native cases plus 13 deterministic helpers),
+Latest completed application/test checkpoint: `1d05480`, verified 2026-10-12
+17:16 UTC on Ubuntu 24.04 x86_64 and AArch64 with actual mpv/libmpv 0.37.0.
+All three standard jobs passed: 4412 default cases /73 explicit opt-in skips,
+66 selected libmpv checks (53 actual native cases plus 13 deterministic helpers),
 production Unix IPC, real public clients, repeated lifetimes, native installation,
 clocked digital measurement, multicast/discovered playback and private Snapcast.
-[Verified run](https://github.com/de41tr/open-room-renderer/actions/runs/38277056416).
-Python 3.11 groups passed 4162 +250 in 140.18s/87.45s. Existing warnings and all
-caps remain. Baseline was 92 tests; counts alone do not establish app or hardware
-compatibility. Any later production change needs its own verification.
+[Verified run](https://github.com/de41tr/open-room-renderer/actions/runs/38281381125).
+Python 3.11 groups passed 4162+250 in 141.41s/90.38s. Existing warnings and all caps
+remain. Baseline was 92 tests; counts alone do not establish app or hardware
+compatibility. After publication, verify this documentation-only handover's own
+CI in the draft PR. Later production/test changes need their own evidence.
 
 ### Reproduce the local two-source acceptance
 
-After installing the checkout's development dependencies, on native Linux with
+Use the reviewed PR branch or exact checkpoint above; this draft has not changed
+main. After installing the checkout's development dependencies, on native Linux with
 mpv >=0.37 and working Unix sockets/loopback multicast:
 
 ```sh
@@ -1023,7 +1025,7 @@ were removed, while the external peer was preserved until fixture teardown.
 These two scenarios took 7.97s / 10.23s, leaving the complete jobs below eleven
 minutes. This is actual installed process acceptance, not systemd boot or hardware.
 
-The exact 9f5f529 source also passed an isolated CPython3.11.17/x86_64 run:
+The exact 9f5f529 source also passed an isolated CPython 3.11.17/x86_64 run:
 2190 default tests /41 gated skips, plus six actual libmpv0.40/null or digital-PCM
 cases and one supporting encoding unit test. Controls, seek/queue, gain/mute,
 load options, native staging and uncertain owner controls were exercised.
@@ -1050,14 +1052,14 @@ without disturbing paused staged playback. Local verification: 2203 default
 passes /41 skips, plus98 focused/native-format cases in the publication snapshot.
 Production-native results for this new revision must be checked separately.
 
-A separate standard x86_64 Python3.11 default-suite CI job now protects the
+A separate standard x86_64 Python 3.11 default-suite CI job now protects the
 declared runtime floor. It uses verified immutable first-party checkout/setup
 actions, official-PyPI dependencies, no dependency cache, no native package
 installation, and an eight-minute whole-job cap. Existing native jobs and their
 fifteen-minute caps are unchanged. The first hosted floor result is pending.
 
 The playlist publication snapshot also passed the full default suite on actual
-CPython3.11.17: 2203 passed /41 gated skips in65.16s. The selected Python3.11
+CPython 3.11.17: 2203 passed /41 gated skips in65.16s. The selected Python 3.11
 real-libmpv evidence above remains tied to checkpoint9f5f529.
 
 ## Per-load live-station packet history
@@ -1442,7 +1444,7 @@ the environment before creating a prefix. No system package or production
 preflight was bypassed, and native installation is not claimed by this run.
 
 The exact combined navigation/action snapshot passed 2534 default tests /64 skips
-on Python3.12 and 3.13; Python3.11 focused checks passed 315. Five targeted actual
+on Python3.12 and 3.13; Python 3.11 focused checks passed 315. Five targeted actual
 libmpv control/navigation/uncertainty cases passed on each of 0.37 and 0.40 in
 19.57s, with default-cadence navigation and complete cleanup. New hosted results
 remain separate; normal native job and stress limits are unchanged.
@@ -1475,7 +1477,7 @@ replacement during an already-admitted load/readiness interval remains excluded;
 separate causal entry/load evidence is needed before changing cleanup there.
 
 The final integrated snapshot passed 2602 default tests /65 skips on Python3.12
-and 3.13, 435 focused Python3.11 tests, 17 real-backend 0.37 cases including recovery
+and 3.13, 435 focused Python 3.11 tests, 17 real-backend 0.37 cases including recovery
 and stalls, and six 0.40 navigation/ownership/staging/uncertainty cases. Normal
 native CI limits are unchanged. Frozen long-radio evidence belongs to its own
 recorded production/source hashes rather than these later revisions.
@@ -2216,7 +2218,8 @@ PCM track and advancing native playback time, while volume 37 and mute remain
 confirmed and unchanged.
 Handle, session, listener, subscriptions, monitor and event tasks all close.
 
-The exact reviewed final test passed on official libmpv 0.37 and 0.40: both
+The exact reviewed final test passed locally on Linux x86_64 with official
+libmpv 0.37 and 0.40: both
 pytest runs took 15.52s, with probes 15.021s/15.024s. First runs and the one-line
 review tightening to exact error -17 are retained separately. Bounds are 20s
 async and 25s child; no prior acceptance, timeout or production behavior changes.
@@ -2224,7 +2227,10 @@ The test joins existing group one, giving 23+43=66 selected checks: 53 actual
 native cases and 13 deterministic helpers. No new runner or workflow lane is
 added. This malformed-media case is REAL_BACKEND/null with test ctypes transport,
 not production-Unix, physical audio, hardware or original-app acceptance.
-Complete hosted verification is still required after publication.
+The exact case subsequently passed hosted libmpv 0.37 on both x86_64 and AArch64
+at 1d05480. Probe times were 15.020s/14.964s, with native error -17, entry 1→2,
+all cross-surface assertions and full cleanup. This still uses the test ctypes
+transport; other Unix-IPC gates do not turn this case into a Unix-IPC proof.
 
 Final combined acceptance-only defaults pass 4412/73 opt-in skips on Python 3.12
 (200.58s), and 4162+250/73 on Python 3.11 (130.87s/74.49s), with 32 existing
@@ -2232,4 +2238,5 @@ warnings. All 34 runtime files remain unchanged from a7e8d8; production digest:
 `6abaedb03144f6bd23545300a232c58fb7fc4a9be003e2d8061fbd90cd71d734`.
 Exact final malformed-media test SHA256:
 `bd1526370fae9b7f6ce9101592a3528da31cdca47e4f4893af9e2325aaeeeb1f`.
-The complete new hosted checkpoint remains pending until observed.
+The complete checkpoint passed all three standard jobs in run 38281381125,
+verified at17:16 UTC. Every old gate and all 66 selected libmpv checks passed.
