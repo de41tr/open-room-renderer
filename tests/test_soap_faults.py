@@ -153,6 +153,13 @@ async def test_backend_rejection_does_not_commit_success_state(api, action, args
         for field in ("phase", "gain_confirmed", "last_error"):
             after.pop(field)
             before.pop(field)
+    if action in {"Pause", "Stop"}:
+        assert after["phase"].value == "ERROR"
+        assert after["intent"] == action.lower()
+        assert "confirmation failed" in after["last_error"]
+        for field in ("phase", "intent", "last_error"):
+            after.pop(field)
+            before.pop(field)
     assert after == before
 
 

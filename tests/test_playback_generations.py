@@ -331,7 +331,9 @@ async def test_stop_ack_without_actual_stop_is_rejected(api):
     api.mpv.stop = AsyncMock(return_value={"error": "success"})
     with pytest.raises(BackendError, match="did not stop"):
         await api.execute(ParsedCommand("stop"), "192.0.2.1")
-    assert api.state.phase == PlaybackPhase.PLAYING
+    assert api.state.phase == PlaybackPhase.ERROR
+    assert api.state.intent == "stop"
+    assert "silence not confirmed" in api.state.last_error
     assert not api.mpv.idle
 
 

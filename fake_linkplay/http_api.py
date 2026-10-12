@@ -1068,10 +1068,20 @@ class HttpApi:
 
     async def _transport_command(self, command: str) -> None:
         """Serialize mutations and verify the actual backend acknowledgement."""
-        previous_phase, previous_intent = self.state.phase, self.state.intent
+        if command == "resume" and self._native_output_uncertain:
+            # A newer Pause can supersede failed Stop without recovering the
+            # retired native entry IDs. Reestablish the selected source first.
+            await self._play_url(self.state.current_url)
+            return
         native_before = self._native_stage
+        retiring_native = command == "stop" and (native_before is not None or self._native_current_id is not None)
         intent = {"pause": "pause", "resume": "play", "stop": "stop"}[command]
         generation = self._accept_playback_command(intent, preserve_native=command != "stop")
+        if retiring_native:
+            # Retiring the stage drops entry IDs before Stop can yield. A newer
+            # Play must still confirm silence before resolving another source,
+            # including when this Stop or its cleanup is cancelled/rejected.
+            self._native_output_uncertain = True
         self.state.phase = PlaybackPhase.COMMAND_ACCEPTED
         try:
             async with self._backend_lock:
@@ -1098,7 +1108,6 @@ class HttpApi:
                 if generation != self.state.generation:
                     raise BackendError("Playback command superseded")
                 if snapshot.get("backend-error"):
-                    self.state.mark_error()
                     raise BackendError("Backend unavailable after command")
                 if effect == "stop" and snapshot.get("idle-active") is not True:
                     raise BackendError("Backend did not stop")
@@ -1126,20 +1135,20 @@ class HttpApi:
                 self.state.phase = PlaybackPhase.PLAYING
                 self._arm_station_recovery()
             self._apply_backend_snapshot(snapshot)
-        except asyncio.CancelledError:
-            if command == "stop" and native_before is not None:
-                async with self._backend_lock:
-                    await self._fail_native_staging_locked(native_before, generation, retired=True)
-            raise
-        except (BackendError, OSError, TimeoutError):
-            if command == "stop" and native_before is not None:
-                async with self._backend_lock:
-                    await self._fail_native_staging_locked(native_before, generation, retired=True)
+        except (BackendError, OSError, TimeoutError, asyncio.CancelledError):
             if generation == self.state.generation and self.state.phase != PlaybackPhase.ERROR:
-                if previous_phase in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING, PlaybackPhase.BUFFERING}:
-                    self.state.mark_error()
-                else:
-                    self.state.phase, self.state.intent = previous_phase, previous_intent
+                # A failed acknowledgement or cancelled waiter does not undo a
+                # native command. Keep the new owner intent: restoring PLAYING
+                # here can mistake an applied Stop for EOF and load the next
+                # track. Even cancellation before this mutation may supersede
+                # an older in-flight load, so its final output remains unknown.
+                uncertainty = ("playback silence not confirmed" if command == "stop"
+                               else "actual transport state unknown")
+                self.state.mark_error(f"{command.capitalize()} confirmation failed; {uncertainty}")
+                self._schedule_event_notify()
+            if command == "stop" and native_before is not None:
+                async with self._backend_lock:
+                    await self._fail_native_staging_locked(native_before, generation, retired=True)
             if generation == self.state.generation and self.state.phase == PlaybackPhase.ERROR:
                 self._schedule_native_staging_failure()
             raise
@@ -4106,7 +4115,9 @@ class HttpApi:
             return
         if action == "Play":
             url = self.queue_url or self.state.current_url
-            if self.state.status == "pause" and self.state.backend_url and self.state.current_url == url:
+            if self._native_output_uncertain:
+                await self._play_url(url)
+            elif self.state.status == "pause" and self.state.backend_url and self.state.current_url == url:
                 await self._transport_command("resume")
             elif self.state.status != "play" or self.state.current_url != url:
                 await self._play_url(url)

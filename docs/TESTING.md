@@ -616,3 +616,22 @@ skips; 46 focused native-refresh/staging/Snapcast/helper tests passed. The
 refreshed production snapshot also passed the separately enabled short libmpv
 stability run (four tests, 88.69s). Production Unix IPC, architecture-specific
 behavior and the clocked Snapcast path require the new native CI run.
+
+
+## Unconfirmed owner transport commands
+
+`test_transport_uncertainty.py` checks that rejected, timed-out or cancelled
+Stop/Pause/Resume commands retain the latest owner intent and expose ERROR,
+rather than restoring stale PLAYING or treating a possibly applied Stop as EOF.
+No retry or finite queue advance is permitted until a new owner command.
+Delayed old loads/snapshots and newer Play commands remain generation-fenced.
+Retired native entry IDs retain an output-uncertainty fence before Stop can yield;
+cancelled cleanup and a superseding Pause cannot let later Play/Resume bypass
+checked Stop/reload and resume an unidentified native successor.
+
+`test_libmpv_transport_uncertainty.py` uses the existing ORR_TEST_LIBMPV_PATH
+opt-in. Generated local WAVs and real libmpv/null confirm Stop or Pause applied,
+then the test injects a lost acknowledgement. Actual HTTP failure, SOAP state,
+delivered GENA error, no automatic second track, and later explicit Play of the
+original selection are verified. This is fault-injected REAL_BACKEND/null plus
+local HTTP/SOAP/GENA integration, not production Unix IPC or physical audio.

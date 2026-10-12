@@ -270,9 +270,9 @@ async def test_local_client_volume_and_mute_round_trip(local_renderer) -> None:
     "operation, method, argument, expected_state",
     [
         ("loadfile", "play_url", MEDIA_URL, "stop"),
-        ("pause", "pause", None, "play"),
-        ("resume", "resume", None, "pause"),
-        ("stop", "stop", None, "play"),
+        ("pause", "pause", None, "stop"),
+        ("resume", "resume", None, "stop"),
+        ("stop", "stop", None, "stop"),
         ("volume", "set_volume", 0.25, "stop"),
         ("mute", "set_mute", True, "stop"),
     ],
@@ -305,6 +305,17 @@ async def test_local_client_backend_failure_is_not_success(
     assert status["mute"] is False
     assert backend.volume_value == 50
     assert backend.mute_value is False
+    if operation in {"pause", "resume", "stop"}:
+        assert status["playback_phase"] == "ERROR"
+        assert "confirmation failed" in status["transport_error"]
+        assert status["stream_url"] == MEDIA_URL
+        if operation == "stop":
+            assert "silence not confirmed" in status["transport_error"]
+        backend.fail_operation = ""
+        await client.resume()
+        recovered = await assert_transport(client, "play")
+        assert recovered["transport_error"] == ""
+        assert backend.url == MEDIA_URL
     if operation == "loadfile":
         assert status["playback_phase"] == "ERROR"
         assert status["transport_error"] == "Backend control failed"

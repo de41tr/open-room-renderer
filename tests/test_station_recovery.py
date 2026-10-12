@@ -431,7 +431,7 @@ async def test_captured_identity_is_rechecked_before_retry(api, identity_change)
 
 
 @pytest.mark.asyncio
-async def test_failed_stop_restoring_old_play_intent_does_not_rearm_retry(api):
+async def test_failed_stop_keeps_owner_fence_and_does_not_rearm_retry(api):
     await play_station(api)
     api._station_recovery_delays = (60, 60, 60)
     task = await eof(api)
@@ -441,8 +441,9 @@ async def test_failed_stop_restoring_old_play_intent_does_not_rearm_retry(api):
     with pytest.raises(BackendError):
         await api.execute(ParsedCommand("stop"), "192.0.2.1")
     await asyncio.gather(task, return_exceptions=True)
-    assert api.state.intent == "play"
-    assert api.state.phase == PlaybackPhase.PLAYING
+    assert api.state.intent == "stop"
+    assert api.state.phase == PlaybackPhase.ERROR
+    assert "silence not confirmed" in api.state.last_error
     for _ in range(8):
         await api.sync_mpv_state()
     assert loads(api) == [STATION]

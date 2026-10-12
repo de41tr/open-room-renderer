@@ -615,3 +615,123 @@ async def test_seek_waits_for_audio_when_successor_was_paused_during_open(tmp_pa
     decoded.set()
     await seeking
     assert mutations(api, "seek") == [7] and api.state.phase == PlaybackPhase.PAUSED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_failure", ["rejection", "cancellation"])
+async def test_cancelled_retired_native_cleanup_preserves_output_fence(tmp_path, first_failure):
+    api = make_api(tmp_path)
+    await start(api)
+    stop_entered, cleanup_entered = asyncio.Event(), asyncio.Event()
+    original_stop, original_snapshot = api.mpv.stop, api.mpv.snapshot
+
+    async def unconfirmed_stop():
+        stop_entered.set()
+        if first_failure == "cancellation":
+            await asyncio.Future()
+        raise BackendError("Synthetic rejected Stop")
+
+    async def blocked_cleanup_snapshot():
+        cleanup_entered.set()
+        await asyncio.Future()
+
+    api.mpv.stop, api.mpv.snapshot = unconfirmed_stop, blocked_cleanup_snapshot
+    stopping = asyncio.create_task(api._transport_command("stop"))
+    await stop_entered.wait()
+    if first_failure == "cancellation":
+        stopping.cancel()
+    await cleanup_entered.wait()
+    stopping.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await stopping
+    assert api.state.phase == PlaybackPhase.ERROR and api.state.intent == "stop"
+    assert api._native_output_uncertain
+    assert api._native_stage is None and api._native_current_id is None
+    # The old armed successor may run while confirmation is unavailable.
+    api.mpv.advance()
+    assert api.mpv.url == B
+    api.mpv.stop, api.mpv.snapshot = original_stop, original_snapshot
+    api._resolve_playback_url = AsyncMock(side_effect=BackendError("Synthetic resolver failure"))
+    with pytest.raises(BackendError):
+        await api._play_url(C)
+    assert api.mpv.idle and not api.mpv.entries
+    assert not api._native_output_uncertain
+    assert mutations(api, "load") == [A]
+
+
+@pytest.mark.asyncio
+async def test_newer_failed_resolution_during_unconfirmed_native_stop_is_fenced(tmp_path):
+    api = make_api(tmp_path)
+    await start(api)
+    entered, release = asyncio.Event(), asyncio.Event()
+    original_stop = api.mpv.stop
+    first = True
+    resolved_while_active = []
+
+    async def stop():
+        nonlocal first
+        if first:
+            first = False
+            entered.set()
+            await release.wait()
+            raise BackendError("Synthetic lost Stop acknowledgement")
+        await original_stop()
+
+    async def resolve(url):
+        resolved_while_active.append(not api.mpv.idle)
+        raise BackendError("Synthetic new-source resolver failure")
+
+    api.mpv.stop, api._resolve_playback_url = stop, resolve
+    stopping = asyncio.create_task(api._transport_command("stop"))
+    await entered.wait()
+    playing = asyncio.create_task(api._play_url(C))
+    await asyncio.sleep(0)
+    release.set()
+    for task in (stopping, playing):
+        with pytest.raises(BackendError):
+            await task
+    assert resolved_while_active == [False]
+    assert api.mpv.idle and not api.mpv.entries
+    assert not api._native_output_uncertain
+    assert api.state.phase == PlaybackPhase.ERROR
+    assert mutations(api, "load") == [A]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resume", ["http", "soap", "internal"])
+async def test_pause_superseding_uncertain_native_stop_reestablishes_play_ownership(tmp_path, resume):
+    from fake_linkplay.http_api import ParsedCommand
+
+    api = make_api(tmp_path)
+    await start(api)
+    original_stop = api.mpv.stop
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def rejected_stop():
+        entered.set()
+        await release.wait()
+        raise BackendError("Synthetic rejected Stop")
+
+    api.mpv.stop = rejected_stop
+    stopping = asyncio.create_task(api._transport_command("stop"))
+    await entered.wait()
+    pausing = asyncio.create_task(api._transport_command("pause"))
+    await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(BackendError):
+        await stopping
+    await pausing
+    assert api.state.phase == PlaybackPhase.PAUSED and api._native_output_uncertain
+    api.mpv.stop = original_stop
+    if resume == "http":
+        await api.execute(ParsedCommand("resume"), "127.0.0.1")
+    elif resume == "soap":
+        await api._execute_soap_side_effect("Play", "<Play/>")
+    else:
+        await api._transport_command("resume")
+    assert not api._native_output_uncertain
+    assert mutations(api, "load") == [A, A]
+    api.mpv.advance()
+    await api.sync_mpv_state()
+    assert api.state.current_url == api.mpv.url == B
+    assert api.state.queue.index == 2 and api.state.phase == PlaybackPhase.PLAYING
