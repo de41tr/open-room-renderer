@@ -37,7 +37,11 @@ provider playback and Android acceptance.
 Backend lifecycle has bounded startup/command/teardown and explicit child/socket
 ownership (UNIT/MOCK plus actual subprocess signal delivery). Production Unix
 IPC is verified on native x86_64 and AArch64 CI; target-host acceptance remains. A failed spawn attempt does
-not automatically respawn; restart the renderer to retry owned spawning.
+not automatically respawn; restart the renderer to retry owned spawning. The
+same one-spawn-per-backend contract applies after an owned player dies following
+successful startup. A new AP07 post-decode SIGKILL/HTTP/SOAP/GENA case is gated for
+standard native CI; its real process-death result remains pending. Deterministic
+post-ready death and loopback failure-projection counterparts pass locally.
 
 Established explicit live stations now have bounded owner-respecting EOF/idle
 recovery (UNIT/MOCK and actual local HTTP outage/return with REAL_BACKEND/null).
@@ -167,10 +171,11 @@ indefinite-memory, WAN, physical-audio or hardware claim is implied.
 
 Checkpoint 4ef68e4: production Unix-IPC repeated-lifetime stress passed over 900s
 on native x86_64 and AArch64, with all owned processes/resources cleaned up.
-Direct-station history reduction/reset is native-verified, but a new changing-ICY
-probe suggests zero history can suppress native title updates; this tradeoff is
-under investigation. M3U/PLS children currently retain native defaults; the
-prepared extension is held pending that investigation. The added real-mpv SIGHUP
-cycle remains pending its own CI. Explicit-loopback
-Zeroconf unregister-failure cleanup is verified with real resources and injected
-failure. Uninterrupted-hour evidence remains separately scoped and pending.
+The zero-history policy was superseded after a changing-ICY regression. Current
+per-file 1 MiB history plus donation disabled preserves native timed titles and
+bounds retention; local mpv0.40 reset/metadata and first-level M3U/PLS child tests
+pass. Native0.37/Unix gates and a separately frozen finite-policy hour remain
+pending their own results. The actual installed SIGHUP cycle and injected
+Zeroconf withdrawal-failure cleanup passed on both architectures at 8d643657.
+That run's ARM whole job failed its final optional Snapcast signal check; the
+failure is retained and under diagnosis. Physical-LAN/app acceptance remains open.

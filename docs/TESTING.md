@@ -217,7 +217,8 @@ PID-preserving exec wrapper; production defaults and IPC stay unchanged.
 Without the exact opt-in these tests skip. With it, missing mpv or forbidden
 AF_UNIX is a failure, never a skip or alternate transport. The current sandbox
 rejects AF_UNIX at preflight. SIGTERM/SIGINT owned and external cycles have
-passed production-IPC CI; the added SIGHUP cycle remains pending its own CI. Its
+passed production-IPC CI. The SIGHUP cycle also passed both architectures in
+run 38205184583, whose ARM job separately failed the final optional Snapcast gate. Its
 helper/isolation tests run in the default suite. Null output proves neither
 audible audio nor hardware, physical LAN, original app or systemd/reboot behavior.
 
@@ -300,6 +301,32 @@ IPC, generated WAVs, loopback HTTP/SOAP and null output. Separate cases exercise
 external ownership and owned process/socket cleanup plus fresh-instance restart.
 A test-local exec wrapper adds only null/config-isolation options and preserves
 the mpv PID for peer-credential ownership checks. All children are reaped.
+
+AP07 also has a dedicated post-decode owned-player-death case:
+
+```sh
+ORR_TEST_UNIX_IPC=1 PYTHONPATH=. .venv/bin/python -m pytest -q -s \
+  tests/test_mpv_unix_integration.py -k owned_player_death
+```
+
+It verifies Linux peer credentials and actual null-output decoder progress
+before SIGKILL of the fixture's own child. Without status polling, the renderer
+must report STOPPED/ERROR through a real GENA callback and withdraw confirmed
+gain. HTTP and SOAP must agree. The case watches past the complete station
+retry window, counts executable invocations, and checks no source retry, queue
+advance, automatic respawn or changed desired gain. Explicit Play on the failed
+instance must fail; a fresh renderer backend/API on the cleaned socket starts
+idle and plays a different generated source only after an explicit command.
+Owned children, IPC pathname, subscriptions, monitors and listeners are cleaned
+up. This is a focused process/control acceptance case, not a service-manager
+restart, measured acoustic silence or hardware test.
+
+This new death case is gated for the existing standard native CI lane and has
+not been run in the development sandbox, where Unix sockets are disallowed.
+The local deterministic counterparts in `test_backend_lifecycle.py` and
+`test_gena_lifecycle.py` use fake child/IPC or fake audio with real loopback
+HTTP/SOAP/GENA; neither establishes actual process death. No libmpv substitution
+is accepted as evidence for the Unix process-death gate.
 
 The PR workflow uses read-only contents permission, pinned official checkout,
 no saved credentials, secrets, deployments or artifacts, and 15-minute jobs on
@@ -831,7 +858,7 @@ real-libmpv evidence above remains tied to checkpoint9f5f529.
 ## Per-load live-station packet history
 
 For a canonical current queue item explicitly marked `stream_type="station"`
-with zero duration, the renderer supplies `demuxer-max-back-bytes=0` in the
+with zero duration, the renderer supplies `demuxer-max-back-bytes=1048576` and `demuxer-donate-buffer=no` in the
 existing named `loadfile` options. It does not change global mpv configuration,
 forward buffering, cache/pause settings or retry timing. Finite or untyped media
 and prospective unrelated native successors keep the native defaults. Known
@@ -842,8 +869,12 @@ defines backward packet retention separately from forward caching. Its
 [loadfile contract](https://github.com/mpv-player/mpv/blob/v0.37.0/DOCS/man/input.rst)
 restores per-file options after playback. The tested mpv 0.40 defaults retain up
 to 50 MiB of backward packets, which is expected native cache growth, not a
-Python leak. Setting the backward limit to zero avoids retaining history this
-renderer cannot seek into for explicit live stations.
+Python leak. A finite 1 MiB backward limit keeps this unused history bounded; disabling
+buffer donation prevents backward history borrowing unused forward capacity.
+Zero is deliberately avoided: paced ICY on mpv 0.40 lost native timed-title
+updates with zero retention, while the same typed station and source retained
+all changes with a 1 MiB cap. The previous zero-history endurance results do not
+validate this revised policy.
 
 `test_station_cache_options.py` tests exact canonical ownership, stale live
 mirrors, finite/unknown media, resolver/header typing, address refresh, successor
@@ -873,8 +904,9 @@ passed both native architectures and the new hosted Python 3.11.17 default job.
 Its real public-client playlist tests now decode the complete intended M3U/PLS
 resource, including literal colons and escaped query bytes.
 
-Only the matching canonical zero-duration station now receives per-file zero
-backward packet history. Existing native forward buffering, cache/pause settings,
+At that earlier checkpoint, only the matching canonical zero-duration station
+received per-file zero backward packet history. The positive-cap policy above
+supersedes zero; those frozen results remain historical. Native forward buffering, cache/pause settings,
 recovery timing, gain and DSP remain unchanged. Finite and unknown media restore
 their previous native defaults. This is supported by the documented
 [mpv 0.35.1 backward-cache option](https://github.com/mpv-player/mpv/blob/v0.35.1/DOCS/man/options.rst)
@@ -923,3 +955,105 @@ whole-native-job bounds; no resource or state assertion was relaxed.
 The opt-in discovery lane additionally starts real explicit-loopback Zeroconf,
 injects only unregister failure/cancellation, and verifies every owned socket
 and selector reader is removed. No physical-LAN/app acceptance is implied.
+
+
+## Changing live ICY metadata
+
+`test_libmpv_live_metadata.py` is an explicit `ORR_TEST_LIBMPV_PATH` lane using
+runtime-generated finite MP3 paced over one loopback HTTP response. Three native
+StreamTitle changes occur with one renderer load and stable native playlist
+entry, queue identity and advancing decoded audio. Autonomous GENA callbacks
+are checked before client status requests can synchronize the renderer.
+HTTP/SOAP/GENA and generated DIDL follow matching fallback titles; explicit
+station titles, artist/album/artwork and opaque DIDL remain exact. A title-less
+opaque DIDL is never rewritten to insert dynamic metadata. The renderer does
+not split arbitrary ICY title text into artist/track fields or invent another
+now-playing schema. This covers native libmpv and null output, not production
+Unix IPC, remote stations, handset presentation or physical audio.
+
+## Native station playlist-child history
+
+mpv 0.40 resets a container's per-load options when it expands M3U/PLS. To extend
+the corrected live-station policy to proven first-level children, the existing
+readiness/state observer makes one bounded attempt per unchanged observed child.
+It uses the same `LIVE_STATION_HISTORY_OPTIONS` as direct loads: a 1 MiB backward
+history cap plus `demuxer-donate-buffer=no`. Zero history is not used, because it
+can suppress timed ICY metadata. Donation is disabled so unused forward capacity
+cannot silently enlarge the backward allocation; forward settings are unchanged.
+
+The canonical zero-duration station, current generation, queue/item identity,
+loaded source and complete first-level native parentage must agree under the
+backend lock. The native process ID is read before fresh source proof. Both
+file-local writes independently use an identical native process/active-entry
+property-expansion guard. Donation is disabled first, then the history cap is
+set. A transition between writes rejects the later write; partial application
+is explicitly unconfirmed. A guarded readback must report both expected values
+and both file-local flags. Integer-only guards never interpolate media URLs.
+
+This begins after the child becomes observable, normally on the existing
+half-second observer cadence, rather than a pre-demux hook. No additional writer
+or monitor is created, and a failed unchanged child is not retried repeatedly.
+The policy transaction is limited to two seconds. A fresh normal snapshot is
+then required before publishing state; its existing IPC read latency is outside
+that budget. Unsupported or failed proof/readback produces one unconfirmed
+warning while otherwise valid playback continues. New admitted loads reset the
+attempt budget; Pause/Resume alone does not. Native file-local restoration
+handles EOF, Stop and finite replacement. Nested/ambiguous/foreign ancestry is
+excluded from the optimization.
+
+`test_station_playlist_cache_options.py` covers owner/source races, both exact
+guards, partial application, full readback, bounded timeout/cancellation and
+stale-observation rejection. `test_libmpv_station_playlist_cache.py` uses real
+mpv with generated M3U/PLS: first and natural-next child readback, finite reset,
+Pause/Resume, genuine replacement between the two writes, and different native
+processes reusing the same path/entry ID. Its paced ICY child cases verify three
+changing native titles and canonical HTTP/SOAP/GENA metadata without reloads.
+The explicit Unix-IPC lane has corresponding child guard/reset cases. Native
+libmpv tests alone do not certify Unix IPC, older runtime versions, real radio
+providers or physical audio. The frozen zero-policy direct hour remains separate
+historical evidence and does not validate this finite child policy.
+
+Primary contracts: [mpv file-local options and conditional property expansion](https://mpv.io/manual/stable/),
+[mpv 0.37 input API](https://github.com/mpv-player/mpv/blob/v0.37.0/DOCS/man/input.rst),
+and [mpv 0.40 synchronous command implementation](https://github.com/mpv-player/mpv/blob/v0.40.0/player/command.c).
+
+
+## Reproducible uninterrupted station endurance
+
+`test_libmpv_sustained_station.py` and `sustained_station_support.py` freeze and
+hash the exact tested sources. The explicit opt-in generates bounded synthetic
+AAC/ADTS with official FFmpeg, then keeps one loopback source and one native
+handle alive without reloads, source changes or seeks. The regular suite runs
+only small parser/observation/child-sensitivity checks; it does not start a soak.
+
+```sh
+ORR_TEST_LIBMPV_SUSTAINED=1 ORR_TEST_LIBMPV_SUSTAINED_SECONDS=3600 \
+ORR_TEST_LIBMPV_PATH=/path/to/libmpv.so.2 PYTHONPATH=. .venv/bin/python -m pytest -q -s \
+  tests/test_libmpv_sustained_station.py
+```
+
+Without the duration override the opted-in smoke baseline is 10s. Valid requested
+baselines are 5..3600s after warmup, bounded by a process-group supervisor deadline
+of baseline+90s. Missing explicit prerequisites fail rather than silently skip.
+Use a private `--basetemp` outside the repository to retain generated diagnostics;
+do not publish raw audio/captures. Only aggregate results belong in reports.
+
+Checks include advancing actual decoder time, exact serialized observation
+mapping and separate monitor freshness, HTTP/SOAP/GENA agreement, lease renewal,
+no recovery/reload, unchanged volume/mute, bounded RSS/FDs/tasks/threads/children,
+and final native/session/listener/subscription/task cleanup. The fixture never
+changes production cache policy. Its 10s smoke passed after replay, but an hour
+result must be tied to its own production/source hashes and completion record.
+The historical zero-cache hour does not test the corrected finite policy or
+changing ICY metadata. This is REAL_BACKEND/null, not production Unix IPC,
+physical audio, WAN reliability or original-app acceptance.
+
+
+The Snapcast failure diagnostic retains all four channel summaries for valid
+captures before any signal-gate assertion. It freezes both PCM file endpoints
+before analysis and emits bounded fitted-window statistics and fixed log-marker
+counts, never raw PCM or log lines. Signal thresholds are unchanged; malformed
+or short captures can still fail before all channel summaries exist. Synthetic
+phase jumps reproduce the observed 5/7 failure shape without proving the ARM
+cause. The historical failed job remains failed, and the next native run is
+needed to establish current delivery behavior.

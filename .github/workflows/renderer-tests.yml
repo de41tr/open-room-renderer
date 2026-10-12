@@ -106,8 +106,9 @@ jobs:
           .venv-ci/bin/python -m pytest -q -s \
             tests/test_libmpv_integration.py tests/test_libmpv_gain.py \
             tests/test_libmpv_dsp.py tests/test_libmpv_recovery.py \
-            tests/test_libmpv_dsp_restore.py tests/test_libmpv_formats.py \
+            tests/test_libmpv_dsp_restore.py tests/test_libmpv_formats.py tests/test_libmpv_live_metadata.py \
             tests/test_libmpv_load_options.py tests/test_libmpv_station_cache.py tests/test_libmpv_load_cleanup.py \
+            tests/test_libmpv_station_playlist_cache.py \
             tests/test_libmpv_stall_recovery.py tests/test_libmpv_queue_staging.py \
             tests/test_libmpv_station_refresh.py tests/test_libmpv_transport_uncertainty.py
 

@@ -485,7 +485,7 @@ Generated local fixtures passed real libmpv0.40 decoding for MP3, ADTS AAC,
 application/octet-stream media, unencrypted HLS segment crossing, first-level
 M3U/PLS, redirects/loop failure and ICY metadata. Two-entry container transitions,
 HTTP/SOAP state and final top-level queue advance passed. Exact isolated snapshot:
-1714 passed with all12 real libmpv cases enabled; two Unix IPC cases skipped
+1714 passed with all 12 real libmpv cases enabled; two Unix IPC cases skipped
 locally. Independent review and delayed-entry native probes confirmed ownership
 and buffering fixes. FFmpeg is a test-fixture dependency, not a new renderer
 runtime dependency; CI now includes these format cases.
@@ -1014,13 +1014,100 @@ added real-mpv owned/external SIGHUP cycle awaits this revision's native CI.
 
 A new paced ICY diagnostic found that native title updates can disappear with
 zero station backward history while the same stream with native defaults exposes
-all changing titles through HTTP/SOAP/GENA. This interaction is under investigation,
-not accepted as a memory/metadata tradeoff. The prepared first-level playlist-child
-extension is held until this is resolved. Existing M3U/PLS children retain native
-defaults because mpv resets the parent load option. The separately frozen direct
+all changing titles through HTTP/SOAP/GENA. At checkpoint 8d643657 this interaction was under investigation, and the prepared
+playlist-child extension was held. The correction and extension below supersede
+that earlier state. The separately frozen direct
 hour does not test changing ICY metadata or establish playlist endurance.
 
 Combined cleanup regression: 2233 default tests passed /44 gated skips; Python3.11
 focused lifecycle/CLI checks passed 142 with 2 native-only skips. Separately, 28
 focused mDNS/actual-loopback tests passed on Python3.11. Native SIGHUP remains
 pending its own hosted result.
+
+## Bounded history for native playlist station children
+
+M3U/PLS children do not inherit their container's per-load options in tested
+mpv 0.40. The current corrected policy uses a finite 1 MiB backward cap and
+disables forward-buffer donation so native timed ICY updates remain available.
+The previous zero-history measurements and frozen direct-hour run remain
+historical evidence for their exact snapshots; they are not evidence for this
+finite policy or the playlist-child path.
+
+Proven first-level station children now receive the same shared policy through
+bounded existing observer/readiness work. Each of the two file-local writes is
+independently guarded in mpv by process and exact active-entry identity. Both
+values and local flags require guarded readback; partial/failed application is
+unconfirmed and warns once. Natural advancement, owner/source changes, a native
+replacement between the writes and process restart with reused entry IDs are
+covered. Finite-source defaults restore at native file boundaries. No global
+configuration, native script, playlist expansion or additional monitor is used.
+See [test scope and native opt-ins](docs/TESTING.md#native-station-playlist-child-history).
+
+## Metadata-safe history and native cleanup results
+
+The direct station policy now keeps 1 MiB of backward packets and disables unused
+forward-buffer donation per file. Zero history had removed native timed ICY
+updates; a positive cap alone could still borrow the large forward allocation.
+The paired correction restores updates without changing forward capacity/time,
+cache/pause behavior, canonical metadata, gain or recovery timing. Shared policy
+constants prevent direct and proven first-level child loads from diverging.
+
+Local mpv0.40 streamed 12 changing ICY titles through one source/load over 70s.
+All changes reached native and renderer metadata. Backward retention plateaued
+at 1,047,872 bytes for the final 20s; forward retention was 16,640–40,768 bytes and
+RSS spread 20,480 bytes in that window. Separate fallback, explicit-title and
+opaque-DIDL cases preserve the intended HTTP/SOAP/GENA contract. These bounded
+measurements do not replace the new corrected-policy hour or native0.37 CI.
+
+[8d643657 CI](https://github.com/de41tr/open-room-renderer/actions/runs/38205184583)
+verified actual installed owned/external CLI SIGHUP on both architectures:
+three signal/restart cycles each, external peers preserved and owned children
+reaped. Real Zeroconf error/cancellation injection closed both owned sockets and
+selector readers on both architectures. Python3.11 and x86_64 fully passed.
+ARM passed all renderer stages but failed the optional Snapcast group-gain PCM
+check: fitted amplitude 249.69 matched expected 250, but only 5/7 short windows
+passed the unchanged signal criterion. This remains a failed whole job; the
+separate diagnostic work must not weaken the gate or imply two-host support.
+
+A new native owned-player-death gate checks background failure projection before
+status polling, no station retry/queue advance/respawn, unconfirmed preserved gain,
+and explicit different-source playback after a fresh backend restart. Its
+production Unix execution remains pending. The new uninterrupted-station harness
+uses frozen/hashed source, one generated paced stream, unchanged observation and
+resource gates, a hard outer deadline and verified cleanup. Existing frozen runs
+retain separate provenance; no later source is credited with their duration.
+
+The separately frozen zero-policy hour completed at 05:03:23 UTC: 3600.669s
+baseline, 3600.589s native progress, one load/source/request, 362 protocol checks
+and 7193 monitor observations. Peak RSS grew 1128 KiB; live FDs/tasks/threads stayed
+12/5/10 and teardown returned to 7 FDs, 1 task, 1 thread, 0 children. All unchanged
+gates and cleanup passed. Its production digest is
+`f1cb53c37437134ec76c8eac37fed47c20e6a419f4cc0cd19b081a5f0882ee61` and source digest
+`212bb4d04bd571193369d0faa35557e63533a62ad7718fbafbaed4460fa82d71`.
+This proves memory/progress for that older direct zero-history snapshot only;
+its ICY limitation remains, and corrected finite-policy endurance is separate.
+
+The exact combined finite-policy/child/death/harness snapshot passed 2338 tests
+with real libmpv enabled and 19 explicit native-only skips in 380.49s. Production
+digest: `b3ae8a5c7ad01696b12be6feb52c16fe51fed9ad6128015992b6d14fd055b5ef`.
+The new production Unix gates and final-policy hour remain separate results.
+
+The separate corrected finite-policy hour is active from 05:05:34.826684 UTC,
+with completion expected around 06:05:35 UTC plus bounded cleanup. It freezes
+production digest `b3ae8a5c7ad01696b12be6feb52c16fe51fed9ad6128015992b6d14fd055b5ef`
+and source digest `ff5f255e08cc54255cff69621c7633da1c604109208d07b389201fbceb1a2735`.
+The same reviewed harness/gates apply, with no diagnostic override. This is
+pending, not credited as a completed duration.
+
+The Snapcast investigation adds bounded per-window amplitude/RMS/residual/phase
+statistics, both-client capture boundaries and allowlisted event counts before
+signal assertions. No gain/mute/source threshold was relaxed. Synthetic phase
+jumps can reproduce the 5/7 failure shape with correct gain, but do not establish
+the original ARM cause. Failure-injection checks still fail nonzero and clean
+up children, ports and FIFO. The original ARM failure remains unresolved.
+
+Final combined default suite: 2317 passed /57 explicit skips in 66.43s. Before the
+Snapcast diagnostics-only addition, the combined finite-policy snapshot passed
+2300 /57 on Python3.11 in 66.73s and 2338 /19 with real libmpv in 380.49s. The final
+Snapcast/helper/supervisor checks separately passed 72 on Python3.11. Production
+bytes and the active frozen final-policy hour are unchanged by those diagnostics.

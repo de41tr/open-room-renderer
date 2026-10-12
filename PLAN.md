@@ -45,13 +45,12 @@ genuine pywiim controls and the Python3.11 floor pass CI. The extended native
 Unix-IPC checkpoint passed over fifteen minutes on both architectures; routine
 CI durations are restored.
 
-Current checks: independently verified mDNS/SIGHUP cleanup fixes await their
-added native CI gates. Hold the prepared playlist-child history extension while
-a changing-ICY probe investigates whether zero history suppresses native title
-updates. Preserve metadata as well as bounded memory. Complete the
-separately frozen uninterrupted direct-station hour with unchanged assertions
-and publish its reproducible harness; its earlier baseline failed the RSS gate.
-Investigate actual owned-player death propagation and changing ICY metadata
-without sacrificing canonical metadata. Nested playlist ancestry and physical
-hardware/app acceptance remain explicit gaps. These are implementation and
-bounded evidence checkpoints, not a full WiiM compatibility certification.
+Current checks: mDNS failure cleanup and graceful SIGHUP now pass both native
+architectures. ARM's separate optional Snapcast PCM check failed and is being
+diagnosed without relaxing its threshold. Zero-history ICY loss is corrected
+with finite 1 MiB retention plus donation disabled; guarded first-level playlist
+children use the same policy and preserve metadata. Check the new older-runtime
+Unix gates and owned-player-death acceptance, then complete a separately frozen
+finite-policy hour with the unchanged reproducible harness. Earlier failed and
+zero-policy runs retain their own provenance. Nested playlist ancestry and
+physical hardware/app acceptance remain explicit gaps, not inferred passes.
