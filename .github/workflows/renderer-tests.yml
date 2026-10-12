@@ -93,6 +93,10 @@ jobs:
           dpkg-query -W mpv libmpv2
           .venv-ci/bin/python -m pip freeze
           echo 'Null/PCM outputs only; no physical audio, ARMv7, or Raspberry Pi claim.'
+          # Read-only inventory for a possible later browser QA lane; no install/start.
+          for browser in google-chrome chromium chromium-browser firefox; do
+            command -v "$browser" || true
+          done
 
       - name: Run default unit and local-client suite
         run: .venv-ci/bin/python -m pytest -q -rs
@@ -118,7 +122,7 @@ jobs:
             tests/test_libmpv_stall_recovery.py tests/test_libmpv_queue_staging.py \
             tests/test_libmpv_queue_navigation_intent.py tests/test_libmpv_repeat_queue.py \
             tests/test_libmpv_favorites.py \
-            tests/test_libmpv_shuffle_queue.py \
+            tests/test_libmpv_shuffle_queue.py tests/test_libmpv_queue_cli.py \
             tests/test_libmpv_source_ownership.py \
             tests/test_libmpv_admitted_load_root.py \
             tests/test_libmpv_station_refresh.py tests/test_libmpv_transport_uncertainty.py
