@@ -367,7 +367,7 @@ class HttpApi:
 
     def _station_source_has_audio(self, recovery: StationRecovery, snapshot: dict) -> bool:
         """Require the captured actual source, not a stale/foreign active path."""
-        return (bool(recovery.backend_url) and snapshot.get("path") == recovery.backend_url
+        return (self._mpv_snapshot_matches_source(snapshot, recovery.backend_url)
                 and snapshot.get("idle-active") is False and snapshot.get("pause") is False
                 and snapshot.get("eof-reached") is not True and snapshot.get("paused-for-cache") is not True
                 and self._mpv_snapshot_has_audio(snapshot))
@@ -479,10 +479,18 @@ class HttpApi:
         expected_url = self.state.backend_url
         if not expected_url and recovery and self._station_recovery_is_current(recovery):
             expected_url = recovery.backend_url
-        if expected_url and observed_url and observed_url != expected_url:
+        if expected_url and observed_url and not self._mpv_snapshot_matches_source(snap, expected_url):
             return
+        tracks = snap.get("track-list")
+        selected_audio = isinstance(tracks, list) and any(
+            isinstance(track, dict) and track.get("type") == "audio" and track.get("selected", True)
+            for track in tracks)
         if self.state.phase not in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING}:
-            if snap.get("eof-reached") is True or snap.get("idle-active") is True:
+            # An expanded playlist is one canonical queue resource. Native
+            # entry EOF can advance within it; only whole-player idle ends
+            # that resource. Direct files retain their existing EOF behavior.
+            expanded_playlist = bool(expected_url and observed_url and observed_url != expected_url)
+            if snap.get("idle-active") is True or (snap.get("eof-reached") is True and not expanded_playlist):
                 if not (self.state.intent == "pause" and not self.state.backend_url):
                     self.state.phase = PlaybackPhase.STOPPED
                     self.state.curpos = 0
@@ -500,7 +508,8 @@ class HttpApi:
                 pass
             elif snap.get("pause") is True:
                 self.state.phase = PlaybackPhase.PAUSED
-            elif snap.get("paused-for-cache") is True:
+            elif (snap.get("paused-for-cache") is True
+                  or (snap.get("core-idle") is True and not selected_audio)):
                 self.state.phase = PlaybackPhase.BUFFERING
             elif self._mpv_snapshot_has_audio(snap):
                 self.state.phase = PlaybackPhase.PLAYING
@@ -568,12 +577,16 @@ class HttpApi:
                 if snapshot.get("backend-error"):
                     self.state.mark_error()
                     raise BackendError("Backend unavailable after command")
-                if effect == "stop" and snapshot.get("idle-active") is False:
+                if effect == "stop" and snapshot.get("idle-active") is not True:
                     raise BackendError("Backend did not stop")
-                if effect == "pause" and snapshot.get("pause") is False:
+                if effect == "pause" and snapshot.get("pause") is not True:
                     raise BackendError("Backend did not pause")
-                if command == "resume" and (snapshot.get("pause") is True or snapshot.get("idle-active") is True):
+                if command == "resume" and (snapshot.get("pause") is not False or snapshot.get("idle-active") is not False):
                     raise BackendError("Backend did not resume")
+                if effect in {"pause", "resume"} and not self._mpv_snapshot_matches_source(snapshot, self.state.backend_url):
+                    self.state.mark_error("Playback source changed before control confirmation")
+                    self._schedule_event_notify()
+                    raise BackendError("Playback source not confirmed after control")
                 if effect == "stop":
                     self.state.backend_url = ""
                     self.state.backend_original_url = ""
@@ -676,7 +689,7 @@ class HttpApi:
                 self._apply_backend_snapshot(snapshot)
                 if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
                     raise BackendError("Playback ended before seek")
-                if not self.state.backend_url or snapshot.get("path") != self.state.backend_url:
+                if not self.state.backend_url or not self._mpv_snapshot_matches_source(snapshot, self.state.backend_url):
                     raise BackendError("Source not confirmed before seek")
                 if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}:
                     raise SoapFault(701, "Transition Not Available")
@@ -2114,6 +2127,30 @@ class HttpApi:
         walk(payload)
         return max(candidates) if candidates else 0
 
+    @staticmethod
+    def _mpv_snapshot_matches_source(snapshot: dict, expected_url: str) -> bool:
+        """Bind a native playlist child to the exact loaded container.
+
+        mpv expands M3U/PLS internally and changes ``path`` to the child.
+        Both its container property and sole active entry must agree. A title,
+        URL suffix, or membership among inactive entries cannot prove identity.
+        Callers still fence the snapshot by their playback generation.
+        """
+        observed = snapshot.get("path")
+        if not isinstance(expected_url, str) or not expected_url or not isinstance(observed, str) or not observed:
+            return False
+        if observed == expected_url:
+            return True
+        if snapshot.get("playlist-path") != expected_url:
+            return False
+        entries = snapshot.get("playlist")
+        if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+            return False
+        active = [entry for entry in entries if entry.get("current") is True or entry.get("playing") is True]
+        return (len(active) == 1 and active[0].get("current") is True and active[0].get("playing") is True
+                and active[0].get("filename") == observed and active[0].get("playlist-path") == expected_url)
+
+
     async def _wait_for_mpv_audio_ready(self, generation: int, playback_url: str, timeout: float = 10.0) -> bool:
         """Poll mpv until the loaded item exposes a selected audio track."""
 
@@ -2130,7 +2167,7 @@ class HttpApi:
             last_snapshot = snapshot
             if snapshot.get("backend-error"):
                 raise BackendError("Backend control failed during readiness")
-            if snapshot.get("path") and snapshot["path"] != playback_url:
+            if not self._mpv_snapshot_matches_source(snapshot, playback_url):
                 continue
             if snapshot.get("idle-active") is not True and self._mpv_snapshot_has_audio(snapshot):
                 LOG.info("mpv audio-ready playback=%s snapshot=%s", playback_url, self._compact_snapshot(snapshot))
@@ -2182,7 +2219,7 @@ class HttpApi:
                     if snapshot.get("backend-error"):
                         self._mark_backend_failure()
                         raise BackendError("Backend control failed during seek")
-                    if snapshot.get("path") == backend_url:
+                    if self._mpv_snapshot_matches_source(snapshot, backend_url):
                         if seek_source is not None and self._seek_source_token(snapshot) != seek_source:
                             raise BackendError("Source changed during seek")
                         self._apply_backend_snapshot(snapshot)

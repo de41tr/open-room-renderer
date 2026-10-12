@@ -35,8 +35,11 @@
    native CI run38188276268 passed on both architectures.
    AP14 is published as `324469c1a8afb72b277735e268e59196edcc6b10`;
    native installation CI run38188925897 passed both architectures.
-   Preserve pending playlist/format, log privacy, clocked-transition measurement
-   and native load-option compatibility changes. Monitor each new CI revision.
+   AP13 is published as `4b2f1d6f112b9ed8be2aa97261db2344068139eb`;
+   run38189242029 passed all lanes on both architectures. AP15 exact snapshot
+   passed1714 with12 real libmpv cases and is being published.
+   Preserve pending log privacy, clocked-transition, named load-option, explicit
+   discovery-interface and unready-load cleanup changes. Monitor each new CI.
 6. Keep production mpv JSON IPC. AF_UNIX is denied in this cloud sandbox; use
    fake-backend tests and optional libmpv/null-output validation with honest scope.
 7. Review all changed files and commit content for private data before publishing;

@@ -94,3 +94,11 @@ including before deferred load/resume/unmute. Corrupt saved state fails closed.
 Fresh native-handle digital PCM confirms the tested cut/balance and bypass
 restore; this is not a full-service reboot or acoustic/DAC claim. Explicit mute
 and zero volume remain usable if DSP restoration fails.
+
+AP15 REAL_BACKEND local fixtures verify MP3, ADTS AAC, octet-stream, unencrypted
+HLS, redirects, ICY and first-level M3U/PLS. The container is the canonical queue
+resource; native children retain proven container ownership and final EOF alone
+advances the top-level queue. Entry loading reports BUFFERING and foreign-source
+controls cannot falsely succeed. Nested playlists remain unsupported because
+outer provenance is lost; an inner decoder can remain active after readiness
+failure until stopped. Owner-fenced failure cleanup is being added separately.

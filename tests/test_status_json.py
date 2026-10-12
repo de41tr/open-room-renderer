@@ -44,6 +44,7 @@ class DummyMpv(MpvBackend):
             "pause": self.paused,
             "filename": self.loaded_url,
             "path": self.loaded_url,
+            "path": self.loaded_url,
             "playback-time": self.seeked_to,
             "duration": self.duration if self.loaded_url else None,
             "track-list": [{"type": "audio", "selected": True}],

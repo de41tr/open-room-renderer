@@ -285,3 +285,18 @@ full process/systemd reboot and hardware remain separate acceptance work.
 
 Native installation CI run38188925897 passed on both x86_64 and AArch64,
 including isolated installed-package import, stable identity and owned uninstall.
+
+## Local radio formats and container identity
+
+`test_libmpv_formats.py` requires explicit libmpv opt-in plus FFmpeg to generate
+all media at runtime. Missing native prerequisites fail after opt-in. Four
+grouped cases cover MP3/ADTS/octet-stream/HLS, M3U/PLS containers, redirects and
+ICY. `test_playlist_source_identity.py` checks exact provenance, generations,
+entry loading, source-fenced controls and seek identity. A container remains one
+canonical queue resource; inner title/time change, but canonical URI/index stay
+with the container until final EOF. Nested containers are not accepted because
+the outer ancestry is unavailable in current snapshots.
+AP15 exact snapshot: 1714 passed with12 real libmpv cases, two local Unix IPC
+skips. Local native format evidence is mpv0.40; the added CI lane will separately
+verify Ubuntu0.37 on x86_64/AArch64. Generated fixtures have no DRM, provider
+accounts or proprietary captures. This is not a WAN/live-radio certification.

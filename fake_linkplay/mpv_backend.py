@@ -755,6 +755,8 @@ class MpvBackend:
             "media-title",
             "filename",
             "path",
+            "playlist-path",
+            "playlist",
             "stream-open-filename",
             "core-idle",
             "eof-reached",

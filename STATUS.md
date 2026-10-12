@@ -466,3 +466,36 @@ AP14 is published as `324469c1a8afb72b277735e268e59196edcc6b10`; its
 passed both architectures, including the new real installed-package/identity/
 manifest-uninstall step. This establishes native AArch64 installation evidence,
 not ARMv7, hardware or systemd boot.
+
+## AP15 native radio formats and playlist ownership
+
+First-level M3U/PLS now play through the normal mpv backend rather than returning
+a false failure when mpv expands a container URL into a different child URL.
+Exact native container provenance plus the sole current/playing entry establishes
+ownership; stale, foreign or inconsistent snapshots still reject. The selected
+container remains one canonical queue item while native entries advance inside
+it. Only final container EOF advances the renderer's top-level queue.
+
+Native entry loading reports BUFFERING even when old time/duration remain.
+Pause/resume verify actual source identity and boolean state before claiming
+completion; seek additionally freezes the actual child/entry identity.
+
+Generated local fixtures passed real libmpv0.40 decoding for MP3, ADTS AAC,
+application/octet-stream media, unencrypted HLS segment crossing, first-level
+M3U/PLS, redirects/loop failure and ICY metadata. Two-entry container transitions,
+HTTP/SOAP state and final top-level queue advance passed. Exact isolated snapshot:
+1714 passed with all12 real libmpv cases enabled; two Unix IPC cases skipped
+locally. Independent review and delayed-entry native probes confirmed ownership
+and buffering fixes. FFmpeg is a test-fixture dependency, not a new renderer
+runtime dependency; CI now includes these format cases.
+
+Nested playlists remain unsupported: mpv reports only immediate ancestry, so
+strict readiness may fail while an inner decoder is active. Do not loosen the
+ownership guard or call this arbitrary-playlist compatibility. Owner-fenced
+cleanup of unready loads is a follow-on in progress. No WAN/provider/hardware
+audio or original Android claim follows from these local tests.
+
+AP13 is published as `4b2f1d6f112b9ed8be2aa97261db2344068139eb`; both jobs in
+[run38189242029](https://github.com/de41tr/open-room-renderer/actions/runs/38189242029)
+passed1684 default tests, eight real libmpv cases, two production Unix IPC cases
+and actual native installer/import/identity/uninstall, including AArch64.
