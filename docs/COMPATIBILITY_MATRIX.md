@@ -283,3 +283,15 @@ The exact next combined source passed 2759 default cases /66 opt-in skips on
 Python3.11 and 3.12. Its selected libmpv lane passed 60 cases on 0.37/0.40, comprising
 47 actual native cases and 13 deterministic helper checks. Hosted Unix IPC and
 architecture verification remain a distinct pending gate for this revision.
+
+
+07c72c5 completed all three standard jobs, including the full native/null/PCM
+and production-Unix gates on both hosted architectures. The following small
+metadata-edit extraction changes organization only: three pure helpers retain
+exact-signature HttpApi wrappers and existing byte/error behavior. Its complete
+standard CI is a separate completion gate; no new capability is advertised.
+
+The extracted-code snapshot passed 2813 /66 default checks on Python3.11/3.12
+and 60 selected libmpv checks on both 0.37/0.40. This is behavior-preservation
+evidence for a limited code move. Its hosted standard-CI completion is pending
+separately; physical output, original Android and two-host limits remain.

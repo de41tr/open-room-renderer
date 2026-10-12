@@ -85,12 +85,24 @@ green before starting any extraction. Then select one small, clearest HttpApi
 responsibility, preferably pure DIDL/XML/metadata formatting. Keep public HTTP,
 SOAP and GENA bytes/fields, errors, state, timing and interfaces unchanged.
 
-Target90 minutes, hard maximum 120 minutes including native CI verification.
+Target 90 minutes, hard maximum 120 minutes including native CI verification.
 Record the actual UTC start, target finish and hard stop here and in RESUME.md
-when the green gate opens; the timer has NOT_STARTED. Use a separate refactor
+when the green gate opens; the timer is ACTIVE. Use a separate refactor
 commit, existing regression coverage and only necessary extraction tests.
 No new dependencies/frameworks, large rewrite, or fundamental playback/recovery/
 queue-staging logic changes. If risky or unable to obtain native-green within
 the budget, abandon the extraction and retain a concrete next-iteration plan.
 Include a short target architecture covering protocol adapters, player core,
 queue, eventing, DSP and service adapters. Stabilization/deadline take priority.
+
+Refactor green gate confirmed: 07c72c5, all three standard CI jobs passed in
+https://github.com/de41tr/open-room-renderer/actions/runs/38226980559 .
+Actual start: 2026-10-12 09:14:53 UTC. Target finish: 10:44:53 UTC.
+Hard stop: 11:14:53 UTC, including complete native CI verification.
+Status: ACTIVE; extraction/review and full local verification passed. Await the
+separate refactor commit's complete standard CI. Extract only the three stateless
+metadata-edit helpers into
+metadata_formatting.py, retaining exact-signature HttpApi wrappers. DIDL creation
+and dynamic attribute escaping remain in place. No protocol dispatch, state or
+playback logic moves. Abort/retain a concrete plan if unsafe or not native-green
+by the hard stop.

@@ -2,28 +2,25 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (08:57 UTC)
+## Current checkpoint (09:32 UTC)
 
-Draft PR remains unmerged. Published `b18b43e` passed all three standard jobs:
-https://github.com/de41tr/open-room-renderer/actions/runs/38223040208 .
-Both architectures passed the 47-test libmpv lane (46 actual native cases plus
-one node-encoding unit check), six production Unix cases, actual pywiim, stress,
+Draft PR remains unmerged. Published `07c72c5` passed all three standard jobs:
+https://github.com/de41tr/open-room-renderer/actions/runs/38226980559 .
+Both architectures passed the 60-test libmpv lane (47 actual native cases plus
+13 deterministic helpers), six production Unix cases, actual pywiim, stress,
 installed lifecycle, clocked transitions, discovery and eleven Snapcast stages.
-Python3.11 passed 2682 /65 skips. Separate local Python3.13 also passed 2682 /65.
+Both native runs retain the eight observed-root cases and owned-EDL cleanup.
+The earlier failed checkpoints remain recorded below.
 
-The earlier `5d64bfb` failed nested-playlist cleanup on both architectures;
-its other 46 libmpv-lane cases and subsequent runtime gates passed. That failure
-is retained, and the admitted-readiness boundary/terminal-error repair is green
-at b18b43e. The next reviewed checkpoint narrows causal root replacement,
-atomically publishes initial identity, and verifies coherent stopped snapshots
-inside the existing deadline. Final combined local verification passed 2759 /66
-on Python3.11/3.12 and the full 60-test libmpv lane on 0.37/0.40. Its hosted result
-remains pending. The original parentless-root candidate was rejected on a real
-owned-EDL counterexample.
-
-The user-requested behavior-neutral extraction remains NOT_STARTED until the
-current fixes receive full green standard CI. Its separate 90-minute target and
-120-minute hard budget, scope and abort rule are recorded in PLAN/RESUME.
+The requested behavior-neutral extraction began at 09:14:53 UTC after that gate.
+It moves exactly three stateless metadata-edit helpers into metadata_formatting.py,
+with unchanged HttpApi wrappers. DIDL creation, dynamic escaping, parsing and all
+playback/recovery/staging/event lifecycle behavior stay in place. The exact patch
+is independently reviewed, including byte/error/effect comparisons. Final local
+default suites passed 2813 /66 on Python3.11/3.12, and both complete selected
+libmpv lanes passed 60 checks. Full hosted verification remains the completion gate. Target 10:44:53 UTC; hard stop
+11:14:53 UTC including native CI. The short target architecture is in
+`docs/architecture.md`; this is a small seam, not a new framework.
 
 At `3e74b24`, expanded live-HLS/libmpv lanes failed: both architectures lost native
 playback-time during the segment-outage two-second hold; four other HLS cases
@@ -1554,3 +1551,36 @@ Production digest: `d1838974ffce99e18fa57bb9c470820306b4345f1cc12e4f74c37fb0385b
 Hosted production-Unix/architecture validation for this exact revision remains
 its own gate before the requested behavior-neutral extraction begins. The
 separately frozen radio endurance source and evidence are not relabeled.
+
+
+## Bounded pure metadata extraction
+
+Only artwork/live-tag editing, first resource-URI replacement and duration
+attribute editing move into metadata_formatting.py. The former function bodies
+are AST-identical; their HttpApi instance/static wrappers retain signatures and
+call-site behavior. There are no new dependencies, awaits, I/O, state reads or
+changes to other HttpApi method bodies. DIDL construction stays in place because
+its dynamic attribute-escaping dispatch would require a less direct extraction.
+
+Existing regex quirks remain deliberately unchanged: backslash replacements can
+expand or raise, namespace/prefix matching is textual, single-quoted duration
+attributes are retained, and spaced equals signs can cause another attribute.
+This refactor does not repair those cases. Necessary characterizations cover the
+existing wrappers and new pure functions; existing integration/native suites
+remain the main protocol and playback gate.
+
+Independent review matched 38,347 bounded baseline/candidate records across
+results, exceptions, object identity, signatures and observable evaluation traces,
+and passed 200 focused tests. A separate author corpus matched 6,849 cases,
+including 1,093 exceptions and 11 effect traces; 212 focused tests passed. These
+are finite equivalence checks, not a proof for every possible input or runtime
+monkeypatch. Exact final full-suite and native results are recorded separately.
+
+Final extracted-code snapshot passed 2813 default tests /66 opt-in skips on
+Python3.12 in 79.04s and Python3.11 in 80.47s. The complete selected libmpv lane
+passed 60 checks on 0.37 in 410.55s and 0.40 in 413.67s (47 actual native cases, 13
+deterministic helpers). No thresholds, timing budgets or opt-in defaults changed.
+Production digest: `93e39232b679ab4d321aaf4f98bdfa4befe61138dcdb04cf3e7dae1ea6ee381e`.
+The separate refactor commit still requires its complete hosted standard CI
+within the recorded budget before being considered finished. Frozen radio
+provenance and all earlier limitations remain unchanged.

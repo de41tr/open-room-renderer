@@ -1368,3 +1368,15 @@ subsequent explicit playback and full teardown. Twelve deterministic helper
 checks are UNIT; the actual libmpv case is REAL_BACKEND/null. The selected native
 lane contains 47 opt-in native cases and 13 deterministic checks, not 60 hardware
 tests. The former active-audio regression remains red with this helper.
+
+
+### Pure metadata-edit extraction
+
+`test_metadata_formatting.py` characterizes the existing three edit helpers
+through both preserved HttpApi wrappers and the new pure module. Exact strings
+cover Unicode, CR/LF/tab, quotes, opaque/encoded resources, first-match behavior,
+malformed tags, backslash replacement errors and existing duration quirks.
+The old bodies move without algorithm changes; DIDL construction/escaping and
+all stateful code remain untouched. Existing metadata/status/GENA and full
+native/Unix/installed-client regressions still gate the refactor. No additional
+provider, original-app, hardware or performance claim follows from extraction.

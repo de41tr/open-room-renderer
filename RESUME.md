@@ -5,10 +5,10 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint b18b43e passed all three jobs, including the
+   Latest completed checkpoint 07c72c5 passed all three jobs, including the
    complete owned-player SIGKILL/error/fresh-backend explicit-restart tail:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38223040208
-   Both architectures passed 47 libmpv-lane checks (46 native/one unit) and six Unix cases. Normal
+   https://github.com/de41tr/open-room-renderer/actions/runs/38226980559
+   Both architectures passed 60 libmpv-lane checks (47 native/13 unit) and six Unix cases. Normal
    limits stay 180s stress /6min step /15min native job /8min Python3.11 floor.
 4. Native evidence also verifies real pywiim, repeated-lifetime stress, installed
    CLI signals, discovery and all eleven same-host Snapcast stages. The earlier
@@ -95,8 +95,11 @@
 11. User-requested small behavior-neutral HttpApi extraction is gated on full
     green standard CI for the current functional fixes. Prefer pure DIDL/XML/
     metadata formatting; no playback/recovery/staging logic refactor or new deps.
-    Timer NOT_STARTED: target 90min, hard 120min including native verification.
-    Record exact UTC start/target/hard stop in PLAN/RESUME when it begins. Keep
+    Timer ACTIVE from 2026-10-12 09:14:53 UTC: target 10:44:53 UTC, hard 11:14:53 UTC
+    including native verification.
+    Reviewed extraction and full local suites passed; hosted CI is still the
+    completion gate. Scope: three stateless helpers and exact-signature wrappers;
+    DIDL creation/dynamic attribute escaping stay in HttpApi. Keep
     all protocol payload/error/state/timing interfaces unchanged, separate commit.
     Abort if risky or not native-green within budget and record next-iteration
     architecture/extraction plan. Preserve the running frozen radio test.
