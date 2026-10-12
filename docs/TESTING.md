@@ -245,3 +245,17 @@ the client-specific case skips without pywiim; unit/HTTP cases remain runnable.
 Latest isolated preset snapshot: 1477 passed with seven libmpv cases enabled,
 two local Unix IPC skips. Direct presets restart their target, not a saved
 provider playlist position.
+
+## Confirmed seek
+
+`test_confirmed_seek.py` covers ignored forward/backward seek acknowledgements,
+fixed two-sided position tolerance, all-stage cancellation/deadlines, EOF/error,
+new owner commands, live/unknown files and fractional bounds.
+`test_seek_proxy_ranges.py` checks optional shifted HTTP range validation.
+Absolute targets must satisfy 0 <= target < known duration; relative buttons
+clamp into that interval. Known live stations reject seek. Unknown duration
+requires an actual position confirmation rather than synthetic duration.
+The real libmpv and Unix IPC fixtures now include paused seek to10 seconds and
+forward/backward HTTP/SOAP checks at response time. AP10 isolated default suite:
+1590 passed, nine opt-in skips; extended libmpv/null seek passed separately.
+Byte-range timing uses bitrate estimates and has no precise VBR acceptance claim.

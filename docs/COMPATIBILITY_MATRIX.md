@@ -74,3 +74,10 @@ pywiim loopback verifies two distinct selected resources with MOCK audio.
 Unknown/invalid entries do not become phantom playable slots. Favorites remain
 configuration-owned; provider preset editing and saved playlist resume are not
 implemented.
+
+AP10 normal seek is confirmed from actual backend position (fixed ±1-second
+window) and preserves pause. HTTP/SOAP/Previous share the same bounded path.
+Live stations and invalid absolute bounds fault; stale or failed work cannot
+claim completion. Generated local30-second media has REAL_BACKEND/null evidence.
+Optional range reload stays off by default and its bitrate-derived global
+position is approximate; shifted-range HTTP behavior has synthetic coverage.

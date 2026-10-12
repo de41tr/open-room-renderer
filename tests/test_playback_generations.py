@@ -297,15 +297,16 @@ async def test_pause_during_replacement_load_tracks_actual_backend_identity(api)
 @pytest.mark.parametrize("terminal", ["error", "eof"])
 async def test_seek_completion_cannot_resurrect_terminal_state(api, terminal):
     await api._play_url("https://media.example.test/one.wav")
-    api._pending_seek_generation = 5
-    api._pending_seek_target = 7
-    api._pending_seek_final_status = "play"
-    api._wait_for_seek_ready = AsyncMock(return_value=True)
-    if terminal == "error":
-        api.mpv.fail = True
-    else:
-        api.mpv.idle = True
-    await api._finish_seek_after_buffering(5, 7, 0)
+    original_seek = api.mpv.seek
+    async def seek_then_end(target):
+        await original_seek(target)
+        if terminal == "error":
+            api.mpv.fail = True
+        else:
+            api.mpv.idle = True
+    api.mpv.seek = seek_then_end
+    with pytest.raises(BackendError):
+        await api._seek_command(7)
     assert api.state.phase == (PlaybackPhase.ERROR if terminal == "error" else PlaybackPhase.STOPPED)
 
 
@@ -314,7 +315,7 @@ async def test_seek_reload_updates_backend_identity_for_later_snapshots(api):
     await api._play_url("https://media.example.test/one.wav")
     api._should_reload_for_large_seek = lambda *_: True
     api._seek_audio_proxy_url = lambda *_: "http://127.0.0.1/fixture-proxy"
-    api._finish_seek_after_buffering = AsyncMock()
+    api.queue_duration_sec = 300
     await api._execute_soap_side_effect("Seek", "<Seek><Unit>REL_TIME</Unit><Target>00:02:00</Target></Seek>")
     assert api.state.backend_url == "http://127.0.0.1/fixture-proxy"
     api._pending_seek_target = None
@@ -462,7 +463,7 @@ async def test_paused_reload_seek_preserves_real_backend_pause(api):
     await api.execute(ParsedCommand("pause"), "192.0.2.1")
     api._should_reload_for_large_seek = lambda *_: True
     api._seek_audio_proxy_url = lambda *_: "http://127.0.0.1/fixture-proxy"
-    api._wait_for_seek_ready = AsyncMock(return_value=True)
+    api.queue_duration_sec = 300
     await api._execute_soap_side_effect("Seek", "<Seek><Unit>REL_TIME</Unit><Target>00:02:00</Target></Seek>")
     await asyncio.sleep(0)
     assert api.mpv.paused
@@ -471,9 +472,8 @@ async def test_paused_reload_seek_preserves_real_backend_pause(api):
 
 
 def test_paused_seek_readiness_does_not_require_advancing_audio(api):
-    api._pending_seek_final_status = "pause"
     snapshot = {"pause": True, "idle-active": False, "core-idle": True, "playback-time": 10}
-    assert api._snapshot_is_seek_ready(snapshot, 10, 1.5, True, 5, 4)
+    assert api._snapshot_is_seek_ready(snapshot, 10, intent="pause")
 
 
 @pytest.mark.asyncio
@@ -503,15 +503,15 @@ async def test_resume_during_replacement_resolution_cannot_resume_old_source(api
 @pytest.mark.asyncio
 @pytest.mark.parametrize("terminal", [PlaybackPhase.STOPPED, PlaybackPhase.ERROR])
 async def test_unready_seek_does_not_replace_terminal_observation(api, terminal):
+    from fake_linkplay.soap import SoapFault
     api.state.phase = terminal
     api.state.last_error = "original failure" if terminal == PlaybackPhase.ERROR else ""
-    api._pending_seek_generation = 5
-    api._pending_seek_target = 29
-    api._wait_for_seek_ready = AsyncMock(return_value=False)
-    await api._finish_seek_after_buffering(5, 29, 0)
+    with pytest.raises(SoapFault):
+        await api._seek_command(29)
     assert api.state.phase == terminal
     assert api.state.last_error != "Seek position not confirmed"
     assert api._pending_seek_target is None
+    assert not api.mpv.calls
 
 
 @pytest.mark.asyncio
@@ -520,6 +520,7 @@ async def test_failed_repause_after_seek_reload_reports_actual_backend_error(api
     await api.execute(ParsedCommand("pause"), "192.0.2.1")
     api._should_reload_for_large_seek = lambda *_: True
     api._seek_audio_proxy_url = lambda *_: "http://127.0.0.1/fixture-proxy"
+    api.queue_duration_sec = 300
     api.mpv.pause = AsyncMock(side_effect=BackendError("synthetic pause failure"))
     with pytest.raises(BackendError):
         await api._execute_soap_side_effect("Seek", "<Seek><Unit>REL_TIME</Unit><Target>00:02:00</Target></Seek>")

@@ -28,6 +28,7 @@ AP01, AP02, AP05, AP03, AP04, AP06, AP07 and AP08 have implementation checkpoint
 including real libmpv/null control, two-track/callback and interrupted-source
 recovery flows. AP11 now confirms and persists actual digital gain. AP12 now validates and transactionally confirms existing DSP, with measured
 PCM effects. AP09 preserves canonical and opaque metadata across client surfaces.
-Confirmed seek, active EQ restore and installation acceptance follow. The
+AP10 confirms actual seeks, including pause/resume and stale-command rejection.
+Active EQ restore, installation and native playlist identity are in integration. The
 least-privilege public CI lane passed real Unix IPC on x86_64 and ARM64.
 This records progress, not full hardware/app acceptance.

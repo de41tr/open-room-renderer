@@ -29,6 +29,7 @@ class DummyMpv(MpvBackend):
             "core-idle": self.idle,
             "pause": self.paused,
             "filename": self.loaded_url,
+            "path": self.loaded_url,
             "playback-time": self.seeked_to,
             "duration": self.duration if self.loaded_url else None,
             "track-list": [{"type": "audio", "selected": True}],
@@ -677,10 +678,10 @@ async def test_episode_without_supplied_duration_does_not_invent_one_hour() -> N
     assert 'duration="3600"' not in api.state.track_metadata
 
 
-def test_seek_ready_uses_playback_progress_over_demux_underrun() -> None:
+def test_seek_ready_accepts_near_target_despite_stale_demux_underrun() -> None:
     api = make_api()
     snapshot = {
-        "playback-time": 2736.2,
+        "playback-time": 2734.6,
         "core-idle": False,
         "idle-active": False,
         "pause": False,
@@ -688,19 +689,19 @@ def test_seek_ready_uses_playback_progress_over_demux_underrun() -> None:
         "track-list": [{"type": "audio", "selected": True}],
         "demuxer-cache-state": {"underrun": True},
     }
-    assert api._snapshot_is_seek_ready(snapshot, 2734, 1.5, True, 20.0, 4.0)
+    assert api._snapshot_is_seek_ready(snapshot, 2734)
 
 
 def test_seek_ready_rejects_idle_snapshot() -> None:
     api = make_api()
     snapshot = {
-        "playback-time": 2736.2,
+        "playback-time": 2734.6,
         "core-idle": True,
         "idle-active": True,
         "cache-buffering-state": 100,
         "track-list": [{"type": "audio", "selected": True}],
     }
-    assert not api._snapshot_is_seek_ready(snapshot, 2734, 1.5, True, 20.0, 4.0)
+    assert not api._snapshot_is_seek_ready(snapshot, 2734)
 
 
 @pytest.mark.asyncio
@@ -741,9 +742,8 @@ async def test_set_play_mode_updates_loop_state() -> None:
 @pytest.mark.asyncio
 async def test_previous_restarts_current_track() -> None:
     api = make_api()
-    api.state.current_url = "https://example.test/audio.mp3"
-    api.state.status = "play"
-    api.state.curpos = 45
+    await api._play_url("https://example.test/audio.mp3")
+    api.mpv.seeked_to = api.state.curpos = 45
     await api._execute_soap_side_effect("Previous", "<Previous />")
     assert api.state.curpos == 0
     assert api.mpv.seeked_to == 0

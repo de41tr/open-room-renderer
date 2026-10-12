@@ -374,3 +374,35 @@ AP09 is published as `93f51e4c310827b1ec1ad9da38b3d6eb9eda851c`. Its
 [CI run 38187041169](https://github.com/de41tr/open-room-renderer/actions/runs/38187041169)
 passed on both x86_64 and AArch64: 1451 default tests, seven libmpv cases and
 two production Unix IPC cases per architecture.
+
+## AP10 confirmed seek checkpoint
+
+HTTP/SOAP seek and first-track Previous now await actual backend position within
+a fixed one-second target window. Requested position is never published as an
+observation. Forward/backward ignored acknowledgements, including the former
+12-to-10-second false positive, fail rather than succeeding after a timer.
+
+The entire seek operation is tracked for shutdown, with bounded preflight lock,
+mutation and confirmation phases. Stop/pause/new selection/new seek, backend
+failure, EOF and changed native resource identities cannot complete old work.
+Known live stations reject seeks. Absolute negative/end-or-later targets reject
+consistently; relative buttons clamp, and fractional backend durations retain
+valid last-second targets. Lost acknowledgements report uncertainty and a public
+resume reloads the selected source rather than retaining a false range identity.
+
+Optional byte-range reload remains disabled by default. Segment coordinates are
+translated consistently, shifted responses must supply matching 206 ranges,
+and ignored/invalid Range responses fail. Bitrate-derived global timing remains
+approximate, especially for VBR/container media; these range cases are synthetic
+HTTP tests, not a gapless or precise compressed-media seek certification.
+
+Independent review: 168 focused checks plus reproduced race/failure cases passed.
+Isolated default snapshot: 1590 passed, nine explicit native opt-in skips.
+Extended real libmpv/null verified a generated 30-second source, paused seek to
+10 seconds, forward/backward HTTP/SOAP seek, resume, Previous and cleanup.
+The native Unix fixture is extended and awaits this commit's CI run.
+
+Configured preset checkpoint is published as
+`84d7caeda4f3c4fc823217305fc0a6529735b2a7`; its
+[CI run 38187800513](https://github.com/de41tr/open-room-renderer/actions/runs/38187800513)
+passed default, libmpv and production Unix IPC lanes on both architectures.

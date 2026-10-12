@@ -273,15 +273,38 @@ async def test_real_unix_ipc_controls_queue_eof_and_external_ownership(native_wo
                     assert await _property(backend, "mute") is False
                     assert await command("setPlayerCmd:seek:8") == "OK"
 
-                    async def sought() -> bool:
-                        return abs(await _property(backend, "playback-time") - 8) < 0.2
-
-                    await _eventually("paused absolute seek", sought)
+                    # Completion must already be confirmed when HTTP/SOAP
+                    # responds, including backward seeks and paused playback.
+                    assert abs(await _property(backend, "playback-time") - 8) < 0.2
+                    assert await _property(backend, "pause") is True
+                    for surface in ("http", "soap"):
+                        for target in (18, 3):
+                            if surface == "http":
+                                assert await command(f"setPlayerCmd:seek:{target}") == "OK"
+                            else:
+                                await soap("Seek", f"<Unit>REL_TIME</Unit><Target>00:00:{target:02}</Target>")
+                            assert abs(await _property(backend, "playback-time") - target) < 0.2
+                            assert await _property(backend, "pause") is True
+                            assert abs(api.state.curpos - target) <= 1 and api.state.status == "pause"
+                    await soap("Previous")
+                    assert await _property(backend, "playback-time") < 0.2
                     assert await _property(backend, "pause") is True
                     assert await command("setPlayerCmd:resume") == "OK"
                     await status("play")
                     before = await _property(backend, "playback-time")
                     await _eventually("resumed native playback progression", progressing)
+                    for surface in ("http", "soap"):
+                        for target in (18, 3):
+                            if surface == "http":
+                                assert await command(f"setPlayerCmd:seek:{target}") == "OK"
+                            else:
+                                await soap("Seek", f"<Unit>REL_TIME</Unit><Target>00:00:{target:02}</Target>")
+                            assert abs(await _property(backend, "playback-time") - target) < 0.5
+                            assert await _property(backend, "pause") is False
+                            assert abs(api.state.curpos - target) <= 1 and api.state.status == "play"
+                    evidence["confirmed_seek"] = {"http_soap_forward_backward": True,
+                                                  "playing_paused": True, "previous_paused": True,
+                                                  "actual_position_before_response": True}
                     assert await command("setPlayerCmd:stop") == "OK"
                     await _eventually("explicit stop", lambda: _matches(backend, "idle-active", True))
                     assert (await status("stop"))["curpos"] == "0"

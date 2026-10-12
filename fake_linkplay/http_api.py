@@ -185,7 +185,10 @@ class HttpApi:
         self._playback_offset_sec = 0
         self._pending_seek_target: int | None = None
         self._pending_seek_generation = 0
-        self._pending_seek_final_status = "play"
+        self._seek_tasks: set[asyncio.Task] = set()
+        self._seek_timeout = 5.0
+        self._seek_poll_interval = 0.05
+        self._seek_closed = False
         self._dsp_command_lock = asyncio.Lock()
         self._dsp_backend_confirmed = False
         self._dsp_backend_attempted = False
@@ -248,6 +251,7 @@ class HttpApi:
         """Share one backend observer between all configured HTTP listeners."""
         self._app_users += 1
         if self._state_monitor_task is None:
+            self._seek_closed = False
             self._state_monitor_task = asyncio.create_task(self._monitor_backend())
         try:
             yield
@@ -257,6 +261,14 @@ class HttpApi:
                 # Invalidate before any cleanup await. An in-flight load keeps
                 # the backend lock until its actual identity has been recorded.
                 self._invalidate_station_recovery()
+                self._seek_closed = True
+                self._pending_seek_generation += 1
+                self._pending_seek_target = None
+                seek_tasks = list(self._seek_tasks)
+                for seek_task in seek_tasks:
+                    seek_task.cancel()
+                if seek_tasks:
+                    await asyncio.gather(*seek_tasks, return_exceptions=True)
                 recovery_task = self._station_recovery_task
                 event_tasks = [subscriber.task for subscriber in self.event_subscribers.values() if subscriber.task and not subscriber.task.done()]
                 self.event_subscribers.clear()
@@ -483,14 +495,17 @@ class HttpApi:
                     self.state.last_error = ""
         if isinstance(snap.get("playback-time"), (int, float)) and self.state.phase != PlaybackPhase.STOPPED:
             playback_time = self._adjusted_playback_time(snap)
-            if self._pending_seek_target is None or abs(playback_time - self._pending_seek_target) <= 2:
-                self.state.curpos = playback_time
+            # Always publish observations, never a requested seek position.
+            self.state.curpos = playback_time
+        if self._pending_seek_target is not None and self.state.phase in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}:
+            self.state.mark_transitioning()
         if self.queue_is_live:
             self.state.totlen = 0
         elif self.queue_duration_sec > 0:
             self.state.totlen = self.queue_duration_sec
-        elif isinstance(snap.get("duration"), (int, float)) and int(snap["duration"]) > 0:
-            self.state.totlen = int(snap["duration"])
+        elif (type(snap.get("duration")) in {int, float} and math.isfinite(snap["duration"])
+                and snap["duration"] > 0):
+            self.state.totlen = int(snap["duration"]) + self._playback_offset_sec
         selected = self.state.queue.current
         if (snap.get("media-title") and self.state.intent != "stop"
                 and (not selected or not selected.title or selected.title_is_fallback)):
@@ -564,17 +579,185 @@ class HttpApi:
             raise
         self._schedule_event_notify()
 
-    async def _seek_command(self, seconds: int) -> None:
-        if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}:
+    async def _seek_command(self, seconds: int, *, relative: bool = False) -> None:
+        """Acknowledge only a bounded, source-fenced actual-position readback.
+
+        Unknown-duration files are allowed; explicitly marked stations are not.
+        The caller owns completion, so HTTP, SOAP and Previous have the same
+        success semantics and shutdown can cancel every confirmation task.
+        """
+        item = self.state.queue.current
+        if (item and item.stream_type == "station") or self.queue_stream_type == "station":
+            raise SoapFault(710, "Seek Mode Not Supported")
+        if (self._seek_closed or self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}
+                and not (self.state.phase == PlaybackPhase.BUFFERING and self._pending_seek_target is not None)):
             raise SoapFault(701, "Transition Not Available")
-        generation = self._accept_playback_command("pause" if self.state.phase == PlaybackPhase.PAUSED else "play")
-        async with self._backend_lock:
-            if generation != self.state.generation:
-                raise BackendError("Playback command superseded")
-            await self._backend_call(self.mpv.seek(seconds))
-        if generation != self.state.generation:
-            raise BackendError("Playback command superseded")
-        self.state.curpos = seconds
+        if type(seconds) is not int:
+            raise SoapFault(402, "Invalid Args")
+        if not relative:
+            self._bounded_seek_target(seconds, self._seek_duration(), relative=False)
+        source_url = self.state.current_url
+        intent = self.state.intent
+        generation = self._accept_playback_command(intent)
+        seek_generation = self._pending_seek_generation
+        task = asyncio.create_task(self._perform_seek(
+            seconds, relative, source_url, intent, generation, seek_generation))
+        self._seek_tasks.add(task)
+        try:
+            await task
+        finally:
+            self._seek_tasks.discard(task)
+
+    def _seek_duration(self, snapshot: dict | None = None) -> float:
+        """Use full metadata or fresh duration, never a truncated display bound."""
+        item = self.state.queue.current
+        duration = (item.duration if item else 0) or self.queue_duration_sec
+        if duration:
+            return float(duration)
+        if snapshot is not None:
+            raw = snapshot.get("duration")
+            if type(raw) in {int, float} and math.isfinite(raw) and raw > 0:
+                return float(raw + self._playback_offset_sec)
+            return float(self.state.totlen)
+        # A display length is integral, so its apparent end may still be a
+        # valid target (e.g. second300 of a300.8-second file). Read it fresh.
+        return 0.0
+
+    @staticmethod
+    def _bounded_seek_target(seconds: int, duration: float, *, relative: bool) -> int:
+        # Absolute targets are rejected, never silently moved. Relative buttons
+        # clamp to the last whole second before a known end (or zero).
+        if relative:
+            seconds = max(0, seconds)
+            if duration > 0:
+                seconds = min(seconds, max(0, math.ceil(duration) - 1))
+        if seconds < 0 or (duration > 0 and seconds >= duration):
+            raise SoapFault(711, "Illegal Seek Target")
+        return seconds
+
+    async def _perform_seek(
+        self, seconds: int, relative: bool, source_url: str, intent: str,
+        generation: int, seek_generation: int,
+    ) -> None:
+        """Own preflight, mutation and confirmation for one accepted command."""
+        mutation_started = False
+
+        def current() -> bool:
+            return (not self._seek_closed and generation == self.state.generation
+                    and seek_generation == self._pending_seek_generation
+                    and self.state.current_url == source_url and self.state.intent == intent)
+
+        try:
+            async with asyncio.timeout(self._seek_timeout), self._backend_lock:
+                if not current():
+                    raise BackendError("Playback command superseded")
+                snapshot = await self.mpv.snapshot()
+                if not current():
+                    raise BackendError("Playback command superseded")
+                if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
+                    raise BackendError("Playback ended before seek")
+                self._apply_backend_snapshot(snapshot)
+                if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
+                    raise BackendError("Playback ended before seek")
+                if not self.state.backend_url or snapshot.get("path") != self.state.backend_url:
+                    raise BackendError("Source not confirmed before seek")
+                if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}:
+                    raise SoapFault(701, "Transition Not Available")
+                seek_source = self._seek_source_token(snapshot)
+                previous_pos = self._adjusted_playback_time(snapshot)
+                target = self._bounded_seek_target(
+                    previous_pos + seconds if relative else seconds,
+                    self._seek_duration(snapshot), relative=relative)
+                direct_url = self.queue_resolved_url or self.state.resolved_url or source_url
+                # A segment starts at offset, so earlier targets require the
+                # original resource. Later absolute targets use local seconds.
+                before_segment = target < self._playback_offset_sec
+                range_reload = not before_segment and self._should_reload_for_large_seek(target, previous_pos)
+                mutation_started = True
+                if before_segment or range_reload:
+                    seek_source = None  # A reload intentionally establishes a new resource.
+                    if before_segment:
+                        playback_url = self._backend_playback_url(source_url, direct_url)
+                        options = dict(self._mpv_playback_options(source_url, direct_url), start=str(target))
+                        offset = 0
+                    else:
+                        playback_url = self._seek_audio_proxy_url(direct_url, target)
+                        options = self._mpv_seek_reload_options()
+                        offset = target
+                    await self._gain_reconciling_call(self.mpv.loadfile(playback_url, options))
+                    # Preserve actual identity even when a newer owner command
+                    # arrived during this locked, acknowledged backend mutation.
+                    self.state.backend_url = playback_url
+                    self.state.backend_original_url = source_url
+                    self._playback_offset_sec = offset
+                    if not current():
+                        raise BackendError("Playback command superseded")
+                    if intent == "pause":
+                        await self._backend_call(self.mpv.pause())
+                else:
+                    await self._backend_call(self.mpv.seek(target - self._playback_offset_sec))
+                if not current():
+                    raise BackendError("Playback command superseded")
+                if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
+                    raise BackendError("Playback ended during seek")
+                backend_url, offset = self.state.backend_url, self._playback_offset_sec
+                self._pending_seek_target = target
+                self.state.mark_transitioning()
+            self._schedule_event_notify(("rendertransport1", "AVTransport"))
+            snapshot = await self._wait_for_seek_ready(current, target, backend_url, offset, intent, seek_source)
+            if (not current() or self.state.backend_url != backend_url or self._playback_offset_sec != offset
+                    or self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}):
+                raise BackendError("Playback command superseded or ended")
+            self._pending_seek_target = None
+            self._apply_backend_snapshot(snapshot)
+            LOG.info("Seek confirmed target=%s actual=%s status=%s", target, self.state.curpos, self.state.status)
+            self._schedule_event_notify(("rendertransport1", "AVTransport"))
+        except (TimeoutError, asyncio.CancelledError):
+            if current() and mutation_started and self.state.phase not in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
+                self.state.mark_error("Seek operation interrupted before confirmation")
+                self._schedule_event_notify(("rendertransport1", "AVTransport"))
+            raise
+        except (BackendError, OSError):
+            if current() and self.state.phase not in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
+                if mutation_started:
+                    self.state.mark_error("Seek position not confirmed")
+                    self._schedule_event_notify(("rendertransport1", "AVTransport"))
+            raise
+        finally:
+            if generation == self.state.generation and seek_generation == self._pending_seek_generation:
+                self._pending_seek_target = None
+
+    @staticmethod
+    def _seek_source_token(snapshot: dict) -> tuple[object, object]:
+        """Fence both the actual file and repeated URLs in a native playlist."""
+        playlist = snapshot.get("playlist")
+        active = [entry for entry in playlist if isinstance(entry, dict)
+                  and (entry.get("current") is True or entry.get("playing") is True)] if isinstance(playlist, list) else []
+        entry_id = active[0].get("id") if len(active) == 1 else None
+        return snapshot.get("path"), entry_id
+
+    @staticmethod
+    def _seek_proxy_content_range(status: int, headers: object, requested: str, offset: int) -> str | None:
+        """Verify shifted bytes and expose segment-local coordinates to mpv.
+
+        This only confirms the HTTP byte range. Bitrate-derived time offsets
+        remain an opt-in approximation, especially for VBR/container media.
+        """
+        if status != 206 or headers.get("Content-Encoding", "identity").lower() != "identity":
+            return None
+        response = re.fullmatch(r"bytes ([0-9]+)-([0-9]+)/([0-9]+)", headers.get("Content-Range", ""))
+        request = re.fullmatch(r"bytes=([0-9]+)-([0-9]*)", requested)
+        if response is None or request is None:
+            return None
+        start, end, total = map(int, response.groups())
+        if start != int(request[1]) or start < offset or not start <= end < total:
+            return None
+        if request[2] and end > int(request[2]):
+            return None
+        length = headers.get("Content-Length")
+        if length is not None and (not length.isdecimal() or int(length) != end - start + 1):
+            return None
+        return f"bytes {start - offset}-{end - offset}/{total - offset}"
 
     async def handle_httpapi(self, request: web.Request) -> web.Response:
         """Handle ``/httpapi.asp`` commands and serialize text/JSON results."""
@@ -856,8 +1039,9 @@ class HttpApi:
                 await self._transport_command(command)
             return "OK"
         if name == "seek":
-            seconds = max(0, int(parsed.args[0]))
-            await self._seek_command(seconds)
+            if not parsed.args or not re.fullmatch(r"-?[0-9]+", parsed.args[0]):
+                raise ValueError("Invalid seek target")
+            await self._seek_command(int(parsed.args[0]))
             return "OK"
         if name == "volume":
             if not parsed.args or not re.fullmatch(r"[0-9]{1,3}", parsed.args[0]):
@@ -1890,156 +2074,85 @@ class HttpApi:
                 return True
         return False
 
-    async def _finish_seek_after_buffering(self, seek_generation: int, target: int, previous_pos: int) -> None:
-        """Complete a seek once mpv reports enough data for stable playback."""
 
-        ready = await self._wait_for_seek_ready(seek_generation, target, previous_pos)
-        if seek_generation != self._pending_seek_generation or self._pending_seek_target != target:
-            return
-        if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
-            self._pending_seek_target = None
-            return
-        if ready:
-            await self.sync_mpv_state()
-            if seek_generation != self._pending_seek_generation:
-                return
-            self._pending_seek_target = None
-            if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
-                return
-            if self._pending_seek_final_status == "pause" and self.state.phase != PlaybackPhase.PAUSED:
-                self.state.mark_error("Backend did not preserve pause during seek")
-        else:
-            self._pending_seek_target = None
-            self.state.mark_error("Seek position not confirmed")
-            self._schedule_event_notify(("rendertransport1", "AVTransport"))
-            return
-        LOG.info("SOAP Seek ready position=%s ready=%s status=%s", self.state.curpos, ready, self.state.status)
-        self._schedule_event_notify(("rendertransport1", "AVTransport"))
-
-    async def _wait_for_seek_ready(self, seek_generation: int, target: int, previous_pos: int) -> bool:
-        """Poll mpv until a seek target appears to be buffered and audible."""
-
-        distance = abs(target - previous_pos)
-        large_seek = distance >= 60
-        timeout = 20.0 if large_seek else 8.0
-        min_elapsed = 4.0 if large_seek else 0.7
-        required_advance = 1.5 if large_seek else 0.6
-        loop = asyncio.get_running_loop()
-        started = loop.time()
-        deadline = started + timeout
-        last_snapshot: dict[str, object] = {}
-        LOG.info(
-            "SOAP Seek waiting target=%s previous=%s distance=%s timeout=%.1f min_elapsed=%.1f",
-            target,
-            previous_pos,
-            distance,
-            timeout,
-            min_elapsed,
-        )
-        while loop.time() < deadline:
-            if seek_generation != self._pending_seek_generation:
-                return False
-            await asyncio.sleep(0.35)
-            async with self._backend_lock:
-                snapshot = await self.mpv.snapshot()
-            if seek_generation != self._pending_seek_generation:
-                return False
-            if snapshot.get("backend-error"):
-                return False
-            if snapshot.get("path") and self.state.backend_url and snapshot["path"] != self.state.backend_url:
-                continue
-            last_snapshot = snapshot
-            elapsed = loop.time() - started
-            if self._snapshot_is_seek_ready(snapshot, target, required_advance, large_seek, elapsed, min_elapsed):
-                return True
-            if loop.time() >= deadline:
-                break
-        LOG.info(
-            "SOAP Seek ready timeout target=%s previous=%s distance=%s snapshot=%s",
-            target,
-            previous_pos,
-            distance,
-            self._compact_snapshot(last_snapshot),
-        )
-        return False
+    async def _wait_for_seek_ready(
+        self, current: Callable[[], bool], target: int, backend_url: str, offset: int, intent: str,
+        seek_source: tuple[object, object] | None,
+    ) -> dict:
+        """Read actual position with a deadline covering lock and snapshot waits."""
+        try:
+            async with asyncio.timeout(self._seek_timeout):
+                while True:
+                    if (not current() or self.state.backend_url != backend_url
+                            or self._playback_offset_sec != offset
+                            or self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}):
+                        raise BackendError("Playback command superseded or ended")
+                    async with self._backend_lock:
+                        if not current():
+                            raise BackendError("Playback command superseded")
+                        snapshot = await self.mpv.snapshot()
+                    if (not current() or self.state.backend_url != backend_url
+                            or self._playback_offset_sec != offset):
+                        raise BackendError("Playback command superseded")
+                    if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
+                        raise BackendError("Playback ended during seek")
+                    # An unrelated or missing path cannot confirm this source,
+                    # including a terminal observation from a different file.
+                    if snapshot.get("backend-error"):
+                        self._mark_backend_failure()
+                        raise BackendError("Backend control failed during seek")
+                    if snapshot.get("path") == backend_url:
+                        if seek_source is not None and self._seek_source_token(snapshot) != seek_source:
+                            raise BackendError("Source changed during seek")
+                        self._apply_backend_snapshot(snapshot)
+                        if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
+                            raise BackendError("Playback ended during seek")
+                        if self._snapshot_is_seek_ready(snapshot, target, intent=intent):
+                            return snapshot
+                    elif snapshot.get("idle-active") is True and not snapshot.get("path"):
+                        # mpv clears path after EOF/stop; this is terminal too.
+                        self._apply_backend_snapshot(snapshot)
+                        raise BackendError("Playback ended during seek")
+                    await asyncio.sleep(self._seek_poll_interval)
+        except TimeoutError:
+            raise BackendError("Seek position not confirmed") from None
 
     def _snapshot_is_seek_ready(
-        self,
-        snapshot: dict[str, object],
-        target: int,
-        required_advance: float,
-        large_seek: bool,
-        elapsed: float,
-        min_elapsed: float,
+        self, snapshot: dict[str, object], target: int, *, intent: str = "play",
     ) -> bool:
-        """Evaluate whether one mpv snapshot satisfies seek-complete criteria."""
+        """Require a two-sided actual-position window and preserved pause.
 
-        if elapsed < min_elapsed:
+        One second covers decoder rounding on either side. Time alone never
+        expands this window: an unchanged ignored backward seek must not
+        become successful merely because confirmation waited longer.
+        """
+        raw = snapshot.get("playback-time")
+        if type(raw) not in {int, float} or not math.isfinite(raw):
             return False
-        playback_raw = snapshot.get("playback-time")
-        if not isinstance(playback_raw, (int, float)):
+        if (snapshot.get("backend-error") or snapshot.get("idle-active") is not False
+                or snapshot.get("eof-reached") is True or snapshot.get("paused-for-cache") is True):
             return False
-        if snapshot.get("idle-active") is True:
+        if snapshot.get("pause") is not (intent == "pause"):
             return False
-        if self._pending_seek_final_status == "pause" and snapshot.get("pause") is True:
-            return abs(self._adjusted_playback_time(snapshot) - target) <= 2
-        if snapshot.get("core-idle") is True:
+        position = raw + self._playback_offset_sec
+        if not target - 1.0 <= position <= target + 1.0:
             return False
+        if intent == "pause":
+            return True
         buffering = snapshot.get("cache-buffering-state")
-        if isinstance(buffering, (int, float)) and 0 <= buffering < 100:
-            return False
-        if not self._mpv_snapshot_has_audio(snapshot):
-            return False
-
-        playback_time = self._adjusted_playback_time(snapshot)
-        if playback_time >= target + required_advance:
-            return True
-        if not large_seek and abs(playback_time - target) <= 2:
-            return True
-
-        cache_state = snapshot.get("demuxer-cache-state")
-        if isinstance(cache_state, dict) and cache_state.get("underrun") is True:
-            return False
-        if large_seek and playback_time >= target + 0.5 and self._snapshot_has_seek_range(snapshot, target):
-            return True
-        return False
+        return (snapshot.get("core-idle") is not True
+                and not (isinstance(buffering, (int, float)) and 0 <= buffering < 100)
+                and self._mpv_snapshot_has_audio(snapshot))
 
     def _adjusted_playback_time(self, snapshot: dict[str, object]) -> int:
         """Return mpv playback time adjusted for proxy reload offsets."""
 
         playback_time = snapshot.get("playback-time")
-        if not isinstance(playback_time, (int, float)):
+        if type(playback_time) not in {int, float} or not math.isfinite(playback_time):
             return self.state.curpos
         return max(0, int(playback_time) + self._playback_offset_sec)
 
-    @staticmethod
-    def _snapshot_is_buffering(snapshot: dict[str, object]) -> bool:
-        if snapshot.get("core-idle") is True or snapshot.get("idle-active") is True:
-            return True
-        buffering = snapshot.get("cache-buffering-state")
-        if isinstance(buffering, (int, float)) and 0 <= buffering < 100:
-            return True
-        cache_state = snapshot.get("demuxer-cache-state")
-        if isinstance(cache_state, dict) and cache_state.get("underrun") is True:
-            return True
-        return False
 
-    @staticmethod
-    def _snapshot_has_seek_range(snapshot: dict[str, object], target: int) -> bool:
-        cache_state = snapshot.get("demuxer-cache-state")
-        if not isinstance(cache_state, dict):
-            return False
-        ranges = cache_state.get("seekable-ranges")
-        if not isinstance(ranges, list):
-            return False
-        for item in ranges:
-            if not isinstance(item, dict):
-                continue
-            start = item.get("start")
-            end = item.get("end")
-            if isinstance(start, (int, float)) and isinstance(end, (int, float)) and start <= target <= end:
-                return True
-        return False
 
     @staticmethod
     def _compact_snapshot(snapshot: dict[str, object]) -> dict[str, object]:
@@ -2431,6 +2544,12 @@ class HttpApi:
                 for header in ("Content-Length", "Content-Range", "Content-Encoding"):
                     if upstream.headers.get(header):
                         headers[header] = upstream.headers[header]
+                if base_offset:
+                    shifted_range = self._seek_proxy_content_range(
+                        upstream.status, upstream.headers, upstream_range, base_offset)
+                    if shifted_range is None:
+                        return web.Response(status=502, text="Upstream seek range was not confirmed")
+                    headers["Content-Range"] = shifted_range
                 response = web.StreamResponse(status=upstream.status, headers=headers)
                 await response.prepare(request)
                 async for chunk in upstream.content.iter_chunked(64 * 1024):
@@ -3159,68 +3278,15 @@ class HttpApi:
             self.state.queue.loop = 0
             return
         if action in {"Seek", "SeekForward", "SeekBackward"}:
-            if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}:
-                raise SoapFault(701, "Transition Not Available")
-            observed_generation = self.state.generation
-            await self.sync_mpv_state()
-            if observed_generation != self.state.generation:
-                raise BackendError("Playback command superseded")
-            final_status = self.state.status if self.state.status in {"play", "pause"} else "play"
-            previous_pos = self.state.curpos
             if action == "SeekForward":
-                seconds = self.state.curpos + 30
+                await self._seek_command(30, relative=True)
             elif action == "SeekBackward":
-                seconds = self.state.curpos - 30
+                await self._seek_command(-30, relative=True)
             else:
                 unit = self._xml_text(body, "Unit")
-                target = self._xml_text(body, "Target")
                 if unit and unit != "REL_TIME":
                     raise SoapFault(710, "Seek Mode Not Supported")
-                seconds = self._hms_to_seconds(target)
-            if not self.queue_is_live and self.state.totlen > 0:
-                seconds = min(seconds, max(0, self.state.totlen - 1))
-            seconds = max(0, int(seconds))
-            generation = self._accept_playback_command(self.state.intent)
-            async with self._backend_lock:
-                if generation != self.state.generation:
-                    raise BackendError("Playback command superseded")
-                if self._should_reload_for_large_seek(seconds, previous_pos):
-                    direct_url = self.queue_resolved_url or self.state.resolved_url
-                    seek_url = self._seek_audio_proxy_url(direct_url, seconds)
-                    LOG.info(
-                        "SOAP %s reloading range proxy position=%s previous=%s direct=%s proxy=%s",
-                        action,
-                        seconds,
-                        previous_pos,
-                        direct_url,
-                        seek_url,
-                    )
-                    await self._gain_reconciling_call(self.mpv.loadfile(seek_url, self._mpv_seek_reload_options()))
-                    self.state.backend_url = seek_url
-                    self._playback_offset_sec = seconds
-                    if final_status == "pause":
-                        try:
-                            await self._backend_call(self.mpv.pause())
-                        except (BackendError, OSError, TimeoutError):
-                            if generation == self.state.generation:
-                                self.state.mark_error("Backend did not preserve pause during seek")
-                                self._schedule_event_notify()
-                            raise
-                else:
-                    await self._backend_call(self.mpv.seek(seconds))
-            if generation != self.state.generation:
-                raise BackendError("Playback command superseded")
-            if self._should_reload_for_large_seek(seconds, previous_pos):
-                self._playback_offset_sec = seconds
-            self.state.curpos = seconds
-            self.state.mark_transitioning()
-            self._pending_seek_target = seconds
-            self._pending_seek_final_status = final_status
-            self._pending_seek_generation += 1
-            seek_generation = self._pending_seek_generation
-            self._schedule_event_notify(("rendertransport1", "AVTransport"))
-            LOG.info("SOAP %s applied position=%s duration=%s", action, seconds, self.state.totlen)
-            asyncio.create_task(self._finish_seek_after_buffering(seek_generation, seconds, previous_pos))
+                await self._seek_command(self._hms_to_seconds(self._xml_text(body, "Target")))
             return
         if action in {"CreateQueue", "ReplaceQueue"}:
             context = self._xml_text(body, "QueueContext")

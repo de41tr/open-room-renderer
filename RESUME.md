@@ -7,8 +7,9 @@
 3. Read STATUS.md and PLAN.md, then run `.venv/bin/python -m pytest -q`.
 4. AP09 metadata projection and exact opaque DIDL round trips are implemented
    and independently reviewed (1458 passed with seven real libmpv cases).
-   AP10 confirmed-seek work is active; preserve its uncommitted edits. Active EQ
-   restore and native installation acceptance remain open. Native IPC/ARM64 CI
+   AP10 confirmed-seek work is implemented and independently reviewed, with
+   isolated default/native-null validation. Active EQ restore, native install
+   and playlist-source fixes are implemented but still in review/integration. Native IPC/ARM64 CI
    passed at the preceding published checkpoint; monitor each new commit's CI.
 5. AP01 is published in draft PR #1 as `2e3068ede2b095b572f7249bc7bdaadecdd9641a`.
    The exact-state PyWiiM checkpoint is published as `a079284e14b1d5f86286b97ff0e5237ca5014bde`.
@@ -25,7 +26,8 @@
    Run 38185537983 passed on x86_64 and AArch64, including real Unix IPC.
    AP09 is published as `93f51e4c310827b1ec1ad9da38b3d6eb9eda851c`; its
    native CI run 38187041169 also passed both architectures.
-   Configured music-preset selection is independently reviewed and being published.
+   Configured music-preset selection is published as
+   `84d7caeda4f3c4fc823217305fc0a6529735b2a7`; both CI architectures passed.
    Preserve concurrent seek, active EQ restore, native install and format fixes.
 6. Keep production mpv JSON IPC. AF_UNIX is denied in this cloud sandbox; use
    fake-backend tests and optional libmpv/null-output validation with honest scope.

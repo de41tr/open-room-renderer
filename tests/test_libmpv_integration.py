@@ -291,6 +291,15 @@ async def _exercise_real_backend(
                 assert payload["transport_error"] == "", payload
                 return payload
 
+            async def soap(action: str, fields: str = "", service: str = "AVTransport") -> str:
+                namespace = "urn:schemas-wiimu-com:service:PlayQueue:1" if service == "PlayQueue" else "urn:schemas-upnp-org:service:AVTransport:1"
+                envelope = f'<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:{action} xmlns:u="{namespace}">{fields}</u:{action}></s:Body></s:Envelope>'
+                async with session.post(f"http://127.0.0.1:{port}/upnp/control/{service}", data=envelope.encode(), headers={"SOAPACTION": f'"{namespace}#{action}"', "Content-Type": "text/xml"}) as response:
+                    text = await response.text()
+                    assert response.status == 200, (action, response.status, text)
+                    ET.fromstring(text)
+                    return text
+
             await status("stop")
             assert await command(f"setPlayerCmd:play:{tracks[0]}") == "OK"
             await status("play")
@@ -332,11 +341,26 @@ async def _exercise_real_backend(
             evidence["volume_mute"] = {"volume": 37, "mute_on_off": True, "gena_delivery": True}
 
             assert await command("setPlayerCmd:seek:8") == "OK"
-            await _eventually("paused seek", lambda: abs(backend.read_property("playback-time") - 8) < 0.2)
+            # Success itself must include actual readback; no eventual wait
+            # may hide an optimistic command acknowledgement.
+            assert abs(backend.read_property("playback-time") - 8) < 0.2
             assert backend.read_property("pause") is True
             payload = await status("pause")
             assert abs(int(payload["curpos"]) - 8) <= 1, payload
             evidence["paused_seek"] = backend.read_property("playback-time")
+
+            for surface in ("http", "soap"):
+                for target in (18, 3):
+                    if surface == "http":
+                        assert await command(f"setPlayerCmd:seek:{target}") == "OK"
+                    else:
+                        await soap("Seek", f"<Unit>REL_TIME</Unit><Target>00:00:{target:02}</Target>")
+                    assert abs(backend.read_property("playback-time") - target) < 0.2
+                    assert backend.read_property("pause") is True
+                    assert abs(api.state.curpos - target) <= 1 and api.state.status == "pause"
+            await soap("Previous")
+            assert backend.read_property("playback-time") < 0.2
+            assert backend.read_property("pause") is True
 
             assert await command("setPlayerCmd:resume") == "OK"
             await status("play")
@@ -344,6 +368,19 @@ async def _exercise_real_backend(
             before = backend.read_property("playback-time")
             await _eventually("resumed playback", lambda: backend.read_property("playback-time") > before + 0.25)
             evidence["resume"] = {"before": before, "after": backend.read_property("playback-time")}
+
+            for surface in ("http", "soap"):
+                for target in (18, 3):
+                    if surface == "http":
+                        assert await command(f"setPlayerCmd:seek:{target}") == "OK"
+                    else:
+                        await soap("Seek", f"<Unit>REL_TIME</Unit><Target>00:00:{target:02}</Target>")
+                    assert abs(backend.read_property("playback-time") - target) < 0.3
+                    assert backend.read_property("pause") is False
+                    assert abs(api.state.curpos - target) <= 1 and api.state.status == "play"
+            evidence["confirmed_seek"] = {"http_soap_forward_backward": True,
+                                          "playing_paused": True, "previous_paused": True,
+                                          "actual_position_before_response": True}
 
             assert await command(f"setPlayerCmd:play:{tracks[1]}") == "OK"
             payload = await status("play")
@@ -369,15 +406,6 @@ async def _exercise_real_backend(
             await _eventually("EOF state monitor", lambda: api.state.status == "stop")
             assert (await status("stop"))["curpos"] == "0"
             evidence["eof"] = {"idle": True, "observed_without_http_poll": True}
-
-            async def soap(action: str, fields: str = "", service: str = "AVTransport") -> str:
-                namespace = "urn:schemas-wiimu-com:service:PlayQueue:1" if service == "PlayQueue" else "urn:schemas-upnp-org:service:AVTransport:1"
-                envelope = f'<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:{action} xmlns:u="{namespace}">{fields}</u:{action}></s:Body></s:Envelope>'
-                async with session.post(f"http://127.0.0.1:{port}/upnp/control/{service}", data=envelope.encode(), headers={"SOAPACTION": f'"{namespace}#{action}"', "Content-Type": "text/xml"}) as response:
-                    text = await response.text()
-                    assert response.status == 200, (action, response.status, text)
-                    ET.fromstring(text)
-                    return text
 
             queue = '<PlayList><QueueName>Synthetic pair</QueueName><ListInfo><SourceName>UPnPServer</SourceName><TrackNumber>2</TrackNumber></ListInfo><Tracks>' + ''.join(
                 f'<Track{index}><Title>Tone {index}</Title><URL>{escape(str(path))}</URL><Duration>30</Duration></Track{index}>'
