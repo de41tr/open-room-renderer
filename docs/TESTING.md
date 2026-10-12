@@ -862,3 +862,42 @@ This native/null lane does not certify production Unix IPC, WAN stations, audibl
 hardware or indefinite memory stability. Continuous-stream resource evidence must
 come from a separate bounded, frozen-source run with unchanged resource budgets;
 short per-file option checks alone do not establish that result.
+
+## Live-station history reduction and extended native checkpoint
+
+The preceding [60d6b0a checkpoint](https://github.com/de41tr/open-room-renderer/actions/runs/38201708621)
+passed both native architectures and the new hosted Python 3.11.17 default job.
+Its real public-client playlist tests now decode the complete intended M3U/PLS
+resource, including literal colons and escaped query bytes.
+
+Only the matching canonical zero-duration station now receives per-file zero
+backward packet history. Existing native forward buffering, cache/pause settings,
+recovery timing, gain and DSP remain unchanged. Finite and unknown media restore
+their previous native defaults. This is supported by the documented
+[mpv 0.35.1 backward-cache option](https://github.com/mpv-player/mpv/blob/v0.35.1/DOCS/man/options.rst)
+and [per-file load options](https://github.com/mpv-player/mpv/blob/v0.35.1/DOCS/man/input.rst),
+as well as the reviewed 0.37 contract; documentation is not a 0.35 runtime test.
+
+The original frozen b011557 uninterrupted-station attempt is FAILED endurance:
+its test exited after 3299.25s overall, before the requested hour completed.
+RSS grew 49,160 KiB against the unchanged 49,152 KiB allowance; other progress,
+protocol and resource checks had not failed. Cleanup completed. Paired 300s
+measurements attribute sustained growth to native backward packet caching and
+allocator retention, not an accumulating Python object set. Do not relabel this
+failed run as an hour pass or as proof of a Python leak.
+
+A separate frozen production-policy run passed 300.09s with one load/request,
+300.053s decoded progression, RSS growth 84 KiB and essentially flat 22 KiB packet
+cache. Original budgets, state/progress assertions and cleanup gates were retained;
+there was no diagnostic global override. A new immutable hour run began at
+04:03:22 UTC and remains pending, with no result expected before 05:03:23 UTC.
+Local combined regression passed 2249 tests with real libmpv enabled and 13
+separate native opt-ins skipped in 303.89s. The added production Unix-IPC flow
+also reads the actual station option and finite-load reset; it awaits CI here.
+
+One extended CI checkpoint now requests 900 seconds of production Unix-IPC
+stress on the same two standard public runners. The stress step is capped at
+18 minutes and each native job at 30 minutes; the Python floor job stays at
+8 minutes. Permissions, assertions and resource budgets are unchanged. After
+recording its terminal result, restore normal 180-second stress, 6-minute step
+and 15-minute native-job caps. This is not a permanent CI-duration increase.

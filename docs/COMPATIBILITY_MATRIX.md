@@ -156,3 +156,10 @@ Python3.11.17 has actual x86_64 default-suite and selected real-libmpv evidence 
 9f5f529; this does not imply ARMv7/Bookworm acceptance. Public-client playlist
 URIs now preserve ports, encoded bytes and literal colons, with real local
 M3U/PLS decoding and honest pre-mutation faults for unsupported legacy indexes.
+
+Explicit zero-duration station loads now avoid native backward packet history;
+finite/unknown files and forward buffering retain their native defaults. Local
+mpv 0.40 property/reset and 300-second continuous-stream checks passed. The
+original default-cache hour attempt failed its RSS gate before completion; the
+new policy hour and extended production Unix checkpoint remain pending. No
+indefinite-memory, WAN, physical-audio or hardware claim is implied.

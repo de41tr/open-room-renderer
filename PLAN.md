@@ -55,3 +55,8 @@ Installed CLI and genuine pywiim production-IPC gates now pass both architecture
 The Python3.11 runtime floor is locally verified; a separate bounded CI floor job is added. A reproduced wrong-resource playlist parse is corrected. Next: evaluate
 unused backward history for explicit non-seekable live stations and complete
 continuous-stream endurance without changing the existing run or its budgets.
+
+Explicit non-seekable stations now avoid unused backward packet history with
+reviewed per-file native options. Complete the separately frozen hour and the
+one-time 900-second production IPC checkpoint, then restore normal CI duration.
+A reproduced mDNS unregister-failure resource leak is being fixed independently.
