@@ -249,6 +249,10 @@ callback or OEM credentials for future integrations.
 ## Docs Worth Reading
 
 - [GETTING_STARTED.md](GETTING_STARTED.md): friendliest first run.
+- [STATUS.md](STATUS.md): current verified checkpoint and retained failure history.
+- [docs/COMPATIBILITY_MATRIX.md](docs/COMPATIBILITY_MATRIX.md#original-work-package-acceptance-overview): original work-package evidence and remaining limits.
+- [docs/TESTING.md](docs/TESTING.md#reproduce-the-local-two-source-acceptance): reproducible local acceptance and evidence scopes.
+- [docs/STRATEGIC_REVIEW.md](docs/STRATEGIC_REVIEW.md#next-phase-assessment): practical constraints, technical debts and next-phase decisions.
 - [docs/demo.md](docs/demo.md): simple demo flow.
 - [docs/architecture.md](docs/architecture.md): how the pieces fit.
 - [docs/developer-map.md](docs/developer-map.md): where to start in the code.

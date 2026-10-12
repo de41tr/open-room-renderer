@@ -6,14 +6,35 @@
 .venv/bin/python -m pytest -q
 ```
 
-Latest completed native CI checkpoint: `21f1a017`, on Ubuntu24.04 x86_64 and
-AArch64, with actual mpv/libmpv0.37.0. The default suite, explicit libmpv
-null/digital-PCM tests, production Unix IPC/lifecycle, private native installation,
-clocked measurement and discovered-endpoint playback all passed.
-[Verified run](https://github.com/de41tr/open-room-renderer/actions/runs/38193687112).
-Newer work must be checked against its own CI result. Baseline was92 tests;
-checkpoint history is in STATUS.md. Counts alone do not establish app or hardware
-compatibility.
+Latest completed native CI checkpoint: `a7e8d8`, verified 2026-10-12 16:38 UTC
+on Ubuntu 24.04 x86_64 and AArch64, with actual mpv/libmpv 0.37.0. All three
+standard jobs passed: 4412 default cases /72 explicit opt-in skips, the complete
+65-check libmpv lane (52 actual native cases plus 13 deterministic helpers),
+production Unix IPC, real public clients, repeated lifetimes, native installation,
+clocked digital measurement, multicast/discovered playback and private Snapcast.
+[Verified run](https://github.com/de41tr/open-room-renderer/actions/runs/38277056416).
+Python 3.11 groups passed 4162 +250 in 140.18s/87.45s. Existing warnings and all
+caps remain. Baseline was 92 tests; counts alone do not establish app or hardware
+compatibility. Any later production change needs its own verification.
+
+### Reproduce the local two-source acceptance
+
+After installing the checkout's development dependencies, on native Linux with
+mpv >=0.37 and working Unix sockets/loopback multicast:
+
+```sh
+ORR_TEST_DISCOVERY=1 ORR_TEST_DISCOVERY_PLAYBACK=1 PYTHONPATH=. .venv/bin/python -m pytest -q -s tests/test_discovery_native.py tests/test_discovery_playback_native.py
+```
+
+This is the same explicit discovery stage used in CI. It includes the bounded
+console candidate reader and the separate discovered-endpoint production-Unix
+flow through two distinct generated sources, controls and received GENA. The
+fixtures own their processes/listeners and use null output. A missing required
+native capability fails after opt-in; do not substitute a mock and call it a
+native pass. This is not the physical DAC/original-app session described below.
+For ordinary UNIT/MOCK/local-client checks, use the default command above without
+these opt-in flags. All commands are run from the checkout; the test environment
+must include its installed console entry point.
 
 ## Scope labels
 
@@ -465,8 +486,10 @@ claim that every malformed lavfi expression is rejected before playback.
 
 Tests also verify normal/cancellation cleanup. No audible output is opened.
 Positive-gain headroom/clipping prevention and physical channel routing are not
-certified by the negative-cut fixtures. Active EQ restore is not yet implemented;
-only the validated preset library and confirmed balance are persisted.
+certified by the negative-cut fixtures. Active EQ/balance/bypass restore is
+implemented and separately measured on a fresh backend by
+`test_libmpv_dsp_restore.py`; see the Active DSP restore section. That digital-PCM
+proof does not establish physical routing or positive-boost clipping prevention.
 
 ## Native Unix IPC and public CI
 
@@ -552,8 +575,10 @@ new owner commands, live/unknown files and fractional bounds.
 Absolute targets must satisfy 0 <= target < known duration; relative buttons
 clamp into that interval. Known live stations reject seek. Unknown duration
 requires an actual position confirmation rather than synthetic duration.
-The real libmpv and Unix IPC fixtures now include paused seek to10 seconds and
-forward/backward HTTP/SOAP checks at response time. AP10 isolated default suite:
+The current real libmpv and Unix IPC fixtures use 30-second inputs and confirm
+paused seek to 8 seconds, plus forward/backward HTTP/SOAP targets at 18 and 3
+seconds before responding. The handover's literal 10-second example is not the
+exact retained fixture target. AP10 isolated default suite:
 1590 passed, nine opt-in skips; extended libmpv/null seek passed separately.
 Byte-range timing uses bitrate estimates and has no precise VBR acceptance claim.
 
@@ -2169,3 +2194,42 @@ baseline/new wire and output parity, plus positive controls for the old ambient
 proxy/netrc behavior using temporary synthetic data and owned loopback peers.
 The correction changes only endpoint validation/session isolation in the two
 legacy helpers. Complete hosted verification remains required after publication.
+
+
+## Native malformed-media failure and explicit recovery
+
+`test_libmpv_invalid_media.py` closes a specific AP07 evidence gap without any
+production change. The fixture generates malformed binary RIFF/WAVE bytes with
+no paths or URLs; it uses the real HTTP API, SOAP reads, received GENA and existing
+libmpv ctypes command adapter with null output. The actual load command is
+acknowledged, but native END_FILE reports reason=error and
+MPV_ERROR_UNKNOWN_FORMAT (-17). This is format-recognition failure, not a claim
+about mid-stream codec corruption or a missing physical output device.
+
+The normal 10-second readiness policy remains unchanged. HTTP returns 502;
+SOAP read actions correctly return 200 carrying STOPPED/ERROR_OCCURRED. Received
+GENA agrees. Native state is idle with empty source/playlist and absent progress;
+the failed selected URI remains visible without being described as playing.
+A four-second observation sees no retry or recovery task. Only explicit SOAP
+selection/Play of the generated valid WAV produces a new native entry, a selected
+PCM track and advancing native playback time, while volume 37 and mute remain
+confirmed and unchanged.
+Handle, session, listener, subscriptions, monitor and event tasks all close.
+
+The exact reviewed final test passed on official libmpv 0.37 and 0.40: both
+pytest runs took 15.52s, with probes 15.021s/15.024s. First runs and the one-line
+review tightening to exact error -17 are retained separately. Bounds are 20s
+async and 25s child; no prior acceptance, timeout or production behavior changes.
+The test joins existing group one, giving 23+43=66 selected checks: 53 actual
+native cases and 13 deterministic helpers. No new runner or workflow lane is
+added. This malformed-media case is REAL_BACKEND/null with test ctypes transport,
+not production-Unix, physical audio, hardware or original-app acceptance.
+Complete hosted verification is still required after publication.
+
+Final combined acceptance-only defaults pass 4412/73 opt-in skips on Python 3.12
+(200.58s), and 4162+250/73 on Python 3.11 (130.87s/74.49s), with 32 existing
+warnings. All 34 runtime files remain unchanged from a7e8d8; production digest:
+`6abaedb03144f6bd23545300a232c58fb7fc4a9be003e2d8061fbd90cd71d734`.
+Exact final malformed-media test SHA256:
+`bd1526370fae9b7f6ce9101592a3528da31cdca47e4f4893af9e2325aaeeeb1f`.
+The complete new hosted checkpoint remains pending until observed.

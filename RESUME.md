@@ -5,8 +5,8 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint 5cf83ee passed all three jobs, verified at
-   16:21 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38275014639
+   Latest completed checkpoint a7e8d8 passed all three jobs, verified at
+   16:38 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38277056416
    Python floor uses complete bounded groups on the same runner, preserving the
    3-minute step/8-minute job; both native jobs retain all existing gates.
    The prior 763f7f7 remains failed solely for its floor time budget.
@@ -306,3 +306,17 @@ with its tested private candidate: 4412/72 on 3.12 (200.46s), 4162+250/72 on 3.1
 Five concrete operator-doc fixes are reviewed. Publish functional and doc commits
 separately, verify complete CI, then finalize handover/stabilization without
 speculative extra features. No main/merge/release or changed deadline authority.
+
+17:00 UTC: all 20 original acceptance packages have a reviewed scope map in the
+compatibility matrix; final constraints/debts/missing features/decisions and
+hardware plan are linked from README and strategic review. The one specific
+malformed-media native gap now passes on exact final test source in 0.37/0.40
+(15.52s each), without a production fix. It proves format error -17, HTTP502,
+received GENA and SOAP read state, native idle/empty source, bounded no-retry,
+explicit valid recovery and cleanup; missing physical device/Unix case remains
+unclaimed. Final defaults pass 4412/73 on 3.12 (200.58s), 4162+250/73 on 3.11
+(130.87s/74.49s). Runtime digest stays
+6abaedb03144f6bd23545300a232c58fb7fc4a9be003e2d8061fbd90cd71d734.
+Publish test/workflow and docs separately, verify full CI, then continue bounded
+quality work until formal stabilization at 19:00 UTC and stop at 20:00 UTC.
+No main-branch edits, merge or release.

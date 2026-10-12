@@ -2,30 +2,47 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current candidate (16:22 UTC)
+## Current acceptance-only candidate (17:00 UTC)
 
-The final narrow legacy CLI correction validates the renderer endpoint before
-creating a request and uses fresh Sessions with ambient proxy/netrc handling
-disabled. Valid method/target/header/body bytes, raw successful output, existing
-redirect rejection and the committed-durability warning remain unchanged.
-Invalid host syntax fails privately before any Session is created. This is not
-a network allowlist, response-schema redesign or authentication feature.
+The original 20 work packages now have an explicit scoped completion map in
+[the compatibility matrix](docs/COMPATIBILITY_MATRIX.md#original-work-package-acceptance-overview).
+It distinguishes local implementation, missing named cases, physical/original-app
+acceptance and deferred services. Stale active-DSP-restore and seek-target prose
+is corrected; no unsupported observation is promoted to a pass.
 
-Independent review reproduced the old ambient proxy/netrc behavior using owned
-loopback peers and temporary synthetic data, then verified its absence after the
-patch. All 51 original assertions remain; focused author/reviewer suites pass
-349 cases, with independent wire/output parity and positive controls.
-Final merged defaults pass 4412/72 on Python 3.12 (200.46s), and 4162+250/72 on
-Python 3.11 (128.65s/72.88s), retaining 32 existing warnings. Production digest:
-`6abaedb03144f6bd23545300a232c58fb7fc4a9be003e2d8061fbd90cd71d734`.
-Complete hosted CI is required after publication; no core or listener change.
+One concrete AP07 gap now has real native evidence: malformed generated WAVE
+bytes receive a successful load-command acknowledgement but then produce native
+format error -17, HTTP 502 and matching received GENA/SOAP read state
+STOPPED/ERROR_OCCURRED. Native source/playlist/progress are empty; a four-second
+observation sees no retry. Only explicit valid selection/Play creates a new
+native entry and advancing playback time, with gain/mute unchanged. All owned
+resources close. Exact final libmpv 0.37/0.40 runs pass in 15.52s each.
+This is test ctypes/null format-recognition evidence, not a malformed-media Unix
+IPC, physical missing-device, mid-stream corruption or acoustic claim.
 
-Five reviewed operator-documentation corrections clarify executable activation,
-installer-versus-control port flags, persistent configuration/state sources,
-and previously completed staging/owned-player-death acceptance. No runtime
-defaults or system settings change. Final assessment and stabilization follow.
+Runtime source is unchanged from a7e8d8. Final combined defaults pass 4412/73
+opt-in skips on Python 3.12 (200.58s), and 4162+250/73 on Python 3.11
+(130.87s/74.49s), retaining 32 existing warnings. The native group adds only this
+one case: 23+43=66 checks, comprising 53 actual native cases and 13 helpers.
+Existing workflow stages, runners and caps remain. Require full hosted CI after
+publication. No new large feature or long-running test is planned.
 
-## Latest verified hosted checkpoint (16:21 UTC)
+The [next-phase assessment](docs/STRATEGIC_REVIEW.md#next-phase-assessment)
+contains three practical constraints, debts and missing features, decisions and
+the existing later hardware plan. Formal stabilization starts 19:00 UTC; active
+work ends 20:00 UTC today. Main is unchanged and the PR remains a draft.
+
+## Latest verified hosted checkpoint (16:38 UTC)
+
+Legacy-isolation head `a7e8d8` passed all three jobs, verified at 16:38 UTC:
+https://github.com/de41tr/open-room-renderer/actions/runs/38277056416 .
+Both native architectures passed 4412/72 defaults, all 65 then-selected libmpv
+checks and every later Unix/client/stress/install/clocked/discovery/Snapcast gate.
+Floor groups passed 4162+250/72 in 140.18s/87.45s. Legacy endpoint/session isolation
+preserves valid wire/output behavior and existing redirect rejection while
+removing ambient proxy/netrc effects. No playback-core or listener change.
+
+## Preceding discovery checkpoint (16:21 UTC)
 
 Discovery head `5cf83ee` passed all three jobs, verified at 16:21 UTC:
 https://github.com/de41tr/open-room-renderer/actions/runs/38275014639 .

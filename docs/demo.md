@@ -43,7 +43,9 @@ To deliberately test app-shaped discovery, stop the neutral runner first and use
 This is an experimental compatibility profile with SSDP and mDNS. The original
 Android app acceptance remains untested; protocol tests do not substitute for it.
 
-The app-compat profile only advertises the TuneIn-style service path that currently works. It should not show extra music-service tiles that the renderer cannot actually handle.
+The app-compat profile advertises the implemented TuneIn-style queue interface.
+This does not establish current public-provider or original-app acceptance.
+Unsupported provider services stay inactive rather than appearing as playable tiles.
 
 If it does not appear:
 
@@ -69,7 +71,10 @@ sudo. Review the optional dedicated non-root system-service template in
 if your appliance needs port 80. No global interpreter capabilities or firewall
 changes are needed for the normal high-port demo.
 
-Discovery helper:
+For bounded unprivileged address hints, use the [explicit-interface discovery CLI](../GETTING_STARTED.md#find-a-renderer-address-with-bounded-ssdp-discovery).
+Its results are unauthenticated candidates; it does not fetch or control them.
+
+Optional private packet-diagnosis helper:
 
 ```bash
 ./scripts/sniff-ssdp.sh

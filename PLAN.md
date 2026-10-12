@@ -4,21 +4,21 @@ Branch: `dot/renderer-autonomous-20261012`; base: `3672b9838e9c39ae8191613108f0d
 Work window ends 2026-10-12 20:00 UTC. Stabilization only after 19:00 UTC.
 No main-branch edits, merge, or release.
 
-## Current functional package (16:22 UTC)
+## Current acceptance and handover package (17:00 UTC)
 
-Discovery checkpoint `5cf83ee` has complete standard CI green, including actual
-console/multicast acceptance on both native architectures. Publish the final
-reviewed legacy CLI endpoint/session correction separately from operator docs
-and checkpoint evidence. Its exact merged defaults pass both Python minors;
-require full hosted CI after publication. Valid wire/output semantics and the
-already-present redirect policy remain unchanged.
+Legacy-isolation checkpoint `a7e8d8` has complete standard CI green. A final
+requirements-to-evidence review of all 20 original packages identified one
+worthwhile native gap: intentionally malformed media. The new short test now
+passes exact reviewed source on libmpv 0.37/0.40; runtime code is unchanged.
+Final default suites pass both Python minors. Publish test/CI wiring separately
+from the reviewed acceptance map, operator links and next-phase handover, then
+verify complete standard CI without changing any cap or existing assertion.
 
-Then prioritize final operator-document consistency, scoped acceptance and
-stabilization. Do not add speculative features or new multihour runs. Preserve
-all prior failures and attach endurance results to their frozen source. Prepare
-three practical constraints, debts and missing features, next-phase decisions
-and the existing later hardware plan. Do not wait for unavailable hardware/app.
-Stabilization starts 19:00 UTC; active work ends 20:00 UTC today.
+Continue only meaningful bounded quality work and operational consistency;
+do not add speculative features or artificial tests. Preserve prior failures and
+frozen-source endurance scope. Physical/original-app acceptance and provider
+integrations remain separate, with no known hardware availability date.
+Formal stabilization starts 19:00 UTC; active work ends 20:00 UTC today.
 
 ## Ordered work
 

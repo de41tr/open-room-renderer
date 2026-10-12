@@ -649,3 +649,40 @@ ConnectionManager now has a usable event endpoint and honest static values match
 its read actions, without invented connections or unsupported connection actions.
 The standard client's unpadded time form is accepted only with ASCII numeric fields
 and minute/second values 0–59; seek execution and ownership are unchanged.
+
+## Original work-package acceptance overview
+
+This is a scoped completion map, not a claim that every original acceptance
+criterion is complete. Software implementation below is unchanged from `a7e8d8`;
+the separately identified malformed-media test extends its acceptance evidence.
+Physical/original-app acceptance
+and provider-account work remain separate. Detailed commands and evidence are in
+[TESTING.md](TESTING.md); the current verified head is in [STATUS.md](../STATUS.md).
+
+| Package | Implemented / strongest evidence | Remaining acceptance boundary |
+|---|---|---|
+| AP01 SOAP faults | Explicit framing/action faults, unchanged-state negative checks and real typed-client controls | No concrete gap found in the specified local fault contract; no universal client certification. |
+| AP02 Authoritative state | Generation/source/intent fences; native HTTP/SOAP/received-GENA agreement through play, pause, stop and failure | Physical device/app behavior is separate. |
+| AP03 App-shaped handshake | Persistent identity, coherent endpoints/fields and real same-host discovery-to-Unix playback | Original Android online/volume observation and physical-LAN/DHCP readdressing acceptance remain NOT_RUN. |
+| AP04 GENA lifecycle | Real callback retry, renewal, expiry, sequence/coalescing and typed-client event parsing | A dedicated concurrent device-rename plus track-switch case is not retained; constituent behaviors are covered, not a reproduced defect. |
+| AP05 Multitrack queue | One-based canonical items; actual distinct native sources, navigation, browse/events, repeat and shuffle | Unsupported live append/remove still fault; this is not arbitrary provider-queue support. |
+| AP06 Header-only station | UNIT/MOCK header/resolver-to-queue checks: one normal item and preserved identity; controlled playback dispatch | Live public-provider end-to-end availability remains unverified. |
+| AP07 Backend failure | Real owned-player death and cleanup; new libmpv/null malformed-format failure, cross-surface error and explicit recovery | New malformed-media proof uses ctypes, not production Unix IPC. Physical missing-output-device acceptance remains unestablished. |
+| AP08 Recovery intent | Controlled native outages/return and Pause/Stop/new-owner cancellation with retained gain | Controlled loopback recovery is not a real-WAN outage claim; initial-load automatic retry is absent. |
+| AP09 Metadata/URI | Opaque fields and XML-sensitive text across surfaces; real autonomous ICY updates | Original-app presentation remains untested. |
+| AP10 Seek/pause/resume | 30-second files; confirmed native 8/18/3-second targets, pause retention and resumed progress | The literal original 10-second example is not the retained fixture target; optional range timing remains approximate. |
+| AP11 Gain/mute | Actual digital PCM: documented cubic gain, exact mute/zero and restart persistence | Host mixer, physical DAC/acoustic effects and full service boot remain untested. |
+| AP12 PEQ/balance | Measured negative-cut/bypass/balance effects, transactional failure retention and active restore | Positive-boost headroom/clipping prevention and effectiveness at every source rate are not established. |
+| AP13 Persistent settings | Atomic identity/name/gain/DSP/favorites; installed-process restart and explicit stopped playlist restore | Automatic last-queue/position restore and physical output-setting acceptance are absent. |
+| AP14 Native installation | Real isolated x86_64/AArch64 install/receipt/owned-uninstall plus installed CLI lifecycle | Native ARMv7, ALSA/DAC, physical LAN and service boot remain NOT_RUN; emulation is narrower. |
+| AP15 Radio formats | Generated MP3/ADTS/M3U/PLS/HLS/ICY/redirect fixtures, later valid candidates and controlled refresh | Live-provider availability and arbitrary nested playlists are unverified/unsupported; endurance belongs to its frozen source. |
+| AP16 Transitions | Calibrated digital frames/events; default-off staged equal-rate transitions reached 0 ms in recorded runs | Default and mixed-rate gaps remain; NORMAL-only staging is not universal gapless or physical-DAC acceptance. |
+| AP17 Spotify | Research/deferred; service remains inactive | No integrated receiver, adapter lifecycle, authorized client playback or logout acceptance. |
+| AP18 TIDAL | Research/deferred; no supported playback/account adapter | Registration/consent, token lifecycle and supported playback acceptance are absent. |
+| AP19 AirPlay/Cast | Deferred and unadvertised | No per-service receiver discovery, pairing/provisioning, audio or Stop acceptance. |
+| AP20 Multiroom | Separate same-host Snapcast PCM/control/join/reconnect experiment | No two-host skew/drift, synchronized source change or actual host-loss acceptance; vendor grouping remains unproved. |
+
+The distinction between an implemented local contract and a missing named test
+or physical acceptance step is intentional. No missing device/account observation
+is silently promoted to a pass. Unsupported queue actions retain explicit
+faults rather than successful no-ops.
