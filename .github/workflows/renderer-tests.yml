@@ -97,6 +97,9 @@ jobs:
           uname -m
           dpkg --print-architecture
           .venv-ci/bin/python --version
+          # UI control-flow checks are required in the native lanes, not skipped.
+          node --version
+          node -e 'if (Number(process.versions.node.split(".")[0]) < 18) process.exit(1)'
           mpv --version
           dpkg-query -W mpv libmpv2
           .venv-ci/bin/python -m pip freeze
@@ -132,7 +135,7 @@ jobs:
             tests/test_libmpv_stall_recovery.py tests/test_libmpv_queue_staging.py \
             tests/test_libmpv_queue_navigation_intent.py \
             tests/test_libmpv_favorites.py \
-            tests/test_libmpv_queue_cli.py \
+            tests/test_libmpv_queue_cli.py tests/test_libmpv_web_controls.py \
             tests/test_libmpv_standard_dmr.py \
             tests/test_libmpv_source_ownership.py \
             tests/test_libmpv_admitted_load_root.py \
