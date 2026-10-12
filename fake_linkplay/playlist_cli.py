@@ -1,9 +1,10 @@
-"""Client-only authored playlists: create/import offline and restore via SOAP."""
+"""Local URL playlists: create/import offline, snapshot, and restore via SOAP."""
 from __future__ import annotations
 
 import argparse
 import sys
 
+from .playlist_client import fetch_current_playlist
 from .playlist_files import (PLAYLIST_MODES, PlaylistCommittedError, PlaylistError,
                              PlaylistFileExistsError, PlaylistFileTypeError, load_playlist,
                              read_playlist_bytes, save_playlist,
@@ -13,8 +14,8 @@ from .queue_client import QueueClient, QueueClientError, explicit_queue, prepare
 
 
 def add_playlist_parser(subparsers: argparse._SubParsersAction) -> None:
-    """Add authored-file commands without an export-from-live-queue command."""
-    parser = subparsers.add_parser("playlist", help="author and restore explicit-URL playlist files")
+    """Add explicit URL-file commands; snapshots never change playback."""
+    parser = subparsers.add_parser("playlist", help="save and restore explicit-URL playlist files")
     commands = parser.add_subparsers(dest="playlist_cmd", required=True)
     create = commands.add_parser("create", help="write an authored playlist; files may contain URL secrets")
     create.add_argument("file")
@@ -29,6 +30,13 @@ def add_playlist_parser(subparsers: argparse._SubParsersAction) -> None:
     importer.add_argument("input", metavar="INPUT")
     importer.add_argument("output", metavar="OUTPUT")
     importer.add_argument("--name", required=True)
+    current = commands.add_parser("save-current", help="save the current queue as a private URL playlist",
+        description="Save one current-queue URL snapshot without changing playback. "
+                    "This is not a lossless backup; metadata and playback state are omitted. "
+                    "Files may contain URL secrets and URLs may expire.")
+    current.add_argument("file")
+    current.add_argument("--host", default="127.0.0.1")
+    current.add_argument("--port", type=int, default=8080)
     restore = commands.add_parser("restore", help="replace the queue, stopped unless --play is given")
     restore.add_argument("file")
     restore.add_argument("--play", action="store_true")
@@ -39,7 +47,9 @@ def add_playlist_parser(subparsers: argparse._SubParsersAction) -> None:
 def run_playlist(args: argparse.Namespace) -> int:
     """Validate all input before writing a file or contacting a renderer."""
     try:
-        if args.playlist_cmd == "import-m3u":
+        if args.playlist_cmd == "save-current":
+            payload = fetch_current_playlist(args.host, args.port)
+        elif args.playlist_cmd == "import-m3u":
             payload = validate_playlist({"version": 1, "name": args.name,
                                          "index": 1, "mode": "normal",
                                          "urls": decode_m3u_urls(read_playlist_bytes(args.input))})
@@ -53,7 +63,11 @@ def run_playlist(args: argparse.Namespace) -> int:
                                start_index=payload["index"], mode=payload["mode"])
         # Validate the whole escaped SOAP request before any file/network write.
         prepare_replace(queue)
-        if args.playlist_cmd == "import-m3u":
+        if args.playlist_cmd == "save-current":
+            save_playlist(args.file, payload)
+            print("Current URL playlist saved. Metadata and playback state were not saved. "
+                  "Keep the file private; URLs may contain secrets or expire.")
+        elif args.playlist_cmd == "import-m3u":
             save_playlist(args.output, payload)
             print("M3U URL list imported. Titles and durations were not saved.")
         elif args.playlist_cmd == "create":
@@ -68,7 +82,7 @@ def run_playlist(args: argparse.Namespace) -> int:
         print("Playlist saved, but crash durability is unconfirmed. "
               "Inspect the destination before retrying.", file=sys.stderr)
     except PlaylistFileExistsError:
-        if args.playlist_cmd == "import-m3u":
+        if args.playlist_cmd in {"import-m3u", "save-current"}:
             print("Playlist not saved: destination already exists. Choose a new output file.", file=sys.stderr)
         else:
             print("Playlist not saved: destination already exists. "

@@ -2,7 +2,7 @@
 
 Version 1 stores only an authored name, selection, mode and ordered explicit
 URLs. It cannot represent resolver provenance, display metadata, history or a
-live queue export. URL strings are never normalized. Files may contain query
+lossless live queue backup. URL strings are never normalized. Files may contain query
 secrets; callers must not include their contents or filesystem errors in logs.
 """
 from __future__ import annotations

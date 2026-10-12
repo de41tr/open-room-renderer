@@ -36,6 +36,7 @@ from aiohttp import web
 
 from .capabilities import capability_fields, configured_sources, service_capability
 from .favorites import FavoritesApi, FavoritesStore
+from .queue_playlist import QueuePlaylistApi
 from .config import Config
 from .log_safety import redact_media_urls
 from .metadata_formatting import metadata_with_art, metadata_with_duration, metadata_with_url
@@ -314,6 +315,7 @@ class HttpApi:
         app = web.Application()
         app.cleanup_ctx.append(self._state_monitor_context)
         app.add_routes(self.favorites_api.routes())
+        app.add_routes(QueuePlaylistApi(lambda: self.state.queue).routes())
         app.add_routes(
             [
                 web.get("/httpapi.asp", self.handle_httpapi),
