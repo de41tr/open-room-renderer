@@ -6,6 +6,15 @@ import logging
 import socket
 from pathlib import Path
 
+from .log_safety import redact_media_urls
+
+
+class RedactingFormatter(logging.Formatter):
+    """Sanitize fully formatted messages, including access logs and tracebacks."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_media_urls(super().format(record))
+
 
 def setup_logging(level: str) -> None:
     """Configure root logging with the project's standard text format."""
@@ -14,6 +23,9 @@ def setup_logging(level: str) -> None:
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    formatter = RedactingFormatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    for handler in logging.getLogger().handlers:
+        handler.setFormatter(formatter)
 
 
 def detect_lan_ip() -> str:

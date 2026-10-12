@@ -19,13 +19,15 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .log_safety import redact_media_urls
+
 LOG = logging.getLogger(__name__)
 
 
 def redact_sensitive(value: object) -> str:
     """Redact tokens and private network addresses before logging mpv URLs."""
 
-    text = str(value)
+    text = redact_media_urls(value)
     patterns = [
         (r"(?i)(X-Plex-Token=)[^&\s\"'<>]+", r"\1***"),
         (r"(?i)(access_token=)[^&\s\"'<>]+", r"\1***"),
@@ -393,17 +395,17 @@ class MpvBackend:
     async def _loadfile_locked(self, url: str, options: dict[str, str] | None) -> dict[str, Any]:
         """Keep source loading serialized with gain initialization and changes."""
 
-        LOG.info("mpv loadfile replace url=%s options=%s", redact_sensitive(url), options or {})
+        LOG.info("mpv loadfile replace url=%s options=%s", redact_sensitive(url), redact_sensitive(options or {}))
         command: list[Any] = ["loadfile", url, "replace"]
         if options:
             command.extend([-1, options])
         response = await self.command(command, timeout=3.0)
         if response.get("error") != "success":
-            LOG.warning("mpv loadfile returned error url=%s response=%s", redact_sensitive(url), response)
+            LOG.warning("mpv loadfile returned error url=%s response=%s", redact_sensitive(url), redact_sensitive(response))
             return {**response, "error": response.get("error") or "mpv loadfile acknowledgement missing"}
         pause_response = await self.command(["set_property", "pause", False], timeout=3.0)
         if pause_response.get("error") != "success":
-            LOG.warning("mpv unpause after loadfile returned error url=%s response=%s", redact_sensitive(url), pause_response)
+            LOG.warning("mpv unpause after loadfile returned error url=%s response=%s", redact_sensitive(url), redact_sensitive(pause_response))
             return {**pause_response, "error": pause_response.get("error") or "mpv unpause acknowledgement missing"}
         return response
 

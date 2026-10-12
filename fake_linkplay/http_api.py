@@ -35,6 +35,7 @@ from aiohttp import web
 
 from .capabilities import configured_presets, capability_fields, configured_sources, service_capability
 from .config import Config
+from .log_safety import redact_media_urls
 from .mpv_backend import BackendError, MpvBackend
 from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_target, validate_callback_url
 from .radio import RadioResolution, RadioResolutionError, resolve_station
@@ -1983,7 +1984,7 @@ class HttpApi:
             and "api.radiotime.com/" not in direct_url
         ):
             proxied = self._local_audio_proxy_url(direct_url)
-            LOG.info("using local proxy for on-demand playback direct=%s proxy=%s", direct_url, proxied)
+            LOG.info("using local proxy for on-demand playback direct=%s proxy=%s", self._redact_sensitive_text(direct_url), self._redact_sensitive_text(proxied))
             return proxied
         return direct_url
 
@@ -2170,9 +2171,9 @@ class HttpApi:
             if not self._mpv_snapshot_matches_source(snapshot, playback_url):
                 continue
             if snapshot.get("idle-active") is not True and self._mpv_snapshot_has_audio(snapshot):
-                LOG.info("mpv audio-ready playback=%s snapshot=%s", playback_url, self._compact_snapshot(snapshot))
+                LOG.info("mpv audio-ready playback=%s snapshot=%s", self._redact_sensitive_text(playback_url), self._redact_sensitive_text(self._compact_snapshot(snapshot)))
                 return True
-        LOG.warning("mpv audio-ready timeout playback=%s snapshot=%s", playback_url, self._compact_snapshot(last_snapshot))
+        LOG.warning("mpv audio-ready timeout playback=%s snapshot=%s", self._redact_sensitive_text(playback_url), self._redact_sensitive_text(self._compact_snapshot(last_snapshot)))
         return False
 
     @staticmethod
@@ -2337,7 +2338,7 @@ class HttpApi:
     def _redact_sensitive_text(text: object) -> str:
         """Mask credentials, local identifiers, and private addresses in logs."""
 
-        value = str(text)
+        value = redact_media_urls(text)
         # Detail logging is essential for WiiM Home reverse engineering, but
         # captures can contain real cloud-service tokens and login material.
         # Keep this list intentionally broad; false-positive redaction is fine.
@@ -3361,7 +3362,7 @@ class HttpApi:
                     duration=hints.duration, title_is_fallback=not bool(hints.title),
                 )], index=1)
                 self._activate_queue_item()
-                LOG.info("SOAP SetAVTransportURI stored url=%s", url)
+                LOG.info("SOAP SetAVTransportURI stored url=%s", self._redact_sensitive_text(url))
                 self._schedule_event_notify(("rendertransport1", "AVTransport"))
             return
         if action == "Play":
@@ -3547,15 +3548,15 @@ class HttpApi:
                 async with session.head(url, allow_redirects=True) as response:
                     duration = self._duration_from_headers(url, response.headers)
                     if duration > 0:
-                        LOG.info("audio duration from HEAD url=%s duration=%s", url, duration)
+                        LOG.info("audio duration from HEAD url=%s duration=%s", self._redact_sensitive_text(url), duration)
                         return duration
                 async with session.get(url, headers={"Range": "bytes=0-0"}, allow_redirects=True) as response:
                     duration = self._duration_from_headers(url, response.headers)
                     if duration > 0:
-                        LOG.info("audio duration from range probe url=%s duration=%s", url, duration)
+                        LOG.info("audio duration from range probe url=%s duration=%s", self._redact_sensitive_text(url), duration)
                         return duration
         except (ClientError, TimeoutError, OSError) as exc:
-            LOG.info("could not probe audio duration url=%s error=%s", url, exc)
+            LOG.info("could not probe audio duration url=%s error=%s", self._redact_sensitive_text(url), self._redact_sensitive_text(exc))
         return 0
 
     @classmethod

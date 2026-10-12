@@ -499,3 +499,23 @@ AP13 is published as `4b2f1d6f112b9ed8be2aa97261db2344068139eb`; both jobs in
 [run38189242029](https://github.com/de41tr/open-room-renderer/actions/runs/38189242029)
 passed1684 default tests, eight real libmpv cases, two production Unix IPC cases
 and actual native installer/import/identity/uninstall, including AArch64.
+
+## Media URL diagnostics no longer expose arbitrary query values
+
+Playback URLs/options are unchanged, but normal source/readiness/proxy/SOAP
+and backend diagnostics now sanitize credentials, complete query strings and
+fragments. Ambiguous encoded or JSON-escaped URL wrappers are masked as a whole
+rather than decoded into new delimiters. The final log formatter also sanitizes
+access logs and tracebacks. Repeated sanitization preserves the private-address
+placeholder instead of mislabeling ordinary LAN sources as invalid.
+
+Review reproduced and fixed escaped-userinfo delimiters, apostrophes, mixed
+encoding, HTML-entity ambiguity and double-formatting. Focused tests, an
+independent bounded edge corpus and concurrent formatter checks passed. Exact
+rebased publication snapshot: 1742 passed with12 real libmpv cases enabled,
+two local Unix IPC skips. This is media-URL hygiene, not general-purpose DLP;
+resource paths and arbitrary free text are not guaranteed secret-free.
+
+AP15 is published as `9f4a1d5e7ca4f9dd8c96c25fa2b1c722847d2cca`;
+[run38189809370](https://github.com/de41tr/open-room-renderer/actions/runs/38189809370)
+passed both native architectures, including the new real format/container lane.

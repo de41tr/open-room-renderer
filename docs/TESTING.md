@@ -300,3 +300,10 @@ AP15 exact snapshot: 1714 passed with12 real libmpv cases, two local Unix IPC
 skips. Local native format evidence is mpv0.40; the added CI lane will separately
 verify Ubuntu0.37 on x86_64/AArch64. Generated fixtures have no DRM, provider
 accounts or proprietary captures. This is not a WAN/live-radio certification.
+
+Media diagnostic privacy: `test_log_safety.py` uses synthetic markers for raw,
+quoted, mixed and JSON-escaped URLs, userinfo, query strings, fragments, malformed
+URLs, double sanitization, access logs and exception formatting. It also checks
+that actual backend arguments and responses are untouched. Ambiguous wrappers
+are masked completely; raw resource paths remain visible. The isolated updated
+snapshot passed1742 with12 real libmpv cases, two local Unix IPC skips.

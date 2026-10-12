@@ -573,7 +573,7 @@ def test_plex_tokens_are_redacted_from_log_previews() -> None:
     assert "sample-token" not in redacted
     assert "sample-access" not in redacted
     assert "sample-refresh" not in redacted
-    assert "X-Plex-Token=***" in redacted
+    assert "?[redacted]" in redacted
 
 
 def test_private_network_and_device_ids_are_redacted_from_log_previews() -> None:
@@ -593,7 +593,7 @@ def test_mpv_url_redaction_hides_tokens_and_private_ips() -> None:
     assert "172.16.1.2" not in redacted
     assert "sample-token" not in redacted
     assert "[private-ip]" in redacted
-    assert "X-Plex-Token=***" in redacted
+    assert "?[redacted]" in redacted
 
 
 def test_stream_service_login_fields_are_redacted_from_log_previews() -> None:
