@@ -224,6 +224,7 @@ class HttpApi:
         self._app_users = 0
         self._monitor_interval = 0.5
         self._queue_advance_task: asyncio.Task | None = None
+        self._admitted_load_generation: int | None = None
         self._native_stage: NativeQueueStage | None = None
         self._native_current_id: int | None = None
         self._native_ready_generation: int | None = None
@@ -1026,6 +1027,11 @@ class HttpApi:
             self._mark_backend_failure()
             return
         if self.state.phase == PlaybackPhase.ERROR:
+            return
+        if self._admitted_load_generation == self.state.generation:
+            # The admitted load's own readiness/cleanup transaction still
+            # owns this window. Unproven nested descendants are not evidence
+            # of a post-ready external takeover. Backend errors stay visible.
             return
         self._adopt_native_successor(snap)
         if self.state.phase == PlaybackPhase.ERROR:
@@ -2721,6 +2727,7 @@ class HttpApi:
                 try:
                     load_identity = (self.state.backend_url, self.state.backend_original_url)
                     load_attempted = True
+                    self._admitted_load_generation = generation
                     # A new admitted load can replace/restart mpv and reuse a
                     # child ID. Pause/Resume alone does not reset this budget.
                     self._station_child_history_attempt = None
@@ -2769,6 +2776,7 @@ class HttpApi:
                 raise BackendError("Playback command superseded")
             if not ready:
                 raise SourcePlaybackError("Source did not confirm playback")
+            self._admitted_load_generation = None
             # An idle observation during readiness may have cleared identity.
             # Audio confirmation belongs to this still-current loaded source.
             self.state.backend_url = playback_url
@@ -2810,6 +2818,10 @@ class HttpApi:
                 elif self.state.phase != PlaybackPhase.ERROR:
                     self._mark_backend_failure()
             raise
+
+        finally:
+            if self._admitted_load_generation == generation:
+                self._admitted_load_generation = None
 
         # Staging starts only after the loaded source's readiness/cleanup
         # transaction ends. Its failure must not re-enter that old load's Stop
