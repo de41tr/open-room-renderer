@@ -27,7 +27,7 @@ import socket
 import subprocess
 import sys
 from typing import Any, AsyncIterator
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -123,7 +123,8 @@ class _RadioFixture:
             assert parts.port == urlsplit(base).port and not parts.query and not parts.fragment
 
     async def handle(self, request: web.Request) -> web.StreamResponse:
-        self.requests.append({"path": request.path, "icy_metadata": request.headers.get("Icy-MetaData", "")})
+        self.requests.append({"path": request.path, "raw_path": request.raw_path,
+                              "icy_metadata": request.headers.get("Icy-MetaData", "")})
         if request.path == "/_fixture/redirect":
             raise web.HTTPFound(location="/_fixture/tone.mp3")
         if request.path == "/_fixture/loop":
@@ -144,9 +145,9 @@ class _RadioFixture:
                 "Content-Type": "audio/mpeg", "icy-metaint": str(interval),
                 "icy-name": "Synthetic loopback station", "icy-br": "64",
             })
-        if request.path not in self.responses:
+        if request.raw_path not in self.responses:
             raise web.HTTPNotFound()
-        data, content_type = self.responses[request.path]
+        data, content_type = self.responses[request.raw_path]
         return web.Response(body=data, content_type=content_type)
 
 
@@ -174,7 +175,7 @@ async def _renderer(library: str, media: dict[str, Path], directory: Path) -> As
         )
         api = HttpApi(cfg, RendererState.from_config(cfg), backend)
         app = api.app()
-        app.router.add_get("/_fixture/{name}", fixture.handle)
+        app.router.add_get("/_fixture/{name:.*}", fixture.handle)
         runner = web.AppRunner(app, shutdown_timeout=1)
         await runner.setup()
         await web.SockSite(runner, listener).start()
@@ -348,6 +349,53 @@ async def _exercise(library: str, ffmpeg: str, directory: Path, scenario: str) -
                 finally:
                     await _command(session, base, "setPlayerCmd:stop")
             assert not failures, {"native_playlists": evidence["native_playlists"], "http_failures": failures}
+            # Exercise the public client's actual unindexed playlist command,
+            # not play_url as a stand-in. Exact raw fixture targets make URI
+            # truncation or extra decoding fail rather than select other media.
+            from pywiim import WiiMClient
+            client_session = ClientSession(timeout=ClientTimeout(total=8), trust_env=False)
+            client = WiiMClient(host="127.0.0.1", port=urlsplit(base).port,
+                protocol="http", timeout=5, session=client_session,
+                capabilities={"retry_count": 1, "supports_metadata": False})
+            evidence["client_playlists"] = {}
+            try:
+                await client.get_status()
+                for name, target, codec in (("station.m3u", "tone.mp3", "mp3"),
+                                            ("station.pls", "tone.aac", "aac")):
+                    for decorated in (False, True):
+                        raw = ("/_fixture/client%2F" + name + "?signature=a%26b%3Dc&literal=%252F&end=:3"
+                               if decorated else "/_fixture/" + name)
+                        url = base + raw
+                        fixture.responses[raw] = fixture.responses["/_fixture/" + name]
+                        # Relative entries of an encoded-path playlist remain
+                        # under /_fixture/ in native URL resolution.
+                        backend._allowed_media.add(url)
+                        loads_before = len(backend.loads)
+                        requests_before = len(fixture.requests)
+                        await client.play_playlist(url)
+                        decoded = await _decoder_progress(backend, base + "/_fixture/" + target, codec)
+                        assert backend.read_property("playlist-path") == url
+                        assert backend.loads[loads_before:] == [url]
+                        assert any(item["raw_path"] == raw for item in fixture.requests[requests_before:])
+                        status = await client.get_player_status()
+                        assert status["uri"] == url and status["play_status"] == "play"
+                        assert api.state.current_url == api.state.backend_url == url
+                        assert api.state.queue.current.url == url and api.state.queue.count == 1
+                        await client.pause()
+                        queue, generation = api.state.queue, api.state.generation
+                        loads = backend.loads[:]
+                        rejected = await _command(session, base,
+                            "setPlayerCmd:playlist:" + quote(url, safe="") + ":3")
+                        assert rejected == (400, "Failed")
+                        assert backend.loads == loads and backend.read_property("pause") is True
+                        assert backend.read_property("path") == base + "/_fixture/" + target
+                        assert api.state.queue is queue and api.state.generation == generation
+                        evidence["client_playlists"][raw] = {
+                            "requested": url, "decoder": decoded, "unsupported_index_preserved_pause": True}
+                        await client.stop()
+            finally:
+                await client.close()
+                assert client_session.closed
             evidence["container_queue_eof"] = {}
             for name, first, second, first_codec, second_codec in (
                 ("two-entries.m3u", "tone.mp3", "tone.aac", "mp3", "aac"),

@@ -103,6 +103,7 @@ class LocalRenderer:
     commands: list[str]
     session: ClientSession
     base_url: str
+    api: HttpApi
 
 
 def loopback_listener() -> socket.socket:
@@ -190,7 +191,7 @@ async def local_renderer(tmp_path, monkeypatch) -> AsyncIterator[LocalRenderer]:
             # The first pywiim request probes/caches the endpoint. Make it
             # read-only so probing cannot duplicate the first mutation.
             await client.get_status()
-            yield LocalRenderer(client, backend, commands, session, f"http://127.0.0.1:{port}")
+            yield LocalRenderer(client, backend, commands, session, f"http://127.0.0.1:{port}", api)
     finally:
         # aiohttp schedules connection-close callbacks for the next loop tick.
         await asyncio.sleep(0)

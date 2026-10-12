@@ -162,8 +162,15 @@ def parse_command(command: str) -> ParsedCommand:
         return ParsedCommand("play", (_decode_playback_argument(command.removeprefix("setPlayerCmd:play:")),))
     if command.startswith("setPlayerCmd:playlist:"):
         rest = command.removeprefix("setPlayerCmd:playlist:")
-        url, _, index = rest.rpartition(":")
-        return ParsedCommand("playlist", (_decode_playback_argument(url), index or "0"))
+        # Public pywiim sends a URI without an index. Its port, IPv6 address,
+        # path and query can all contain colons, including a final ":3".
+        # A legacy index is distinguishable only after a fully quoted inner
+        # URI, whose own colons are escaped. Never split a literal URI.
+        wrapped, separator, index = rest.partition(":")
+        if (separator and re.fullmatch(r"(?:[A-Za-z0-9_.~-]|%[0-9A-Fa-f]{2})+", wrapped)
+                and re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", unquote(wrapped))):
+            return ParsedCommand("playlist", (_decode_playback_argument(wrapped), index))
+        return ParsedCommand("playlist", (_decode_playback_argument(rest),))
     if command.startswith("setPlayerCmd:m3u:play:"):
         return ParsedCommand("m3u_play", (_decode_playback_argument(command.removeprefix("setPlayerCmd:m3u:play:")),))
     if command.startswith("setPlayerCmd:seek:"):
@@ -1652,9 +1659,14 @@ class HttpApi:
         if name.startswith("get") and ("Capability" in name or "Support" in name):
             return {"error": "Failed", "command": name}
         if name in {"play", "playlist", "m3u_play"}:
+            if not parsed.args or (name == "playlist" and len(parsed.args) > 1 and parsed.args[1] != "0"):
+                raise ValueError("Unsupported playlist index")
+            url = parsed.args[0]
+            # Validate the candidate before stopping staged native playback or
+            # touching the current selection, generation or metadata.
+            queue = PlaybackQueue(items=[QueueItem(url=url, source="CustomRadio")], index=1)
             if self._native_stage is not None or self._native_current_id is not None or self._native_output_uncertain:
                 await self._transport_command("stop")
-            url = parsed.args[0]
             self.queue_url = url
             self.queue_title = url.rsplit("/", 1)[-1] or "Network stream"
             self.queue_source = "CustomRadio"
@@ -1664,8 +1676,7 @@ class HttpApi:
             self.state.play_medium = "STATION-NETWORK"
             self.state.album_art_uri = ""
             self.state.track_metadata = self._didl_metadata(url, self.queue_title, self.queue_source)
-            self.state.queue = PlaybackQueue(items=[QueueItem(url=url,
-                source=self.queue_source)], index=1)
+            self.state.queue = queue
             self._activate_queue_item()
             await self._play_url(url)
             self._schedule_event_notify()

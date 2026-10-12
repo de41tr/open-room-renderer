@@ -52,6 +52,16 @@ transport, volume/mute, explicit backend failures and recovery, and asserts
 session/listener/task cleanup. It does not fetch media or perform discovery.
 The installed client's TLS-version deprecation warning is an upstream warning.
 
+The public client's `play_playlist(url)` command preserves an unindexed URI,
+including ports, IPv6, path/query colons and escaped resource bytes. The legacy
+indexed form is recognized only when the entire inner URI is percent-quoted
+before the `:<index>` suffix. This renderer supports only exact index `0` there,
+meaning start the container at its beginning; it is unrelated to the canonical
+queue's one-based index. Unsupported indexes and empty/invalid queue text fault
+before changing playback. A literal URI ending in `:3` remains that exact URI.
+The optional libmpv format lane also exercises actual pywiim M3U/PLS playback,
+native child source/decoder progression and rejection preserving paused audio.
+
 ## Real client with production Unix IPC
 
 ```sh
