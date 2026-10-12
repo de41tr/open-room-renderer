@@ -214,59 +214,15 @@ Still experimental:
 - Plex/cloud-library adapter, which is experimental and disabled/not surfaced,
 - optional service adapters.
 
-## Continuing The Plex Experiment
+## Disabled Cloud-Library Experiments
 
-Plex is deliberately **off** in the alpha runner. If someone wants to continue that experiment locally, use a private config copy and do not share the resulting state files:
-
-```bash
-mkdir -p .state
-cp configs/config.app-compat.yaml .state/plex-experiment.yaml
-```
-
-Edit `.state/plex-experiment.yaml`:
-
-```yaml
-enable_plex_service: true
-enable_plex_legacy_gate: false
-plex_capability_mode: "exact"
-plex_user_info_mode: "not_login"
-```
-
-Then start that config directly:
-
-```bash
-ORR_CONFIG=.state/plex-experiment.yaml ./scripts/run.sh
-```
-
-Before starting, set `http_api_port` and `upnp_port` to `8080`, set `mirror_port_80` to `false`, and choose a private writable `mpv_socket`. Some controller-app discovery flows may still require the separately reviewed port-80 service.
-
-For a manually authorized Plex token, the experimental code looks for `.state/plex_user_info.json`. Use only a token from your own Plex account and never commit or paste this file:
-
-```json
-{
-  "source": "Plex",
-  "accountSource": "Plex",
-  "msg": "success",
-  "userId": "synthetic-user-id",
-  "userName": "plex-user",
-  "showName": "Plex User",
-  "email": "",
-  "accessToken": "REDACTED_USER_TOKEN",
-  "refreshToken": "",
-  "expires": 4102444800,
-  "subscription": "0",
-  "subscriptionDescription": "",
-  "country": "US",
-  "uuid": "00000000-0000-4000-8000-000000000000",
-  "clientIdentifier": "open-room-renderer-dev-client",
-  "sourceVersion": "1.4",
-  "capabilityVersion": "1.4",
-  "replayGain": true,
-  "redirectUrl": "com.linkplay.wiimhome%3A%2F%2Fcallback%3Fcategory%3Doauth%26service%3Dplex"
-}
-```
-
-This is not a supported feature yet. The missing work is reliable account state, server selection, library browsing, artwork proxying without leaking tokens, and playback URLs that the renderer can hand to `mpv`.
+Plex/cloud-library scaffolding is not a supported playback integration. Even an
+explicit experimental configuration keeps its capability item inactive and
+excludes it from playable music services and legacy support bits. A configured
+label or stored account shape is not evidence of server selection, browsing or
+working playback. No provider login, registration or token-based acceptance was
+performed in this work; existing disabled account scaffolding remains. Do not reuse another application's OAuth
+callback or OEM credentials for future integrations.
 
 ## Docs Worth Reading
 

@@ -273,7 +273,7 @@ async def test_tunein_minimal_capability_exposes_only_new_tunein() -> None:
 
 
 @pytest.mark.asyncio
-async def test_plex_service_can_be_added_to_minimal_tunein_capability() -> None:
+async def test_plex_experiment_is_inactive_in_minimal_tunein_capability() -> None:
     cfg = Config(
         uuid="00000000-0000-4000-8000-000000000000",
         advertise_ip="127.0.0.1",
@@ -292,11 +292,13 @@ async def test_plex_service_can_be_added_to_minimal_tunein_capability() -> None:
     assert plex["removable"] is True
     assert plex["replayGain"] is False
     assert status["streamServicesCapability"]["streamServices"][0]["version"] == "1.4"
-    assert status["supported_services"] == "newTuneIn,Plex"
+    assert status["supported_services"] == "newTuneIn"
     assert status["streams"] == "200"
     assert "streamAll" not in status
     assert "streams_all" not in status
-    assert {"id": "Plex", "name": "Plex", "source": "Plex", "enabled": True} in status["music_services"]
+    assert not any(item["id"].lower() == "plex" for item in status["music_services"])
+    assert plex["active"] is plex["configurable"] is False
+    assert plex["experimental"] is True
 
 
 @pytest.mark.asyncio
@@ -338,8 +340,8 @@ async def test_stream_service_sentinels_can_be_added_for_manage_gate_diagnostics
     services = status["streamServicesCapability"]["streamServices"]
     assert [item["id"] for item in services] == ["Plex", "newTuneIn", "Deezer2", "SoundCloud", "OPS", "LPRP", "HM", "LPDZ", "SC"]
     assert all(item["version"] == "1.4" for item in services)
-    assert status["supported_services"] == "Plex,newTuneIn"
-    assert [item["id"] for item in status["music_services"]] == ["Plex", "newTuneIn"]
+    assert status["supported_services"] == "newTuneIn"
+    assert [item["id"] for item in status["music_services"]] == ["newTuneIn"]
     assert all(not item["active"] for item in services[2:])
 
 
@@ -410,7 +412,7 @@ def test_plex_user_info_is_persisted_and_reloaded(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_plex_legacy_gate_is_explicit_opt_in() -> None:
+async def test_plex_legacy_gate_cannot_claim_unimplemented_playback() -> None:
     cfg = Config(
         uuid="00000000-0000-4000-8000-000000000000",
         advertise_ip="127.0.0.1",
@@ -422,11 +424,11 @@ async def test_plex_legacy_gate_is_explicit_opt_in() -> None:
     api = HttpApi(cfg, RendererState.from_config(cfg), DummyMpv())
     status = await api.execute(ParsedCommand("getStatusEx"), "127.0.0.1")
     assert isinstance(status, dict)
-    assert status["supported_services"] == "newTuneIn,Plex,PLEX"
-    assert int(status["streams"]) & (1 << 43)
-    assert int(status["streams_all"]) & (1 << 43)
+    assert status["supported_services"] == "newTuneIn"
+    assert not int(status["streams"]) & (1 << 43)
+    assert "streams_all" not in status
     assert "streamAll" not in status
-    assert {"id": "PLEX", "name": "Plex", "source": "Plex", "enabled": True} in status["music_services"]
+    assert not any(item["id"].lower() == "plex" for item in status["music_services"])
 
 
 @pytest.mark.asyncio

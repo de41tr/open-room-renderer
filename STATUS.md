@@ -621,3 +621,37 @@ audio-parameter diagnostic raced lazy output creation before calibration. A
 bounded optional-metadata sampler now records unavailable values without
 bypassing any strict PCM checks (22 focused tests passed, one native skip).
 The next native run must establish calibration and renderer measurements.
+
+## Native discovery/playback and clocked transition result
+
+Head eb7c2ac9f3718ec80ef2efd05f1e4a4e0eeddcf6 passed all lanes on native
+x86_64 and AArch64 in
+[run38192653073](https://github.com/de41tr/open-room-renderer/actions/runs/38192653073).
+Actual multicast discovery led to fetched control/event URLs, two distinct WAV
+resources and real production Unix-IPC play/pause/resume/Next/volume/mute/unmute/
+Stop, with HTTP/SOAP/GENA agreement and complete child/task/listener cleanup.
+The new nested-playlist cleanup also passed with actual mpv0.37 decoding.
+
+The continuously clocked digital probe now calibrates the known125ms silence
+exactly and preserves all96000 frames per track. Equal-rate ORR boundary gaps
+were6.125ms on x86_64 and25.125ms on AArch64; mixed-rate gaps6.8125/25.333ms;
+pause-near-transition gaps4.9375/26.125ms. Direct native equal-rate mpv playlist
+measured0ms on both. These are bounded same-host measurements with2ms stated
+tolerance, not a distribution of repeated results or physical DAC evidence.
+All ORR cases are GAP_OBSERVED; passing the measurement does not mean gapless.
+Observer phase and native-EOF versus sink timing are being investigated
+before attributing the gap or changing queue loading.
+
+## Experimental service honesty
+
+The unfinished Plex scaffolding no longer advertises active/configurable
+playback, even when explicitly selected for diagnostics. Its inactive shape is
+retained, but playable service lists and legacy support masks exclude Plex.
+All protocol capability projections agree. This does not implement or exercise
+account login. The README no longer suggests another application's OAuth
+callback or a manual token-file recipe for the unsupported integration.
+
+Final experimental-service snapshot: 1860 default tests passed,22 explicit
+native skips. Independent review passed109 focused tests and confirmed27
+ordinary neutral/TuneIn/direct-source configurations match baseline. Reserved
+provider source aliases and padded legacy decimal masks are covered.

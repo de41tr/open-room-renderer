@@ -110,11 +110,17 @@ reset and gain checks passed. This fixes
 option transport compatibility, not approximate byte-range timestamp accuracy.
 
 AP16 now has a reviewed clocked digital transition probe with a2ms reported
-tolerance, known-silence calibration and equal/mixed-rate/pause cases. Its first
-native run failed calibration; a strict isolated-capture repair is under test.
-No valid gap measurement or gapless capability is advertised. A passing
+tolerance, known-silence calibration and equal/mixed-rate/pause cases. Native
+calibration now passes on x86_64/AArch64. Renderer equal-rate gaps measured
+6.125/25.125ms; direct native mpv playlist measured0ms in the same runs.
+Renderer gapless capability remains unadvertised. A passing
 measurement test must not be confused with a WITHIN_TOLERANCE audio result.
 
 Explicit IPv4 discovery now has real same-host multicast and socket-isolation
-evidence. The discovered-endpoint native playback lane is awaiting CI. No
+evidence. The discovered-endpoint production Unix-IPC flow passed on both native
+architectures in [run38192653073](https://github.com/de41tr/open-room-renderer/actions/runs/38192653073). No
 physical-network reachability or original Android compatibility is inferred.
+
+Experimental Plex capability entries remain inactive and absent from playable
+service lists/legacy bits, including explicit diagnostic profiles. Account
+scaffolding is not complete playback integration and no account flow was run.

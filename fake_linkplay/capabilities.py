@@ -21,6 +21,18 @@ def stream_mask_with_plex(value: Any) -> str:
     return str(base | PLEX_STREAMS_BIT)
 
 
+def _without_unimplemented_plex(value: Any) -> str:
+    """Legacy diagnostic masks must not re-enable unimplemented playback."""
+    try:
+        mask = int(str(value or "0"), 0)
+    except ValueError:
+        try:
+            mask = int(str(value or "0"), 10)
+        except ValueError:
+            return "0"
+    return str(max(0, mask) & ~PLEX_STREAMS_BIT)
+
+
 def plex_stream_service(cfg: Config | None) -> dict[str, object]:
     """Build the StreamServicesCapability item used for Plex experiments."""
 
@@ -33,8 +45,9 @@ def plex_stream_service(cfg: Config | None) -> dict[str, object]:
         "model": model,
         "quality": [],
         "audioSurround": [],
-        "active": True,
-        "configurable": True,
+        "active": False,
+        "configurable": False,
+        "experimental": True,
         "removable": True,
         "replayGain": False,
     }
@@ -135,9 +148,12 @@ def stream_services_capability(cfg: Config | None, stream_services: list[dict[st
 def configured_sources(cfg: Config) -> list[dict[str, object]]:
     sources = []
     for source in cfg.experimental_sources:
-        if not source.enabled:
-            continue
         label = source.source or source.name
+        if (not source.enabled or str(source.id).casefold() == "plex"
+                or str(label).casefold() == "plex"):
+            # A local URL or UI experiment cannot turn the unfinished provider
+            # into an enabled service/source alias on another status surface.
+            continue
         icon = source.icon.replace("{host}", cfg.resolved_advertise_ip).replace("{port}", str(cfg.http_api_port)) if source.icon else f"http://{cfg.resolved_advertise_ip}:{cfg.http_api_port}/icons/{source.id}.svg"
         sources.append({"id": source.id, "source_id": source.id, "name": source.name, "title": source.name,
             "source": label, "SourceName": label, "service": label, "url": source.url, "uri": source.url,
@@ -188,7 +204,8 @@ def service_capability(cfg: Config | None) -> dict[str, object]:
     add_stream_service_sentinels(cfg, services)
     if cfg.source_experiment_variant in {"new_source", "music_service", "all"}:
         for source in configured_sources(cfg):
-            services.append({"id": source["id"], "version": "1.0", "active": True,
+            services.append({"id": source["id"], "version": "1.0",
+                "active": str(source["id"]).casefold() != "plex",
                 "configurable": False, "removable": False, "name": source["name"],
                 "url": source["url"], "icon": source["icon"], "experimental": True})
     return stream_services_capability(cfg, services, "1.4" if cfg.enable_plex_service else "1.0")
@@ -204,8 +221,9 @@ def capability_fields(cfg: Config) -> dict[str, object]:
     for record, item in zip(music, active):
         if item.get("url"):
             record["url"] = item["url"]
-    legacy_plex = cfg.enable_plex_service and cfg.enable_plex_legacy_gate
-    streams = str(cfg.tunein_streams_value) if cfg.source_experiment_variant == "tunein" else "0"
+    legacy_plex = cfg.enable_plex_legacy_gate and any(
+        item.get("id") == "Plex" and item.get("active") for item in services)
+    streams = _without_unimplemented_plex(cfg.tunein_streams_value) if cfg.source_experiment_variant == "tunein" else "0"
     if legacy_plex:
         streams = stream_mask_with_plex(streams)
         supported.append("PLEX")
@@ -214,7 +232,7 @@ def capability_fields(cfg: Config) -> dict[str, object]:
               "streamServicesCapability": capability, "servicesCapability": capability,
               "supported_services": ",".join(supported), "music_services": music, "musicServices": music}
     if cfg.tunein_stream_all_value is not None:
-        result["streams_all"] = stream_mask_with_plex(cfg.tunein_stream_all_value) if legacy_plex else str(cfg.tunein_stream_all_value)
+        result["streams_all"] = stream_mask_with_plex(cfg.tunein_stream_all_value) if legacy_plex else _without_unimplemented_plex(cfg.tunein_stream_all_value)
     elif legacy_plex:
         result["streams_all"] = streams
     return result
