@@ -703,3 +703,34 @@ and AArch64, including all seven no-EOF station scenarios:
 [run38194471807](https://github.com/de41tr/open-room-renderer/actions/runs/38194471807).
 Actual production-grace recovery took16.04/16.03 seconds on those runners;
 exhaustion used exactly three retries and confirmed idle.
+
+## Experimental native successor staging (default off)
+
+`native_queue_staging: true` opts into one-successor mpv playlist staging for
+confirmed finite direct playback. The default is false in every profile; strings
+are rejected as flag values. Gain, DSP and mpv audio defaults are unchanged.
+Append acknowledgement alone never changes canonical metadata: an owned native
+entry ID must actually become current/playing before queue adoption. Duplicate
+URLs, delayed acknowledgement, Pause/Resume/seek and manual Next/Previous around
+a native transition are fenced by ownership and confirmed state.
+
+Active native M3U/PLS containers are not staged further. A successor with exact
+first-level container ancestry can be adopted as one canonical item. Nested or
+foreign-tail ancestry that cannot be proved is explicitly unsupported: ERROR
+reports silence not confirmed, does not falsely adopt the source, and does not
+Stop an unproved foreign source. Such audio may remain active until an explicit
+owner control succeeds. This opt-in is not blanket gapless certification.
+
+Independent review reproduced and fixed lost-ACK-after-EOF, invalid-seek pause
+restoration, stale source-resolution ownership and gain-error adoption races.
+The exact rebased snapshot passed2024 tests with real libmpv enabled; eight
+explicit native IPC/discovery/clocked cases skipped locally. Native/null tests
+confirm entry ownership, cleanup, navigation and unchanged gain/DSP defaults.
+A supplementary private clocked diagnostic measured equal-rate128.75ms off
+versus0ms on at a0.35s monitor-phase offset, with96000 frames per track. Mixed
+rate still measured9.083ms. This is not production Unix-IPC acceptance.
+
+The native clocked CI lane now compares off/on equal and mixed rates at the
+phase offset, plus staged pause near EOF. Exact sample counts remain required;
+only staged equal-rate playback has a hard2ms acceptance gate. Mixed-rate gaps
+are reported honestly. The actual native result remains pending.

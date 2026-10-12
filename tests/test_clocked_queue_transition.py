@@ -170,7 +170,14 @@ def test_real_clocked_queue_transition():
     stdout, stderr = result.stdout, result.stderr
     assert result.returncode == 0, f"Clocked queue measurement failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
     evidence = json.loads(stdout)
-    assert set(evidence["cases"]) == {"equal_rate", "mixed_rate", "pause_near_transition"}
+    assert set(evidence["cases"]) == {"equal_rate", "mixed_rate", "pause_near_transition",
+        "phase_off_equal", "phase_off_mixed", "phase_on_equal", "phase_on_mixed", "phase_on_pause"}
+    assert evidence["cases"]["phase_on_equal"]["outcome"] == "WITHIN_TOLERANCE"
+    for name, case in evidence["cases"].items():
+        assert all(track["frame_count_delta"] == 0 for track in case["tracks"])
+        if name.startswith("phase_"):
+            assert case["start_phase_seconds"] == .35
+            assert case["native_queue_staging"] is name.startswith("phase_on")
     assert evidence["cleanup"] == {"children_reaped": True, "http_monitor_done": True, "no_pending_tasks": True}
     assert evidence["known_gap_control"]["outcome"] == "GAP_OBSERVED"
     # Current ORR may have a real gap. Do not encode that bug as the desired

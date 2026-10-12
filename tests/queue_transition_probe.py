@@ -454,14 +454,38 @@ async def probe(directory: Path) -> dict[str, Any]:
                         return body
                 async with session.request("SUBSCRIBE", base + "/upnp/event/PlayQueue", headers={"NT": "upnp:event", "CALLBACK": f"<{base}/_fixture_events>", "TIMEOUT": "Second-60"}) as response:
                     assert response.status == 200
-                for name, second, pause in (("equal_rate", paths[1], False), ("mixed_rate", paths[2], False), ("pause_near_transition", paths[1], True)):
+                cases = [
+                    ("equal_rate", paths[1], False, False, None),
+                    ("mixed_rate", paths[2], False, False, None),
+                    ("pause_near_transition", paths[1], True, False, None),
+                    ("phase_off_equal", paths[1], False, False, .35),
+                    ("phase_off_mixed", paths[2], False, False, .35),
+                    ("phase_on_equal", paths[1], False, True, .35),
+                    ("phase_on_mixed", paths[2], False, True, .35),
+                    ("phase_on_pause", paths[1], True, True, .35),
+                ]
+                for name, second, pause, staging, start_phase in cases:
+                    cfg.native_queue_staging = staging
                     notifications.clear()
                     queue = '<PlayList><QueueName>Clocked pair</QueueName><ListInfo><SourceName>UPnPServer</SourceName><TrackNumber>2</TrackNumber></ListInfo><Tracks>' + ''.join(
                         f'<Track{i}><Title>Marker {i}</Title><URL>{escape(str(path))}</URL><Duration>{DURATION}</Duration></Track{i}>'
                         for i, path in enumerate((paths[0], second), 1)) + '</Tracks></PlayList>'
                     await soap("CreateQueue", f"<QueueContext>{escape(queue)}</QueueContext>", "PlayQueue")
+                    if start_phase is not None:
+                        # Fix the start offset relative to the unchanged 0.5 s
+                        # production monitor. Only fixture scheduling changes;
+                        # there is no HTTP status polling across native EOF.
+                        old_monitor = api._state_monitor_task
+                        old_monitor.cancel()
+                        await asyncio.gather(old_monitor, return_exceptions=True)
+                        api._state_monitor_task = asyncio.create_task(api._monitor_backend())
+                        monitor = api._state_monitor_task
+                        await asyncio.sleep(start_phase)
                     offset = capture.frames
                     await soap("PlayQueueWithIndex", "<QueueName>Clocked pair</QueueName><Index>1</Index>", "PlayQueue")
+                    if staging:
+                        assert api._native_stage is not None and api._native_stage.confirmed
+                        assert api.state.plicurr == 1, "Append ACK must not publish the next item"
                     assert await prop("current-ao") == "pulse"
                     assert abs(await prop("duration") - DURATION) < .001
                     assert await prop("audio-out-params/samplerate") == RATE
@@ -492,12 +516,16 @@ async def probe(directory: Path) -> dict[str, Any]:
                         return any(event.get("CurrentIndex") == "2" and event.get("TrackURI") == str(second) and event.get("TrackTitle") == "Marker 2" for event in notifications)
                     await eventually("delivered second-track GENA metadata", got_event)
                     measured = await finish_capture(offset, label=name)
+                    assert all(track["frame_count_delta"] == 0 for track in measured["tracks"]), measured
+                    if name == "phase_on_equal":
+                        assert measured["outcome"] == "WITHIN_TOLERANCE", measured
                     if pause:
                         assert measured["tracks"][0]["internal_nonsignal_frames"] >= RATE * .4, measured
                     else:
                         assert all(track["internal_nonsignal_frames"] <= GAP_TOLERANCE_FRAMES for track in measured["tracks"]), measured
                     evidence["cases"][name] = {"source_rates": [RATE, 44100 if second == paths[2] else RATE],
                         "queue_index": 2, "duration_seconds": DURATION, "delivered_gena_metadata": True,
+                        "native_queue_staging": staging, "start_phase_seconds": start_phase,
                         "pause": paused, **measured}
                     await command("setPlayerCmd:stop")
             evidence["sink_after_cases"] = (await pactl("list", "short", "sinks")).strip()

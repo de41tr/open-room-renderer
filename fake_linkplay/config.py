@@ -109,6 +109,8 @@ class Config:
     proxy_on_demand_audio: bool = False
     proxy_allowed_lan_hosts: list[str] = field(default_factory=list)
     range_seek_reload: bool = False
+    # Experimental one-successor native queue staging; never changes mpv audio defaults.
+    native_queue_staging: bool = False
     channel_balance: str = "0.0"
     podcast_presets: list[PodcastPreset] = field(default_factory=list)
     experimental_sources: list[ExperimentalSource] = field(default_factory=list)
@@ -116,6 +118,8 @@ class Config:
     def __post_init__(self) -> None:
         """Normalize configured IDs without replacing their identity."""
 
+        if type(self.native_queue_staging) is not bool:
+            raise ValueError("native_queue_staging must be boolean")
         if type(self.default_mute) is not bool:
             raise ValueError("default_mute must be boolean")
         if self.discovery_interface is not None:

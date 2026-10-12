@@ -66,7 +66,7 @@ jobs:
             tests/test_libmpv_dsp.py tests/test_libmpv_recovery.py \
             tests/test_libmpv_dsp_restore.py tests/test_libmpv_formats.py \
             tests/test_libmpv_load_options.py tests/test_libmpv_load_cleanup.py \
-            tests/test_libmpv_stall_recovery.py
+            tests/test_libmpv_stall_recovery.py tests/test_libmpv_queue_staging.py
 
       - name: Run explicit production Unix IPC and lifecycle lane
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}

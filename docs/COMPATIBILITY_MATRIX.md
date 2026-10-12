@@ -134,3 +134,10 @@ separate tool with no advertised renderer capability or mandatory dependency.
 The production ORR Unix-IPC gate awaits CI; two-host synchronization, physical
 output and WiiM grouping remain NOT_RUN. See TESTING.md for exact invocation,
 private evidence handling and non-atomic group-volume limits.
+
+Native successor staging is a default-off experiment with real libmpv ownership
+and supplementary equal-rate clocked improvement evidence. Production Unix-IPC
+clocked acceptance is pending. It changes no audio defaults or advertised
+capability. Mixed-rate gaps and unprovable nested/foreign-tail ancestry remain
+explicit limits; the latter reports ERROR and silence not confirmed without an
+unsafe Stop. See GETTING_STARTED.md before enabling.

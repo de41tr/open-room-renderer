@@ -114,6 +114,27 @@ class StationRecovery:
     stall_position: float | None = None
 
 
+@dataclass
+class NativeQueueStage:
+    """One canonical successor, owned before the asynchronous append starts."""
+
+    generation: int
+    queue: PlaybackQueue
+    index: int
+    item: QueueItem
+    url: str
+    backend_url: str
+    before: tuple[tuple[int, str], ...]
+    next_item: QueueItem
+    next_url: str
+    resolved_url: str
+    entry_id: int | None = None
+    confirmed: bool = False
+    failed: bool = False
+    cleanup_scheduled: bool = False
+    invalidated: bool = False
+
+
 def parse_command(command: str) -> ParsedCommand:
     """Parse the HTTP ``command`` query parameter into a stable command name.
 
@@ -183,6 +204,14 @@ class HttpApi:
         self._app_users = 0
         self._monitor_interval = 0.5
         self._queue_advance_task: asyncio.Task | None = None
+        self._native_stage: NativeQueueStage | None = None
+        self._native_current_id: int | None = None
+        self._native_ready_generation: int | None = None
+        self._native_waiting_for_audio = False
+        self._native_output_uncertain = False
+        self._native_owned_entries: tuple[tuple[int, str], ...] = ()
+        self._native_staging_timeout = 3.0
+        self._native_cleanup_tasks: set[asyncio.Task] = set()
         self._station_recovery: StationRecovery | None = None
         self._station_recovery_task: asyncio.Task | None = None
         self._station_recovery_loading = False
@@ -284,6 +313,9 @@ class HttpApi:
                 # Invalidate before any cleanup await. An in-flight load keeps
                 # the backend lock until its actual identity has been recorded.
                 self._invalidate_station_recovery()
+                self._invalidate_native_staging()
+                if self._native_cleanup_tasks:
+                    await asyncio.gather(*tuple(self._native_cleanup_tasks), return_exceptions=True)
                 self._seek_closed = True
                 self._pending_seek_generation += 1
                 self._pending_seek_target = None
@@ -337,7 +369,7 @@ class HttpApi:
     def _play_generation(self, value: int) -> None:
         self.state.generation = value
 
-    def _accept_playback_command(self, intent: str) -> int:
+    def _accept_playback_command(self, intent: str, *, preserve_native: bool = False) -> int:
         self._invalidate_station_recovery()
         task = self._queue_advance_task
         if task is not None and task is not asyncio.current_task() and not task.done():
@@ -346,7 +378,16 @@ class HttpApi:
         self._pending_seek_generation += 1
         self._pending_seek_target = None
         self._proxy_sources.clear()
-        return self.state.accept_command(intent)
+        native_ready = self._native_ready_generation == self.state.generation
+        generation = self.state.accept_command(intent)
+        stage = self._native_stage
+        if preserve_native:
+            self._native_ready_generation = generation if native_ready else None
+            if stage is not None and not stage.invalidated:
+                stage.generation = generation
+        else:
+            self._invalidate_native_staging()
+        return generation
 
     def _invalidate_station_recovery(self) -> None:
         recovery, self._station_recovery = self._station_recovery, None
@@ -427,6 +468,7 @@ class HttpApi:
         self._invalidate_station_recovery()
         self.state.gain_confirmed = False
         self.state.mark_error("Backend control failed")
+        self._schedule_native_staging_failure()
         LOG.warning("playback failure category=backend_control generation=%s", self.state.generation)
         self._schedule_event_notify()
 
@@ -562,6 +604,323 @@ class HttpApi:
             if self._station_recovery_task is asyncio.current_task():
                 self._station_recovery_task = None
 
+    def _invalidate_native_staging(self) -> None:
+        stage, self._native_stage = self._native_stage, None
+        if stage is not None:
+            stage.invalidated = True
+        self._native_current_id = None
+        self._native_ready_generation = None
+        self._native_waiting_for_audio = False
+        self._native_owned_entries = ()
+
+    @staticmethod
+    def _native_entries(snapshot: dict) -> tuple[tuple[int, str], ...] | None:
+        entries = snapshot.get("playlist")
+        if not isinstance(entries, list) or not entries:
+            return None
+        result = []
+        for entry in entries:
+            if (not isinstance(entry, dict) or type(entry.get("id")) is not int
+                    or entry["id"] < 0 or not isinstance(entry.get("filename"), str)):
+                return None
+            result.append((entry["id"], entry["filename"]))
+        if len({entry_id for entry_id, _ in result}) != len(result):
+            return None
+        return tuple(result)
+
+    @staticmethod
+    def _native_active(snapshot: dict) -> dict | None:
+        entries = snapshot.get("playlist")
+        if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+            return None
+        active = [entry for entry in entries if entry.get("current") is True or entry.get("playing") is True]
+        if len(active) != 1 or active[0].get("current") is not True or active[0].get("playing") is not True:
+            return None
+        return active[0]
+
+    @staticmethod
+    def _native_audio_ready(snapshot: dict) -> bool:
+        tracks, position = snapshot.get("track-list"), snapshot.get("playback-time")
+        return (snapshot.get("idle-active") is False and isinstance(tracks, list)
+                and any(isinstance(track, dict) and track.get("type") == "audio"
+                        and track.get("selected", True) for track in tracks)
+                and type(position) in {int, float} and math.isfinite(position))
+
+    def _native_selection_matches(self, stage: NativeQueueStage) -> bool:
+        return (self.state.queue is stage.queue and stage.queue.index == stage.index
+                and stage.queue.current is stage.item and stage.item.url == stage.url == self.state.current_url
+                and stage.queue.count > stage.index
+                and stage.queue.items[stage.index] is stage.next_item and stage.next_item.url == stage.next_url)
+
+    def _native_stage_is_current(self, stage: NativeQueueStage) -> bool:
+        return (self._native_stage is stage and not stage.invalidated
+                and stage.generation == self.state.generation and self.state.intent in {"play", "pause"}
+                and self._native_selection_matches(stage))
+
+    def _native_predecessor_matches(self, stage: NativeQueueStage, snapshot: dict) -> bool:
+        active = self._native_active(snapshot)
+        return (active is not None and active.get("id") == stage.before[-1][0]
+                and active.get("filename") == stage.backend_url and snapshot.get("path") == stage.backend_url)
+
+    def _native_successor_matches(self, stage: NativeQueueStage, snapshot: dict) -> bool:
+        """Exact ACK entry identity, or a proven first-level container expansion."""
+        if stage.entry_id is None or snapshot.get("idle-active") is not False:
+            return False
+        entries = self._native_entries(snapshot)
+        active = self._native_active(snapshot)
+        if entries is None or active is None:
+            return False
+        if entries == stage.before + ((stage.entry_id, stage.resolved_url),):
+            return (active.get("id") == stage.entry_id and active.get("filename") == stage.resolved_url
+                    and snapshot.get("path") == stage.resolved_url)
+        # mpv replaces a playlist container's acknowledged entry with children.
+        # Require the untouched owned prefix and every new entry's exact parent;
+        # nested ancestry and membership among inactive entries are insufficient.
+        added = snapshot["playlist"][len(stage.before):]
+        return (entries[:len(stage.before)] == stage.before and bool(added)
+                and stage.entry_id not in {entry_id for entry_id, _ in entries}
+                and active in added and all(entry.get("playlist-path") == stage.resolved_url for entry in added)
+                and self._mpv_snapshot_matches_source(snapshot, stage.resolved_url)
+                and snapshot.get("path") != stage.resolved_url)
+
+    def _native_failed_append_source_matches(self, stage: NativeQueueStage, snapshot: dict) -> bool:
+        """Readback may prove cleanup ownership, never successful adoption.
+
+        An append may apply and reach EOF before its ACK is lost. With the
+        unchanged owned prefix and exactly its new current tail/children, a
+        same-owner Stop can silence that mutation. A foreign replacement,
+        unrelated extra entries or an ambiguous active entry fail this proof.
+        """
+        entries, active = self._native_entries(snapshot), self._native_active(snapshot)
+        if (stage.entry_id is not None or snapshot.get("idle-active") is not False or entries is None or active is None
+                or entries[:len(stage.before)] != stage.before
+                or active.get("id") in {entry_id for entry_id, _ in stage.before}):
+            return False
+        added = snapshot["playlist"][len(stage.before):]
+        if active not in added:
+            return False
+        if len(added) == 1 and added[0].get("filename") == stage.resolved_url:
+            return snapshot.get("path") == stage.resolved_url
+        return (bool(added) and all(entry.get("playlist-path") == stage.resolved_url for entry in added)
+                and self._mpv_snapshot_matches_source(snapshot, stage.resolved_url))
+
+    def _native_control_source_matches(self, snapshot: dict, *, allow_successor: bool = False) -> bool:
+        stage = self._native_stage
+        if (allow_successor and stage is not None and stage.confirmed
+                and self._native_stage_is_current(stage) and self._native_successor_matches(stage, snapshot)):
+            return True
+        if not self._mpv_snapshot_matches_source(snapshot, self.state.backend_url):
+            return False
+        active = self._native_active(snapshot)
+        return (self._native_current_id is None
+                or active is not None and active.get("id") == self._native_current_id)
+
+    def _adopt_native_successor(self, snapshot: dict) -> bool:
+        stage = self._native_stage
+        if (stage is None or stage.failed or self.state.phase == PlaybackPhase.ERROR
+                or not stage.confirmed or not self._native_stage_is_current(stage)
+                or not self._native_successor_matches(stage, snapshot)):
+            return False
+        stage.queue.index = stage.index + 1
+        stage.next_item.resolved_url = stage.resolved_url
+        self._native_stage = None
+        self._native_waiting_for_audio = not self._native_audio_ready(snapshot)
+        self._activate_queue_item()
+        self.state.backend_url = stage.resolved_url
+        self.state.backend_original_url = stage.next_url
+        self._playback_offset_sec = 0
+        expanded = snapshot.get("path") != stage.resolved_url
+        self._native_current_id = None if expanded else stage.entry_id
+        self._native_owned_entries = () if expanded else self._native_entries(snapshot) or ()
+        self._schedule_event_notify()
+        return True
+
+    async def _fail_native_staging_locked(self, stage: NativeQueueStage, generation: int, *, retired: bool = False) -> None:
+        """Fail closed without index-based removal racing a native transition.
+
+        A same-owner Stop is allowed only while the source remains ours. Never
+        stop a foreign path, and never mutate after a newer owner took over.
+        """
+        def owns_cleanup() -> bool:
+            return (generation == self.state.generation and self._native_selection_matches(stage)
+                    and (retired and self.state.intent == "stop" or self._native_stage_is_current(stage)))
+        if not owns_cleanup():
+            return
+        failure = self.state.last_error if self.state.phase == PlaybackPhase.ERROR else "Native queue staging failed"
+        silenced = False
+        try:
+            async with asyncio.timeout(self._native_staging_timeout):
+                snapshot = await self.mpv.snapshot()
+                if not owns_cleanup():
+                    return
+                if snapshot.get("idle-active") is True:
+                    silenced = True
+                elif (not snapshot.get("backend-error") and (
+                        self._native_predecessor_matches(stage, snapshot)
+                        or self._native_successor_matches(stage, snapshot)
+                        or self._native_failed_append_source_matches(stage, snapshot))):
+                    await self._backend_call(self.mpv.stop())
+                    while True:
+                        snapshot = await self.mpv.snapshot()
+                        if snapshot.get("backend-error"):
+                            break
+                        if snapshot.get("idle-active") is True:
+                            silenced = True
+                            break
+                        await asyncio.sleep(.05)
+        except (BackendError, OSError, TimeoutError):
+            pass
+        if silenced:
+            self._native_output_uncertain = False
+            # The mutation lock still excludes newer loads, even if a newer
+            # owner accepted a command while this stop was being acknowledged.
+            self.state.backend_url = ""
+            self.state.backend_original_url = ""
+        if owns_cleanup():
+            self._native_output_uncertain = not silenced
+            self._invalidate_native_staging()
+            self.state.mark_error(failure if silenced else failure + "; playback silence not confirmed")
+            self._schedule_event_notify()
+
+    def _schedule_native_staging_failure(self) -> None:
+        """A transport error must not leave an owned successor armed to play."""
+        stage = self._native_stage
+        if stage is None or not self._native_stage_is_current(stage):
+            return
+        stage.failed = True
+        if stage.cleanup_scheduled:
+            return
+        stage.cleanup_scheduled = True
+        generation = self.state.generation
+        async def cleanup() -> None:
+            async with self._backend_lock:
+                await self._fail_native_staging_locked(stage, generation)
+        task = asyncio.create_task(cleanup())
+        self._native_cleanup_tasks.add(task)
+        def completed(done: asyncio.Task) -> None:
+            self._native_cleanup_tasks.discard(done)
+            if not done.cancelled():
+                done.exception()
+        task.add_done_callback(completed)
+
+    def _native_staging_ready(self, generation: int) -> bool:
+        return (generation == self.state.generation and self._native_ready_generation == generation
+                and self.state.phase == PlaybackPhase.PLAYING and self.state.intent == "play"
+                and self.state.gain_confirmed and getattr(self.mpv, "gain_confirmed", False) is True
+                and getattr(self.mpv, "confirmed_dsp", None) is not None)
+
+    async def _maybe_stage_native_successor(self, generation: int) -> None:
+        """Append at most one next canonical item, after current readiness.
+
+        Old native entries are retained as a bounded ownership prefix (at most
+        the canonical queue's 1000-item bound). Removing by playlist index at
+        EOF would be unsafe. Stop/replacement clears the native playlist.
+        """
+        if (not self.cfg.native_queue_staging or generation != self.state.generation
+                or self._native_ready_generation != generation
+                or self._native_stage is not None or self.state.phase != PlaybackPhase.PLAYING
+                or self.state.intent != "play" or not self.state.gain_confirmed
+                or getattr(self.mpv, "gain_confirmed", False) is not True
+                or getattr(self.mpv, "confirmed_dsp", None) is None
+                or self.cfg.proxy_on_demand_audio or self._playback_offset_sec):
+            return
+        queue, item, index = self.state.queue, self.state.queue.current, self.state.queue.index
+        if item is None or item.stream_type == "station" or index >= queue.count:
+            return
+        successor = queue.items[index]
+        if successor.stream_type == "station" or self._radio_station_from_url(successor.url):
+            return
+        stage = None
+        try:
+            async with self._backend_lock:
+                try:
+                    async with asyncio.timeout(self._native_staging_timeout):
+                        if generation != self.state.generation or self._native_stage is not None:
+                            return
+                        snapshot = await self.mpv.snapshot()
+                        if (generation != self.state.generation or self.state.queue is not queue
+                                or queue.current is not item or queue.index != index):
+                            return
+                        entries, active = self._native_entries(snapshot), self._native_active(snapshot)
+                        duration = snapshot.get("duration")
+                        if (snapshot.get("backend-error") or snapshot.get("path") != self.state.backend_url
+                                or snapshot.get("playlist-path") or snapshot.get("idle-active") is not False
+                                or snapshot.get("pause") is not False or snapshot.get("eof-reached") is True
+                                or snapshot.get("paused-for-cache") is True or not self._native_audio_ready(snapshot)
+                                or type(duration) not in {int, float} or not math.isfinite(duration) or duration <= 0
+                                or not entries or not active or active.get("id") != entries[-1][0]
+                                or active.get("filename") != self.state.backend_url):
+                            return
+                        if self._native_owned_entries:
+                            if entries != self._native_owned_entries:
+                                return
+                        elif len(entries) != 1:
+                            return
+                        direct_url = successor.resolved_url or await self._resolve_playback_url(successor.url)
+                        # Public station resolutions remain ordinary station
+                        # loads, even if a future resolver returns provenance.
+                        if not isinstance(direct_url, str) or not direct_url:
+                            return
+                        if (generation != self.state.generation or self.state.queue is not queue
+                                or queue.current is not item or queue.index != index):
+                            return
+                        if not self._native_staging_ready(generation) or self._mpv_playback_options(successor.url, direct_url):
+                            return
+                        fresh = await self.mpv.snapshot()
+                        fresh_active = self._native_active(fresh)
+                        if (not self._native_staging_ready(generation) or self.state.queue is not queue
+                                or queue.current is not item or queue.index != index
+                                or fresh.get("backend-error") or self._native_entries(fresh) != entries
+                                or fresh_active is None or fresh_active.get("id") != active["id"]
+                                or fresh.get("path") != self.state.backend_url or fresh.get("playlist-path")
+                                or fresh.get("idle-active") is not False or fresh.get("pause") is not False
+                                or fresh.get("eof-reached") is True or fresh.get("paused-for-cache") is True
+                                or not self._native_audio_ready(fresh)):
+                            return
+                        stage = NativeQueueStage(generation, queue, index, item, item.url,
+                                                 self.state.backend_url, entries, successor, successor.url, direct_url)
+                        self._native_stage = stage
+                        self._native_current_id = active["id"]
+                        self._native_owned_entries = entries
+                        # Publish ownership before awaiting. Pause/Resume/seek
+                        # can transfer this record; Stop/new source invalidates it.
+                        stage.entry_id = await self.mpv.append_file(direct_url)
+                        while True:
+                            snapshot = await self.mpv.snapshot()
+                            if not self._native_stage_is_current(stage):
+                                return  # A newer Stop/load owns cleanup under this lock.
+                            if stage.failed or self.state.phase == PlaybackPhase.ERROR:
+                                await self._fail_native_staging_locked(stage, generation)
+                                return
+                            entries_after = self._native_entries(snapshot)
+                            successor_matches = self._native_successor_matches(stage, snapshot)
+                            structure_matches = entries_after == stage.before + ((stage.entry_id, direct_url),)
+                            if snapshot.get("backend-error") or not (structure_matches or successor_matches):
+                                raise BackendError("Native append identity was not confirmed")
+                            stage.confirmed = (snapshot.get("idle-active") is False
+                                and (self._native_predecessor_matches(stage, snapshot) or successor_matches))
+                            if stage.confirmed:
+                                break
+                            if snapshot.get("idle-active") is True:
+                                raise BackendError("Native append ended before confirmation")
+                            # One-shot property reads may straddle native EOF.
+                            # Retry a torn path/entry pair within the same bound.
+                            await asyncio.sleep(.02)
+                        if generation == self.state.generation and self._adopt_native_successor(snapshot):
+                            self._apply_backend_snapshot(snapshot)
+                except (BackendError, OSError, TimeoutError):
+                    if stage is not None:
+                        stage.failed = True
+                        await self._fail_native_staging_locked(stage, generation)
+        except asyncio.CancelledError:
+            # Shutdown and owner commands cannot leave unobserved append work.
+            # No detached cleanup task may outlive its source generation.
+            if stage is not None:
+                stage.failed = True
+                async with self._backend_lock:
+                    await self._fail_native_staging_locked(stage, generation)
+            raise
+
     async def sync_mpv_state(self) -> None:
         """Apply an observation only to the generation that requested it."""
         generation = self.state.generation
@@ -575,6 +934,7 @@ class HttpApi:
         if generation != self.state.generation:
             return
         self._apply_backend_snapshot(snap)
+        await self._maybe_stage_native_successor(generation)
 
     def _apply_backend_snapshot(self, snap: dict) -> None:
         """One source of truth for all HTTP, SOAP and event serializers."""
@@ -586,6 +946,23 @@ class HttpApi:
             return
         if self.state.phase == PlaybackPhase.ERROR:
             return
+        self._adopt_native_successor(snap)
+        if self.state.phase == PlaybackPhase.ERROR:
+            return
+        stage = self._native_stage
+        active = self._native_active(snap)
+        if (stage is not None and stage.confirmed and self._native_stage_is_current(stage)
+                and snap.get("idle-active") is False and active is not None
+                and active.get("filename") == snap.get("path")
+                and not self._native_predecessor_matches(stage, snap)):
+            # An exact successor would already have been adopted above. An
+            # unknown expansion or foreign tail must not remain false PLAYING.
+            # Parentage missing from mpv snapshots is not permission to Stop it.
+            stage.failed = True
+            self._native_output_uncertain = True
+            self.state.mark_error("Native queue source ownership lost; playback silence not confirmed")
+            self._schedule_event_notify()
+            return
         observed_url = snap.get("path")
         recovery = self._station_recovery
         stall_expired = self._station_stall_expired(snap)
@@ -594,6 +971,16 @@ class HttpApi:
             expected_url = recovery.backend_url
         if expected_url and observed_url and not self._mpv_snapshot_matches_source(snap, expected_url):
             return
+        if (self._native_current_id is not None and observed_url == expected_url
+                and self._seek_source_token(snap)[1] != self._native_current_id):
+            return
+        if self._native_waiting_for_audio:
+            if snap.get("idle-active") is True:
+                self.state.mark_error("Staged successor failed before audio readiness")
+                self._schedule_event_notify()
+                return
+            if self._native_audio_ready(snap):
+                self._native_waiting_for_audio = False
         tracks = snap.get("track-list")
         selected_audio = isinstance(tracks, list) and any(
             isinstance(track, dict) and track.get("type") == "audio" and track.get("selected", True)
@@ -603,6 +990,14 @@ class HttpApi:
             # entry EOF can advance within it; only whole-player idle ends
             # that resource. Direct files retain their existing EOF behavior.
             expanded_playlist = bool(expected_url and observed_url and observed_url != expected_url)
+            stage = self._native_stage
+            if stage is not None and self._native_stage_is_current(stage):
+                if snap.get("idle-active") is True:
+                    self.state.mark_error("Staged successor ended before playback was confirmed")
+                    self._schedule_event_notify()
+                    return
+                if snap.get("eof-reached") is True:
+                    return  # Native mpv owns this transition; never double-load it.
             if snap.get("idle-active") is True or (snap.get("eof-reached") is True and not expanded_playlist):
                 if not (self.state.intent == "pause" and not self.state.backend_url):
                     self.state.phase = PlaybackPhase.STOPPED
@@ -673,13 +1068,24 @@ class HttpApi:
     async def _transport_command(self, command: str) -> None:
         """Serialize mutations and verify the actual backend acknowledgement."""
         previous_phase, previous_intent = self.state.phase, self.state.intent
+        native_before = self._native_stage
         intent = {"pause": "pause", "resume": "play", "stop": "stop"}[command]
-        generation = self._accept_playback_command(intent)
+        generation = self._accept_playback_command(intent, preserve_native=command != "stop")
         self.state.phase = PlaybackPhase.COMMAND_ACCEPTED
         try:
             async with self._backend_lock:
                 if generation != self.state.generation:
                     raise BackendError("Playback command superseded")
+                if command != "stop" and self._native_stage is not None:
+                    if self._native_stage.failed:
+                        await self._fail_native_staging_locked(self._native_stage, generation)
+                        raise BackendError("Native queue staging failed before control")
+                    before = await self.mpv.snapshot()
+                    if generation != self.state.generation:
+                        raise BackendError("Playback command superseded")
+                    self._adopt_native_successor(before)
+                    if not self._native_control_source_matches(before):
+                        raise BackendError("Native queue source not confirmed before control")
                 pause_unloaded = command == "pause" and self.state.backend_original_url != self.state.current_url
                 effect = "stop" if pause_unloaded else command
                 operation = getattr(self.mpv, effect)()
@@ -699,11 +1105,14 @@ class HttpApi:
                     raise BackendError("Backend did not pause")
                 if command == "resume" and (snapshot.get("pause") is not False or snapshot.get("idle-active") is not False):
                     raise BackendError("Backend did not resume")
-                if effect in {"pause", "resume"} and not self._mpv_snapshot_matches_source(snapshot, self.state.backend_url):
+                if effect in {"pause", "resume"}:
+                    self._adopt_native_successor(snapshot)
+                if effect in {"pause", "resume"} and not self._native_control_source_matches(snapshot):
                     self.state.mark_error("Playback source changed before control confirmation")
                     self._schedule_event_notify()
                     raise BackendError("Playback source not confirmed after control")
                 if effect == "stop":
+                    self._native_output_uncertain = False
                     self.state.backend_url = ""
                     self.state.backend_original_url = ""
             if generation != self.state.generation:
@@ -716,12 +1125,22 @@ class HttpApi:
                 self.state.phase = PlaybackPhase.PLAYING
                 self._arm_station_recovery()
             self._apply_backend_snapshot(snapshot)
+        except asyncio.CancelledError:
+            if command == "stop" and native_before is not None:
+                async with self._backend_lock:
+                    await self._fail_native_staging_locked(native_before, generation, retired=True)
+            raise
         except (BackendError, OSError, TimeoutError):
+            if command == "stop" and native_before is not None:
+                async with self._backend_lock:
+                    await self._fail_native_staging_locked(native_before, generation, retired=True)
             if generation == self.state.generation and self.state.phase != PlaybackPhase.ERROR:
                 if previous_phase in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING, PlaybackPhase.BUFFERING}:
                     self.state.mark_error()
                 else:
                     self.state.phase, self.state.intent = previous_phase, previous_intent
+            if generation == self.state.generation and self.state.phase == PlaybackPhase.ERROR:
+                self._schedule_native_staging_failure()
             raise
         self._schedule_event_notify()
 
@@ -740,11 +1159,11 @@ class HttpApi:
             raise SoapFault(701, "Transition Not Available")
         if type(seconds) is not int:
             raise SoapFault(402, "Invalid Args")
-        if not relative:
+        if not relative and self._native_stage is None:
             self._bounded_seek_target(seconds, self._seek_duration(), relative=False)
         source_url = self.state.current_url
         intent = self.state.intent
-        generation = self._accept_playback_command(intent)
+        generation = self._accept_playback_command(intent, preserve_native=True)
         seek_generation = self._pending_seek_generation
         task = asyncio.create_task(self._perform_seek(
             seconds, relative, source_url, intent, generation, seek_generation))
@@ -802,18 +1221,63 @@ class HttpApi:
                     raise BackendError("Playback command superseded")
                 if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
                     raise BackendError("Playback ended before seek")
+                # Pause is a bounded fence against native EOF between identity
+                # preflight and seek. It is only used with a staged successor.
+                native_seek_fence = self._native_stage is not None
+                if native_seek_fence:
+                    if self._native_stage.failed:
+                        await self._fail_native_staging_locked(self._native_stage, generation)
+                        raise BackendError("Native queue staging failed before seek")
+                    if not self._native_control_source_matches(snapshot, allow_successor=True):
+                        raise BackendError("Native queue source not confirmed before seek")
+                    mutation_started = True
+                    await self._backend_call(self.mpv.pause())
+                    if not current():
+                        raise BackendError("Playback command superseded")
+                    snapshot = await self.mpv.snapshot()
+                    if not current():
+                        raise BackendError("Playback command superseded")
+                    if snapshot.get("pause") is not True:
+                        raise BackendError("Native queue did not pause before seek")
+                    if self._adopt_native_successor(snapshot):
+                        source_url = self.state.current_url
                 self._apply_backend_snapshot(snapshot)
+                while self._native_waiting_for_audio:
+                    # An owned native successor may be paused while its path
+                    # is already current but its decoder is still opening. A
+                    # seek at that point can be discarded by mpv initialization.
+                    # Wait for actual selected audio within the seek deadline.
+                    if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
+                        raise BackendError("Playback ended before seek")
+                    await asyncio.sleep(self._seek_poll_interval)
+                    if not current():
+                        raise BackendError("Playback command superseded")
+                    snapshot = await self.mpv.snapshot()
+                    if not current():
+                        raise BackendError("Playback command superseded")
+                    if not self._native_control_source_matches(snapshot):
+                        raise BackendError("Source changed before seek")
+                    self._apply_backend_snapshot(snapshot)
                 if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
                     raise BackendError("Playback ended before seek")
-                if not self.state.backend_url or not self._mpv_snapshot_matches_source(snapshot, self.state.backend_url):
+                if not self.state.backend_url or not self._native_control_source_matches(snapshot):
                     raise BackendError("Source not confirmed before seek")
                 if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}:
                     raise SoapFault(701, "Transition Not Available")
                 seek_source = self._seek_source_token(snapshot)
                 previous_pos = self._adjusted_playback_time(snapshot)
-                target = self._bounded_seek_target(
-                    previous_pos + seconds if relative else seconds,
-                    self._seek_duration(snapshot), relative=relative)
+                try:
+                    target = self._bounded_seek_target(
+                        previous_pos + seconds if relative else seconds,
+                        self._seek_duration(snapshot), relative=relative)
+                except SoapFault:
+                    if native_seek_fence and intent == "play" and current():
+                        await self._gain_reconciling_call(self.mpv.resume())
+                        if current():
+                            restored = await self.mpv.snapshot()
+                            if current():
+                                self._apply_backend_snapshot(restored)
+                    raise
                 direct_url = self.queue_resolved_url or self.state.resolved_url or source_url
                 # A segment starts at offset, so earlier targets require the
                 # original resource. Later absolute targets use local seconds.
@@ -844,6 +1308,10 @@ class HttpApi:
                     await self._backend_call(self.mpv.seek(target - self._playback_offset_sec))
                 if not current():
                     raise BackendError("Playback command superseded")
+                if native_seek_fence and intent == "play":
+                    await self._gain_reconciling_call(self.mpv.resume())
+                    if not current():
+                        raise BackendError("Playback command superseded")
                 if self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
                     raise BackendError("Playback ended during seek")
                 backend_url, offset = self.state.backend_url, self._playback_offset_sec
@@ -861,12 +1329,14 @@ class HttpApi:
         except (TimeoutError, asyncio.CancelledError):
             if current() and mutation_started and self.state.phase not in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
                 self.state.mark_error("Seek operation interrupted before confirmation")
+                self._schedule_native_staging_failure()
                 self._schedule_event_notify(("rendertransport1", "AVTransport"))
             raise
         except (BackendError, OSError):
             if current() and self.state.phase not in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
                 if mutation_started:
                     self.state.mark_error("Seek position not confirmed")
+                    self._schedule_native_staging_failure()
                     self._schedule_event_notify(("rendertransport1", "AVTransport"))
             raise
         finally:
@@ -1159,6 +1629,8 @@ class HttpApi:
         if name.startswith("get") and ("Capability" in name or "Support" in name):
             return {"error": "Failed", "command": name}
         if name in {"play", "playlist", "m3u_play"}:
+            if self._native_stage is not None or self._native_current_id is not None or self._native_output_uncertain:
+                await self._transport_command("stop")
             url = parsed.args[0]
             self.queue_url = url
             self.queue_title = url.rsplit("/", 1)[-1] or "Network stream"
@@ -1233,6 +1705,7 @@ class HttpApi:
                 self.state.gain_confirmed = False
                 self._invalidate_station_recovery()
                 self.state.mark_error("Gain confirmation failed; actual output unknown; showing last confirmed settings")
+                self._schedule_native_staging_failure()
                 self._schedule_event_notify()
                 raise
             if volume is not None:
@@ -1989,6 +2462,8 @@ class HttpApi:
 
     async def _play_url(self, url: str) -> None:
         """Resolve/load once and confirm only this generation's actual audio."""
+        if self._native_stage is not None or self._native_current_id is not None or self._native_output_uncertain:
+            await self._transport_command("stop")
         if not self.state.queue.current or self.state.queue.current.url != url:
             self.state.queue = PlaybackQueue(items=[QueueItem(url=url,
                 source=self.queue_source or self.state.track_source, metadata=self.state.track_metadata,
@@ -2096,6 +2571,7 @@ class HttpApi:
                     # command arrived during the bounded, locked mutation.
                     self.state.backend_url = playback_url
                     self.state.backend_original_url = url
+                    self._native_output_uncertain = False
                     load_identity = (playback_url, url)
                     self._playback_offset_sec = 0
                     if self.state.current_url == url:
@@ -2139,7 +2615,6 @@ class HttpApi:
                 raise SourcePlaybackError("Station source ended during recovery", "source_eof")
             if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING}:
                 raise BackendError("Backend no longer playing")
-            return True
         except (BackendError, OSError, TimeoutError, asyncio.CancelledError) as exc:
             try:
                 await silence_failed_load()
@@ -2167,6 +2642,18 @@ class HttpApi:
                 elif self.state.phase != PlaybackPhase.ERROR:
                     self._mark_backend_failure()
             raise
+
+        # Staging starts only after the loaded source's readiness/cleanup
+        # transaction ends. Its failure must not re-enter that old load's Stop
+        # cleanup, which cannot claim ownership of a subsequently foreign path.
+        if current():
+            self._native_ready_generation = generation
+            await self._maybe_stage_native_successor(generation)
+            if generation != self.state.generation:
+                raise BackendError("Playback command superseded")
+            if self.state.phase == PlaybackPhase.ERROR:
+                raise BackendError("Native queue staging failed")
+        return True
 
     def _backend_playback_url(self, original_url: str, direct_url: str) -> str:
         # WiiM Home can hand us service profile URLs rather than final media
@@ -3438,6 +3925,21 @@ class HttpApi:
             # Superseded auto-advance must not overwrite newer owner state.
             return
 
+    async def _navigate_queue(self, delta: int) -> None:
+        """Resolve native EOF before calculating relative navigation indexes."""
+        if self._native_stage is not None:
+            was_playing = self.state.intent == "play"
+            # A confirmed pause freezes native advancement through the index
+            # calculation. Pause's pre/post snapshots adopt only an owned ID.
+            await self._transport_command("pause")
+            try:
+                self.state.queue.validate_index(self.state.queue.index + delta)
+            except QueueError:
+                if was_playing:
+                    await self._transport_command("resume")
+                raise SoapFault(711, "Illegal Seek Target") from None
+        await self._play_queue_index(self.state.queue.index + delta)
+
     async def _replace_queue(self, queue: PlaybackQueue) -> None:
         queue.validate()
         if self.state.backend_url or self.state.status in {"play", "pause", "transition"}:
@@ -3572,11 +4074,11 @@ class HttpApi:
             await self._transport_command(action.lower())
             return
         if action == "Next":
-            await self._play_queue_index(self.state.queue.index + 1)
+            await self._navigate_queue(1)
             return
         if action == "Previous":
             if self.state.queue.count > 1:
-                await self._play_queue_index(self.state.queue.index - 1)
+                await self._navigate_queue(-1)
                 return
             if not self.state.current_url or self.state.status not in {"play", "pause"}:
                 raise SoapFault(701, "Transition Not Available")

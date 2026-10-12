@@ -420,6 +420,20 @@ class MpvBackend:
             raise BackendError(f"Backend operation failed: {redact_sensitive(response.get('error') or 'missing acknowledgement')}")
         return response
 
+    async def append_file(self, url: str) -> int:
+        """Append one inert playlist entry and return mpv's acknowledged ID.
+
+        No gain, DSP, pause or gapless settings change here. The caller must
+        prove a ready owned current item before staging, and confirm identity
+        again before adopting the successor. ACK alone is never playback.
+        """
+        response = await self.checked_command(["loadfile", url, "append"])
+        data = response.get("data")
+        entry_id = data.get("playlist_entry_id") if isinstance(data, dict) else None
+        if type(entry_id) is not int or entry_id < 0:
+            raise BackendError("Native append did not return an entry identity")
+        return entry_id
+
     async def pause(self) -> None:
         """Pause playback."""
 

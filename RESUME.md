@@ -33,3 +33,11 @@
 Native probe supervision and the optional Snapcast acceptance tool are reviewed.
 Monitor the new private-package production-IPC Snapcast CI gate; standalone
 control/PCM success alone is not ORR IPC or two-host synchronization evidence.
+
+Default-off native successor staging is independently reviewed and locally
+validated. Monitor the new phase-offset clocked equal-rate2ms gate before
+claiming native transition improvement. Preserve ambiguous-ancestry uncertainty.
+The new Snapcast IPC gate failed first Play in run38195598391 while all other
+lanes passed; FIFO/control backpressure is being diagnosed without weakening
+production readbacks/timeouts. Public-station refresh is separately reviewed
+and being integrated with staging's typed resolver caller.

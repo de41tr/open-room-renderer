@@ -266,3 +266,26 @@ unchanged. A changed DHCP address requires updating these settings and restartin
 automatic interface migration is not implemented. Keep the same state directory
 and UUID when restarting or renaming. Real original-app/LAN acceptance remains a
 separate test from the native same-host multicast and playback CI lanes.
+
+## Experimental Finite-Queue Staging
+
+The renderer normally loads the next canonical item after observing EOF. For
+controlled finite-media testing, this default-off option lets mpv stage one
+successor and keeps canonical metadata tied to the verified native entry:
+
+```yaml
+native_queue_staging: true
+```
+
+Use a boolean, not a quoted string. Existing profiles remain false. Volume, DSP
+and mpv audio settings do not change. This is an experimental reduced-gap path,
+not a promise of gapless playback for every codec, rate, playlist or output.
+Native clocked CI acceptance for this revision is still pending; consult
+STATUS.md and docs/TESTING.md for actual results.
+
+Active playlist containers are excluded from further staging. Exact first-level
+container ancestry is supported, but nested/foreign-tail ancestry can be
+unprovable. That case returns ERROR with silence explicitly unconfirmed and
+does not stop an unproved foreign source; audio can remain active until an
+explicit owner control succeeds. Keep the option false where that boundary is
+unacceptable. No synchronized multiroom capability follows from staging.
