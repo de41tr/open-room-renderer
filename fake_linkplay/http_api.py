@@ -2341,7 +2341,8 @@ class HttpApi:
                 encoded = stream.read(1024 * 1024 + 1)
             if len(encoded) > 1024 * 1024:
                 raise ValueError("EQ preset document is too large")
-            payload = json.loads(encoded, parse_constant=self._reject_eq_constant)
+            payload = json.loads(encoded, parse_constant=self._reject_eq_constant,
+                                 object_pairs_hook=self._unique_eq_object)
             if (not isinstance(payload, dict) or type(payload.get("version", 1)) is not int
                     or payload.get("version", 1) != 1):
                 raise ValueError("Unsupported EQ preset document")
@@ -2481,13 +2482,24 @@ class HttpApi:
     def _reject_eq_constant(value: str) -> object:
         raise ValueError("Non-finite EQ JSON value")
 
+    @staticmethod
+    def _unique_eq_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        """Reject ambiguous fields before selecting any DSP value or preset."""
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate EQ field")
+            result[key] = value
+        return result
+
     @classmethod
     def _eq_payload(cls, command: str, prefix: str) -> dict[str, object]:
         raw = unquote(command.removeprefix(prefix))
         if len(raw) > 128 * 1024:
             raise ValueError("EQ request is too large")
         try:
-            payload = json.loads(raw, parse_constant=cls._reject_eq_constant)
+            payload = json.loads(raw, parse_constant=cls._reject_eq_constant,
+                                 object_pairs_hook=cls._unique_eq_object)
         except RecursionError as exc:
             raise ValueError("EQ request nesting is too deep") from exc
         if not isinstance(payload, dict):
