@@ -10,6 +10,7 @@ The existing test_libmpv_dsp.py digital-PCM gate remains the sample-level proof.
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from html import escape
 import json
 import locale
@@ -172,6 +173,49 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
             assert staged["queue"]["mode"] == "repeat-all"
             assert [item["index"] for item in staged["queue"]["items"]] == [1, 2]
             assert backend.read_property("idle-active") is True and not media_requests
+            # Edit the metadata-bearing canonical queue, not its lossy URL
+            # export. A duplicated URL is a distinct occurrence: moving the
+            # selected original must retain its metadata and follow its index.
+            original_queue = deepcopy(api.state.queue)
+            edit_generation = staged["generation"]
+            before = len(backend.commands)
+            for action, fields, titles, index in (
+                ("playlist_append", {"urls": [urls[0]]}, ["Synthetic tone 1", "Synthetic tone 2", ""], 1),
+                ("playlist_move", {"from_index": 1, "to_index": 3}, ["Synthetic tone 2", "", "Synthetic tone 1"], 3),
+                ("playlist_remove", {"index": 2}, ["Synthetic tone 2", "Synthetic tone 1"], 2),
+                ("playlist_move", {"from_index": 2, "to_index": 1}, ["Synthetic tone 1", "Synthetic tone 2"], 1),
+            ):
+                old_queue = api.state.queue
+                old_value = deepcopy(old_queue)
+                generation = (await snapshot())["generation"]
+                await command(action, guard=True, **fields)
+                edited_queue = await canonical(index, "STOPPED")
+                assert edited_queue["generation"] == generation + 1
+                assert edited_queue["queue"]["playlist_edit_reason"] == "supported"
+                assert [item.title for item in api.state.queue.items] == titles
+                assert api.state.queue.current == original_queue.current
+                assert api.state.queue.current is not old_queue.current
+                assert api.state.queue is not old_queue and old_queue == old_value
+                assert api.state.curpos == 0
+                assert backend.commands[before:] == [] and not media_requests
+                assert backend.read_property("idle-active") is True
+                assert backend.read_property("playlist") == []
+                assert not any(track.get("selected") and track.get("type") == "audio"
+                               for track in backend.read_property("track-list"))
+            assert api.state.queue == original_queue
+            edited_queue = api.state.queue
+            rejected = await command("playlist_append", urls=[urls[0]],
+                                     expected_generation=edit_generation, expected=409)
+            assert rejected["outcome"] == "REJECTED" and rejected["error"] == "stale_generation"
+            assert api.state.queue is edited_queue
+            assert backend.commands[before:] == [] and not media_requests
+            evidence["playlist_edits"] = {
+                "append_move_remove": True, "duplicate_selected_occurrence_retained": True,
+                "canonical_metadata_retained": True, "detached_originals_unchanged": True,
+                "position_reset": True, "stale_append": 409,
+                "native_mutations_before_explicit_play": 0, "media_requests_before_explicit_play": 0,
+            }
+
             await command("volume", value=25)
             await command("mute", value=True)
             assert backend.read_property("volume") == pytest.approx(25)
@@ -205,6 +249,22 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
             await pending_play
             await decoded(1)
             await canonical(1, "PLAYING")
+
+            before = len(backend.commands)
+            active_queue = api.state.queue
+            active_playlist = backend.read_property("playlist")
+            for action, fields in (
+                ("playlist_append", {"urls": [urls[0]]}),
+                ("playlist_replace", {"source": {"format": "urls", "urls": urls,
+                    "name": "Blocked while playing", "index": 1, "mode": "normal"}}),
+            ):
+                rejected = await command(action, expected=409, guard=True, **fields)
+                assert rejected["outcome"] == "REJECTED"
+                assert api.state.queue is active_queue
+                assert backend.commands[before:] == []
+                assert backend.read_property("playlist") == active_playlist
+                await canonical(1, "PLAYING")
+            evidence["playlist_edits"]["playing_rejected_without_native_mutation"] = True
 
             await command("pause", guard=True)
             assert backend.read_property("pause") is True
@@ -415,6 +475,68 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
             await command("stop")
             assert backend.read_property("idle-active") is True
             await canonical(1, "STOPPED")
+
+            # Import each supported authored format through real Web HTTP.
+            # The duplicate at position three stays selected through the edit,
+            # and only the following explicit Play may load its actual source.
+            authored_urls = [urls[0], urls[1], urls[0]]
+            document = {"version": 1, "name": "Web imported duplicates", "index": 3,
+                        "mode": "repeat-all", "urls": authored_urls}
+            source_options = {"name": document["name"], "index": 3, "mode": "repeat-all"}
+            sources = (
+                {"format": "json", "text": json.dumps(document)},
+                {"format": "m3u", "text": "#EXTM3U\n#EXTINF:30,Ignored display hint\n"
+                    + "\n".join(authored_urls) + "\n", **source_options},
+                {"format": "urls", "urls": authored_urls, **source_options},
+            )
+            before = len(backend.commands)
+            requests_before = list(media_requests)
+            native_before = backend.read_property("playlist")
+            imported_formats = []
+            for source in sources:
+                generation = (await snapshot())["generation"]
+                await command("playlist_replace", source=source, guard=True)
+                imported = await canonical(3, "STOPPED")
+                assert imported["generation"] == generation + 1
+                assert imported["queue"]["name"] == document["name"]
+                assert imported["queue"]["mode"] == "repeat-all"
+                assert imported["queue"]["count"] == 3
+                assert [item.url for item in api.state.queue.items] == authored_urls
+                assert [item.title for item in api.state.queue.items] == ["", "", "first.wav"]
+                assert api.state.queue.current.title_is_fallback is True
+                assert all(not item.metadata for item in api.state.queue.items)
+                assert backend.commands[before:] == [] and media_requests == requests_before
+                assert backend.read_property("playlist") == native_before
+                assert backend.read_property("idle-active") is True
+                assert not any(track.get("selected") and track.get("type") == "audio"
+                               for track in backend.read_property("track-list"))
+                imported_formats.append(source["format"])
+            generation = (await snapshot())["generation"]
+            await command("playlist_move", from_index=3, to_index=2, guard=True)
+            await canonical(2, "STOPPED")
+            assert [item.url for item in api.state.queue.items] == [urls[0], urls[0], urls[1]]
+            imported_queue = api.state.queue
+            rejected = await command("playlist_replace", source=sources[-1],
+                                     expected_generation=generation, expected=409)
+            assert rejected["outcome"] == "REJECTED" and rejected["error"] == "stale_generation"
+            assert api.state.queue is imported_queue
+            assert backend.commands[before:] == [] and media_requests == requests_before
+            assert backend.read_property("playlist") == native_before
+            assert backend.read_property("idle-active") is True
+            await command("play", guard=True)
+            selected_source = await decoded(1)
+            await canonical(2, "PLAYING")
+            assert len(media_requests) > len(requests_before)
+            evidence["playlist_import"] = {
+                "formats": imported_formats, "duplicate_count": 2,
+                "selected_index_before_move": 3, "selected_index_after_move": 2,
+                "stale_replace": 409, "native_mutations_before_explicit_play": 0,
+                "media_requests_before_explicit_play": 0, "actual_source_after_explicit_play": 1,
+                "native_id_after_explicit_play": selected_source["native_id"],
+            }
+            await command("stop")
+            assert backend.read_property("idle-active") is True
+            await canonical(2, "STOPPED")
     finally:
         release.set()
         dsp_release.set()
@@ -470,6 +592,10 @@ def test_real_libmpv_web_controls(tmp_path: Path) -> None:
     assert {sample["source"] for sample in evidence["decoded"]} == {1, 2}
     assert evidence["dsp_editor"]["complete_bands"] == 40
     assert evidence["dsp_editor"]["stale_extra_native_mutations"] == 0
+    assert evidence["playlist_edits"]["canonical_metadata_retained"] is True
+    assert evidence["playlist_edits"]["native_mutations_before_explicit_play"] == 0
+    assert evidence["playlist_import"]["formats"] == ["json", "m3u", "urls"]
+    assert evidence["playlist_import"]["actual_source_after_explicit_play"] == 1
     print(json.dumps(evidence, sort_keys=True))
 
 
