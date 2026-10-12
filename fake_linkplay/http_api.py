@@ -40,6 +40,7 @@ from .capabilities import capability_fields, configured_sources, service_capabil
 from .eventing import EventSubscriber, EventSubscriptionManager
 from .favorites import FavoritesApi, FavoritesStore
 from .queue_playlist import QueuePlaylistApi
+from .web_playlists import PLAYLIST_ACTIONS
 from .web_ui import (WebAdmissionError, WebCommand, WebControlApi, WebDspCommandError,
                      WebRuntime)
 from .config import Config
@@ -349,7 +350,22 @@ class HttpApi:
         if (self.state.queue.count <= 1 and not is_shuffle(self.state.queue.loop)
                 and "Previous" in self._current_transport_actions().split(",")):
             actions.add("previous")
+        # Browser playlist edits deliberately require an already-confirmed
+        # stop. No queued replacement waits behind a hidden Stop or native
+        # operation. This is conservative admission, not a new queue owner.
+        playlist_stopped = (self.state.phase == PlaybackPhase.STOPPED
+            and self.state.intent == "stop" and not self.state.backend_url
+            and not self.state.backend_original_url and not self._backend_lock.locked()
+            and not unknown and not self._native_waiting_for_audio
+            and self._native_stage is None and self._native_current_id is None
+            and not self._native_owned_entries and not self._native_cleanup_tasks
+            and self._admitted_load_generation is None and self._pending_seek_target is None
+            and not any(not task.done() for task in self._seek_tasks)
+            and not self._station_recovery_loading
+            and not any(task is not None and not task.done() for task in
+                        (self._station_recovery_task, self._queue_advance_task)))
         return WebRuntime(
+            playlist_stopped=playlist_stopped,
             actions=frozenset(actions), transport_unknown=unknown,
             transport_pending=self._native_waiting_for_audio or self._pending_seek_target is not None,
             gain_pending=self._gain_operations > 0 or self._gain_command_lock.locked(),
@@ -382,6 +398,11 @@ class HttpApi:
         transport = {"play": "resume", "pause": "pause", "stop": "stop", "next": "next", "previous": "prev"}
         if action in transport:
             await self.execute(ParsedCommand(transport[action]), "")
+        elif action in PLAYLIST_ACTIONS:
+            # Admission and detached preparation ran synchronously immediately
+            # before dispatch. Its stopped/backend-empty guard means the
+            # existing replacement takes no await before installing this queue.
+            await self._replace_queue(command.prepared_queue)
         elif action == "seek":
             await self._seek_command(command.seconds)
         elif action == "volume":

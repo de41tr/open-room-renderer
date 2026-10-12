@@ -1,7 +1,7 @@
 /* Dependency-free control-flow tests; these are not browser/layout tests. */
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {Controller, DspDraft, DSP_KEYS, DSP_MODES, validateEditor, MODES, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError} = require('../fake_linkplay/web_assets/controller.js');
+const {Controller, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_MODES, validateEditor, MODES, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError} = require('../fake_linkplay/web_assets/controller.js');
 const clone = value => JSON.parse(JSON.stringify(value));
 const revisionID = letter => letter.repeat(64);
 function editor(overrides = {}) {
@@ -18,9 +18,9 @@ function state(overrides = {}) {
     transport: {phase: 'STOPPED', intent: 'stop', status: 'CONFIRMED', message: ''},
     media: {title: 'Track <script>bad()</script>', artist: 'Artist', album: '', artwork: null, is_live: false, position_seconds: 0, duration_seconds: 120},
     gain: {status: 'CONFIRMED', volume: 20, mute: false, last_confirmed: {volume: 20, mute: false}},
-    queue: {name: 'My queue', count: 2, index: 1, mode: 'normal', items: [{index: 1, title: 'One', artist: '', album: '', duration_seconds: 120}, {index: 2, title: 'Two', artist: '', album: '', duration_seconds: null}]},
+    queue: {playlist_edit_reason: 'supported', name: 'My queue', count: 2, index: 1, mode: 'normal', items: [{index: 1, title: 'One', artist: '', album: '', duration_seconds: 120}, {index: 2, title: 'Two', artist: '', album: '', duration_seconds: null}]},
     dsp: {status: 'CONFIRMED', balance: 0, eq_enabled: false, name: 'Default', editor: editor()},
-    actions: {play: true, pause: false, stop: true, next: true, previous: false, seek: true, queue_select: true, queue_mode: true, save_current: true}, ...overrides
+    actions: {playlist_replace: true, playlist_append: true, playlist_remove: true, playlist_move: true, play: true, pause: false, stop: true, next: true, previous: false, seek: true, queue_select: true, queue_mode: true, save_current: true}, ...overrides
   };
 }
 const favorites = (items = [], session_id = 'session-one') => ({version: 1, session_id, favorites: items});
@@ -155,6 +155,8 @@ async function appHarness() {
   const requests = [], events = new Map(), timers = new Map(); let timerId = 0;
   class Element {
     constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attributes = {}; this.listeners = new Map(); this.textContent = ''; this.value = ''; this.hidden = false; this.disabled = false; this.classList = {toggle() {}}; this.open = false; }
+    get value() {return this._value || '';}
+    set value(value) {this._value = value; if (this.type === 'file' && value === '') this.files = [];}
     setAttribute(key, value) {this.attributes[key] = value; if (key === 'src') this.src = value;}
     getAttribute(key) {return this.attributes[key];}
     removeAttribute(key) {delete this.attributes[key];}
@@ -172,6 +174,7 @@ async function appHarness() {
   const html = fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/index.html'), 'utf8');
   for (const match of html.matchAll(/<([a-z][a-z0-9]*)\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
     const element = new Element(match[1]); element.id = match[3]; element.hidden = /\bhidden\b/.test(match[2]); element.disabled = /\bdisabled\b/.test(match[2]);
+    const type = match[2].match(/\btype="([^"]*)"/); if (type) element.type = type[1];
     const value = match[2].match(/\bvalue="([^"]*)"/); if (value) element.value = value[1]; ids.set(element.id, element);
   }
   const document = {activeElement: null, hidden: false, getElementById: id => {assert.ok(ids.has(id), `Unknown element ${id}`); return ids.get(id);}, createElement: tag => new Element(tag), createDocumentFragment: () => new Element('fragment'), addEventListener: (name, callback) => events.set(name, callback)};
@@ -187,7 +190,7 @@ async function appHarness() {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/app.js'), 'utf8'), {window, document, fetch, AbortController, TextEncoder, TextDecoder, Uint8Array, URL, Date, console});
   async function settle() {for (let i = 0; i < 10; i += 1) await tick();}
   await settle();
-  return {ids, timers, requests, setState: value => {current = value;}, setFavorites: value => {library = value;}, setPost: fn => {postHook = fn;}, settle, refresh: async () => {await ids.get('refresh').fire('click'); await settle();}, posts: () => requests.filter(item => item.options.method === 'POST').map(item => JSON.parse(item.options.body))};
+  return {ids, timers, requests, pagehide: () => events.get('pagehide')?.(), setState: value => {current = value;}, setFavorites: value => {library = value;}, setPost: fn => {postHook = fn;}, settle, refresh: async () => {await ids.get('refresh').fire('click'); await settle();}, posts: () => requests.filter(item => item.options.method === 'POST').map(item => JSON.parse(item.options.body))};
 }
 test('app renders metadata as text, and polling preserves favorite form edits', async () => {
   const h = await appHarness();
@@ -407,6 +410,226 @@ test('preset conflict permits explicit name correction while unknown save blocks
     await h.ids.get('dsp-save').fire('click'); h.ids.get('dsp-name').value = 'Already there'; await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.ids.get('dsp-dialog').open, true); assert.equal(h.ids.get('dsp-preset-submit').disabled, unknown);
     if (unknown) {await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.posts().length, 1);} else {h.ids.get('dsp-name').value = 'Different'; await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.posts().length, 2);}
   }
+});
+
+/* Playlist tests use synthetic sources and a DOM double, not browser acceptance. */
+const playlistJSON = (changes = {}) => JSON.stringify({version: 1, name: 'Authored queue', index: 1, mode: 'repeat-all', urls: ['https://example.test/a?token=private'], ...changes});
+function localFile(text, name = 'private-source.json') {
+  const bytes = new TextEncoder().encode(text);
+  return {name, size: bytes.length, arrayBuffer: async () => bytes.buffer};
+}
+async function sourceFormat(h, format) { h.ids.get('playlist-format').value = format; await h.ids.get('playlist-format').fire('change'); }
+async function sourceURLs(h, text) { h.ids.get('playlist-urls').value = text; await h.ids.get('playlist-urls').fire('input'); }
+async function chooseFile(h, file) { h.ids.get('playlist-file').files = [file]; h.ids.get('playlist-file').value = 'C:\\fakepath\\' + file.name; await h.ids.get('playlist-file').fire('change'); }
+async function confirmPlaylist(h) { h.ids.get('playlist-confirm').checked = true; await h.ids.get('playlist-confirm').fire('input'); }
+function playlistRows(h, action) { return h.ids.get('queue-list').querySelectorAll('button').filter(button => button.dataset.queueAction === action); }
+function safeMessages(h) { return ['notice-text', 'playlist-dialog-status', 'playlist-preview', 'playlist-size'].map(id => h.ids.get(id).textContent).join(' '); }
+test('playlist actions fail closed without explicit supported capabilities or confirmed stopped state', async () => {
+  assert.equal(playlistAvailable(state(), 'playlist_replace'), true);
+  for (const transport of [{phase: 'PLAYING', status: 'CONFIRMED'}, {phase: 'PAUSED', status: 'CONFIRMED'}, {phase: 'STOPPED', status: 'PENDING'}, {phase: 'STOPPED', status: 'ERROR'}]) {
+    const current = state({transport: {...state().transport, ...transport}}), h = harness(); h.setState(current); await h.controller.refresh();
+    for (const action of ['playlist_replace', 'playlist_append', 'playlist_remove', 'playlist_move']) assert.equal(h.controller.canMutate(action), false);
+    assert.equal(h.controller.canMutate('stop'), true);
+  }
+  const noFlags = state(); for (const key of ['playlist_replace', 'playlist_append', 'playlist_remove', 'playlist_move']) delete noFlags.actions[key];
+  assert.doesNotThrow(() => validateState(noFlags)); assert.equal(playlistAvailable(noFlags, 'playlist_replace'), false);
+  for (const reason of ['empty_queue', 'unsupported_queue', undefined]) {
+    const current = state({queue: {...state().queue, playlist_edit_reason: reason}});
+    assert.equal(playlistAvailable(current, 'playlist_append'), false); assert.equal(playlistAvailable(current, 'playlist_remove'), false);
+  }
+  assert.throws(() => validateState(state({queue: {...state().queue, playlist_edit_reason: 'maybe'}})));
+  assert.throws(() => validateState(state({actions: {...state().actions, playlist_append: 'yes'}})));
+});
+test('pasted URL lists preserve original URL bytes and reject ambiguous lines', () => {
+  const url = 'HTTP://Example.test:80/a%2fb?sig=One%2BTwo#fragment';
+  assert.deepEqual(pastedURLs(url + '\r\n\nhttps://example.test/b\n'), [url, 'https://example.test/b']);
+  for (const text of ['', ' ' + url, url + ' ', url + '\r', '#EXTM3U\n' + url, 'https://user:secret@example.test/a', 'file:///secret', '\ufeff' + url, ('https://example.test/a\n').repeat(1001)]) assert.equal(pastedURLs(text), null);
+  assert.deepEqual(playlistPreview('json', playlistJSON({index: 2, urls: [url, url]}), {}), {count: 2, index: 2, mode: 'repeat-all'});
+  assert.equal(playlistPreview('json', '<script>secret</script>', {}), null);
+});
+test('local file decode is fatal UTF-8, preserves BOM and never exposes a filename or source in errors', async () => {
+  const draft = new PlaylistDraft(state(), 'playlist_replace'); draft.setSource('json');
+  const text = '\ufeff' + playlistJSON(); await draft.readFile(localFile(text)); assert.equal(draft.text, text); assert.equal(draft.error, '');
+  await draft.readFile({name: 'secret-source.json', size: 2, arrayBuffer: async () => Uint8Array.from([0xc3, 0x28]).buffer});
+  assert.equal(draft.text, ''); assert.match(draft.error, /UTF-8/); assert.doesNotMatch(draft.error, /secret-source/);
+  let reads = 0; await draft.readFile({name: 'secret-source.json', size: MAX_REQUEST_BYTES + 1, arrayBuffer: async () => {reads += 1;}}); assert.equal(reads, 0);
+});
+test('cancel, newer source and late file reads cannot restore an obsolete private draft', async () => {
+  for (const event of ['cancel', 'newer', 'format']) {
+    const draft = new PlaylistDraft(state(), 'playlist_replace'), old = deferred(); draft.setSource('json');
+    const reading = draft.readFile({name: 'obsolete.json', size: 3, arrayBuffer: () => old.promise});
+    if (event === 'cancel') draft.cancel();
+    else if (event === 'newer') await draft.readFile(localFile('new'));
+    else draft.setSource('urls', 'https://example.test/new');
+    old.resolve(new TextEncoder().encode('old').buffer); await reading;
+    assert.equal(draft.text, event === 'cancel' ? '' : event === 'newer' ? 'new' : 'https://example.test/new'); assert.equal(draft.reading, false);
+  }
+});
+test('playlist draft identity is immutable and staleness is sticky across polling reversions', () => {
+  for (const next of [state({generation: 8}), state({session_id: 'restarted'}), state({transport: {...state().transport, phase: 'PLAYING'}}), state({actions: {...state().actions, playlist_append: false}})]) {
+    const draft = new PlaylistDraft(state(), 'playlist_append'); draft.setSource('urls', 'https://example.test/private'); draft.observe(next, true); draft.observe(state(), true);
+    assert.equal(draft.stale, true); assert.equal(draft.canSubmit(state(), true), false); assert.equal(draft.generation, 7); assert.equal(draft.session, 'session-one'); assert.equal(draft.text, 'https://example.test/private');
+  }
+});
+test('full UTF-8 JSON envelope is bounded, including escaping, and checked before requests', async () => {
+  const body = {action: 'playlist_replace', expected_generation: 7, source: {format: 'json', text: ''}};
+  const base = requestBytes(body); body.source.text = 'a'.repeat(MAX_REQUEST_BYTES - base);
+  assert.equal(requestBytes(body), MAX_REQUEST_BYTES);
+  const h = harness(); await h.controller.refresh(); await h.controller.mutate(body, 'Replace queue'); assert.equal(h.posts().length, 1);
+  body.source.text += 'é'; assert.equal(requestBytes(body), MAX_REQUEST_BYTES + 2); assert.equal((await h.controller.mutate(body, 'Replace queue')).kind, 'blocked'); assert.equal(h.posts().length, 1);
+  body.source.text = '\\"\n'.repeat(7000); assert.ok(body.source.text.length < MAX_REQUEST_BYTES); assert.ok(requestBytes(body) > MAX_REQUEST_BYTES);
+  assert.equal((await h.controller.mutate(body, 'Replace queue')).kind, 'blocked'); assert.equal(h.posts().length, 1);
+});
+test('playlist replace needs explicit confirmation and preserves exact pasted URL bytes in strict source envelope', async () => {
+  const h = await appHarness(), url = 'HTTP://Example.test:80/a%2fb?sig=One%2BTwo';
+  await h.ids.get('playlist-load').fire('click'); await sourceFormat(h, 'urls'); await sourceURLs(h, url + '\r\nhttps://example.test/b\n');
+  h.ids.get('playlist-name').value = 'My explicit queue'; h.ids.get('playlist-index').value = '2'; h.ids.get('playlist-mode').value = 'shuffle-once';
+  await h.refresh(); assert.equal(h.ids.get('playlist-urls').value, url + '\r\nhttps://example.test/b\n');
+  assert.equal(h.ids.get('playlist-submit').disabled, true); await h.ids.get('playlist-form').fire('submit'); assert.equal(h.posts().length, 0);
+  await confirmPlaylist(h); assert.equal(h.ids.get('playlist-submit').disabled, false);
+  h.setPost(() => {h.setState(state({generation: 8})); return {request_acknowledged: true};}); await h.ids.get('playlist-form').fire('submit');
+  assert.deepEqual(h.posts(), [{action: 'playlist_replace', expected_generation: 7, source: {format: 'urls', urls: [url, 'https://example.test/b'], name: 'My explicit queue', index: 2, mode: 'shuffle-once'}}]);
+  assert.equal(h.ids.get('playlist-dialog').open, false); assert.equal(h.ids.get('playlist-urls').value, ''); assert.equal(h.ids.get('playlist-name').value, ''); assert.doesNotMatch(safeMessages(h), /One%2BTwo/);
+});
+test('JSON and M3U send original local text including BOM; only safe summaries enter messages', async () => {
+  for (const format of ['json', 'm3u']) {
+    const h = await appHarness(), text = format === 'json' ? '\ufeff' + playlistJSON() : '\ufeff#EXTM3U\r\n#EXTINF:123,private-title\r\nhttps://example.test/a?token=private\r\n';
+    await h.ids.get('playlist-load').fire('click'); await sourceFormat(h, format); await chooseFile(h, localFile(text, 'private-filename.' + format)); await confirmPlaylist(h);
+    assert.equal(h.ids.get('playlist-file').value, ''); assert.equal(h.ids.get('playlist-file').files.length, 0); assert.equal(h.ids.get('playlist-submit').disabled, false); assert.doesNotMatch(safeMessages(h), /private/);
+    await h.ids.get('playlist-form').fire('submit'); const body = h.posts()[0]; assert.equal(body.source.text, text); assert.equal(body.source.format, format);
+    assert.deepEqual(Object.keys(body.source).sort(), format === 'json' ? ['format', 'text'] : ['format', 'index', 'mode', 'name', 'text']);
+  }
+});
+test('file failures and escaped envelope overflow are local generic errors with no request', async () => {
+  for (const file of [{name: 'private-invalid.json', size: 2, arrayBuffer: async () => Uint8Array.from([0xc3, 0x28]).buffer}, localFile('"'.repeat(20000), 'private-large.json')]) {
+    const h = await appHarness(); await h.ids.get('playlist-load').fire('click'); await chooseFile(h, file); await confirmPlaylist(h); await h.ids.get('playlist-form').fire('submit');
+    assert.equal(h.posts().length, 0); assert.equal(h.ids.get('playlist-submit').disabled, true); assert.match(h.ids.get('playlist-dialog-status').textContent, /UTF-8|32,768/); assert.doesNotMatch(safeMessages(h), /private/);
+  }
+});
+test('native Escape and Cancel scrub source fields; late file reads cannot reopen or populate a newer dialog', async () => {
+  for (const close of ['cancel', 'playlist-cancel']) {
+    const h = await appHarness(), late = deferred(); await h.ids.get('playlist-load').fire('click');
+    const reading = chooseFile(h, {name: 'obsolete-private.json', size: 3, arrayBuffer: () => late.promise}); await h.settle();
+    if (close === 'cancel') await h.ids.get('playlist-dialog').fire('cancel'); else await h.ids.get(close).fire('click');
+    assert.equal(h.ids.get('playlist-dialog').open, false); assert.equal(h.ids.get('playlist-file').value, ''); assert.equal(h.ids.get('playlist-urls').value, ''); assert.equal(h.ids.get('playlist-name').value, '');
+    await h.ids.get('playlist-load').fire('click'); await sourceFormat(h, 'urls'); await sourceURLs(h, 'https://example.test/new');
+    late.resolve(new TextEncoder().encode('old').buffer); await reading; assert.equal(h.ids.get('playlist-urls').value, 'https://example.test/new'); assert.match(h.ids.get('playlist-preview').textContent, /^URLS/); assert.equal(h.posts().length, 0);
+  }
+});
+test('playlist draft is preserved but cannot be silently rebased after a changed queue or same-generation restart', async () => {
+  for (const change of [{generation: 8}, {session_id: 'restarted'}, {actions: {...state().actions, playlist_replace: false}}]) {
+    const h = await appHarness(); await h.ids.get('playlist-load').fire('click'); await sourceFormat(h, 'urls'); await sourceURLs(h, 'https://example.test/private'); await confirmPlaylist(h);
+    h.setState(state(change)); await h.refresh(); h.setState(state()); await h.refresh();
+    assert.equal(h.ids.get('playlist-urls').value, 'https://example.test/private'); assert.equal(h.ids.get('playlist-submit').disabled, true); await h.ids.get('playlist-form').fire('submit'); assert.equal(h.posts().length, 0); assert.match(h.ids.get('playlist-dialog-status').textContent, /Cancel and review/);
+  }
+});
+test('duplicate playlist submit is single-shot; lost response stays UNKNOWN even after matching stopped readback', async () => {
+  const h = await appHarness(), pending = deferred(); h.setPost(() => pending.promise);
+  await h.ids.get('playlist-add').fire('click'); await sourceURLs(h, 'https://example.test/private?secret=value');
+  const saving = h.ids.get('playlist-form').fire('submit'); await h.settle(); await h.ids.get('playlist-form').fire('submit'); assert.equal(h.posts().length, 1); assert.equal(h.ids.get('stop').disabled, false);
+  h.setState(state({generation: 8})); pending.reject(new Error('response lost private?secret=value')); await saving; await h.refresh();
+  assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN'); assert.equal(h.ids.get('playlist-submit').disabled, true); assert.match(safeMessages(h), /No retry was sent/); assert.doesNotMatch(safeMessages(h), /secret=value/);
+  await h.ids.get('playlist-form').fire('submit'); assert.equal(h.posts().length, 1);
+});
+test('Stop remains separate and recoverable during playlist requests; closing does not hide an unknown outcome', async () => {
+  const h = await appHarness(), pending = deferred(); h.setPost(body => body.action === 'playlist_append' ? pending.promise : {request_acknowledged: true});
+  await h.ids.get('playlist-add').fire('click'); await sourceURLs(h, 'https://example.test/a'); const saving = h.ids.get('playlist-form').fire('submit'); await h.settle();
+  await h.ids.get('stop').fire('click'); await h.ids.get('playlist-close').fire('click'); pending.reject(new Error('lost')); await saving;
+  assert.deepEqual(h.posts().map(body => body.action), ['playlist_append', 'stop']); assert.equal(h.ids.get('playlist-dialog').open, false); assert.match(h.ids.get('notice-text').textContent, /^Stop:/); assert.match(h.ids.get('notice-text').textContent, /Earlier request outcome unknown/);
+});
+test('server rejection content cannot disclose playlist input and does not permit duplicate submission', async () => {
+  const h = await appHarness(); h.setPost(() => ({__status: 400, outcome: 'REJECTED', error: 'invalid_playlist', message: 'Bad secret-file.json https://example.test/?private=value'}));
+  await h.ids.get('playlist-add').fire('click'); await sourceURLs(h, 'https://example.test/a'); await h.ids.get('playlist-form').fire('submit'); await h.ids.get('playlist-form').fire('submit');
+  assert.equal(h.posts().length, 1); assert.doesNotMatch(safeMessages(h), /secret-file|private=value/); assert.match(safeMessages(h), /Playlist request rejected/);
+});
+test('unsupported queues and paused playback disable editing; Stop never chains a pending import', async () => {
+  const h = await appHarness(); h.setState(state({queue: {...state().queue, playlist_edit_reason: 'unsupported_queue'}})); await h.refresh();
+  assert.equal(h.ids.get('playlist-add').disabled, true); assert.equal(h.ids.get('playlist-load').disabled, false); assert.ok(playlistRows(h, 'remove').every(button => button.disabled)); assert.match(h.ids.get('playlist-availability').textContent, /cannot be edited/);
+  h.setState(state({transport: {...state().transport, phase: 'PAUSED'}})); await h.refresh(); assert.equal(h.ids.get('playlist-load').disabled, true); await h.ids.get('playlist-load').fire('click'); assert.equal(h.ids.get('playlist-dialog').open, false);
+  h.setPost(() => {h.setState(state({generation: 8})); return {request_acknowledged: true};}); await h.ids.get('stop').fire('click'); assert.deepEqual(h.posts(), [{action: 'stop'}]); assert.equal(h.ids.get('playlist-load').disabled, false); assert.equal(h.ids.get('playlist-dialog').open, false);
+});
+test('queue row move/remove capture displayed indices, enforce edges, and suppress repeated submission', async () => {
+  const h = await appHarness(), pending = deferred(); h.setPost(() => pending.promise);
+  assert.equal(playlistRows(h, 'up')[0].disabled, true); assert.equal(playlistRows(h, 'down')[1].disabled, true); assert.equal(playlistRows(h, 'remove')[0].disabled, false);
+  await playlistRows(h, 'up')[0].fire('click'); assert.equal(h.posts().length, 0);
+  const moving = playlistRows(h, 'up')[1].fire('click'); await h.settle(); await playlistRows(h, 'up')[1].fire('click'); assert.deepEqual(h.posts(), [{action: 'playlist_move', expected_generation: 7, from_index: 2, to_index: 1}]);
+  pending.resolve({request_acknowledged: true}); await moving; assert.equal(playlistRows(h, 'up')[1].disabled, true);
+  const h2 = await appHarness(); await playlistRows(h2, 'remove')[1].fire('click'); assert.deepEqual(h2.posts(), [{action: 'playlist_remove', expected_generation: 7, index: 2}]);
+});
+test('old row actions refuse same-generation restarts, changed queues and unsupported-to-supported revalidation', async () => {
+  for (const change of [{generation: 8}, {session_id: 'restarted'}]) {
+    const h = await appHarness(), old = playlistRows(h, 'remove')[0]; h.setState(state(change)); await h.refresh(); await old.fire('click'); assert.equal(h.posts().length, 0);
+  }
+  const h = await appHarness(); h.setState(state({queue: {...state().queue, playlist_edit_reason: 'unsupported_queue'}})); await h.refresh();
+  h.setState(state()); await h.refresh(); assert.ok(playlistRows(h, 'remove').every(button => button.disabled)); await playlistRows(h, 'remove')[0].fire('click'); assert.equal(h.posts().length, 0);
+  h.setState(state({generation: 8})); await h.refresh(); assert.equal(playlistRows(h, 'remove')[0].disabled, false);
+});
+test('append, remove and move obey queue count bounds including direct event dispatch', async () => {
+  for (const count of [0, 1, 1000]) {
+    const h = await appHarness(), queue = {...state().queue, count, index: count ? 1 : 0, items: Array.from({length: count}, (_, offset) => ({...state().queue.items[0], index: offset + 1}))};
+    h.setState(state({generation: 8, queue})); await h.refresh();
+    if (count < 2) assert.ok(playlistRows(h, 'remove').every(button => button.disabled));
+    if (count === 0 || count === 1000) { assert.equal(h.ids.get('playlist-add').disabled, true); await h.ids.get('playlist-add').fire('click'); assert.equal(h.ids.get('playlist-dialog').open, false); }
+    assert.equal(h.posts().length, 0);
+  }
+});
+
+test('inactive source settings are disabled and cannot block JSON or append through native form validation', async () => {
+  const h = await appHarness(); await h.ids.get('playlist-load').fire('click');
+  assert.equal(h.ids.get('playlist-index').disabled, true); assert.equal(h.ids.get('playlist-urls').disabled, true); assert.equal(h.ids.get('playlist-file').disabled, false);
+  await sourceFormat(h, 'urls'); assert.equal(h.ids.get('playlist-index').disabled, false); assert.equal(h.ids.get('playlist-file').disabled, true); assert.equal(h.ids.get('playlist-urls').disabled, false);
+  h.ids.get('playlist-index').value = '-1'; await sourceFormat(h, 'json'); assert.equal(h.ids.get('playlist-index').disabled, true);
+  await h.ids.get('playlist-close').fire('click'); await h.ids.get('playlist-add').fire('click'); assert.equal(h.ids.get('playlist-format').disabled, true); assert.equal(h.ids.get('playlist-index').disabled, true); assert.equal(h.ids.get('playlist-confirm').disabled, true);
+});
+test('new file selection invalidates previous confirmation and only latest read may set source', async () => {
+  const h = await appHarness(), old = deferred(); await h.ids.get('playlist-load').fire('click');
+  const reading = chooseFile(h, {name: 'old.json', size: 3, arrayBuffer: () => old.promise}); await h.settle();
+  await chooseFile(h, localFile(playlistJSON())); await confirmPlaylist(h); old.resolve(new TextEncoder().encode('old').buffer); await reading;
+  await h.ids.get('playlist-form').fire('submit'); assert.equal(h.posts()[0].source.text, playlistJSON());
+});
+
+test('metadata-only row rebuilding cannot upgrade an unsupported queue identity into enabled edits', async () => {
+  const h = await appHarness(); h.setState(state({generation: 8, queue: {...state().queue, playlist_edit_reason: 'unsupported_queue'}})); await h.refresh();
+  const items = state().queue.items.map(item => ({...item, title: 'Updated title'}));
+  h.setState(state({generation: 8, queue: {...state().queue, items}})); await h.refresh();
+  assert.ok(playlistRows(h, 'remove').every(button => button.disabled)); assert.equal(h.ids.get('playlist-add').disabled, true); await h.ids.get('playlist-add').fire('click'); assert.equal(h.ids.get('playlist-dialog').open, false); await playlistRows(h, 'remove')[0].fire('click'); assert.equal(h.posts().length, 0);
+});
+
+test('detached play-row handlers cannot retarget after a generation change or renderer restart', async () => {
+  for (const change of [{generation: 8}, {session_id: 'restarted'}]) {
+    const h = await appHarness(), old = h.ids.get('queue-list').querySelectorAll('button')[0]; h.setState(state(change)); await h.refresh(); await old.fire('click'); assert.equal(h.posts().length, 0);
+  }
+});
+
+test('pagehide closes and scrubs the private playlist draft before navigation caching', async () => {
+  const h = await appHarness(); await h.ids.get('playlist-load').fire('click'); await sourceFormat(h, 'urls'); await sourceURLs(h, 'https://example.test/?private=value'); await confirmPlaylist(h);
+  h.pagehide(); assert.equal(h.ids.get('playlist-dialog').open, false); assert.equal(h.ids.get('playlist-urls').value, ''); assert.equal(h.ids.get('playlist-name').value, ''); assert.equal(h.ids.get('playlist-confirm').checked, false); assert.equal(h.ids.get('playlist-file').files.length, 0); assert.doesNotMatch(safeMessages(h), /private=value/); assert.equal(h.posts().length, 0);
+});
+
+test('typed replacement names enforce the server UTF-8 byte bound without changing authored JSON', async () => {
+  const h = await appHarness(); await h.ids.get('playlist-load').fire('click'); await sourceFormat(h, 'urls'); await sourceURLs(h, 'https://example.test/a');
+  h.ids.get('playlist-name').value = '🎵'.repeat(65); await h.ids.get('playlist-name').fire('input'); await confirmPlaylist(h); await h.ids.get('playlist-form').fire('submit');
+  assert.equal(h.posts().length, 0); assert.match(h.ids.get('playlist-dialog-status').textContent, /1–256 UTF-8 bytes/);
+  h.ids.get('playlist-name').value = '🎵'.repeat(64); await h.ids.get('playlist-name').fire('input'); await confirmPlaylist(h); assert.equal(h.ids.get('playlist-submit').disabled, false);
+});
+
+test('a delayed close event from the old playlist dialog cannot clear its reopened draft', async () => {
+  const h = await appHarness(), dialog = h.ids.get('playlist-dialog');
+  // HTMLDialogElement.close queues its close event. Delay it explicitly,
+  // rather than relying on the test double's synchronous close shortcut.
+  dialog.close = () => {dialog.open = false;};
+  await h.ids.get('playlist-add').fire('click');
+  await sourceURLs(h, 'https://example.test/old?token=old');
+  await h.ids.get('playlist-close').fire('click');
+  assert.equal(h.ids.get('playlist-urls').value, '');
+  await h.ids.get('playlist-add').fire('click');
+  await sourceURLs(h, 'https://example.test/new?token=new');
+  await dialog.fire('close');
+  assert.equal(dialog.open, true);
+  assert.equal(h.ids.get('playlist-urls').value, 'https://example.test/new?token=new');
+  await h.ids.get('playlist-form').fire('submit');
+  assert.equal(h.posts().length, 1);
+  assert.deepEqual(h.posts()[0].urls, ['https://example.test/new?token=new']);
 });
 
 test('a delayed favorite close event cannot clear a reopened favorite draft', async () => {

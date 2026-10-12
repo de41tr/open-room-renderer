@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 import ipaddress
 import hashlib
 import hmac
@@ -28,7 +28,10 @@ from .eq_presets import EqPresetLibrary, normalize_eq_preset_name
 from .log_safety import redact_media_urls
 from .mpv_backend import BackendError
 from .persistence import AtomicWriteCommittedError, validate_eq_records
+from .queue import PlaybackQueue
 from .queue_protocol import MODES, validate_url
+from .web_playlists import (PLAYLIST_ACTIONS, WebPlaylistError, availability as playlist_availability,
+                            prepare_edit, prepare_source, prepare_urls)
 from .radio import RadioResolutionError
 from .state import PlaybackPhase, RendererState
 
@@ -51,7 +54,7 @@ _HEADERS = {
         "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
 }
 _GENERATION_ACTIONS = frozenset({"play", "pause", "next", "previous", "seek",
-                               "queue_select", "queue_mode", "favorite_current"})
+                               "queue_select", "queue_mode", "favorite_current"}) | PLAYLIST_ACTIONS
 _SCHEMAS = {
     **{name: {"expected_generation"} for name in ("play", "pause", "next", "previous")},
     "stop": set(), "seek": {"seconds", "expected_generation"},
@@ -61,6 +64,10 @@ _SCHEMAS = {
     "favorite_add": {"name", "url"}, "favorite_current": {"name", "expected_generation"},
     "favorite_rename": {"id", "name"}, "favorite_target": {"id", "url", "metadata"},
     "favorite_delete": {"id"}, "favorite_play": {"id"},
+    "playlist_replace": {"expected_generation", "source"},
+    "playlist_append": {"expected_generation", "urls"},
+    "playlist_remove": {"expected_generation", "index"},
+    "playlist_move": {"expected_generation", "from_index", "to_index"},
     "dsp_bands": {"expected_dsp", "bands"},
     "dsp_preset_load": {"expected_dsp", "preset_id"},
     "dsp_preset_save": {"expected_dsp", "name"},
@@ -91,6 +98,11 @@ class WebCommand:
     expected_dsp: str = ""
     preset_id: str = ""
     bands: list[dict[str, object]] | None = None
+    source: PlaybackQueue | None = field(default=None, repr=False)
+    urls: list[str] | None = field(default=None, repr=False)
+    from_index: int | None = None
+    to_index: int | None = None
+    prepared_queue: PlaybackQueue | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -102,6 +114,7 @@ class WebRuntime:
     gain_pending: bool = False
     backend_gain_confirmed: bool = True
     queue_mode_locked: bool = False
+    playlist_stopped: bool = False
 
 
 class WebAdmissionError(ValueError):
@@ -226,6 +239,8 @@ def decode_command(encoded: bytes) -> WebCommand:
         raise ValueError
 
     try:
+        if type(encoded) is not bytes or len(encoded) > MAX_REQUEST_BYTES:
+            raise ValueError
         payload = json.loads(encoded.decode("utf-8"), object_pairs_hook=unique,
                              parse_float=finite, parse_constant=invalid)
         if not isinstance(payload, dict) or not isinstance(payload.get("action"), str):
@@ -235,6 +250,15 @@ def decode_command(encoded: bytes) -> WebCommand:
             raise ValueError
         if action in _GENERATION_ACTIONS:
             _integer(payload["expected_generation"], 0, MAX_SAFE_INTEGER)
+        if action == "playlist_replace":
+            payload["source"] = prepare_source(payload["source"])
+        if action == "playlist_append":
+            payload["urls"] = prepare_urls(payload["urls"])
+        if action == "playlist_remove":
+            _integer(payload["index"], 1, 1000)
+        if action == "playlist_move":
+            _integer(payload["from_index"], 1, 1000)
+            _integer(payload["to_index"], 1, 1000)
         if action == "seek":
             _integer(payload["seconds"], 0, 2 ** 31 - 1)
         if action == "volume":
@@ -484,6 +508,8 @@ class WebControlApi:
         visible_name = _queue_label(queue.name)
         actions.update(queue_select=bool(queue.items), queue_mode=not runtime.queue_mode_locked,
                        save_current=can_save)
+        playlist_actions, playlist_reason = playlist_availability(queue, stopped=runtime.playlist_stopped)
+        actions.update(playlist_actions)
         dsp = self._dsp_snapshot()
         dsp = {**dsp, "name": _dsp_name(dsp.get("name", ""))}
         self._revision += 1
@@ -502,6 +528,7 @@ class WebControlApi:
                 "mute": state.mute if gain_status == "CONFIRMED" else None,
                 "last_confirmed": {"volume": state.volume, "mute": state.mute} if gain_status == "CONFIRMED" else None},
             "queue": {"name": visible_name, "count": queue.count, "index": queue.index,
+                "playlist_edit_reason": playlist_reason,
                 "mode": _MODE_NAMES[queue.loop], "items": [
                     {"index": number, "title": _title(entry.title, (entry.url, entry.resolved_url), f"Track {number}"),
                      "artist": _display(entry.artist), "album": _display(entry.album),
@@ -527,7 +554,7 @@ class WebControlApi:
                 "artwork": safe_artwork(entry["artwork"]), "target_label": _display(target, "Saved target")})
         return {"version": 1, "session_id": self._session_id, "favorites": records}
 
-    def _admit(self, command: WebCommand) -> None:
+    def _admit(self, command: WebCommand) -> WebCommand:
         """All guards run immediately before dispatch, with no intervening await."""
         state = self._current_state()
         if command.expected_generation is not None and command.expected_generation != state.generation:
@@ -542,6 +569,18 @@ class WebControlApi:
             raise WebAdmissionError("unavailable", 409)
         if command.action == "queue_mode" and runtime.queue_mode_locked:
             raise WebAdmissionError("unavailable", 409)
+        if command.action in PLAYLIST_ACTIONS:
+            actions, _reason = playlist_availability(state.queue, stopped=runtime.playlist_stopped)
+            if not actions[command.action]:
+                raise WebAdmissionError("unavailable", 409)
+            try:
+                queue = command.source if command.action == "playlist_replace" else prepare_edit(
+                    state.queue, command.action, urls=command.urls, index=command.index,
+                    from_index=command.from_index, to_index=command.to_index)
+            except WebPlaylistError:
+                raise WebAdmissionError() from None
+            command = replace(command, prepared_queue=queue)
+        return command
 
     async def handle(self, request: web.Request) -> web.Response:
         dispatched = False
@@ -569,7 +608,7 @@ class WebControlApi:
             if request.method != "POST":
                 raise WebAdmissionError("method_not_allowed", 405)
             command = await self._body(request, origin)
-            self._admit(command)
+            command = self._admit(command)
             dispatched = True
             result = await self._dispatch(command)
             return web.json_response({"request_acknowledged": True, **(result or {})}, headers=_HEADERS)

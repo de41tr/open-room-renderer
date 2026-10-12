@@ -63,6 +63,67 @@
     }
     canApply(state, fresh) { return Boolean(fresh && state?.dsp.status === "CONFIRMED" && state.dsp.editor && this.session === state.session_id && this.revision === state.dsp.editor.revision && this.dirty && this.bands && !this.stale && !this.pending && !this.review); }
   }
+  const PLAYLIST_ACTIONS = Object.freeze(["playlist_replace", "playlist_append", "playlist_remove", "playlist_move"]);
+  const MAX_REQUEST_BYTES = 32768;
+  function requestBytes(body) { return new TextEncoder().encode(JSON.stringify(body)).length; }
+  function playlistAvailable(state, action) {
+    if (!state || !PLAYLIST_ACTIONS.includes(action) || state.transport.status !== "CONFIRMED" || state.transport.phase !== "STOPPED" || state.actions[action] !== true) return false;
+    if (action === "playlist_replace") return true;
+    return state.queue.playlist_edit_reason === "supported" && (action === "playlist_append" ? state.queue.count > 0 && state.queue.count < 1000 : state.queue.count > 1);
+  }
+  function pastedURLs(text) {
+    // Remove only LF/CRLF separators and truly empty lines, never URL bytes.
+    if (!string(text)) return null;
+    const urls = text.split(/\r?\n/).filter(line => line !== "");
+    return urls.length >= 1 && urls.length <= 1000 && urls.every(url => safeAudioURL(url)) ? urls : null;
+  }
+  function playlistPreview(format, source, settings) {
+    let urls, index, mode;
+    try {
+      if (format === "json") {
+        // This is only a local summary. Send the original text (including BOM)
+        // to the authoritative decoder, even when a summary is unavailable.
+        const document = JSON.parse(source);
+        if (!isObject(document) || document.version !== 1 || !Array.isArray(document.urls)) return null;
+        urls = document.urls; index = document.index; mode = document.mode;
+      } else {
+        urls = format === "urls" ? pastedURLs(source) : source.replace(/^\ufeff/, "").split(/\r?\n/).filter(line => line !== "" && !line.startsWith("#"));
+        index = settings.index; mode = settings.mode;
+      }
+      if (!urls || urls.length < 1 || urls.length > 1000 || !integer(index) || index < 1 || index > urls.length || !Object.hasOwn(MODES, mode)) return null;
+      return {count: urls.length, index, mode};
+    } catch (_) { return null; }
+  }
+  class PlaylistDraft {
+    constructor(state, action) {
+      this.session = state.session_id; this.generation = state.generation; this.action = action;
+      this.allowed = playlistAvailable(state, action); this.stale = false; this.sent = false; this.cancelled = false;
+      this.format = "urls"; this.text = ""; this.reading = false; this.error = ""; this.serial = 0;
+    }
+    observe(state, fresh) {
+      if (!this.sent && fresh && (this.session !== state.session_id || this.generation !== state.generation || !playlistAvailable(state, this.action))) this.stale = true;
+    }
+    canSubmit(state, fresh) {
+      return Boolean(fresh && this.allowed && !this.stale && !this.sent && !this.reading && !this.cancelled && this.session === state?.session_id && this.generation === state.generation && playlistAvailable(state, this.action));
+    }
+    setSource(format, text = "") { if (this.sent || this.cancelled) return; this.serial += 1; this.format = format; this.text = text; this.reading = false; this.error = ""; }
+    async readFile(file) {
+      if (this.sent || this.cancelled) return;
+      const serial = ++this.serial; this.text = ""; this.error = ""; this.reading = true;
+      try {
+        if (!file || !integer(file.size) || file.size === 0 || file.size > MAX_REQUEST_BYTES) throw new Error();
+        const size = file.size, reading = file.arrayBuffer(); file = null;
+        const bytes = await reading;
+        if (this.serial !== serial || this.cancelled) return;
+        if (bytes.byteLength !== size) throw new Error();
+        const source = new TextDecoder("utf-8", {fatal: true, ignoreBOM: true}).decode(bytes);
+        if (this.serial === serial && !this.cancelled) this.text = source;
+      } catch (_) {
+        if (this.serial === serial && !this.cancelled) this.error = "Could not read this file as a bounded UTF-8 playlist. Choose a UTF-8 file; the complete request must fit 32,768 bytes.";
+      } finally { if (this.serial === serial && !this.cancelled) this.reading = false; }
+    }
+    cancel() { this.cancelled = true; this.serial += 1; this.text = ""; this.error = ""; this.reading = false; }
+  }
   function validateState(state) {
     if (!isObject(state) || state.version !== 1 || !string(state.session_id) || !state.session_id || !integer(state.revision) || !integer(state.generation) || !string(state.csrf_token) || !state.csrf_token || !isObject(state.device) || !string(state.device.name)) throw new Error("Invalid renderer snapshot");
     const {transport, media, gain, queue, dsp, actions} = state;
@@ -70,10 +131,12 @@
     if (!isObject(media) || ![media.title, media.artist, media.album].every(string) || !(media.artwork === null || string(media.artwork)) || typeof media.is_live !== "boolean" || !optionalNumber(media.position_seconds) || !optionalNumber(media.duration_seconds)) throw new Error("Invalid media snapshot");
     if (!isObject(gain) || !["CONFIRMED", "PENDING", "UNKNOWN"].includes(gain.status) || !(gain.volume === null || (integer(gain.volume) && gain.volume <= 100)) || !optionalBoolean(gain.mute)) throw new Error("Invalid gain snapshot");
     if (!isObject(queue) || !string(queue.name) || !integer(queue.count) || queue.count > 1000 || !integer(queue.index) || !Object.hasOwn(MODES, queue.mode) || !Array.isArray(queue.items) || queue.items.length !== queue.count || (queue.count === 0 ? queue.index !== 0 : queue.index < 1 || queue.index > queue.count)) throw new Error("Invalid queue snapshot");
+    if (queue.playlist_edit_reason !== undefined && !["supported", "empty_queue", "unsupported_queue"].includes(queue.playlist_edit_reason)) throw new Error("Invalid queue edit capability");
     queue.items.forEach((item, offset) => { if (!isObject(item) || item.index !== offset + 1 || ![item.title, item.artist, item.album].every(string) || !optionalNumber(item.duration_seconds)) throw new Error("Invalid queue item"); });
     if (!isObject(dsp) || !["CONFIRMED", "PENDING", "UNKNOWN"].includes(dsp.status) || !(dsp.balance === null || (typeof dsp.balance === "number" && Number.isFinite(dsp.balance) && Math.abs(dsp.balance) <= 1)) || !optionalBoolean(dsp.eq_enabled) || !string(dsp.name)) throw new Error("Invalid sound snapshot");
     if (dsp.editor !== null) { if (dsp.status !== "CONFIRMED") throw new Error("Unconfirmed sound editor"); validateEditor(dsp.editor); }
     if (!isObject(actions) || !["play", "pause", "stop", "next", "previous", "seek", "queue_select", "queue_mode", "save_current"].every(key => typeof actions[key] === "boolean")) throw new Error("Invalid actions snapshot");
+    if (PLAYLIST_ACTIONS.some(action => actions[action] !== undefined && typeof actions[action] !== "boolean")) throw new Error("Invalid playlist actions");
     return state;
   }
   function validateFavorites(payload, session) {
@@ -103,7 +166,7 @@
   function guardedAction(state, action, values = {}) {
     if (!state) throw new Error("Read renderer state first");
     const body = {action, ...values};
-    if (["play", "pause", "next", "previous", "seek", "queue_select", "queue_mode", "favorite_current"].includes(action)) body.expected_generation = state.generation;
+    if (["play", "pause", "next", "previous", "seek", "queue_select", "queue_mode", "favorite_current", ...PLAYLIST_ACTIONS].includes(action)) body.expected_generation = state.generation;
     if (["queue_select", "queue_mode"].includes(action)) body.queue_name = state.queue.name;
     if (action.startsWith("dsp_")) { if (state.dsp.status !== "CONFIRMED" || !state.dsp.editor) throw new Error("Read confirmed sound state first"); body.expected_dsp = state.dsp.editor.revision; }
     return body;
@@ -122,6 +185,7 @@
       this.request = request;
       this.onChange = onChange;
       this.state = null;
+      this.playlistIdentity = null; this.playlistEditable = false;
       this.favorites = [];
       this.fresh = false;
       this.favoritesFresh = false;
@@ -137,7 +201,7 @@
     changed() { this.onChange(this); }
     get busy() { return this.active.size > 0; }
     get stopBusy() { return Array.from(this.active.values()).some(item => item.action === "stop"); }
-    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (!action.startsWith("favorite_") || this.favoritesFresh) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor))); }
+    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (!action.startsWith("favorite_") || this.favoritesFresh) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor)) && (!action.startsWith("playlist_") || playlistAvailable(this.state, action) && (action === "playlist_replace" || this.playlistEditable))); }
     refresh() {
       this.readAgain = true;
       if (!this.readPromise) {
@@ -159,6 +223,10 @@
           if (stateResult.status !== "fulfilled" || stateResult.value.status !== 200) throw new Error();
           const state = validateState(stateResult.value.body);
           if (this.state && this.state.session_id === state.session_id && state.revision < this.state.revision) throw new Error();
+          const playlistIdentity = JSON.stringify([state.session_id, state.generation]);
+          if (playlistIdentity !== this.playlistIdentity) this.playlistEditable = state.queue.playlist_edit_reason === "supported";
+          else if (state.queue.playlist_edit_reason !== "supported") this.playlistEditable = false;
+          this.playlistIdentity = playlistIdentity;
           this.state = state;
           this.fresh = true;
           this.lastReadAt = Date.now();
@@ -179,6 +247,7 @@
     }
     async mutate(body, label) {
       if (!isObject(body) || !string(body.action) || !this.canMutate(body.action)) return {kind: "blocked", text: "Read current state and wait for the pending request before trying again."};
+      if (requestBytes(body) > MAX_REQUEST_BYTES) return {kind: "blocked", text: "The complete request exceeds the 32,768-byte limit."};
       const id = ++this.operation;
       this.epoch += 1;
       this.fresh = false;
@@ -193,6 +262,10 @@
         else result = {...commandError(response), id};
       } catch (_) {
         result = {kind: "unknown", text: `${label}: outcome unknown because the response was lost. The command may have taken effect. No retry was sent.`, id};
+      }
+      if (body.action.startsWith("playlist_") && result.kind !== "acknowledged") {
+        // Never echo a server error that could contain private source text.
+        result.text = result.kind === "error" ? "Playlist request rejected. Review the source, current queue and stopped state before starting again." : "Playlist request outcome unknown. It may have taken effect. Check the current queue before starting again. No retry was sent.";
       }
       this.active.delete(id);
       this.fresh = false;
@@ -210,5 +283,5 @@
       return result;
     }
   }
-  return {Controller, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
+  return {Controller, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
 });

@@ -1,12 +1,14 @@
 /* Same-origin UI. Canonical snapshots are the only source of displayed state. */
 (function () {
   "use strict";
-  const {Controller, DspDraft, DSP_KEYS, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
+  const {Controller, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
   const $ = id => document.getElementById(id);
   const drafts = {seek: false, volume: false, mode: false, balance: false};
   let snapshot = null, queueSignature = "", favoritesSignature = "", artworkURL = null;
   let dialogContext = null, dialogSerial = 0, pollTimer = null, pollRun = 0;
   const soundDraft = new DspDraft();
+  let playlistDraft = null, queueEditing = null;
+  const queueIntents = new WeakMap();
   let presetSignature = "", presetContext = null, presetSerial = 0, soundSubmission = null;
   const text = (id, value) => { const element = $(id); if (element.textContent !== value) element.textContent = value; };
   const balanceLabel = value => value === 0 ? "Center" : `${Math.round(Math.abs(value) * 100)}% ${value < 0 ? "left" : "right"}`;
@@ -105,7 +107,7 @@
     text("eq", !dspKnown || dsp.eq_enabled === null ? "EQ unavailable" : dsp.eq_enabled ? "Bypass EQ" : "Enable EQ");
     $("eq").setAttribute("aria-pressed", dspKnown && dsp.eq_enabled === true ? "true" : "false");
     $("eq").disabled = !ready || !dspKnown || dsp.eq_enabled === null;
-    renderSoundEditor(); renderQueue(ready); renderFavorites(ready);
+    renderSoundEditor(); renderQueue(ready); renderPlaylist(); renderFavorites(ready);
     text("freshness", control.lastReadAt ? `${control.fresh ? "State received" : "Last state received"} ${new Date(control.lastReadAt).toLocaleTimeString()}. Playback status comes from the renderer.` : "No state received yet.");
     $("add-favorite").disabled = !ready || !control.favoritesFresh;
     $("save-current").disabled = !ready || !control.favoritesFresh || !snapshot.actions.save_current;
@@ -173,12 +175,18 @@
   }
   function renderQueue(ready) {
     const {queue, generation} = snapshot;
+    // Eligibility belongs to this queue identity, not a rebuilt DOM row. A
+    // metadata-only poll must not upgrade previously unsupported row intent.
+    const identity = JSON.stringify([snapshot.session_id, generation]);
+    if (!queueEditing || queueEditing.identity !== identity) queueEditing = {identity, allowed: queue.playlist_edit_reason === "supported", stale: false};
+    else if (queue.playlist_edit_reason !== "supported") queueEditing.stale = true;
     text("queue-count", String(queue.count)); text("queue-name", queue.name || "Current queue");
     $("queue-empty").hidden = queue.items.length > 0;
     const signature = JSON.stringify([snapshot.session_id, queue.name, generation, queue.items]);
     if (signature !== queueSignature) {
       queueSignature = signature;
       const focusedIndex = document.activeElement?.dataset.queueIndex;
+      const focusedAction = document.activeElement?.dataset.queueAction;
       const fragment = document.createDocumentFragment();
       queue.items.forEach(item => {
         const row = element("li", "queue-row"), button = element("button", "queue-button");
@@ -189,15 +197,145 @@
         button.append(copy, element("span", "item-duration", formatTime(item.duration_seconds)));
         button.setAttribute("aria-label", `Play track ${item.index}: ${item.title || "Untitled track"}`);
         // Capture identity from the displayed row, never a future poll's index.
+        const session = snapshot.session_id;
         const command = {action: "queue_select", queue_name: queue.name, index: item.index, expected_generation: generation};
-        button.addEventListener("click", () => run(command, "Select track"));
-        row.append(button); fragment.append(row);
+        button.addEventListener("click", () => { if (snapshot.session_id === session && snapshot.generation === generation) return run(command, "Select track"); });
+        row.append(button);
+        const edits = element("div", "queue-edit-actions"); edits.setAttribute("role", "group"); edits.setAttribute("aria-label", `Edit entry ${item.index}`);
+        [["up", "Move up", "playlist_move", {from_index: item.index, to_index: item.index - 1}], ["down", "Move down", "playlist_move", {from_index: item.index, to_index: item.index + 1}], ["remove", "Remove", "playlist_remove", {index: item.index}]].forEach(([direction, label, action, values]) => {
+          const edit = element("button", "button subtle small", label); edit.type = "button"; edit.dataset.queueIndex = String(item.index); edit.dataset.queueAction = direction;
+          edit.setAttribute("aria-label", `${label} entry ${item.index}`);
+          const intent = {action, session: snapshot.session_id, generation, eligibility: queueEditing, allowed: queueEditing.allowed, edge: direction === "up" && item.index === 1 || direction === "down" && item.index === queue.count, sent: false, stale: false};
+          queueIntents.set(edit, intent);
+          edit.addEventListener("click", async () => {
+            if (!intent.allowed || intent.eligibility.stale || intent.edge || intent.sent || intent.stale || intent.session !== snapshot.session_id || intent.generation !== snapshot.generation || !control.canMutate(action)) return;
+            intent.sent = true;
+            await run({action, expected_generation: intent.generation, ...values}, direction === "remove" ? "Remove queue entry" : "Move queue entry");
+          });
+          edits.append(edit);
+        });
+        row.append(edits); fragment.append(row);
       });
       $("queue-list").replaceChildren(fragment);
-      if (focusedIndex) Array.from($("queue-list").querySelectorAll("button")).find(button => button.dataset.queueIndex === focusedIndex)?.focus({preventScroll: true});
+      if (focusedIndex) Array.from($("queue-list").querySelectorAll("button")).find(button => button.dataset.queueIndex === focusedIndex && button.dataset.queueAction === focusedAction)?.focus({preventScroll: true});
     }
-    $("queue-list").querySelectorAll("button").forEach(button => { button.disabled = !ready || !snapshot.actions.queue_select; button.setAttribute("aria-current", String(Number(button.dataset.queueIndex) === queue.index)); });
+    $("queue-list").querySelectorAll("button").forEach(button => {
+      const intent = queueIntents.get(button);
+      if (intent) {
+        if (intent.session !== snapshot.session_id || intent.generation !== generation || queue.playlist_edit_reason !== "supported") intent.stale = true;
+        button.disabled = !intent.allowed || intent.eligibility.stale || intent.edge || intent.sent || intent.stale || !control.canMutate(intent.action);
+      } else { button.disabled = !ready || !snapshot.actions.queue_select; button.setAttribute("aria-current", String(Number(button.dataset.queueIndex) === queue.index)); }
+    });
   }
+  function playlistInput(draft) {
+    const settings = {name: $("playlist-name").value, index: Number($("playlist-index").value), mode: $("playlist-mode").value};
+    let body, error = "";
+    const urls = draft.format === "urls" ? pastedURLs(draft.text) : null;
+    if (draft.action === "playlist_append" && draft.format !== "urls") error = "Appending requires an explicit URL list.";
+    else if (!draft.text) error = draft.format === "urls" ? "Enter at least one explicit audio URL." : "Choose a local UTF-8 playlist file.";
+    else if (draft.format === "urls" && !urls) error = "Use 1–1000 explicit HTTP or HTTPS URLs, one per line, without credentials or surrounding spaces.";
+    else if (draft.action === "playlist_replace" && draft.format !== "json" && (!settings.name.trim() || new TextEncoder().encode(settings.name).length > 256)) error = "Enter a queue name of 1–256 UTF-8 bytes.";
+    else if (draft.action === "playlist_replace" && draft.format !== "json" && (!Number.isSafeInteger(settings.index) || settings.index < 1 || settings.index > 1000 || !Object.hasOwn(MODES, settings.mode) || urls && settings.index > urls.length)) error = "Enter a queue name, a valid starting entry and playback mode.";
+    else {
+      body = {action: draft.action, expected_generation: draft.generation};
+      if (draft.action === "playlist_append") {
+        if (snapshot.queue.count + urls.length > 1000) error = "The current queue and added URLs must total no more than 1000 entries.";
+        body.urls = urls;
+      } else if (draft.format === "json") body.source = {format: "json", text: draft.text};
+      else body.source = draft.format === "m3u" ? {format: "m3u", text: draft.text, ...settings} : {format: "urls", urls, ...settings};
+      if (requestBytes(body) > MAX_REQUEST_BYTES) error = "The complete request exceeds 32,768 UTF-8 bytes. Choose a smaller source, including its JSON escaping and settings.";
+    }
+    return {body, error, preview: playlistPreview(draft.format, draft.text, settings)};
+  }
+  function renderPlaylist() {
+    $("playlist-load").disabled = !control.canMutate("playlist_replace");
+    $("playlist-add").disabled = !control.canMutate("playlist_append");
+    const reason = snapshot.queue.playlist_edit_reason === "supported" && !control.playlistEditable ? "unsupported_queue" : snapshot.queue.playlist_edit_reason;
+    text("playlist-availability", !control.fresh ? "Queue state is unavailable. Refresh before loading or editing." : reason === "unsupported_queue" ? "This source queue cannot be edited here. You can replace it with a new URL playlist once playback is stopped." : !playlistAvailable(snapshot, "playlist_replace") ? "Stop playback separately and wait for confirmed idle before loading or editing a queue." : reason === "empty_queue" ? "Load an authored playlist or a list of audio URLs to begin." : "Queue changes keep playback stopped. Supported metadata is preserved when editing; shuffle history is reset.");
+    const draft = playlistDraft;
+    if (!draft) return;
+    draft.observe(snapshot, control.fresh);
+    const append = draft.action === "playlist_append", file = draft.format !== "urls";
+    $("playlist-format-field").hidden = append; $("playlist-file-field").hidden = !file; $("playlist-urls-field").hidden = file;
+    $("playlist-settings").hidden = append || draft.format === "json"; $("playlist-replace-warning").hidden = append;
+    const locked = draft.sent || draft.stale || draft.cancelled;
+    $("playlist-format").disabled = locked || append; $("playlist-file").disabled = locked || !file; $("playlist-urls").disabled = locked || file;
+    ["playlist-name", "playlist-index", "playlist-mode"].forEach(id => { $(id).disabled = locked || append || draft.format === "json"; });
+    $("playlist-confirm").disabled = locked || append;
+    text("playlist-file-hint", draft.format === "m3u" ? "Direct URL lists only; HLS and relative paths are unsupported. Titles and durations in M3U files are not imported. The original text is sent only when you confirm replacement." : "Authored JSON keeps its starting entry and playback mode. The original text is sent only when you confirm replacement.");
+    const input = playlistInput(draft), preview = input.preview;
+    text("playlist-preview", !draft.text ? draft.reading ? "Reading local file…" : "Choose a source to preview its count and settings." : `${draft.format.toUpperCase()} · ${preview ? `${preview.count} ${preview.count === 1 ? "entry" : "entries"}${append ? " to append" : ` · Start at ${preview.index} · ${MODES[preview.mode]}`}` : "Count and settings unavailable"}. Local preview only; the renderer validates the source.`);
+    text("playlist-size", input.body ? `${requestBytes(input.body).toLocaleString()} / 32,768 UTF-8 request bytes, including JSON escaping and settings.` : "The complete request must fit 32,768 UTF-8 bytes, including JSON escaping and settings.");
+    let status = draft.status || "";
+    if (!draft.sent) {
+      if (draft.stale) status = "The queue, playback state or renderer session changed. Your draft is preserved. Cancel and review the current queue before starting again.";
+      else if (!control.fresh) status = "Current state is unavailable. Your draft is preserved; wait for a fresh stopped state.";
+      else if (draft.reading) status = "Reading the local file. Nothing has been sent.";
+      else if (draft.error) status = draft.error;
+      else if (draft.text) status = input.error;
+    }
+    text("playlist-dialog-status", status);
+    $("playlist-submit").disabled = !control.canMutate(draft.action) || !draft.canSubmit(snapshot, control.fresh) || Boolean(draft.error || input.error) || !append && !$("playlist-confirm").checked;
+  }
+  function clearPlaylist() {
+    playlistDraft?.cancel(); playlistDraft = null;
+    $("playlist-file").value = ""; $("playlist-urls").value = ""; $("playlist-name").value = ""; $("playlist-confirm").checked = false;
+    text("playlist-dialog-status", ""); text("playlist-preview", ""); text("playlist-size", "");
+  }
+  function closePlaylist() { clearPlaylist(); $("playlist-dialog").close(); }
+  function openPlaylist(action) {
+    if (!control.canMutate(action)) return;
+    clearPlaylist(); playlistDraft = new PlaylistDraft(snapshot, action);
+    const append = action === "playlist_append";
+    playlistDraft.setSource(append ? "urls" : "json");
+    $("playlist-format").value = playlistDraft.format; $("playlist-name").value = "My playlist"; $("playlist-index").value = "1"; $("playlist-mode").value = "normal";
+    $("playlist-file").accept = ".json,application/json";
+    text("playlist-dialog-heading", append ? "Add URLs to queue" : "Load playlist");
+    text("playlist-dialog-hint", append ? "Append explicit URLs to this queue. Supported track metadata is preserved, shuffle history is reset, and playback remains stopped." : "Replace the queue from a local authored JSON file, an M3U URL list, or pasted explicit URLs. Playback remains stopped.");
+    text("playlist-submit", append ? "Add URLs, keep stopped" : "Replace queue, keep stopped");
+    renderPlaylist(); $("playlist-dialog").showModal(); $(append ? "playlist-urls" : "playlist-format").focus();
+  }
+  $("playlist-load").addEventListener("click", () => openPlaylist("playlist_replace"));
+  $("playlist-add").addEventListener("click", () => openPlaylist("playlist_append"));
+  ["playlist-close", "playlist-cancel"].forEach(id => $(id).addEventListener("click", closePlaylist));
+  // Native close events are queued: an old event must not erase a reopened draft.
+  $("playlist-dialog").addEventListener("close", () => { if (!$("playlist-dialog").open) clearPlaylist(); });
+  window.addEventListener("pagehide", closePlaylist); // Scrub input before back/forward caching.
+  $("playlist-dialog").addEventListener("cancel", event => { event.preventDefault(); closePlaylist(); });
+  $("playlist-format").addEventListener("change", () => {
+    if (!playlistDraft || playlistDraft.sent || playlistDraft.stale || playlistDraft.action !== "playlist_replace") return;
+    const format = $("playlist-format").value;
+    if (!["json", "m3u", "urls"].includes(format)) return;
+    playlistDraft.setSource(format); $("playlist-urls").value = ""; $("playlist-file").value = ""; $("playlist-confirm").checked = false;
+    $("playlist-file").accept = format === "json" ? ".json,application/json" : ".m3u,.m3u8,audio/x-mpegurl,audio/mpegurl";
+    renderPlaylist();
+  });
+  $("playlist-file").addEventListener("change", async () => {
+    const draft = playlistDraft; let file = $("playlist-file").files?.[0];
+    $("playlist-file").value = ""; // Release the selection and never display a filename.
+    if (!draft || draft.sent || draft.stale || draft.format === "urls") return;
+    $("playlist-confirm").checked = false;
+    const reading = draft.readFile(file); file = null; renderPlaylist(); await reading;
+    if (playlistDraft === draft) renderPlaylist();
+  });
+  $("playlist-urls").addEventListener("input", () => {
+    if (!playlistDraft || playlistDraft.sent || playlistDraft.stale || playlistDraft.format !== "urls") return;
+    playlistDraft.setSource("urls", $("playlist-urls").value); $("playlist-confirm").checked = false; renderPlaylist();
+  });
+  ["playlist-name", "playlist-index", "playlist-mode", "playlist-confirm"].forEach(id => $(id).addEventListener("input", () => { if (id !== "playlist-confirm") $("playlist-confirm").checked = false; renderPlaylist(); }));
+  $("playlist-form").addEventListener("submit", async event => {
+    event.preventDefault(); const draft = playlistDraft;
+    if (!draft) return;
+    draft.observe(snapshot, control.fresh);
+    if (!control.canMutate(draft.action) || !draft.canSubmit(snapshot, control.fresh)) { renderPlaylist(); return; }
+    const input = playlistInput(draft);
+    if (draft.error || input.error || draft.action === "playlist_replace" && !$("playlist-confirm").checked) { renderPlaylist(); return; }
+    draft.sent = true; draft.status = "PENDING · Waiting for the renderer. No retry will be sent.";
+    const result = await run(input.body, draft.action === "playlist_replace" ? "Replace queue" : "Append queue URLs");
+    if (playlistDraft !== draft) return;
+    if (result.kind === "acknowledged" && control.fresh && snapshot.session_id === draft.session && snapshot.generation !== draft.generation && snapshot.transport.status === "CONFIRMED" && snapshot.transport.phase === "STOPPED") closePlaylist();
+    else { draft.status = result.kind === "acknowledged" ? "Request acknowledged, but the stopped queue change has not been verified. Close this dialog and review the current queue before another request." : `${result.kind.toUpperCase()} · ${result.text}`; renderPlaylist(); }
+  });
   function renderFavorites(ready) {
     text("favorites-count", String(control.favorites.length));
     $("favorites-empty").hidden = control.favorites.length > 0;
