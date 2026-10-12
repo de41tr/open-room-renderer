@@ -131,13 +131,17 @@ scaffolding is not complete playback integration and no account flow was run.
 Optional Snapcast acceptance now has actual same-host digital delivery, group
 controls, gain/mute and reconnect evidence using official binaries. It is a
 separate tool with no advertised renderer capability or mandatory dependency.
-The production ORR Unix-IPC gate awaits CI; two-host synchronization, physical
+The first direct-FIFO production gate failed; the private clocked-ingress repair awaits CI; two-host synchronization, physical
 output and WiiM grouping remain NOT_RUN. See TESTING.md for exact invocation,
 private evidence handling and non-atomic group-volume limits.
 
 Native successor staging is a default-off experiment with real libmpv ownership
 and supplementary equal-rate clocked improvement evidence. Production Unix-IPC
-clocked acceptance is pending. It changes no audio defaults or advertised
+clocked equal-rate staging measured 0ms on x86_64 and AArch64 in run38196685851. It changes no audio defaults or advertised
 capability. Mixed-rate gaps and unprovable nested/foreign-tail ancestry remain
 explicit limits; the latter reports ERROR and silence not confirmed without an
 unsafe Stop. See GETTING_STARTED.md before enabling.
+
+Public-station renewal now has controlled real-backend address-change evidence,
+including staging-enabled operation; live-provider availability remains unverified.
+The repeated-lifetime production Unix stress lane is explicit and awaits CI.

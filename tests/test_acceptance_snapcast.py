@@ -124,3 +124,79 @@ async def test_recycled_rpc_port_never_receives_a_mutation(tmp_path, monkeypatch
         await listener.wait_closed()
         await asyncio.sleep(0)
     assert requests == (['Server.GetStatus'] if owned_alive else [])
+
+
+def test_ipc_diagnostics_never_include_media_errors_or_unknown_property_names():
+    from tools.acceptance_snapcast import ipc_summary
+    secret = 'https://private.example/audio?token=SECRET'
+    assert ipc_summary(['loadfile', secret, 'replace'], {'error': secret}, .125) == {
+        'command': 'loadfile', 'seconds': .125, 'outcome': 'rejected'}
+    assert ipc_summary(['get_property', secret], {'error': 'mpv IPC command timed out'}, .5) == {
+        'command': 'get_property:other', 'seconds': .5, 'outcome': 'timeout'}
+    assert ipc_summary({'name': 'loadfile', 'url': secret}, {'error': 'success'}, .001) == {
+        'command': 'loadfile', 'seconds': .001, 'outcome': 'success'}
+
+
+def native_state():
+    return {'path': 'synthetic.wav', 'idle-active': False, 'pause': False,
+            'eof-reached': False, 'paused-for-cache': False, 'playback-time': 3.0}
+
+
+@pytest.mark.parametrize('fault', ['backend-error', 'idle-active', 'pause', 'eof-reached',
+                                   'paused-for-cache', 'path', 'playback-time', 'mute'])
+def test_upstream_mute_requires_actual_active_native_source(fault):
+    from tools.acceptance_snapcast import assert_upstream_active
+    value = native_state()
+    mute = True
+    if fault in {'backend-error', 'idle-active', 'pause', 'eof-reached', 'paused-for-cache'}:
+        value[fault] = True
+    elif fault == 'path':
+        value[fault] = 'another-source.wav'
+    elif fault == 'playback-time':
+        value[fault] = float('nan')
+    else:
+        mute = False
+    with pytest.raises(AssertionError):
+        assert_upstream_active(value, mute, True, 'synthetic.wav')
+
+
+def test_upstream_mute_accepts_documented_snapcast_silence_classifications():
+    from tools.acceptance_snapcast import assert_upstream_active
+    assert assert_upstream_active(native_state(), True, True, 'synthetic.wav') == 3.0
+    for status in ('playing', 'idle'):
+        value = state()
+        value['streams'][0]['status'] = status
+        checked(value, ('playing', 'idle'))
+    # Downstream group mute still cannot use source idleness as its proof.
+    with pytest.raises(AssertionError):
+        checked(value)
+
+
+@pytest.mark.parametrize('frequency', [440, 733])
+def test_tone_fit_preserves_gain_across_a_clock_correction(frequency):
+    import math
+    import statistics
+    from tools.acceptance_snapcast import RATE, tone_amplitudes
+    count = 7 * RATE // 10
+    values = [round(500 * math.sin(2 * math.pi * frequency * (index + (858 if index > count // 2 else 0)) / RATE))
+              for index in range(count)]
+    amplitudes = tone_amplitudes(values, frequency)
+    assert abs(statistics.median(amplitudes) - 500) < 1
+    assert sum(abs(value - 500) < 7 for value in amplitudes) / len(amplitudes) >= .8
+
+
+@pytest.mark.parametrize('corruption', ['swapped_frequency', 'wrong_gain', 'silence', 'noise'])
+def test_tone_fit_rejects_corrupted_source_identity(corruption):
+    import math
+    import random
+    from tools.acceptance_snapcast import RATE, tone_amplitudes
+    random.seed(0)
+    values = [round(500 * math.sin(2 * math.pi * (733 if corruption == 'swapped_frequency' else 440) * i / RATE))
+              for i in range(7 * RATE // 10)]
+    if corruption == 'wrong_gain':
+        values = [value // 2 for value in values]
+    elif corruption == 'silence':
+        values = [0] * len(values)
+    elif corruption == 'noise':
+        values = [random.randrange(-500, 501) for value in values]
+    assert sum(abs(value - 500) < 7 for value in tone_amplitudes(values, 440)) / 7 < .8

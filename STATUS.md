@@ -733,4 +733,84 @@ rate still measured9.083ms. This is not production Unix-IPC acceptance.
 The native clocked CI lane now compares off/on equal and mixed rates at the
 phase offset, plus staged pause near EOF. Exact sample counts remain required;
 only staged equal-rate playback has a hard2ms acceptance gate. Mixed-rate gaps
-are reported honestly. The actual native result remains pending.
+are reported honestly. The actual native results are recorded below.
+
+Native production Unix-IPC measurements in [run38196685851](https://github.com/de41tr/open-room-renderer/actions/runs/38196685851)
+passed the staged equal-rate gate on both architectures: phase-offset unstaged
+168.354ms (x86_64) / 186.979ms (AArch64) became 0ms with staging. Staged pause
+also measured 0ms; mixed-rate remained 8.25ms / 5.9375ms. Each track retained
+exactly 96000 frames and the known 125ms silence calibration remained exact.
+This is clocked digital output, not physical audio. Staging stays default off.
+Every renderer lane passed; the separate direct-FIFO Snapcast experiment failed.
+
+## Public-station address renewal
+
+Successfully resolved anonymous station references now carry internal, URL-bound
+provenance. Recovery and a later explicit Play refresh an expired stream address
+through that same fixed public resolver, retaining the requested station, queue
+identity, metadata and gain. Client-supplied labels, IDs and XML cannot grant
+resolver authority. Initial materialization resolves once; explicit finite
+tracks and ordinary URLs retain their existing behavior. Typed station results
+are deliberately not native-staged as finite successors.
+
+Fresh progress is checked again at the serialized load boundary; a deferral
+refunds retry budget. Terminal recovery failure confirms same-owner Stop/idle
+or reports uncertainty, including EOF/idle cases that began buffering again.
+Independent review covered staging off/on, finite-to-station transitions and
+foreign tails. The exact current-base snapshot passed 2081 tests with optional
+libmpv enabled, with eight environment-specific native cases skipped. Controlled
+local resolver/media tests prove expired address A is replaced with B; this is
+not a live-provider availability or Android acceptance claim.
+
+## Bounded repeated-playback stability
+
+`ORR_TEST_UNIX_STABILITY=1 PYTHONPATH=. .venv/bin/pytest -q -s tests/test_mpv_unix_stability.py`
+opts into unmodified production Unix IPC over three owned mpv lifetimes (180s
+by default, bounded to 180..900s). The shared flow exercises HTTP/SOAP/GENA,
+actual source changes, controls, callback retries, station interruptions and
+independent Stop/source-replacement recovery fences. Native events independently
+count loads and EOF; controller and child resources are measured separately.
+Linux PPid enumeration has a real disposable-child sensitivity test. Opt-in
+fails when Unix IPC is unavailable; it never silently substitutes libmpv.
+
+The separately opt-in libmpv lane uses `ORR_TEST_LIBMPV_STABILITY=1`,
+`ORR_TEST_LIBMPV_PATH` and `ORR_TEST_LIBMPV_STABILITY_SECONDS` (recommended 60..900; allowed 30..3600) with
+`tests/test_libmpv_stability.py`. At production checkpoint 7c20ef8, the final
+reviewed short lane passed in 88.258s: 24 cycles, 60 loads, 52 source changes,
+121 cross-surface agreements and six callback retries held through actual gain
+readback. All three cleanups returned to one task, seven FDs, one thread and
+zero children/subscriptions. A separately frozen 907.402s run at older production
+checkpoint eb7c2ac9 covered 367 cycles and 746 loads; it is not evidence for
+later changes or the final strengthened counter assertions. Repeated in-process
+libmpv creation retained allocator memory; these bounded budgets do not prove
+leak freedom or uninterrupted-stream endurance. The new production Unix stress
+lane awaits CI. Actual pending-retry Pause cancellation remains separately
+covered by libmpv recovery, not this Unix stress flow.
+
+## Snapcast production-IPC ingress correction
+
+The first native Snapcast gate failed HTTP Play on both architectures: direct
+untimed mpv PCM/FIFO backpressure blocked property reads beyond production's
+existing deadline. Renderer control timeouts and readbacks are unchanged.
+`tools/acceptance_snapcast.py --orr-ipc` now defaults to a private clocked Pulse
+null sink and monitor feeding the private Snapcast FIFO. It needs pulseaudio,
+parec and pactl, uses its own runtime/server/sink and supervised process group,
+and neither discovers host audio nor installs/enables a service. `--ingress=fifo`
+retains the original diagnostic path; standalone mode still defaults to FIFO.
+
+Independent real-libmpv diagnostic comparisons passed all eleven control/PCM
+stages, and the original standalone FIFO passed seven. Native production Unix
+IPC with the distribution's Snapcast version still awaits CI. Spectral checks
+use independent short windows with an 80% window tolerance plus unchanged RMS
+and gain requirements; this is not sample-perfect continuity or clock-skew
+measurement. Mute still requires exact-zero PCM. Upstream silent-source status
+may be playing or idle only with independent native identity/control/progress
+proof; group mute still requires an active playing source. Killed-worker,
+recorder-failure and termination tests verified bounded owned-process cleanup.
+No two-host synchronization or advertised service capability is claimed.
+
+Combined publication snapshot: 2082 default tests passed / 36 explicit opt-in
+skips; 46 focused native-refresh/staging/Snapcast/helper tests passed. The
+refreshed production snapshot also passed the separately enabled short libmpv
+stability run (four tests, 88.69s). Production Unix IPC, architecture-specific
+behavior and the clocked Snapcast path require the new native CI run.

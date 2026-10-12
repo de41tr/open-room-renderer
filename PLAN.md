@@ -38,8 +38,10 @@ Log privacy, calibrated clocked transition measurement, version-independent load
 options, explicit multicast discovery and same-owner unready-load cleanup are
 implemented. Native discovery-to-playback passed on both CI architectures.
 Sustained no-EOF station stalls now have reviewed owner-fenced bounded recovery.
-Next: verify reduced-gap native queue staging, long-running production IPC and
-optional Snapcast control/delivery. Nested playlist ancestry, provider URL refresh
+Equal-rate native staging now measures 0ms on both CI architectures, with mixed-rate limits.
+Public-station address refresh is implemented and independently reviewed. Next:
+verify repeated-lifetime production IPC and the clocked Snapcast ingress repair;
+complete the separately frozen continuous-station soak. Nested playlist ancestry
 and real hardware/app acceptance remain open. The
 least-privilege public CI lane passed real Unix IPC on x86_64 and ARM64.
 This records progress, not full hardware/app acceptance.
