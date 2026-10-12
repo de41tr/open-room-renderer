@@ -111,6 +111,14 @@ def _record(payload: object, *, persisted: bool = False) -> Favorite:
     return favorite
 
 
+def validate_target_edit(url: object, metadata: object) -> tuple[str, str]:
+    """Validate an explicit target/metadata policy without resolving media."""
+    url = _url(url)
+    if not isinstance(metadata, str) or metadata not in {"keep", "clear"}:
+        raise FavoriteError("invalid_favorite", "metadata must be keep or clear")
+    return url, metadata
+
+
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
@@ -292,6 +300,20 @@ class FavoritesStore:
             position = self._position(identifier)
             self._commit(self._records[:position] + self._records[position + 1:])
 
+    def set_url(self, identifier: str, url: object, metadata: object) -> dict[str, object]:
+        """Edit only the library; existing detached playback keeps its target."""
+        with self._lock:
+            self._require_available()
+            url, metadata = validate_target_edit(url, metadata)
+            position = self._position(identifier)
+            fields = {field: "" for field in _DISPLAY_FIELDS} if metadata == "clear" else {}
+            updated = replace(self._records[position], url=url, **fields)
+            if updated != self._records[position]:
+                records = list(self._records)
+                records[position] = updated
+                self._commit(tuple(records))
+            return self._entry(identifier)
+
 
 class FavoritesApi:
     """JSON routes for ORR's library; no compatibility claims for OEM writes."""
@@ -306,6 +328,7 @@ class FavoritesApi:
         return [web.get(base, self.handle), web.post(base, self.handle),
                 web.post(base + "/current", self.handle),
                 web.post(base + "/{id}/play", self.handle_play),
+                web.put(base + "/{id}/target", self.handle),
                 web.patch(base + "/{id}", self.handle), web.delete(base + "/{id}", self.handle)]
 
     async def handle_play(self, request: web.Request) -> web.Response:
@@ -358,7 +381,11 @@ class FavoritesApi:
                 self.store.delete(identifier)
                 return web.json_response({"deleted": identifier})
             payload = await self._body(request)
-            if request.method == "PATCH" or request.path.endswith("/current"):
+            if request.method == "PUT":
+                if not isinstance(payload, dict) or set(payload) != {"url", "metadata"}:
+                    raise FavoriteError("invalid_favorite", "Only url and metadata fields are accepted")
+                favorite = self.store.set_url(request.match_info["id"], payload["url"], payload["metadata"])
+            elif request.method == "PATCH" or request.path.endswith("/current"):
                 if not isinstance(payload, dict) or set(payload) != {"name"}:
                     raise FavoriteError("invalid_favorite", "Only the name field is accepted")
                 if request.method == "PATCH":

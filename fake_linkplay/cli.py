@@ -20,6 +20,7 @@ from aiohttp import web
 
 from .config import load_config
 from .favorites_client import favorite_play_id, play_favorite
+from .favorites_target_client import set_favorite_url
 from .http_api import HttpApi
 from .mdns import MdnsAdvertiser
 from .mpv_backend import BackendError, MpvBackend
@@ -255,12 +256,15 @@ def build_parser(*, private_client_errors: bool = False) -> argparse.ArgumentPar
     add_playlist_parser(sub)
     favorites = sub.add_parser("favorites", help="manage renderer-owned local favorites")
     favorites_sub = favorites.add_subparsers(dest="favorites_cmd", required=True)
-    for name in ("list", "add", "save-current", "rename", "delete", "play"):
+    for name in ("list", "add", "save-current", "rename", "delete", "play", "set-url"):
         p = favorites_sub.add_parser(name)
-        if name in {"rename", "delete"}:
+        if name in {"rename", "delete", "set-url"}:
             p.add_argument("favorite_id", type=favorite_id)
         if name == "play":
             p.add_argument("favorite_id", type=favorite_play_id)
+        if name == "set-url":
+            p.add_argument("url")
+            p.add_argument("--metadata", choices=("keep", "clear"), required=True)
         if name in {"add", "save-current", "rename"}:
             p.add_argument("name")
         if name == "add":
@@ -288,8 +292,11 @@ def main(argv: list[str] | None = None) -> int:
     """
 
     argv = sys.argv[1:] if argv is None else argv
+    legacy_favorite = (len(argv) > 1 and argv[0] == "favorites"
+                       and argv[1] in {"list", "add", "save-current", "rename", "delete"})
     private_errors = (any(arg in {"queue", "playlist", *COMMANDS} for arg in argv)
-                      or {"favorites", "play"} <= set(argv))
+                      or {"favorites", "play"} <= set(argv)
+                      or ({"favorites", "set-url"} <= set(argv) and not legacy_favorite))
     args = build_parser(private_client_errors=private_errors).parse_args(argv)
     if args.cmd in COMMANDS:
         return run_transport_command(args)
@@ -309,6 +316,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "volume":
         return api_get(args.host, args.port, f"setPlayerCmd:vol:{args.value}")
     elif args.cmd == "favorites":
+        if args.favorites_cmd == "set-url":
+            return set_favorite_url(args.host, args.port, args.favorite_id, args.url, args.metadata)
         if args.favorites_cmd == "play":
             return play_favorite(args.host, args.port, args.favorite_id)
         if args.favorites_cmd == "list":
