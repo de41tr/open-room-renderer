@@ -309,6 +309,8 @@ open-room-renderer favorites save-current "Selected track"
 open-room-renderer favorites play FAVORITE_ID
 open-room-renderer favorites play configured:1
 open-room-renderer favorites rename FAVORITE_ID "New label"
+open-room-renderer favorites set-url FAVORITE_ID "https://media.example.test/repaired.m3u" --metadata keep
+open-room-renderer favorites set-url FAVORITE_ID "https://media.example.test/replacement.wav" --metadata clear
 open-room-renderer favorites delete FAVORITE_ID
 ```
 
@@ -321,13 +323,30 @@ using `MCUKeyShortClick:N` or a public client's preset selector. Editing a favor
 does not alter audio that is already playing.
 
 `favorites play ID` sends one bodyless request and selects a detached snapshot of
-that favorite. Deleting or renaming library entries after admission cannot change
+that favorite. Deleting, renaming or replacing a library URL after admission cannot change
 the requested source. Use the listed `configured:N` ID for a configuration-owned
 favorite. `configured:N` identifies a configuration slot; changing configuration
 order can change that slot. Managed IDs remain stable across library edits.
 The CLI reports `request_acknowledged`, not a claim that audio is still
 playing. A timeout leaves the outcome unconfirmed: check status before deciding
 whether to try again. The CLI never retries or follows a redirect.
+
+`favorites set-url ID URL --metadata keep|clear` repairs a managed favorite while
+preserving its stable ID, library name and position. The metadata choice is
+required: `keep` retains title, artist, album and artwork; `clear` empties all four.
+Choose `keep` only when the captured display fields still describe the replacement.
+The operation validates and saves the reference without fetching or checking the
+media. Current audio and already-admitted playback requests retain their old
+snapshot; only a later explicit recall selects the replacement. It does not
+change the queue, recovery or native staging. An unchanged target and unchanged
+display fields succeed without rewriting the library.
+
+The target-edit CLI makes one direct request without environment proxies/netrc,
+redirects or retries. It checks the bounded returned record and prints only a
+fixed acknowledgement, ID and metadata policy. A timeout, disconnect or invalid
+acknowledgement leaves the write outcome unconfirmed; inspect `favorites list`
+before deciding to retry. No automatic rollback is attempted. The 10-second
+network timeout bounds connection/read inactivity, not total command runtime.
 
 `add` optionally accepts `--title`, `--artist`, `--album` and `--artwork`.
 `save-current` saves the canonical selected direct URL and display metadata, not
@@ -343,7 +362,7 @@ It uses `state_dir/favorites.json`, with one running renderer as the writer.
 Do not share that state directory between processes or edit the file while serving.
 A corrupt library is preserved and managed operations return an error; configured
 favorites and unrelated playback remain usable. Repair/restore it and restart.
-After a durability warning, run `favorites list` before retrying an addition:
+After a durability warning, run `favorites list` before retrying a library change:
 the replacement may already have committed.
 
 The API and stored library are for a trusted private control LAN. URL userinfo is

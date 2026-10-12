@@ -368,6 +368,7 @@ URL; it does not resume an old multi-track position.
 | POST `/orr/v1/favorites/current` | name | 201 and canonical selected direct target |
 | POST `/orr/v1/favorites/ID/play` | No body | 200 and `{"request_acknowledged":true,"favorite_id":"ID"}` |
 | PATCH `/orr/v1/favorites/ID` | name | 200 and renamed favorite |
+| PUT `/orr/v1/favorites/ID/target` | Exactly url and metadata (`keep` or `clear`) | 200 and updated favorite |
 | DELETE `/orr/v1/favorites/ID` | No body | 200 and deleted ID |
 
 JSON-bearing writes require UTF-8 JSON, bounded Content-Length and no compression/chunked
@@ -378,6 +379,30 @@ XML text fail. HTTP(S) URL bytes and query encoding are preserved; userinfo and
 renderer audio-proxy paths, including encoded/dot-segment equivalents, are rejected.
 No library edit fetches media or changes the active queue, generation, position,
 volume or play mode. Playback still goes through the existing selected-URL path.
+
+Target repair preserves managed ID, library name and position. Its exact JSON
+body is `{"url":"https://media.example.test/repaired.wav","metadata":"keep"}`
+or the same shape with `"metadata":"clear"`. `keep` preserves title/artist/album/
+artwork; `clear` empties exactly those four fields. The metadata policy is required
+in both API and CLI (`favorites set-url ID URL --metadata keep|clear`). Unchanged
+records are acknowledged without a disk write. Configuration-owned targets remain
+read-only (403); unknown managed IDs return 404. Missing/extra fields, invalid URLs
+or metadata choices return 400; other methods on this target route return 405.
+Existing name PATCH and save-current POST contracts are unchanged.
+
+The success body remains the exact `{"favorite":{...}}` envelope with ID, slot,
+editable, name, URL and all four display fields. It is returned only after the
+store transaction succeeds (or no-op). The dedicated target-edit CLI requires
+HTTP 200, identity-encoded UTF-8 application/json, a bounded response (128KiB),
+exact fields, matching ID and URL bytes, editable=true and a positive integer
+slot. Clear-policy ACKs must have four empty display fields. It uses one direct
+PUT with environment proxy/netrc discovery disabled, without preliminary reads,
+redirects, retries, rollback or legacy-client fallback. Its output contains only
+request_acknowledged, favorite_id and metadata policy. On 503 it reads at most
+4KiB to recognize only the owned durability-unconfirmed/committed=true warning;
+remote error text is never printed. Other malformed/oversized ACKs and transport
+failures leave the outcome unconfirmed. Its 10-second connection/read-inactivity
+timeout is not a total execution deadline.
 
 Owned recall accepts a managed ID or strict `configured:N` (one to six digits,
 positive and no leading zero). Configured IDs identify configuration slots and

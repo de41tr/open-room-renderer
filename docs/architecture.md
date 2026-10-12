@@ -290,3 +290,9 @@ Offline playlist editing uses a pure `playlist_edits` transformation module with
 occurrence-position selection semantics. It reuses existing source/result schema,
 URL and escaped-request validation plus the unchanged private file boundary.
 Only the CLI chooses input/output paths; no renderer or live queue code changes.
+
+
+Favorite target repair stays in the existing locked library transaction and a
+separate bounded management client. An explicit keep/clear policy changes only
+stored content metadata; playback uses its already-detached snapshot. Existing
+rename/current/recall clients and player/recovery/staging paths stay unchanged.

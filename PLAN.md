@@ -4,20 +4,22 @@ Branch: `dot/renderer-autonomous-20261012`; base: `3672b9838e9c39ae8191613108f0d
 Work window ends 2026-10-12 20:00 UTC. Stabilization only after 19:00 UTC.
 No main-branch edits, merge, or release.
 
-## Current functional package (14:55 UTC)
+## Current functional package (15:33 UTC)
 
-Queue-save checkpoint `3fd5df8` has full standard CI green, including the floor
-rebalance. Publish independently reviewed offline saved-playlist append/remove/
-move, with its separate native CLI extension and exact final default-suite evidence.
-No live queue/player change or new file-overwrite behavior is introduced.
+Offline-edit checkpoint `3737c93` has full standard CI green. Publish reviewed
+managed-favorite target repair with explicit metadata policy, separate native
+acceptance and a small same-runner native scheduling rebalance. Final defaults,
+independent review and exact native v2 flows pass; require hosted CI.
 
-Next: explicit managed-favorite target repair preserving stable ID/position, with
-an explicit policy for content metadata and unchanged already-admitted playback.
-Then prefer bounded SSDP-only candidate discovery for headless setup over the
-lower-confidence DSP CLI. Discovery must never fetch untrusted LOCATION URLs or
-claim authenticated ownership; retain limits and actual same-host acceptance.
-Keep each package isolated while preceding CI runs; integrate/publish only after
-its predecessor is green. Defer broad core work, browser UI and new multihour runs.
+Next: bounded SSDP-only candidate discovery for headless setup. Use one explicitly
+selected IPv4 interface, short absolute deadline and packet/result limits; never
+fetch LOCATION or load/write renderer configuration. Label unauthenticated results
+as candidates, not verified devices or a proven primary control port. Reuse actual
+same-host multicast acceptance. No new listener/auth/CORS or network settings.
+A specific older CLI proxy/netrc consistency gap is under consideration separately;
+any correction must remain narrow and preserve valid legacy payloads/outputs.
+Defer broad core/security audits, browser UI and new multihour runs. Keep private
+packages isolated and publish only after the preceding checkpoint is green.
 Stabilization starts 19:00 UTC; active work ends 20:00 UTC today.
 
 ## Ordered work

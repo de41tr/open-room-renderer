@@ -4,39 +4,40 @@ Optimize useful, verified user workflows per hour, not test/commit/line counts.
 All work stays on the autonomous branch and draft PR; no merge or release.
 Stabilization starts 2026-10-12 19:00 UTC; active work ends at 20:00 UTC.
 
-## Current decision (2026-10-12 14:55 UTC)
+## Current decision (2026-10-12 15:33 UTC)
 
-- **COMPLETE:** safe queue save has full standard CI green at 3fd5df8. The floor
-  rebalance is hosted-verified with preserved cases/caps and improved margin.
-- **CONTINUE:** publish reviewed offline playlist editing. Real native CLI and
-  final integrated defaults pass; append/remove/reorder no longer require manual
-  JSON changes. Keep the new checkpoint's hosted result pending until observed.
-- **NEXT:** managed-favorite URL repair preserving stable identity/position and
-  admitted playback. Require an explicit metadata policy, not accidental stale
-  title/artwork reuse or unexplained deletion.
-- **PIVOT after that:** bounded SSDP-only candidate discovery for headless setup,
-  using the existing product token and actual native multicast fixture. No HTTP
-  fetch, config-writing side effect or authenticated-device claim. A 60–75 minute
-  slice is more deterministic than ambiguous DSP global/wifi controls.
-- **DEFER:** DSP CLI unless time and a precise context contract remain; browser UI,
-  per-instance DAC YAML, extra multihour runs and major core/provider work. A small
-  redistribution of existing native tests may recover job margin; never relax
-  acceptance or increase runner/process counts merely to stay green.
+- **COMPLETE:** offline playlist editing has full standard CI green at 3737c93.
+  The headless file workflow now covers capture, import, append/remove/reorder,
+  explicit stopped restore and playback without manual JSON editing.
+- **CONTINUE:** publish reviewed managed-favorite target repair. Required metadata
+  policy makes target changes explicit; actual native playback remains untouched
+  until later recall. V2 closes a small legacy diagnostic edge and has exact local
+  native/default evidence. Require full hosted verification.
+- **NEXT:** bounded SSDP-only candidate discovery, without HTTP/config side effects
+  or an authenticated-device claim. Its read-only assessment fits existing native
+  multicast acceptance and is more deterministic than the DSP-context proposal.
+- **ASSESS narrowly:** older CLI transport helpers inherit environment proxy/netrc
+  behavior unlike the new clients. Any correction should preserve valid outputs
+  and address that concrete behavior only, not restart a broad security audit.
+- **DEFER:** DSP CLI, browser UI without established QA, per-instance DAC YAML,
+  extra multihour runs and major core/provider work. Native test redistribution
+  preserves all cases/caps and needs hosted timing verification; count growth is
+  not a feature or a reason to relax acceptance.
 
 Priority order: critical regressions/security and green CI; useful new local
 features; targeted low-risk refactoring; special tests only with high information
 value; documentation and later hardware preparation. Existing quality gates stay.
 
-Review after the next major package, or around 16:25–16:55 UTC. Record value,
+Review after the next major package, or around 17:03–17:33 UTC. Record value,
 effort, risk and CONTINUE/PIVOT/DEFER; green counts alone are not completion.
 
 ## Open proposals (maximum five)
 
 | Proposal | Category | Value / effort / risk | Next action |
 |---|---|---|---|
-| Offline saved-playlist editing | A_AUTONOM | Reviewed useful file operations; no live queue mutation | Publish and verify complete standard CI. |
-| Managed-favorite target repair | A_AUTONOM | Preserves stable IDs when targets move; 45–75min | Explicit replacement/metadata policy; active admitted playback stays unchanged. |
-| Bounded candidate-discovery CLI | A_AUTONOM | Fills headless address-finding gap; 60–75min | Short explicit SSDP search, no HTTP fetch, unverified-candidate labels and native fixture acceptance. |
+| Managed-favorite target repair | A_AUTONOM | Reviewed library-only change, explicit metadata policy | Publish and verify complete standard CI. |
+| Bounded candidate-discovery CLI | A_AUTONOM | Fills headless address-finding gap; 60–75min | Short explicit SSDP search, no HTTP fetch, unverified-candidate labels and native acceptance. |
+| Legacy CLI transport consistency | A_AUTONOM / ASSESS | Concrete proxy/netrc discrepancy; avoid expanding scope | Assess a minimal behavior-preserving transport correction, without a broad audit. |
 | Further player-core / eventing decomposition | B_AWAITING_DECISION | Potential maintenance gain; major scope and ownership/timing risk | Defer this round. Present a concrete boundary/migration plan for explicit later decision; do other authorized work meanwhile. |
 | Merge or release | C_APPROVAL_REQUIRED | Distribution decision, not an implementation milestone | Do not act. Requires separate explicit authorization; current instruction prohibits it. Silence is not consent. |
 

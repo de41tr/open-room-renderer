@@ -2,38 +2,37 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (14:55 UTC)
+## Current checkpoint (15:33 UTC)
 
-Queue-save head `3fd5df8` passed all three standard jobs, verified at 14:51:55 UTC:
-https://github.com/de41tr/open-room-renderer/actions/runs/38264218792 .
-All previous stages pass, including 65 libmpv checks, production Unix IPC, both
-real clients, stress/install/clocked/discovery/Snapcast. x86_64/AArch64 jobs took
-845.124s/865.381s under 900s. The floor rebalance is now hosted-verified:
-3665 +245 /72 skips in 135.98s/97.64s, preserving every case and time cap.
-Native-group timing remains imbalanced; assess a small same-runner redistribution
-before later features consume the remaining job margin, without reducing coverage.
+Offline-edit head `3737c93` passed all three standard jobs, verified at 15:18:55 UTC:
+https://github.com/de41tr/open-room-renderer/actions/runs/38267299183 .
+Both architectures passed all 65 libmpv checks and every later Unix/client/stress/
+install/clocked/discovery/Snapcast gate. x86_64/AArch64 jobs took 825.214s/857.156s;
+floor groups passed 3728+245/72 in 117.03s/59.78s. All existing caps remain.
 
-The next reviewed feature edits saved URL playlists offline: append, remove and
-move into a new private output file. Both complete source and result are validated
-before publication. Name, mode, exact URL strings and duplicate occurrences survive;
-selection follows the original occurrence's position rather than URL equality.
-Removing the selected item chooses its next surviving neighbor, or the final
-previous item; empty results fail. Move destinations are final one-based positions.
-No renderer request, playback change or file overwrite occurs during editing.
+The next reviewed feature repairs a managed favorite's URL without changing its
+stable ID, name or library position. The caller must explicitly choose keep or
+clear for title/artist/album/artwork. The new bounded PUT/client leaves legacy
+rename/current and playback clients unchanged. It does not resolve, play or retarget
+an admitted snapshot. Configured favorites stay read-only; atomic pre/postcommit
+outcomes remain truthful. Unknown acknowledgements never trigger retry/rollback.
 
-One new loopback/MOCK chain verifies stopped restore. The existing native CLI flow
-adds all three offline commands while playback is paused, then separately restores
-the edited order stopped and explicitly plays its selected source. All prior
-proofs remain. Exact final libmpv 0.37/0.40 probes pass in 11.879s/12.263s; the flow
-has 24 CLI children and 11 cases under unchanged 4s child/18s inner/20s outer bounds.
-Native selection is unique B around an appended duplicate A; selected-duplicate
-identity permutations are covered by pure tests, not overstated as native evidence.
+The exact final native flow keeps the old source/entry and metadata playing through
+one PUT, then a later same-ID recall performs exactly one load of the other source.
+Recreation verifies repaired target/metadata persistence without autoplay. Existing
+pywiim, compaction, radio and cleanup proofs remain. Final libmpv 0.37/0.40 probes
+pass in 6.278s/6.274s under unchanged 16s/18s bounds. Native metadata policy is keep;
+clear and concurrent admitted-snapshot cases have deterministic/HTTP coverage.
+A minor legacy parser diagnostic collision was fixed before the final v2 freeze.
 
-Final combined defaults pass 3973 /72 skips on Python 3.12 (187.79s), and
-3728 +245 /72 on Python 3.11 (120.26s/68.94s), with 32 existing warnings.
-Production digest:
-`e1b03a2f0dacd6fa93c54ef9f145df93a9854f4c2e4a488deed98a2563169701`.
-The new checkpoint still requires its own complete hosted verification.
+Final combined defaults pass 4026/72 on Python 3.12 (199.30s), and 3781+245/72 on
+Python 3.11 (128.26s/74.23s), with 32 existing warnings. Production digest:
+`7feac68d6165add699b8041ebc68bfd0f2d0085fd58841773107fed46e0be3a5`.
+A separate workflow-only rebalance moves unchanged repeat/shuffle files to native
+group one: all 24 files/65 node IDs and marks remain, now 22+43. Hosted logs suggest
+about 30s less critical-path imbalance; its actual effect is still unverified.
+No time cap, assertion, runner or process count changes. This checkpoint requires
+complete hosted verification after publication.
 
 The requested behavior-neutral extraction began at 09:14:53 UTC after its prerequisite green gate.
 It moves exactly three stateless metadata-edit helpers into metadata_formatting.py,

@@ -1783,6 +1783,56 @@ libmpv 0.37/0.40 runs pass in 8.518s/7.990s with 55 received events and the unch
 20s subprocess bound. This adds no second native test or shuffle-history claim.
 
 
+## Managed favorite target repair acceptance
+
+Target repairs have focused in-process/threaded-loopback coverage:
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q \
+  tests/test_favorite_target.py tests/test_favorite_target_cli.py \
+  tests/test_managed_favorites.py tests/test_favorite_play.py \
+  tests/test_favorites_cli.py tests/test_favorite_play_cli.py
+```
+
+The new tests verify exact URL bytes, stable IDs/names/positions, configured
+prefixes, keep/clear policy, no-op writes, restart persistence, concurrent rename
+and target edits, store size limits, corrupt-file preservation, and real atomic
+file-fsync/replace/directory-fsync failures. PUT framing, methods, duplicate JSON,
+body limits, encodings, configuration-owned/unknown targets and truthful private
+pre/postcommit API errors are checked through local HTTP.
+
+Playback tests leave an existing A selection untouched during repair, hold an
+admitted A snapshot at resolution while editing its library target to B, and
+prove that only a subsequent same-ID recall selects B. Native-staging and station
+recovery ownership objects remain unchanged by a library-only repair. These are
+deterministic backend contracts, not native audio or hardware proof.
+
+CLI tests call argparse/dispatch in-process and use a threaded synthetic HTTP
+peer or the real local renderer, without adding parameterized CLI subprocesses.
+They verify one PUT, required metadata policy, private parse errors, exact ACK
+shape/types/ID/URL, clear-policy empty fields, maximum-size display records,
+bounded chunked and Content-Length responses, real environment-proxy/netrc
+isolation, no redirects/retries/fallback, closure on errors, disconnects and
+truthful bounded durability warnings. Invalid acknowledgements do not trigger
+rollback. Existing recall and legacy CLI tests remain regression gates; no WAN
+media, provider accounts or proprietary clients are needed.
+
+The existing native favorite flow now also makes one real CLI target-edit PUT
+while the old WAV source/native entry 4 continues decoding with advancing PCM and
+unchanged renderer metadata/state. It verifies the exact body and absence of a
+preliminary GET without consuming the production request stream. Only the later
+explicit recall of the same ID loads the other source at entry 5. Library ID/name/
+slot and keep-policy display fields survive; service/backend recreation restores
+the repaired target without autoplay. All prior compaction, pywiim, public-radio
+fresh-resolution/recovery and cleanup checks remain under 16s/18s bounds.
+
+Final refrozen v2 passes once each on libmpv 0.37/0.40: 6.278s/6.274s probes,
+6.99s pytest each. V1 evidence is retained separately. An early probe failed because
+its fixture middleware consumed the PUT body before the real decoder; the fixture
+was corrected to observe the decoder's actual result, with no production change.
+Native evidence covers metadata keep and ctypes/null; clear and admitted-snapshot
+races remain deterministic/HTTP tests. No new Unix, provider-WAN or hardware claim.
+
 ## Stable-ID favorite recall acceptance
 
 The new own-API/CLI recall resolves one detached preset snapshot under the library
@@ -2005,3 +2055,24 @@ https://github.com/de41tr/open-room-renderer/actions/runs/38264218792 .
 Native x86_64/AArch64 job times were 845.124s/865.381s; all prior gates passed.
 Its floor partition passed 3665+245/72 in 135.98s/97.64s without changed caps.
 The new offline-edit checkpoint's hosted result remains pending until observed.
+
+
+Final integrated target-repair v2 defaults pass 4026/72 on Python 3.12 (199.30s),
+and 3781+245/72 on Python 3.11 (128.26s/74.23s), retaining 32 existing warnings.
+Production digest:
+`7feac68d6165add699b8041ebc68bfd0f2d0085fd58841773107fed46e0be3a5`.
+
+The separate native scheduling change moves only repeat and shuffle to the end
+of group one. Its base comparison retains 24 explicit files/65 unique node IDs,
+identical marks and fixture closures in both opt-in modes; groups become 22+43.
+The two tests own isolated bounded processes/handles/state/listeners. Completed
+hosted logs measured 29.969s/29.939s combined probe time on x86_64/AArch64, motivating
+an estimated 30–31s critical-path saving. This is not a hosted performance result.
+All test/runner contents are unchanged by the scheduling commit, and all 13 existing
+runner guards pass (independent 9.02s; parent 8.94s). Same 360s/7min/15min bounds and
+same two processes/runners remain; verify the new checkpoint's complete CI.
+
+The predecessor 3737c93 passed all three standard jobs, verified 15:18:55 UTC:
+https://github.com/de41tr/open-room-renderer/actions/runs/38267299183 .
+Native x86_64/AArch64 jobs took 825.214s/857.156s with all prior gates passing;
+floor groups passed 3728+245/72 in 117.03s/59.78s. The new checkpoint is pending.

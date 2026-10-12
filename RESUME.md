@@ -5,8 +5,8 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint 3fd5df8 passed all three jobs, verified at
-   14:51:55 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38264218792
+   Latest completed checkpoint 3737c93 passed all three jobs, verified at
+   15:18:55 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38267299183
    Python floor uses complete bounded groups on the same runner, preserving the
    3-minute step/8-minute job; both native jobs retain all existing gates.
    The prior 763f7f7 remains failed solely for its floor time budget.
@@ -267,3 +267,13 @@ candidate discovery if its safety/acceptance contract remains small. A native
 same-runner rebalance assessment is underway; do not raise caps or lose cases.
 Keep no new integration/publication before the predecessor is green. Existing
 19:00/20:00 UTC stabilization/stop times and all hardware/privacy limits remain.
+
+15:33 UTC: favorite target-repair v2 is reviewed and final combined defaults pass
+4026/72 on Python 3.12 (199.30s), grouped 3.11 (128.26s/74.23s). Exact native v2
+probes pass 0.37/0.40 in 6.278s/6.274s; do not reuse earlier v1 source hashes.
+Publish feature, native proof, workflow-only native rebalance and docs separately.
+The rebalance preserves all 24 files/65 cases as 22+43, same two processes/caps;
+its hosted timing remains pending. Next implement bounded SSDP-only discovery,
+with no HTTP/config side effects or verified-identity claim. A narrow pre-existing
+legacy CLI proxy/netrc behavior is being considered, not a restarted broad audit.
+Keep the 19:00 UTC feature cutoff and 20:00 UTC active-work stop unchanged.
