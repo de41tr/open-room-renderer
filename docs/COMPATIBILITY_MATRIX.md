@@ -43,9 +43,9 @@ Established explicit live stations now have bounded owner-respecting EOF/idle
 recovery (UNIT/MOCK and actual local HTTP outage/return with REAL_BACKEND/null).
 Sustained no-progress cache stalls now use a15-second observation grace and
 the same finite retry budget; progress/owner commands reset or cancel recovery.
-Exhaustion confirms actual silence before terminal source failure. Initial
-load retry and provider URL refresh remain separate limitations; finite/unknown
-media are never silently restarted.
+Exhaustion confirms actual silence before terminal source failure. Automatic initial-load retry remains unsupported. Provenance-bound public
+station addresses are refreshed on established recovery or a later explicit Play;
+finite/unknown media are never silently restarted.
 
 Volume/mute now use confirmed full-pair backend readback, pre-load/resume
 reconciliation and atomic persistence. Actual HTTP controls have digital PCM
@@ -131,7 +131,7 @@ scaffolding is not complete playback integration and no account flow was run.
 Optional Snapcast acceptance now has actual same-host digital delivery, group
 controls, gain/mute and reconnect evidence using official binaries. It is a
 separate tool with no advertised renderer capability or mandatory dependency.
-The first direct-FIFO production gate failed; the private clocked-ingress repair awaits CI; two-host synchronization, physical
+The repaired private clocked-ingress production gate passed on both native architectures in run38198310911; two-host synchronization, physical
 output and WiiM grouping remain NOT_RUN. See TESTING.md for exact invocation,
 private evidence handling and non-atomic group-volume limits.
 
@@ -144,4 +144,10 @@ unsafe Stop. See GETTING_STARTED.md before enabling.
 
 Public-station renewal now has controlled real-backend address-change evidence,
 including staging-enabled operation; live-provider availability remains unverified.
-The repeated-lifetime production Unix stress lane is explicit and awaits CI.
+The repeated-lifetime production Unix stress lane passed on both native architectures in run38198310911 (three lifetimes each).
+
+Actual pywiim navigation and percent-encoded media resources now have real-client
+loopback and separate real-libmpv decoder evidence. The new production Unix-client
+and installed CLI restart/signal lanes await their exact native CI result. Lost
+Stop/Pause acknowledgements expose ERROR and preserve owner intent instead of
+automatically advancing or restarting the queue.

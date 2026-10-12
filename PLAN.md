@@ -45,3 +45,8 @@ complete the separately frozen continuous-station soak. Nested playlist ancestry
 and real hardware/app acceptance remain open. The
 least-privilege public CI lane passed real Unix IPC on x86_64 and ARM64.
 This records progress, not full hardware/app acceptance.
+
+Lost-acknowledgement owner controls and retired-native-output races now have a
+reviewed fence. Actual-client HTTP navigation and encoded-media URI preservation
+are fixed. Next verify the installed CLI process boundary and genuine pywiim
+production IPC in native CI, then complete the frozen continuous-station run.

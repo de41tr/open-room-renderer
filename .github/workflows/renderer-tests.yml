@@ -75,6 +75,12 @@ jobs:
           ORR_TEST_UNIX_IPC: "1"
         run: .venv-ci/bin/python -m pytest -q -s tests/test_mpv_unix_integration.py
 
+      - name: Exercise real pywiim against production Unix IPC
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          ORR_TEST_PYWIIM_UNIX: "1"
+        run: .venv-ci/bin/python -m pytest -q -s tests/test_pywiim_unix_integration.py
+
       - name: Exercise production Unix IPC across repeated playback lifetimes
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         timeout-minutes: 6

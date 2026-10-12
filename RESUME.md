@@ -17,10 +17,18 @@
    its explicit native lane. Monitor the new 180s production Unix-IPC stress lane,
    keeping controller/child resources and native events distinct. The qualified
    older 15-minute libmpv stress is not the newer code's acceptance evidence.
-6. A separately frozen uninterrupted station test stopped around 245s on a
-   position-lag assertion. Diagnose monitor cadence, integer truncation and read
-   ordering against native time before restarting; no one-hour success is claimed.
-   Check the corrected test and frozen source hash before accepting its result.
+6. Current native CI run38198310911 for b011557 passed both architectures,
+   including production Unix stress and the clocked Snapcast gate.
+   The corrected frozen one-hour station run began 03:10 UTC against b011557;
+   expect no result before about 04:10 UTC. The earlier 245s failure was precisely
+   explained by integer truncation plus monitor cadence, not stale playback.
+   Exact snapshot mapping and separate monitor freshness now replace that flawed
+   comparison. No success is claimed until the full run and cleanup pass.
+   The next reviewed package fences lost Stop/Pause acknowledgements and native
+   output uncertainty; real pywiim Next/Previous and percent-encoded media URIs
+   now work through the normal queue/backend path. CLI failures return nonzero
+   without URL disclosure or following redirects. Monitor the new installed-CLI
+   lifecycle and actual-pywiim Unix-IPC CI gates before claiming native success.
 7. No vendor cloud auth/registration, OEM keys, DRM bypass, firmware execution or
    proprietary publication. No binaries, APKs, original IDs, credentials or raw
    captures. Inspect all files before each small tested publication and verify

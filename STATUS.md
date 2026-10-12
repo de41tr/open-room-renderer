@@ -814,3 +814,76 @@ skips; 46 focused native-refresh/staging/Snapcast/helper tests passed. The
 refreshed production snapshot also passed the separately enabled short libmpv
 stability run (four tests, 88.69s). Production Unix IPC, architecture-specific
 behavior and the clocked Snapcast path require the new native CI run.
+
+
+## Real-client navigation and native compatibility gate prepared
+
+Actual pywiim 2.3.9 next_track/previous_track use HTTP next/prev. Those exact
+commands now reuse the existing SOAP navigation implementation, preserving
+owner/gain/staging/readback semantics and single-track Previous restart. Empty
+queues, boundaries, failed loads and malformed command suffixes remain failures.
+Focused real-client/mock, parser, queue and native-staging regressions passed 97
+cases, including paused restart and native-successor index reconciliation.
+
+A separate opt-in real-client/production-Unix-IPC gate uses two distinct generated
+WAVs, exact loopback HTTP targets and null audio. It checks actual native resource,
+decoded time and gain alongside exact parsed/raw HTTP and delivered ordered GENA.
+The encoded-separator/synthetic-signature resource must arrive unchanged. Client
+controls are genuine public methods; SOAP only creates the queue. Explicit opt-in
+fails on missing dependencies or IPC, with bounded whole-process supervision.
+
+Production Unix IPC remains NOT_RUN locally (AF_UNIX EPERM). A separately labeled
+real pywiim 2.3.9/libmpv 0.40 diagnostic passed all controls, actual readbacks, raw
+media-target checks and cleanup with both navigation and URI-preservation fixes.
+That is not the production Unix transport, original Android app or hardware proof.
+The new native CI gate still requires its own result.
+
+## Verified native checkpoint b011557
+
+[Run38198310911](https://github.com/de41tr/open-room-renderer/actions/runs/38198310911)
+passed every lane on Ubuntu x86_64 and AArch64. The production Unix-IPC stress
+ran 185.745s / 186.315s across three owned mpv lifetimes per architecture:
+132 / 138 native loads, 124 / 130 source changes, 301 / 316 HTTP/SOAP/GENA
+agreements, and six independently observed EOFs each. Every lifetime reaped
+its child, removed its Unix socket and closed event observers/listeners;
+controller cleanup returned to one task, seven FDs, one thread and zero children.
+Child resource counts were separate; this is bounded stress, not leak freedom.
+
+The repaired private clocked Snapcast ingress passed all eleven stages using
+production Unix IPC with mpv0.37, PulseAudio16.1 and Snapcast0.27 on both runners.
+Two file-output clients demonstrated distribution, join/leave/rejoin, per-client
+non-atomic group gain, exact-zero group/upstream mute, reconnect retention and
+HTTP Stop draining to digital silence. All owned children were reaped and
+checked ports closed. This replaces the initial direct-FIFO gate failure;
+it does not establish two-host synchronization, physical audio, vendor grouping
+or an advertised renderer service. Station-address refresh and all previous
+renderer lanes also passed at this exact checkpoint.
+
+## Owner intent and real-client compatibility corrections
+
+An applied native Stop with a lost acknowledgement previously restored old play
+intent, so its idle observation could auto-start the next finite track. Rejected,
+unconfirmed or cancelled Stop/Pause/Resume now retain latest owner intent and
+report explicit ERROR; unconfirmed silence is never described as successful Stop.
+Retired native output remains fenced across cancellation and newer commands.
+Only a new owner command can recover playback, with checked Stop/reload when
+native ownership is uncertain. Independent real libmpv/null HTTP/SOAP/GENA tests
+proved no automatic second track and explicit Play recovery of the selection.
+
+Real pywiim HTTP Next/Previous now share existing SOAP navigation semantics.
+Already decoded absolute media URIs retain encoded path separators and signed-
+query bytes; only a fully quoted outer URI wrapper gets one additional decode.
+The real client and decoder reached an exact local target containing `%2F`,
+`%26`, `%3D`, `%252F` and UTF-8 escapes. This fixes an actual wrong-resource load,
+not merely display text. Malformed navigation suffixes still fail without mutation.
+
+CLI commands return nonzero on HTTP errors, redirects and network failures;
+errors omit media URLs/response bodies, and redirects are not followed. The
+reviewed installed-entry lifecycle gate checks actual serve/restart, persisted
+identity/gain/DSP, signals and owned/external process boundaries. The new actual
+pywiim/Unix-IPC gate verifies real-client controls and exact media resources.
+These two production-native additions require their own CI result; local native
+transport remains restricted. The combined default snapshot passed 2190 tests
+with 41 explicit opt-in skips. With the real-libmpv option enabled, the same
+combined regression suite passed 2218 tests with 13 separate opt-in native cases
+skipped in 291.85s. Installed CLI/actual-client production IPC still await CI.
