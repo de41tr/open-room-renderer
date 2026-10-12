@@ -115,10 +115,24 @@ audio can work without direct ALSA access. Do not fix permissions with a broad
 see the [mpv audio-device documentation](https://mpv.io/manual/stable/#options-audio-device).
 
 Stop with `Ctrl+C`. Restart uses the same `state/uuid`; do not copy that state
-between independent renderers. Each needs its own prefix, state directory, IPC
-socket, and, on the same host, a different `--port` (for example 8081). Discovery
-also needs distinct identities. Two live multicast responders on one host still
-need target-network acceptance.
+between independent renderers. Each needs its own prefix, state directory and
+IPC socket. For two renderers on one host, pass a different installer `--port`
+(for example 8081), or set distinct `http_api_port`/`upnp_port` values in each
+config. `serve` accepts `--config`, not `--port`; control-command `--port` chooses
+the destination. Discovery also needs distinct identities. Two live multicast
+responders on one host still need target-network acceptance.
+
+The remaining CLI examples use the short `open-room-renderer` command. In each
+control terminal, activate the installed environment first (adjust the path for
+a custom prefix):
+
+```bash
+source ~/.local/share/open-room-renderer/venv/bin/activate
+```
+
+For an editable checkout, use `source .venv/bin/activate` instead. Activation
+only changes this shell; alternatively use the full executable path shown above.
+The installer does not add a global command or change your shell startup files.
 
 ### Find a renderer address with bounded SSDP discovery
 
@@ -328,8 +342,10 @@ native_queue_staging: true
 Use a boolean, not a quoted string. Existing profiles remain false. Volume, DSP
 and mpv audio settings do not change. This is an experimental reduced-gap path,
 not a promise of gapless playback for every codec, rate, playlist or output.
-Native clocked CI acceptance for this revision is still pending; consult
-STATUS.md and docs/TESTING.md for actual results.
+Production Unix-IPC clocked staging passed on x86_64 and AArch64, including
+measured equal-rate and mixed-rate limits. See the scoped results in
+[the compatibility matrix](docs/COMPATIBILITY_MATRIX.md) and [testing guide](docs/TESTING.md);
+these digital measurements do not establish physical DAC or universal gapless playback.
 
 Active playlist containers are excluded from further staging. Exact first-level
 container ancestry is supported, but nested/foreign-tail ancestry can be
@@ -434,6 +450,22 @@ A successful JSON result says `request_acknowledged`, not that audio was observe
 Only the renderer's exact `OK` response is accepted. The client never redirects
 or retries a command, and ignores environment proxies and netrc credentials.
 An uncertain result may already have taken effect; inspect status before retrying.
+
+## Legacy direct controls and endpoint syntax
+
+The legacy `status`, `play`, `pause`, `resume`, `stop`, `volume`, and
+`favorites list/add/save-current/rename/delete` commands make direct requests,
+ignoring environment proxies and netrc credentials. They never retry or follow redirects. Their ten-second
+connect/read inactivity timeout is not a total elapsed-time deadline. Successful
+response text is printed unchanged, with a trailing newline; non-2xx responses
+fail without printing their bodies.
+
+Renderer hosts use the shared client grammar: ASCII letters, digits, dots and
+hyphens (up to 253 characters), or IPv6 literals with optional brackets. Scoped
+IPv6 addresses, Unicode IDNs and underscores are not accepted; use an ASCII
+punycode hostname where appropriate. Supply the port separately as an integer
+from 1 through 65535. Userinfo, URL schemes, paths, queries and fragments are not
+host input. This validates endpoint syntax, not membership in a private network.
 
 ## Multi-track queues and authored playlists
 

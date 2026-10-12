@@ -28,7 +28,8 @@ unauthenticated and unverified; a description port is not a verified primary API
 port. Empty results are only absence of matching observed replies. The actual
 console entry point also finds both owned loopback responders, with two
 kernel-observed TTL-0 multicast searches, no HTTP request and owned cleanup.
-That local native result does not establish physical-LAN/app/hardware acceptance.
+The exact console/multicast case also passed both hosted native architectures
+at 5cf83ee. These results do not establish physical-LAN/app/hardware acceptance.
 
 Neutral and compatibility profiles share independent product/version metadata.
 The compatibility profile changes protocol presentation and discovery identity;
@@ -52,9 +53,10 @@ ownership (UNIT/MOCK plus actual subprocess signal delivery). Production Unix
 IPC is verified on native x86_64 and AArch64 CI; target-host acceptance remains. A failed spawn attempt does
 not automatically respawn; restart the renderer to retry owned spawning. The
 same one-spawn-per-backend contract applies after an owned player dies following
-successful startup. A new AP07 post-decode SIGKILL/HTTP/SOAP/GENA case is gated for
-standard native CI; its real process-death result remains pending. Deterministic
-post-ready death and loopback failure-projection counterparts pass locally.
+successful startup. The actual post-decode SIGKILL/HTTP/SOAP/GENA case and fresh
+backend restart passed standard x86_64/AArch64 CI at checkpoint 62b089ad.
+Deterministic post-ready death and loopback failure-projection counterparts also
+pass; none of this establishes target-host service boot or automatic respawn.
 
 Established explicit live stations now have bounded owner-respecting EOF/idle
 recovery (UNIT/MOCK and actual local HTTP outage/return with REAL_BACKEND/null).

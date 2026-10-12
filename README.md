@@ -194,13 +194,22 @@ That script explains before it asks for `sudo`: packet capture normally needs el
 
 ## Configuration
 
-Start with:
+For a native installation, edit `PREFIX/config.yaml`; its persistent identity
+and settings default to `PREFIX/state/` (a custom `state_dir` changes that
+location). The default prefix is
+`~/.local/share/open-room-renderer`. Keep that state across restarts.
 
-```bash
-configs/config.example.yaml
-```
+For checkout development, `configs/config.example.yaml` is the neutral template.
+The profile wrappers write a derived `runner-config.yaml` inside their `.state/`
+directory on each launch; do not edit that generated file for lasting changes.
+Use `ORR_CONFIG=/absolute/path/to/custom.yaml ./scripts/run-dev.sh` (or the
+app-compat wrapper) to select a persistent custom YAML instead. Explicit custom
+YAML is used as supplied, without the wrapper's generated-profile overrides.
 
-Public examples use neutral names and synthetic values. Runtime state such as generated UUID, device rename, EQ presets, and account state belongs in `.state/`, which is intentionally ignored.
+The app-compat template directly requests port 80 and a `/tmp` IPC path. Its
+supported wrapper normally overrides these to port 8080 and profile-owned IPC;
+port 80 remains an explicit option. Public examples contain neutral names and
+synthetic values. Keep actual state and local configuration private.
 
 Verbose HTTP logging is off by default. Keep it that way for normal use. If you enable it for private debugging, sanitize before sharing anything.
 
