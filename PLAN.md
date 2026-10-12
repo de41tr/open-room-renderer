@@ -17,7 +17,9 @@ No main-branch edits, merge, or release.
 9. P1 where time permits: metadata, confirmed seek, volume/mute, existing DSP,
    persistent settings, ARM installation, radio formats and measured transitions.
 
-P2 service integrations and synchronized multiroom are deferred. No proprietary
+P2 provider integrations remain disabled. Bounded Snapcast digital/control
+experiments are separate from two-host synchronization or an advertised service.
+No proprietary
 material, credentials, original identifiers, captures or binaries belong here.
 Keep the production Unix-socket mpv design; use deterministic test doubles where
 this execution environment cannot create Unix-domain sockets.
@@ -32,8 +34,12 @@ AP10 confirms actual seeks, including pause/resume and stale-command rejection.
 AP14 provides reviewed native installation and stable unprivileged profiles.
 AP13 restores complete confirmed active DSP, including deferred startup.
 AP15 has first-level native playlist ownership and local radio-format evidence.
-Log privacy, clocked transition measurement, version-independent load options,
-explicit discovery interfaces and unready-load cleanup follow. Nested playlist
-ancestry and real hardware/app acceptance remain open. The
+Log privacy, calibrated clocked transition measurement, version-independent load
+options, explicit multicast discovery and same-owner unready-load cleanup are
+implemented. Native discovery-to-playback passed on both CI architectures.
+Sustained no-EOF station stalls now have reviewed owner-fenced bounded recovery.
+Next: verify reduced-gap native queue staging, long-running production IPC and
+optional Snapcast control/delivery. Nested playlist ancestry, provider URL refresh
+and real hardware/app acceptance remain open. The
 least-privilege public CI lane passed real Unix IPC on x86_64 and ARM64.
 This records progress, not full hardware/app acceptance.

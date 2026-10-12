@@ -6,8 +6,8 @@
    dot/renderer-autonomous-20261012; never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Read STATUS.md, PLAN.md and docs/TESTING.md. Last verified native checkpoint
-   eb7c2ac9f3718ec80ef2efd05f1e4a4e0eeddcf6 passed all lanes on x86_64/AArch64:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38192653073
+   21f1a01794dbcbdc5383cb530d343026b8cda5cf passed all lanes on x86_64/AArch64:
+   https://github.com/de41tr/open-room-renderer/actions/runs/38193687112
 4. Actual same-host multicast discovery now leads through fetched endpoint, two
    distinct decoded sources and production Unix-IPC controls with HTTP/SOAP/GENA
    agreement. Failed/unready source loads now confirm same-owner Stop/idle.
@@ -15,8 +15,8 @@
    equal-rate6.125ms/x86 and25.125ms/ARM64 versus0ms direct mpv playlist. Native
    EOF/sink timing and a minimal preload approach are under investigation;
    no gapless claim. Preserve strict calibration and sample checks.
-6. Active independent work: owner-fenced sustained-cache-stall recovery (actual
-   held-open source reproduced), frozen15-minute native stability with reviewed
+6. Active independent work: owner-fenced sustained-cache-stall recovery is implemented and independently
+   reviewed; monitor its native CI. Continue frozen15-minute stability with reviewed
    event/resource scope, and private Snapcast local digital/control experiments.
    The latter is not two-host synchronization or a supported ORR service.
 7. Keep optional experiments inactive unless their actual advertised function

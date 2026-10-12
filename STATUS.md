@@ -7,8 +7,9 @@ Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 - Source and reference review agree on base commit `3672b9838e9c39ae8191613108f0d91a5cada97d`.
 - Python 3.12.14; initial suite: 92 passed.
 - mpv 0.40.0 can decode synthetic WAV, MP3 and FLAC to null output.
-- Current sandbox denies Unix-domain socket creation; multicast discovery is also
-  unavailable. This is a test limitation, not evidence of a production defect.
+- At baseline the sandbox denied Unix-domain sockets and default-route multicast.
+  Production Unix IPC subsequently passed native CI; explicit-interface loopback
+  multicast now passes locally. Physical LAN/audio/app acceptance remains open.
 
 ## AP01 checkpoint
 
@@ -655,3 +656,32 @@ Final experimental-service snapshot: 1860 default tests passed,22 explicit
 native skips. Independent review passed109 focused tests and confirmed27
 ordinary neutral/TuneIn/direct-source configurations match baseline. Reserved
 provider source aliases and padded legacy decimal masks are covered.
+
+## Established live stations recover from no-EOF cache stalls
+
+A real held-open local response reproduced an indefinite BUFFERING state: audio
+reached9.984s, then paused-for-cache/core-idle stayed true without EOF. The
+monitor now requires15 seconds of unchanged decoded position for an established
+explicit live station before using the existing three-attempt retry budget.
+Transient return or any decoded progress resets the grace; fresh snapshots
+recheck that evidence before a queued retry or terminal Stop. Initial loads,
+finite files, unknown sources and owner Pause/Stop remain separate.
+
+At exhaustion a stalled socket is stopped and actual idle confirmed, so delayed
+network bytes cannot silently restart audio after ERROR. Cleanup remains bounded
+and same-owner-fenced through shutdown and newer source selection. Failed Stop
+or readback reports silence unconfirmed rather than claiming a stopped decoder.
+No gain, mute, canonical selection or generation is changed by successful retry.
+
+Independent review reproduced and fixed a backoff race where resumed progress
+previously failed to reset the queued deadline. The original negative controls
+now pass unchanged. Native tests use generated held-open HTTP media and real
+libmpv/null; production15-second recovery, transient return, owner commands,
+finite exclusion and exhausted retries are separate scenarios. This is not
+provider-URL refresh, physical WAN/router testing or hardware playback proof.
+
+Final rebased snapshot: 1937 passed with all optional libmpv cases enabled;
+eight explicit native IPC/discovery/clocked cases skipped locally. Independent
+review cleared the unchanged adversarial repros and production15-second grace.
+The seven actual no-EOF scenarios are now in the native CI libmpv lane; monitor
+that revision separately. Prior21f1a017 CI passed all lanes on both architectures.

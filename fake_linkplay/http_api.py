@@ -109,6 +109,9 @@ class StationRecovery:
     attempts: int = 0
     invalidated: bool = False
     category: str = "unexpected_idle"
+    established: bool = False
+    stall_since: float | None = None
+    stall_position: float | None = None
 
 
 def parse_command(command: str) -> ParsedCommand:
@@ -184,6 +187,8 @@ class HttpApi:
         self._station_recovery_task: asyncio.Task | None = None
         self._station_recovery_loading = False
         self._station_recovery_delays = (0.5, 1.0, 2.0)
+        self._station_stall_timeout = 15.0
+        self._station_stall_clock = time.monotonic
         self._playback_offset_sec = 0
         self._pending_seek_target: int | None = None
         self._pending_seek_generation = 0
@@ -360,7 +365,10 @@ class HttpApi:
 
     def _station_recovery_is_current(self, recovery: StationRecovery) -> bool:
         return (not recovery.invalidated and self._station_recovery is recovery
-                and recovery.generation == self.state.generation and self.state.intent == "play"
+                and self._station_recovery_owns_selection(recovery))
+
+    def _station_recovery_owns_selection(self, recovery: StationRecovery) -> bool:
+        return (recovery.generation == self.state.generation and self.state.intent == "play"
                 and self.state.queue is recovery.queue and self.state.queue.index == recovery.index
                 and self.state.queue.current is recovery.item
                 and recovery.item.stream_type == "station" and recovery.item.duration == 0
@@ -371,7 +379,49 @@ class HttpApi:
         return (self._mpv_snapshot_matches_source(snapshot, recovery.backend_url)
                 and snapshot.get("idle-active") is False and snapshot.get("pause") is False
                 and snapshot.get("eof-reached") is not True and snapshot.get("paused-for-cache") is not True
+                and snapshot.get("core-idle") is not True
                 and self._mpv_snapshot_has_audio(snapshot))
+
+    def _station_stall_expired(self, snapshot: dict) -> bool:
+        """Observe sustained no-progress buffering only for an established station."""
+        recovery = self._station_recovery
+        if recovery is None or not self._station_recovery_is_current(recovery):
+            return False
+        position = snapshot.get("playback-time")
+        if self._station_source_has_audio(recovery, snapshot):
+            recovery.established = True
+        stalled = (recovery.established
+                   and self._mpv_snapshot_matches_source(snapshot, recovery.backend_url)
+                   and snapshot.get("idle-active") is False and snapshot.get("pause") is False
+                   and snapshot.get("eof-reached") is not True
+                   and (snapshot.get("paused-for-cache") is True or snapshot.get("core-idle") is True)
+                   and type(position) in {int, float} and math.isfinite(position))
+        if not stalled:
+            recovery.stall_since = recovery.stall_position = None
+            return False
+        now = self._station_stall_clock()
+        if recovery.stall_since is None or position != recovery.stall_position:
+            recovery.stall_since = now
+        recovery.stall_position = position
+        return now - recovery.stall_since >= self._station_stall_timeout
+
+    def _station_stall_retry_needed(self, recovery: StationRecovery, snapshot: dict) -> bool:
+        """A queued stall retry cannot outlive renewed progress or a new grace."""
+        if recovery.category != "source_stall" or snapshot.get("idle-active") is True:
+            # A fully ended source or failed load still uses the finite retry loop.
+            return True
+        if not self._mpv_snapshot_matches_source(snapshot, recovery.backend_url):
+            raise BackendError("Station source changed before recovery")
+        if snapshot.get("eof-reached") is True and snapshot.get("path") == recovery.backend_url:
+            # Native playlist entry EOF can still advance within the same
+            # station. Only direct-source EOF may bypass a fresh stall grace.
+            return True
+        if self._station_stall_expired(snapshot):
+            return True
+        self._apply_backend_snapshot(snapshot)
+        self.state.last_error = ""
+        self._schedule_event_notify()
+        return False
 
     def _mark_backend_failure(self) -> None:
         self._invalidate_station_recovery()
@@ -386,11 +436,13 @@ class HttpApi:
             self.state.phase = PlaybackPhase.STOPPED
             return
         self.state.phase = PlaybackPhase.BUFFERING
-        self.state.last_error = ("Station source ended; retry pending" if category == "source_eof"
-                                 else "Station source idle; retry pending")
+        self.state.last_error = {
+            "source_eof": "Station source ended; retry pending",
+            "source_stall": "Station source stalled; retry pending",
+        }.get(category, "Station source idle; retry pending")
         if self._station_recovery_task is None or self._station_recovery_task.done():
             recovery.category = category
-            if recovery.attempts >= len(self._station_recovery_delays):
+            if recovery.attempts >= len(self._station_recovery_delays) and category != "source_stall":
                 self._exhaust_station_recovery(recovery)
             else:
                 self._station_recovery_task = asyncio.create_task(self._retry_station(recovery))
@@ -401,10 +453,58 @@ class HttpApi:
                     recovery.category, recovery.generation, recovery.attempts)
         self._schedule_event_notify()
 
+    async def _silence_exhausted_station(self, recovery: StationRecovery) -> bool:
+        """A stalled socket can become audible later; fence and confirm its Stop."""
+        # Shutdown revokes retry eligibility without giving the loaded source
+        # to another owner. Drain this bounded cleanup, including its lock wait.
+        self._station_recovery_loading = True
+        try:
+            async with asyncio.timeout(3.0), self._backend_lock:
+                if not self._station_recovery_owns_selection(recovery):
+                    return False
+                snapshot = await self.mpv.snapshot()
+                if not self._station_recovery_owns_selection(recovery):
+                    return False
+                if snapshot.get("backend-error"):
+                    raise BackendError("Backend unavailable during station cleanup")
+                if (self._station_recovery_is_current(recovery)
+                        and self._station_source_has_audio(recovery, snapshot)):
+                    self._apply_backend_snapshot(snapshot)
+                    return False
+                if (self._station_recovery_is_current(recovery)
+                        and not self._station_stall_retry_needed(recovery, snapshot)):
+                    return False
+                if snapshot.get("idle-active") is not True:
+                    if not self._mpv_snapshot_matches_source(snapshot, recovery.backend_url):
+                        raise BackendError("Station source changed before cleanup")
+                    await self._backend_call(self.mpv.stop())
+                    while True:
+                        snapshot = await self.mpv.snapshot()
+                        if snapshot.get("backend-error"):
+                            raise BackendError("Backend unavailable during station cleanup")
+                        if snapshot.get("idle-active") is True:
+                            break
+                        await asyncio.sleep(0.05)
+                # Keep the backend lock through readback even if an owner
+                # command arrived during Stop; that newer command runs next.
+                self.state.backend_url = self.state.backend_original_url = ""
+                return self._station_recovery_is_current(recovery)
+        finally:
+            self._station_recovery_loading = False
+
     async def _retry_station(self, recovery: StationRecovery) -> None:
         try:
             while self._station_recovery_is_current(recovery):
                 if recovery.attempts >= len(self._station_recovery_delays):
+                    if recovery.category == "source_stall":
+                        try:
+                            if not await self._silence_exhausted_station(recovery):
+                                return
+                        except (BackendError, OSError, TimeoutError):
+                            if self._station_recovery_owns_selection(recovery):
+                                self._mark_backend_failure()
+                                self.state.last_error = "Backend control failed; playback silence not confirmed"
+                            return
                     self._exhaust_station_recovery(recovery)
                     return
                 await asyncio.sleep(self._station_recovery_delays[recovery.attempts])
@@ -425,10 +525,21 @@ class HttpApi:
                                  recovery.category, recovery.generation, recovery.attempts)
                         self._schedule_event_notify()
                         return
+                    if not self._station_stall_retry_needed(recovery, snapshot):
+                        return
                     recovery.attempts += 1
                     LOG.info("station recovery category=%s generation=%s attempt=%s",
                              recovery.category, recovery.generation, recovery.attempts)
-                    await self._load_playback_url(recovery.url, recovery.generation, recovery=recovery)
+                    loaded = await self._load_playback_url(recovery.url, recovery.generation, recovery=recovery)
+                    if loaded is False:
+                        # Fresh progress during resolution/lock acquisition
+                        # deferred the mutation, so no retry budget was spent.
+                        recovery.attempts -= 1
+                        return
+                    # The newly loaded source receives its own grace. Keep old
+                    # evidence through failed loads/resolution so their bounded
+                    # retry loop still detects any progress in the old source.
+                    recovery.stall_since = recovery.stall_position = None
                 except SourcePlaybackError:
                     if not self._station_recovery_is_current(recovery):
                         return
@@ -477,6 +588,7 @@ class HttpApi:
             return
         observed_url = snap.get("path")
         recovery = self._station_recovery
+        stall_expired = self._station_stall_expired(snap)
         expected_url = self.state.backend_url
         if not expected_url and recovery and self._station_recovery_is_current(recovery):
             expected_url = recovery.backend_url
@@ -510,8 +622,11 @@ class HttpApi:
             elif snap.get("pause") is True:
                 self.state.phase = PlaybackPhase.PAUSED
             elif (snap.get("paused-for-cache") is True
-                  or (snap.get("core-idle") is True and not selected_audio)):
+                  or (snap.get("core-idle") is True and (not selected_audio
+                      or recovery is not None and self._station_recovery_is_current(recovery)))):
                 self.state.phase = PlaybackPhase.BUFFERING
+                if stall_expired:
+                    self._recover_station_after_end("source_stall")
             elif self._mpv_snapshot_has_audio(snap):
                 self.state.phase = PlaybackPhase.PLAYING
                 recovery = self._station_recovery
@@ -1886,8 +2001,8 @@ class HttpApi:
         self._schedule_event_notify()
         await self._load_playback_url(url, generation)
 
-    async def _load_playback_url(self, url: str, generation: int, *, recovery: StationRecovery | None = None) -> None:
-        """Share load/readiness with retries without accepting a new owner command."""
+    async def _load_playback_url(self, url: str, generation: int, *, recovery: StationRecovery | None = None) -> bool:
+        """Load and confirm audio; False means a stale stall retry was deferred."""
         def current() -> bool:
             return (generation == self.state.generation
                     and (recovery is None or self._station_recovery_is_current(recovery)))
@@ -1959,6 +2074,18 @@ class HttpApi:
             async with self._backend_lock:
                 if not current():
                     raise BackendError("Playback command superseded")
+                if recovery is not None and recovery.category == "source_stall":
+                    # Resolution and lock acquisition can both yield. Recheck
+                    # progress at the mutation boundary, not only at backoff.
+                    snapshot = await self.mpv.snapshot()
+                    if not current():
+                        raise BackendError("Playback command superseded")
+                    if snapshot.get("backend-error"):
+                        raise BackendError("Backend control failed before recovery load")
+                    self.state.phase = PlaybackPhase.BUFFERING
+                    if not self._station_stall_retry_needed(recovery, snapshot):
+                        return False
+                    self.state.phase = PlaybackPhase.LOADING
                 if recovery is not None:
                     self._station_recovery_loading = True
                 try:
@@ -2012,6 +2139,7 @@ class HttpApi:
                 raise SourcePlaybackError("Station source ended during recovery", "source_eof")
             if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING}:
                 raise BackendError("Backend no longer playing")
+            return True
         except (BackendError, OSError, TimeoutError, asyncio.CancelledError) as exc:
             try:
                 await silence_failed_load()

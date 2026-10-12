@@ -6,12 +6,14 @@
 .venv/bin/python -m pytest -q
 ```
 
-Latest published CI checkpoint: `52f5c4d`. On each Ubuntu 24.04 x86_64 and
-AArch64 runner, the default suite passed 1383 tests with nine explicit opt-in
-skips, then all seven libmpv cases and both production Unix IPC cases passed.
-[Verified run](https://github.com/de41tr/open-room-renderer/actions/runs/38185537983).
-Baseline was 92 tests; checkpoint history is in STATUS.md. Counts alone do not
-establish app or hardware compatibility.
+Latest completed native CI checkpoint: `21f1a017`, on Ubuntu24.04 x86_64 and
+AArch64, with actual mpv/libmpv0.37.0. The default suite, explicit libmpv
+null/digital-PCM tests, production Unix IPC/lifecycle, private native installation,
+clocked measurement and discovered-endpoint playback all passed.
+[Verified run](https://github.com/de41tr/open-room-renderer/actions/runs/38193687112).
+Newer work must be checked against its own CI result. Baseline was92 tests;
+checkpoint history is in STATUS.md. Counts alone do not establish app or hardware
+compatibility.
 
 ## Scope labels
 
@@ -32,9 +34,11 @@ or null output does not establish audible playback or Android app compatibility.
 The prepared mpv 0.40.0 decoder handled synthetic WAV/MP3/FLAC with null output.
 The execution sandbox denies Unix-domain sockets; production JSON IPC integration
 is NOT_RUN in this sandbox, but has passed on native x86_64 and AArch64 CI
-runners (below). Multicast SSDP validation is still unavailable here. Do not replace
-production IPC merely to accommodate this sandbox. ARMv7/Odroid, DAC, real audio,
-and actual Android app validation require a suitable separate environment.
+runners (below). Explicit-interface loopback SSDP/mDNS multicast now also passes
+in the sandbox, and the complete discovered-endpoint production-IPC flow passes
+in native CI. Do not replace production IPC to accommodate this sandbox. Physical
+LAN, ARMv7/Odroid, DAC/acoustic audio and original Android app validation remain
+separate acceptance steps.
 
 ## Playback generation and local client coverage
 
@@ -424,3 +428,32 @@ Final experimental-service snapshot: 1860 default tests passed,22 explicit
 native skips. Independent review passed109 focused tests and confirmed27
 ordinary neutral/TuneIn/direct-source configurations match baseline. Reserved
 provider source aliases and padded legacy decimal masks are covered.
+
+## Established live stations recover from no-EOF cache stalls
+
+A real held-open local response reproduced an indefinite BUFFERING state: audio
+reached9.984s, then paused-for-cache/core-idle stayed true without EOF. The
+monitor now requires15 seconds of unchanged decoded position for an established
+explicit live station before using the existing three-attempt retry budget.
+Transient return or any decoded progress resets the grace; fresh snapshots
+recheck that evidence before a queued retry or terminal Stop. Initial loads,
+finite files, unknown sources and owner Pause/Stop remain separate.
+
+At exhaustion a stalled socket is stopped and actual idle confirmed, so delayed
+network bytes cannot silently restart audio after ERROR. Cleanup remains bounded
+and same-owner-fenced through shutdown and newer source selection. Failed Stop
+or readback reports silence unconfirmed rather than claiming a stopped decoder.
+No gain, mute, canonical selection or generation is changed by successful retry.
+
+Independent review reproduced and fixed a backoff race where resumed progress
+previously failed to reset the queued deadline. The original negative controls
+now pass unchanged. Native tests use generated held-open HTTP media and real
+libmpv/null; production15-second recovery, transient return, owner commands,
+finite exclusion and exhausted retries are separate scenarios. This is not
+provider-URL refresh, physical WAN/router testing or hardware playback proof.
+
+Final rebased snapshot: 1937 passed with all optional libmpv cases enabled;
+eight explicit native IPC/discovery/clocked cases skipped locally. Independent
+review cleared the unchanged adversarial repros and production15-second grace.
+The seven actual no-EOF scenarios are now in the native CI libmpv lane; monitor
+that revision separately. Prior21f1a017 CI passed all lanes on both architectures.

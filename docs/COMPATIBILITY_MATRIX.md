@@ -41,8 +41,11 @@ not automatically respawn; restart the renderer to retry owned spawning.
 
 Established explicit live stations now have bounded owner-respecting EOF/idle
 recovery (UNIT/MOCK and actual local HTTP outage/return with REAL_BACKEND/null).
-Initial load failure, sustained cache stalls and provider URL refresh remain
-separate limitations; finite/unknown media are never silently restarted.
+Sustained no-progress cache stalls now use a15-second observation grace and
+the same finite retry budget; progress/owner commands reset or cancel recovery.
+Exhaustion confirms actual silence before terminal source failure. Initial
+load retry and provider URL refresh remain separate limitations; finite/unknown
+media are never silently restarted.
 
 Volume/mute now use confirmed full-pair backend readback, pre-load/resume
 reconciliation and atomic persistence. Actual HTTP controls have digital PCM
