@@ -5,8 +5,8 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint d9a94e2 passed all three jobs, verified at
-   15:55 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38271661061
+   Latest completed checkpoint 5cf83ee passed all three jobs, verified at
+   16:21 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38275014639
    Python floor uses complete bounded groups on the same runner, preserving the
    3-minute step/8-minute job; both native jobs retain all existing gates.
    The prior 763f7f7 remains failed solely for its floor time budget.
@@ -296,3 +296,13 @@ Exact native console acceptance passed all five cases twice (10.19s/10.22s),
 with real TTL-0 multicast and no HTTP requests at either owned endpoint. Publish
 feature/native/docs separately and require full CI. Legacy isolation remains
 private until this checkpoint is green. Keep all deadlines and scope limits.
+
+16:22 UTC: discovery is fully green on both native architectures and Python 3.11.
+Actual console candidates/TTL-0/no-HTTP/cleanup evidence is present in both hosted
+logs. The approved final legacy CLI isolation patch is integrated byte-for-byte
+with its tested private candidate: 4412/72 on 3.12 (200.46s), 4162+250/72 on 3.11
+(128.65s/72.88s). Production digest:
+6abaedb03144f6bd23545300a232c58fb7fc4a9be003e2d8061fbd90cd71d734.
+Five concrete operator-doc fixes are reviewed. Publish functional and doc commits
+separately, verify complete CI, then finalize handover/stabilization without
+speculative extra features. No main/merge/release or changed deadline authority.

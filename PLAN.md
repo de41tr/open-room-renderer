@@ -4,26 +4,20 @@ Branch: `dot/renderer-autonomous-20261012`; base: `3672b9838e9c39ae8191613108f0d
 Work window ends 2026-10-12 20:00 UTC. Stabilization only after 19:00 UTC.
 No main-branch edits, merge, or release.
 
-## Current functional package (15:58 UTC)
+## Current functional package (16:22 UTC)
 
-Favorite-target checkpoint `d9a94e2` has full standard CI green. Explicit target
-repair, its separate native acceptance and the same-runner native scheduling
-rebalance retain every existing gate and cap. The old source remains playing
-until later explicit stable-ID recall.
+Discovery checkpoint `5cf83ee` has complete standard CI green, including actual
+console/multicast acceptance on both native architectures. Publish the final
+reviewed legacy CLI endpoint/session correction separately from operator docs
+and checkpoint evidence. Its exact merged defaults pass both Python minors;
+require full hosted CI after publication. Valid wire/output semantics and the
+already-present redirect policy remain unchanged.
 
-Publish the reviewed bounded SSDP-only candidate discovery package for headless
-setup, with separate native acceptance and documentation commits. Final default
-suites on both Python minors and the native multicast CLI flow pass; require full
-hosted CI. It uses one explicitly
-selected IPv4 interface, short absolute deadline and packet/result limits; never
-fetch LOCATION or load/write renderer configuration. Label unauthenticated results
-as candidates, not verified devices or a proven primary control port. Reuse actual
-same-host multicast acceptance. No new listener/auth/CORS or network settings.
-A final narrow legacy CLI correction is privately developing endpoint validation
-and isolated Sessions: no ambient proxy/netrc settings, while preserving valid
-legacy payloads/outputs and the already-present redirect rejection.
-Defer broad core/security audits, browser UI and new multihour runs. Keep private
-packages isolated and publish only after the preceding checkpoint is green.
+Then prioritize final operator-document consistency, scoped acceptance and
+stabilization. Do not add speculative features or new multihour runs. Preserve
+all prior failures and attach endurance results to their frozen source. Prepare
+three practical constraints, debts and missing features, next-phase decisions
+and the existing later hardware plan. Do not wait for unavailable hardware/app.
 Stabilization starts 19:00 UTC; active work ends 20:00 UTC today.
 
 ## Ordered work

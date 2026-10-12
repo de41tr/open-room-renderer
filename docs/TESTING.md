@@ -29,6 +29,21 @@ compatibility.
 Synthetic test inputs only. A SOAP 200, playback status field, mock backend call,
 or null output does not establish audible playback or Android app compatibility.
 
+## Legacy CLI transport isolation
+
+`tests/test_cli_commands.py`, `tests/test_favorites_cli.py` and
+`tests/test_legacy_cli_transport.py` cover legacy GET controls and favorites
+GET/POST/PATCH/DELETE. Loopback peers check exact encoded command targets and
+JSON bytes, unchanged successful response text, safe HTTP failures, and no
+redirect-target requests. Temporary synthetic netrc credentials and all proxy
+environment spellings are set while both `NO_PROXY` spellings are cleared;
+only the owned renderer receives a request, with no Authorization or
+Proxy-Authorization header, and the owned proxy receives none. No real
+credentials or external network are used. Mock sessions verify endpoint
+rejection before session construction, fresh sessions, timeout options,
+no retries and response/session closure on success and failure (UNIT/MOCK +
+INTEGRATION). These checks do not establish physical LAN or audio behavior.
+
 ## Current environment limits
 
 The prepared mpv 0.40.0 decoder handled synthetic WAV/MP3/FLAC with null output.
@@ -2136,3 +2151,21 @@ warnings. Production digest:
 Independent review found no defect, including private continuous-traffic and
 parser/legacy-diagnostic probes. The exact native CLI extension passes locally
 as scoped above. Complete hosted CI is required after publication.
+
+
+Discovery checkpoint 5cf83ee passed all three standard jobs, verified 16:21 UTC:
+https://github.com/de41tr/open-room-renderer/actions/runs/38275014639 .
+Both native logs contain the new actual console/multicast result: two exact
+candidates, two kernel-reported TTL-0 searches, zero fixture HTTP requests and
+complete child/observer/renderer cleanup. Every previous gate also passed.
+Floor groups passed 3938+245/72 in 134.72s/83.10s, retaining every cap and case.
+
+Final merged legacy-isolation defaults pass 4412/72 on Python 3.12 (200.46s),
+and 4162+250/72 on Python 3.11 (128.65s/72.88s), with 32 existing warnings.
+Production digest:
+`6abaedb03144f6bd23545300a232c58fb7fc4a9be003e2d8061fbd90cd71d734`.
+Independent review retained all 51 original assertions and verified exact
+baseline/new wire and output parity, plus positive controls for the old ambient
+proxy/netrc behavior using temporary synthetic data and owned loopback peers.
+The correction changes only endpoint validation/session isolation in the two
+legacy helpers. Complete hosted verification remains required after publication.

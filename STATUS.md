@@ -2,29 +2,47 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current candidate (16:04 UTC)
+## Current candidate (16:22 UTC)
 
-The bounded headless `discover --interface LOCAL_IPV4` command is independently
-reviewed. It returns sanitized, unauthenticated SSDP candidates, with a short
-absolute deadline, at most two searches, and strict packet/result bounds. It
-performs no HTTP/config/control action and never auto-selects a returned endpoint.
-A description port remains an unverified advertisement, not a confirmed API port.
+The final narrow legacy CLI correction validates the renderer endpoint before
+creating a request and uses fresh Sessions with ambient proxy/netrc handling
+disabled. Valid method/target/header/body bytes, raw successful output, existing
+redirect rejection and the committed-durability warning remain unchanged.
+Invalid host syntax fails privately before any Session is created. This is not
+a network allowlist, response-schema redesign or authentication feature.
 
-The existing real two-renderer loopback fixture now invokes the console wrapper
-against candidate source, observes both exact identities/endpoints and two
-kernel-reported TTL-0 searches, and traps zero HTTP requests at those endpoints.
-All five native discovery cases pass in 10.19s/10.22s, with the old 25s outer bound,
-negative cases and cleanup retained. This is same-host Linux discovery evidence;
-there is no new physical-LAN, hardware, installed-wheel or original-app claim.
+Independent review reproduced the old ambient proxy/netrc behavior using owned
+loopback peers and temporary synthetic data, then verified its absence after the
+patch. All 51 original assertions remain; focused author/reviewer suites pass
+349 cases, with independent wire/output parity and positive controls.
+Final merged defaults pass 4412/72 on Python 3.12 (200.46s), and 4162+250/72 on
+Python 3.11 (128.65s/72.88s), retaining 32 existing warnings. Production digest:
+`6abaedb03144f6bd23545300a232c58fb7fc4a9be003e2d8061fbd90cd71d734`.
+Complete hosted CI is required after publication; no core or listener change.
 
-Final integrated defaults pass 4183/72 opt-in skips on Python 3.12 (201.09s),
-and 3938+245/72 on Python 3.11 (129.30s/77.21s), retaining 32 existing warnings.
-Production digest: `e8e2442a692c9fb9d727b41d86c222aa0257e70044e217394e2e599d508f52a3`.
-Publish feature, native acceptance and docs separately, then require full hosted CI.
-A separate final legacy host/proxy/netrc correction is privately reviewed; do not
-combine its unverified code into this checkpoint.
+Five reviewed operator-documentation corrections clarify executable activation,
+installer-versus-control port flags, persistent configuration/state sources,
+and previously completed staging/owned-player-death acceptance. No runtime
+defaults or system settings change. Final assessment and stabilization follow.
 
-## Latest verified hosted checkpoint (15:55 UTC)
+## Latest verified hosted checkpoint (16:21 UTC)
+
+Discovery head `5cf83ee` passed all three jobs, verified at 16:21 UTC:
+https://github.com/de41tr/open-room-renderer/actions/runs/38275014639 .
+Both native architectures passed the actual console/multicast flow: two known
+candidates, two kernel-reported TTL-0 searches, zero HTTP requests at either
+fixture endpoint, child reaping and observer/renderer cleanup. Every earlier
+native/Unix/client/stress/install/clocked/discovery/Snapcast gate also passed.
+Floor groups passed 3938+245/72 in 134.72s/83.10s. All caps remain unchanged.
+
+The command returns bounded, sanitized, unauthenticated SSDP candidates on an
+explicit IPv4 interface. It never fetches HTTP, loads config or controls a result;
+an advertised description port is not a verified primary API port. Native
+same-host acceptance does not establish physical-LAN, hardware or original-app
+compatibility. The separate native console wrapper loads candidate source using
+PYTHONPATH; no additional installed-wheel claim follows from that specific test.
+
+## Preceding favorite-target checkpoint (15:55 UTC)
 
 Favorite-target head `d9a94e2` passed all three standard jobs, verified at 15:55 UTC:
 https://github.com/de41tr/open-room-renderer/actions/runs/38271661061 .
