@@ -3,6 +3,7 @@
 Actual CLI subprocesses reach the production loopback HttpApi, then the existing
 real libmpv ctypes command-node test adapter. Three distinct generated WAVs prove
 native identity and advancing decoded PCM, with HTTP/SOAP/received GENA agreement.
+Client-only mode, navigation, mute and paused seek commands use the same path.
 This optional lane does not certify production Unix IPC, physical audio, shuffle
 traversal or endurance; those have separate tests. No external media is fetched.
 """
@@ -52,7 +53,7 @@ async def _exercise(library: str, directory: Path) -> dict:
                 "command_transport": "test ctypes command-node adapter, not Unix IPC",
                 "mpv_version": backend.read_property("mpv-version"),
                 "observer_interval": api._monitor_interval,
-                "source_sha256": hashes, "decoded": [], "cases": {}}
+                "source_sha256": hashes, "decoded": [], "wire": [], "cases": {}}
 
     async def media(request):
         requests.append(request.raw_path)
@@ -101,7 +102,7 @@ async def _exercise(library: str, directory: Path) -> dict:
 
         async with ClientSession(timeout=ClientTimeout(total=4), trust_env=False) as client:
             subscriptions = {}
-            for service in ("AVTransport", "PlayQueue"):
+            for service in ("AVTransport", "PlayQueue", "RenderingControl"):
                 async with client.request("SUBSCRIBE", server.make_url("/upnp/event/" + service), headers={
                     "NT": "upnp:event", "CALLBACK": f'<{server.make_url("/fixture-events")}>',
                     "TIMEOUT": "Second-60",
@@ -111,7 +112,7 @@ async def _exercise(library: str, directory: Path) -> dict:
 
             async def soap(action, service="AVTransport", fields="<InstanceID>0</InstanceID>"):
                 namespace = ("urn:schemas-wiimu-com:service:PlayQueue:1" if service == "PlayQueue"
-                             else "urn:schemas-upnp-org:service:AVTransport:1")
+                             else f"urn:schemas-upnp-org:service:{service}:1")
                 body = (f'<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>'
                         f'<u:{action} xmlns:u="{namespace}">{fields}</u:{action}></s:Body></s:Envelope>')
                 async with client.post(server.make_url("/upnp/control/" + service), data=body, headers={
@@ -121,14 +122,18 @@ async def _exercise(library: str, directory: Path) -> dict:
                     assert response.status == 200, (action, response.status, text)
                     return _values(text)
 
-            async def wire(name, index, phase, mode, loop, marker):
-                url = urls[index - 1]
+            async def player_status():
                 async with client.get(server.make_url("/httpapi.asp"), params={"command": "getPlayerStatus"}) as response:
                     assert response.status == 200
-                    status = await response.json()
+                    return await response.json()
+
+            async def wire(name, index, phase, mode, loop, marker):
+                url = urls[index - 1]
+                status = await player_status()
+                http_phase = "PAUSED" if phase == "PAUSED_PLAYBACK" else phase
                 assert (status["plicurr"], status["plicount"], status["loop"], status["uri"],
                         status["playback_phase"], status["transport_error"]) == (
-                            str(index), "3", str(loop), url, phase, ""), status
+                            str(index), "3", str(loop), url, http_phase, ""), status
                 assert (await soap("GetTransportSettings"))["PlayMode"] == mode
                 assert (await soap("GetTransportInfo"))["CurrentTransportState"] == phase
                 position = await soap("GetPositionInfo")
@@ -154,10 +159,19 @@ async def _exercise(library: str, directory: Path) -> dict:
                             and (event_queue.name, event_queue.index, event_queue.loop) == (name, index, loop)
                             and [item.url for item in event_queue.items] == urls)
 
-                for service in subscriptions:
-                    await _eventually("received " + service + " CLI selection agreement", lambda: any(
-                        sid == subscriptions[service] and agrees(service, properties)
-                        for sid, properties in receipts[marker:]))
+                received = {}
+                for service in ("AVTransport", "PlayQueue"):
+                    properties = await _eventually("received " + service + " CLI selection agreement", lambda: next((
+                        properties for sid, properties in receipts[marker:]
+                        if sid == subscriptions[service] and agrees(service, properties)), None))
+                    if service == "AVTransport":
+                        change = _attributes(properties["LastChange"])
+                        received[service] = {key: change[key] for key in (
+                            "CurrentPlayMode", "CurrentTrack", "CurrentTrackURI", "TransportState", "RelativeTimePosition")}
+                    else:
+                        received[service] = {key: properties[key] for key in ("CurrentIndex", "LoopMode", "TrackURI")}
+                evidence["wire"].append({"index": index, "phase": phase, "mode": mode, "uri": status["uri"],
+                                         "soap_position": position["RelTime"], "received": received})
 
             async def decoded(index):
                 url = urls[index - 1]
@@ -185,6 +199,7 @@ async def _exercise(library: str, directory: Path) -> dict:
                 await _eventually("production observer confirms selected native source", lambda: (
                     api.state.phase == PlaybackPhase.PLAYING and api.state.queue.index == index))
                 evidence["decoded"].append({**later, "first_position": first["position"]})
+                return later
 
             async def show(name, index, mode):
                 summary = await cli("queue", "show", "--name", name)
@@ -207,6 +222,91 @@ async def _exercise(library: str, directory: Path) -> dict:
                 await wire("Explicit queue", index, "PLAYING", "REPEAT_ALL", 0, marker)
             assert evidence["decoded"][0]["native_id"] != evidence["decoded"][1]["native_id"]
             evidence["cases"]["play_index"] = {"different_native_sources": [1, 2]}
+
+            # A mode request changes policy while this exact native source
+            # keeps decoding; it cannot restart, reload or replace ownership.
+            marker, commands, generation = len(receipts), len(backend.commands), api.state.generation
+            native_playlist = backend.read_property("playlist")
+            previous = evidence["decoded"][-1]
+            assert await cli("queue", "mode", "normal") == {"mode_request_acknowledged": True, "mode": "normal"}
+            unchanged = await decoded(2)
+            assert api.state.generation == generation
+            assert backend.commands[commands:] == []
+            assert backend.read_property("playlist") == native_playlist
+            assert unchanged["native_id"] == previous["native_id"]
+            assert unchanged["position"] > previous["position"]
+            await wire("Explicit queue", 2, "PLAYING", "NORMAL", 4, marker)
+            evidence["cases"]["queue_mode"] = {"native_id": unchanged["native_id"], "generation": generation,
+                "before_position": previous["position"], "after_position": unchanged["position"],
+                "native_mutations": 0, "native_loads": 0}
+
+            navigation = [unchanged]
+            for command, index in (("next", 3), ("previous", 2)):
+                marker, loads = len(receipts), len(_loads(backend.commands))
+                assert await cli(command) == {"request_acknowledged": True, "command": command}
+                selection = await decoded(index)
+                assert selection["native_id"] != navigation[-1]["native_id"]
+                assert len(_loads(backend.commands)) == loads + 1
+                await wire("Explicit queue", index, "PLAYING", "NORMAL", 4, marker)
+                navigation.append(selection)
+            assert [entry["index"] for entry in navigation] == [2, 3, 2]
+            assert navigation[0]["path"] == navigation[2]["path"] != navigation[1]["path"]
+            evidence["cases"]["normal_navigation"] = {"indices": [entry["index"] for entry in navigation],
+                "native_ids": [entry["native_id"] for entry in navigation], "loads": 2}
+
+            native_playlist = backend.read_property("playlist")
+            loads = len(_loads(backend.commands))
+            mute_values = []
+            for value, expected in (("on", True), ("off", False)):
+                marker = len(receipts)
+                assert await cli("mute", value) == {"request_acknowledged": True, "command": "mute", "value": value}
+                assert backend.read_property("mute") is expected
+                status = await player_status()
+                assert status["mute"] == str(int(expected)) and status["transport_error"] == ""
+                fields = "<InstanceID>0</InstanceID><Channel>Master</Channel>"
+                assert (await soap("GetMute", "RenderingControl", fields))["CurrentMute"] == str(int(expected))
+                event = await _eventually("received CLI mute " + value, lambda: next((properties
+                    for sid, properties in receipts[marker:]
+                    if sid == subscriptions["RenderingControl"] and properties.get("Mute") == str(int(expected))), None))
+                mute_values.append({"native": backend.read_property("mute"), "http": status["mute"],
+                                    "gena": event["Mute"]})
+            assert backend.read_property("playlist") == native_playlist
+            assert len(_loads(backend.commands)) == loads
+            assert backend.read_property("pause") is False and api.state.phase == PlaybackPhase.PLAYING
+            evidence["cases"]["mute_on_off"] = {"confirmed_values": mute_values, "native_loads": 0}
+
+            assert await cli("pause") == "OK"
+            assert backend.read_property("pause") is True and api.state.intent == "pause"
+            marker = len(receipts)
+            assert await cli("seek", "8") == {"request_acknowledged": True, "command": "seek", "seconds": 8}
+            actual = backend.read_property("playback-time")
+            assert abs(actual - 8) < .2, actual
+            assert backend.read_property("pause") is True
+            assert backend.read_property("duration") == pytest.approx(30, abs=.05)
+            assert backend.read_property("path") == urls[1]
+            assert backend.read_property("playlist") == native_playlist
+            assert len(_loads(backend.commands)) == loads
+            assert api.state.intent == "pause" and api.state.phase == PlaybackPhase.PAUSED
+            status = await player_status()
+            assert abs(int(status["curpos"]) - actual) <= 1
+            position = await soap("GetPositionInfo")
+            def seconds(value):
+                return sum(int(part) * multiplier for part, multiplier in zip(value.split(":"), (3600, 60, 1)))
+
+            assert abs(seconds(position["RelTime"]) - actual) <= 1
+            await wire("Explicit queue", 2, "PAUSED_PLAYBACK", "NORMAL", 4, marker)
+            event = await _eventually("received paused CLI absolute seek position", lambda: next((properties
+                for sid, properties in receipts[marker:]
+                if sid == subscriptions["AVTransport"] and properties.get("TransportState") == "PAUSED_PLAYBACK"
+                and properties.get("TrackURI") == urls[1]
+                and abs(seconds(properties["RelativeTimePosition"]) - actual) <= 1), None))
+            await asyncio.sleep(.1)
+            settled = backend.read_property("playback-time")
+            assert abs(settled - actual) < .03 and backend.read_property("pause") is True
+            evidence["cases"]["paused_seek"] = {"target": 8, "native_position": actual,
+                "settled_position": settled, "http_position": status["curpos"], "soap_position": position["RelTime"],
+                "gena_position": event["RelativeTimePosition"], "gena_phase": event["TransportState"],
+                "native_id": native_playlist[0]["id"], "path": backend.read_property("path"), "native_loads": 0}
 
             playlist = directory / "authored.json"
             await cli("playlist", "create", playlist, "--name", "Authored queue", "--start-index", "3",
@@ -235,8 +335,8 @@ async def _exercise(library: str, directory: Path) -> dict:
             await cli("playlist", "restore", playlist, "--play")
             await decoded(3)
             await wire("Authored queue", 3, "PLAYING", "SHUFFLE", 2, marker)
-            assert len({entry["native_id"] for entry in evidence["decoded"]}) == 3
-            assert len(_loads(backend.commands)) == 3, "Each requested selection loads exactly once"
+            assert len({entry["native_id"] for entry in evidence["decoded"]}) == 5
+            assert len(_loads(backend.commands)) == 5, "Each requested selection loads exactly once"
             assert playlist.read_bytes() == authored_bytes, "Restoring must not rewrite the authored file"
             evidence["cases"]["restore_play"] = {"selected_native_source": 3, "authored_bytes_unchanged": True}
             # A real CLI Stop also leaves no native playlist that can advance.
@@ -277,8 +377,8 @@ def test_real_queue_cli_and_authored_playlist(tmp_path):
         cwd=root, env=env, text=True, capture_output=True, timeout=20, check=False)
     assert completed.returncode == 0, f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
     evidence = json.loads(completed.stdout)
-    assert evidence["cleanup"]["no_pending_tasks"] and len(evidence["cases"]) == 4
-    assert evidence["cleanup"]["cli_children_reaped"] == 9
+    assert evidence["cleanup"]["no_pending_tasks"] and len(evidence["cases"]) == 8
+    assert evidence["cleanup"]["cli_children_reaped"] == 16
     print(json.dumps(evidence, sort_keys=True))
 
 
