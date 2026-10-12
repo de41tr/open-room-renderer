@@ -208,7 +208,8 @@ class HttpApi:
         self.state = state
         self.favorites = FavoritesStore(cfg)
         self.state.preset_view = lambda: self.favorites.effective_presets()
-        self.favorites_api = FavoritesApi(self.favorites, lambda: self.state.queue.current)
+        self.favorites_api = FavoritesApi(self.favorites, lambda: self.state.queue.current,
+                                          self._play_preset_snapshot)
         self._shuffle_rng = shuffle_rng if shuffle_rng is not None else random.Random()
         if is_shuffle(state.queue.loop) and state.queue._shuffle is None:
             state.queue._shuffle = shuffle_cycle(state.queue.index, state.queue.count, self._shuffle_rng)

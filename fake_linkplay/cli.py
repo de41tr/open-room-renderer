@@ -19,6 +19,7 @@ import requests
 from aiohttp import web
 
 from .config import load_config
+from .favorites_client import favorite_play_id, play_favorite
 from .http_api import HttpApi
 from .mdns import MdnsAdvertiser
 from .mpv_backend import BackendError, MpvBackend
@@ -254,10 +255,12 @@ def build_parser(*, private_client_errors: bool = False) -> argparse.ArgumentPar
     add_playlist_parser(sub)
     favorites = sub.add_parser("favorites", help="manage renderer-owned local favorites")
     favorites_sub = favorites.add_subparsers(dest="favorites_cmd", required=True)
-    for name in ("list", "add", "save-current", "rename", "delete"):
+    for name in ("list", "add", "save-current", "rename", "delete", "play"):
         p = favorites_sub.add_parser(name)
         if name in {"rename", "delete"}:
             p.add_argument("favorite_id", type=favorite_id)
+        if name == "play":
+            p.add_argument("favorite_id", type=favorite_play_id)
         if name in {"add", "save-current", "rename"}:
             p.add_argument("name")
         if name == "add":
@@ -285,7 +288,8 @@ def main(argv: list[str] | None = None) -> int:
     """
 
     argv = sys.argv[1:] if argv is None else argv
-    private_errors = any(arg in {"queue", "playlist", *COMMANDS} for arg in argv)
+    private_errors = (any(arg in {"queue", "playlist", *COMMANDS} for arg in argv)
+                      or {"favorites", "play"} <= set(argv))
     args = build_parser(private_client_errors=private_errors).parse_args(argv)
     if args.cmd in COMMANDS:
         return run_transport_command(args)
@@ -305,6 +309,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "volume":
         return api_get(args.host, args.port, f"setPlayerCmd:vol:{args.value}")
     elif args.cmd == "favorites":
+        if args.favorites_cmd == "play":
+            return play_favorite(args.host, args.port, args.favorite_id)
         if args.favorites_cmd == "list":
             return favorites_request(args.host, args.port, "GET")
         if args.favorites_cmd == "add":

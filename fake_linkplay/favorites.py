@@ -8,7 +8,7 @@ API, these routes are unauthenticated and intended for a trusted local network.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, replace
 import json
 import logging
@@ -23,6 +23,7 @@ from aiohttp import web
 
 from .capabilities import configured_presets
 from .config import Config
+from .mpv_backend import BackendError
 from .persistence import AtomicWriteCommittedError, atomic_write_text
 from .queue import PlaybackQueue, QueueItem
 from .radio import RadioResolutionError, public_station_reference
@@ -34,6 +35,7 @@ MAX_FAVORITES_BYTES = 1024 * 1024
 MAX_REQUEST_BYTES = 32 * 1024
 MAX_URL_BYTES = 8192
 _ID = re.compile(r"[0-9a-f]{32}\Z")
+_CONFIGURED_ID = re.compile(r"configured:([1-9][0-9]{0,5})\Z")
 _FIELDS = {"id", "name", "url", "title", "artist", "album", "artwork"}
 _DISPLAY_FIELDS = {"title", "artist", "album", "artwork"}
 
@@ -211,6 +213,33 @@ class FavoritesStore:
                 })
             return {"version": 1, "favorites": records}
 
+    def playback_snapshot(self, identifier: str) -> dict[str, object]:
+        """Resolve identity once under the library lock, retaining playback fields.
+
+        The returned effective preset is detached from the library. Its slot is
+        metadata only: later edits cannot redirect this admitted selection.
+        Configured playback does not depend on managed-library availability.
+        """
+        with self._lock:
+            configured = _CONFIGURED_ID.fullmatch(identifier) if isinstance(identifier, str) else None
+            if configured:
+                presets = configured_presets(self.cfg)
+                number = int(configured[1])
+                if number <= len(presets):
+                    return dict(presets[number - 1])
+            else:
+                if not isinstance(identifier, str) or not _ID.fullmatch(identifier):
+                    raise FavoriteError("invalid_id", "Invalid favorite ID")
+                self._require_available()
+                presets = self.effective_presets()
+                # Only the managed suffix owns stable IDs. An experimental
+                # configured source may happen to use the same textual ID.
+                configured_count = len(presets) - len(self._records)
+                for preset in presets[configured_count:]:
+                    if preset["id"] == identifier:
+                        return dict(preset)
+            raise FavoriteError("not_found", "Unknown favorite ID", 404)
+
     def _entry(self, identifier: str) -> dict[str, object]:
         return next(record for record in self.document()["favorites"] if record["id"] == identifier)
 
@@ -275,14 +304,32 @@ class FavoritesStore:
 class FavoritesApi:
     """JSON routes for ORR's library; no compatibility claims for OEM writes."""
 
-    def __init__(self, store: FavoritesStore, current_item: Callable[[], QueueItem | None]) -> None:
+    def __init__(self, store: FavoritesStore, current_item: Callable[[], QueueItem | None],
+                 play_snapshot: Callable[[dict[str, object]], Awaitable[None]]) -> None:
         self.store, self.current_item = store, current_item
+        self.play_snapshot = play_snapshot
 
     def routes(self) -> list[web.RouteDef]:
         base = "/orr/v1/favorites"
         return [web.get(base, self.handle), web.post(base, self.handle),
                 web.post(base + "/current", self.handle),
+                web.post(base + "/{id}/play", self.handle_play),
                 web.patch(base + "/{id}", self.handle), web.delete(base + "/{id}", self.handle)]
+
+    async def handle_play(self, request: web.Request) -> web.Response:
+        """Admit one bodyless stable-ID selection through the existing player."""
+        try:
+            if request.content_length not in {None, 0} or request.headers.get("Transfer-Encoding"):
+                raise FavoriteError("unexpected_body", "Favorite play does not accept a request body")
+            identifier = request.match_info["id"]
+            selected = self.store.playback_snapshot(identifier)
+            await self.play_snapshot(selected)
+            return web.json_response({"request_acknowledged": True, "favorite_id": identifier})
+        except FavoriteError as exc:
+            return web.json_response({"error": exc.code, "message": str(exc)}, status=exc.status)
+        except (BackendError, OSError, TimeoutError):
+            return web.json_response({"error": "playback_failed",
+                                      "message": "Favorite playback could not be confirmed"}, status=502)
 
     @staticmethod
     async def _body(request: web.Request) -> object:
