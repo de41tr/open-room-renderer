@@ -9,7 +9,7 @@ import socket
 import subprocess
 import sys
 from threading import Thread
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import pytest
 
@@ -52,8 +52,9 @@ def http_peer(status, body="OK", *, disconnect=False, location=None, request_hea
             assert not thread.is_alive()
 
 
-def invoke(port, *args):
+def invoke(port, *args, env_overrides=None):
     env = {**os.environ, "PYTHONPATH": str(ROOT), "NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1"}
+    env.update(env_overrides or {})
     return subprocess.run([sys.executable, "-m", "fake_linkplay.cli", *args,
         "--host", "127.0.0.1", "--port", str(port)], cwd=ROOT, env=env,
         capture_output=True, text=True, timeout=15)
@@ -71,6 +72,8 @@ def test_cli_success_and_command_encoding(arguments, command):
     assert result.returncode == 0 and result.stdout == "synthetic response\n"
     assert result.stderr == ""
     assert len(requests) == 1
+    encoded = "setPlayerCmd:play:" + quote(arguments[1], safe="") if arguments[0] == "play" else command
+    assert requests[0] == "/httpapi.asp?command=" + encoded
     query = parse_qs(urlsplit(requests[0]).query)
     assert list(query) == ["command"]
     assert unquote(query["command"][0]) == command
@@ -118,8 +121,60 @@ def test_cli_timeout_is_nonzero_without_url_traceback(monkeypatch, capsys):
     def timeout(url, **kwargs):
         assert kwargs == {"timeout": 10, "allow_redirects": False}
         raise cli.requests.Timeout("sensitive request: " + url)
-    monkeypatch.setattr(cli.requests, "get", timeout)
+    class Session:
+        trust_env = True
+        closed = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.closed = True
+
+        def get(self, url, **kwargs):
+            assert self.trust_env is False
+            return timeout(url, **kwargs)
+
+    session = Session()
+    monkeypatch.setattr(cli.requests, "Session", lambda: session)
     assert cli.main(["play", SECRET_URL]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "Request failed: timed out\n"
+    assert session.closed
+
+
+@pytest.mark.parametrize("media_url", [
+    "https://media.example.test/音声/a%2Fb?token=synthetic-secret&name=a b+c#部分",
+    "http://[::1]:8081/a:b?literal=%25&reserved=/?#fragment",
+])
+def test_cli_play_preserves_exact_encoded_request_target(media_url):
+    with http_peer(200) as (port, received):
+        result = invoke(port, "play", media_url)
+    assert result.returncode == 0 and result.stderr == ""
+    assert received == ["/httpapi.asp?command=setPlayerCmd:play:" + quote(media_url, safe="")]
+
+
+@pytest.mark.parametrize("arguments", [
+    ("status",), ("pause",), ("resume",), ("stop",), ("volume", "37"), ("play", SECRET_URL),
+])
+def test_cli_ignores_environment_proxy_and_synthetic_netrc(tmp_path, arguments):
+    # Only synthetic credentials and owned loopback peers are used. Override the
+    # invoke helper's usual bypass last so a proxy regression cannot pass unseen.
+    netrc = tmp_path / "synthetic.netrc"
+    netrc.write_text("machine 127.0.0.1 login synthetic-user password synthetic-password\n")
+    netrc.chmod(0o600)
+    headers = []
+    with http_peer(200, "unexpected proxy") as (proxy_port, proxy_received):
+        proxy = f"http://synthetic-proxy:synthetic-password@127.0.0.1:{proxy_port}"
+        env = {key: proxy for key in (
+            "http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY",
+        )}
+        env.update({"NETRC": str(netrc), "NO_PROXY": "", "no_proxy": ""})
+        with http_peer(200, "direct renderer", request_headers=headers) as (port, received):
+            result = invoke(port, *arguments, env_overrides=env)
+    assert result.returncode == 0 and result.stdout == "direct renderer\n"
+    assert result.stderr == ""
+    assert len(received) == 1 and proxy_received == []
+    assert len(headers) == 1
+    assert {name.lower() for name in headers[0]}.isdisjoint({"authorization", "proxy-authorization"})

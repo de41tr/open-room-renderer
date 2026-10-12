@@ -44,11 +44,14 @@ class RecordedRequest:
 def http_peer(
     status: int = 200, body: str = "OK", *,
     disconnect: bool = False, location: str | None = None,
+    request_headers: list[dict[str, str]] | None = None,
 ) -> Iterator[tuple[int, list[RecordedRequest]]]:
     received: list[RecordedRequest] = []
 
     class Handler(BaseHTTPRequestHandler):
         def handle_request(self) -> None:
+            if request_headers is not None:
+                request_headers.append(dict(self.headers))
             length = int(self.headers.get("Content-Length", "0"))
             received.append(RecordedRequest(
                 self.command, self.path, self.headers.get("Content-Type"), self.rfile.read(length),
@@ -81,11 +84,14 @@ def http_peer(
             assert not thread.is_alive()
 
 
-def invoke(port: int, *arguments: str) -> subprocess.CompletedProcess[str]:
+def invoke(
+    port: int, *arguments: str, env_overrides: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ, "PYTHONPATH": str(ROOT), "PYTHONUTF8": "1",
         "NO_PROXY": "127.0.0.1", "no_proxy": "127.0.0.1",
     }
+    env.update(env_overrides or {})
     return subprocess.run(
         [sys.executable, "-m", "fake_linkplay.cli", "favorites", *arguments,
          "--host", "127.0.0.1", "--port", str(port)],
@@ -124,6 +130,7 @@ def test_favorites_cli_exact_routes_and_json_payloads(
     else:
         assert request.content_type == "application/json"
         assert json.loads(request.body) == payload
+        assert request.body == json.dumps(payload, allow_nan=False).encode("utf-8")
 
 
 @pytest.mark.parametrize("arguments", COMMANDS)
@@ -209,11 +216,27 @@ def test_favorites_cli_timeout_and_request_options(
         assert kwargs == expected
         raise cli.requests.Timeout("sensitive request: " + MEDIA_URL)
 
-    monkeypatch.setattr(cli.requests, "request", timeout)
+    class Session:
+        trust_env = True
+        closed = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.closed = True
+
+        def request(self, method, url, **kwargs):
+            assert self.trust_env is False
+            return timeout(method, url, **kwargs)
+
+    session = Session()
+    monkeypatch.setattr(cli.requests, "Session", lambda: session)
     assert cli.main(["favorites", *arguments]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "Request failed: timed out\n"
+    assert session.closed
 
 
 @pytest.mark.parametrize("body,committed_warning", [
@@ -231,3 +254,25 @@ def test_cli_committed_failure_warns_without_echoing_arbitrary_response(body, co
                 "Run favorites list before retrying.\n") if committed_warning else "Request failed: HTTP 503\n"
     assert result.stderr == expected
     assert MEDIA_URL not in result.stderr and NAME not in result.stderr
+
+
+@pytest.mark.parametrize("arguments", COMMANDS)
+def test_favorites_cli_ignores_environment_proxy_and_synthetic_netrc(tmp_path, arguments):
+    # Explicitly clear both NO_PROXY spellings after invoke's default environment.
+    netrc = tmp_path / "synthetic.netrc"
+    netrc.write_text("machine 127.0.0.1 login synthetic-user password synthetic-password\n")
+    netrc.chmod(0o600)
+    headers = []
+    with http_peer(200, "unexpected proxy") as (proxy_port, proxy_received):
+        proxy = f"http://synthetic-proxy:synthetic-password@127.0.0.1:{proxy_port}"
+        env = {key: proxy for key in (
+            "http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY",
+        )}
+        env.update({"NETRC": str(netrc), "NO_PROXY": "", "no_proxy": ""})
+        with http_peer(200, "direct renderer", request_headers=headers) as (port, received):
+            result = invoke(port, *arguments, env_overrides=env)
+    assert result.returncode == 0 and result.stdout == "direct renderer\n"
+    assert result.stderr == ""
+    assert len(received) == 1 and proxy_received == []
+    assert len(headers) == 1
+    assert {name.lower() for name in headers[0]}.isdisjoint({"authorization", "proxy-authorization"})

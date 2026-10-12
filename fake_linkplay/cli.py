@@ -26,7 +26,8 @@ from .http_api import HttpApi
 from .mdns import MdnsAdvertiser
 from .mpv_backend import BackendError, MpvBackend
 from .playlist_cli import add_playlist_parser, run_playlist
-from .queue_client import PrivateClientArgumentParser, add_queue_commands, run_queue_command
+from .queue_client import (PrivateClientArgumentParser, QueueClientError, _endpoint,
+                           add_queue_commands, run_queue_command)
 from .ssdp import SsdpServer
 from .state import RendererState
 from .transport_client import COMMANDS, add_transport_commands, run_transport_command
@@ -172,22 +173,30 @@ async def serve(config_path: str) -> None:
 def api_get(host: str, port: int, command: str) -> int:
     """Print a successful response or a safe error and return an exit status."""
 
-    url = f"http://{host}:{port}/httpapi.asp?command={command}"
     try:
-        response = requests.get(url, timeout=10, allow_redirects=False)
+        url = _endpoint(host, port, path=f"/httpapi.asp?command={command}")
+    except QueueClientError:
+        print("Request failed: invalid renderer host or port", file=sys.stderr)
+        return 1
+    try:
+        # Use only the explicit endpoint, without ambient proxy/netrc credentials.
+        # Default Requests adapters do not retry; redirects remain disabled.
+        with requests.Session() as session:
+            session.trust_env = False
+            with session.get(url, timeout=10, allow_redirects=False) as response:
+                if not 200 <= response.status_code < 300:
+                    # Do not print the exception, request URL or response body: a play
+                    # command can contain a credential-bearing media URL in its query.
+                    print(f"Request failed: HTTP {response.status_code}", file=sys.stderr)
+                    return 1
+                print(response.text)
+                return 0
     except requests.Timeout:
         print("Request failed: timed out", file=sys.stderr)
         return 1
     except requests.RequestException:
         print("Request failed: could not contact renderer", file=sys.stderr)
         return 1
-    if not 200 <= response.status_code < 300:
-        # Do not print the exception, request URL or response body: a play
-        # command can contain a credential-bearing media URL in its query.
-        print(f"Request failed: HTTP {response.status_code}", file=sys.stderr)
-        return 1
-    print(response.text)
-    return 0
 
 
 def favorite_id(value: str) -> str:
@@ -204,32 +213,38 @@ def favorites_request(
 ) -> int:
     """Manage favorites through the renderer, keeping failed requests private."""
 
-    url = f"http://{host}:{port}/orr/v1/favorites{path}"
+    try:
+        url = _endpoint(host, port, path=f"/orr/v1/favorites{path}")
+    except QueueClientError:
+        print("Request failed: invalid renderer host or port", file=sys.stderr)
+        return 1
     try:
         kwargs = {"json": payload} if payload is not None else {}
-        response = requests.request(method, url, timeout=10, allow_redirects=False, **kwargs)
+        with requests.Session() as session:
+            session.trust_env = False
+            with session.request(method, url, timeout=10, allow_redirects=False, **kwargs) as response:
+                if not 200 <= response.status_code < 300:
+                    # Inspect only a fixed, owned error discriminator. Never print server
+                    # text, media URLs, names, or exceptions from an unsuccessful request.
+                    try:
+                        error = response.json()
+                    except ValueError:
+                        error = None
+                    if (response.status_code == 503 and isinstance(error, dict)
+                            and error.get("error") == "durability_unconfirmed" and error.get("committed") is True):
+                        print("Favorites were replaced, but crash durability is unconfirmed. "
+                              "Run favorites list before retrying.", file=sys.stderr)
+                    else:
+                        print(f"Request failed: HTTP {response.status_code}", file=sys.stderr)
+                    return 1
+                print(response.text)
+                return 0
     except requests.Timeout:
         print("Request failed: timed out", file=sys.stderr)
         return 1
     except requests.RequestException:
         print("Request failed: could not contact renderer", file=sys.stderr)
         return 1
-    if not 200 <= response.status_code < 300:
-        # Inspect only a fixed, owned error discriminator. Never print server
-        # text, media URLs, names, or exceptions from an unsuccessful request.
-        try:
-            error = response.json()
-        except ValueError:
-            error = None
-        if (response.status_code == 503 and isinstance(error, dict)
-                and error.get("error") == "durability_unconfirmed" and error.get("committed") is True):
-            print("Favorites were replaced, but crash durability is unconfirmed. "
-                  "Run favorites list before retrying.", file=sys.stderr)
-        else:
-            print(f"Request failed: HTTP {response.status_code}", file=sys.stderr)
-        return 1
-    print(response.text)
-    return 0
 
 
 def build_parser(*, private_client_errors: bool = False) -> argparse.ArgumentParser:
