@@ -106,3 +106,69 @@ async def test_generic_explicit_interface_real_owned_socket_isolation():
     print(json.dumps({"lane": "PRODUCTION_ZEROCONF/interface-isolation", "zeroconf_version": zeroconf.__version__,
                       "owned_ipv4_readers_isolated": len(sockets), "selected_sender_verified": True,
                       "owned_sockets_closed": True}, sort_keys=True))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["error", "cancel"])
+async def test_real_loopback_unregister_failure_closes_owned_sockets(monkeypatch, fault):
+    """Only unregister is MOCK-injected; all owned resources/closure are real."""
+    import sys
+    from unittest.mock import AsyncMock
+
+    advertiser = MdnsAdvertiser(Config(
+        uuid="00000000-0000-4000-8000-000000000009", enable_mdns=True,
+        advertise_ip="127.0.0.1", discovery_interface="127.0.0.1",
+        mdns_instance_name="Synthetic teardown fixture",
+    ))
+    assert sys.platform == "linux", "Explicit discovery resource lane requires Linux"
+    owner = None
+    sockets = []
+    try:
+        async with asyncio.timeout(15):
+            await advertiser.start()
+            owner = advertiser._zeroconf
+            engine = owner.zeroconf.engine
+            transports = {wrapper.transport for wrapper in (*engine.readers, *engine.senders)}
+            sockets = [transport.get_extra_info("socket") for transport in transports]
+            assert sockets and all(sock.fileno() >= 0 for sock in sockets)
+            original_fds = {sock.fileno() for sock in sockets}
+            selector = asyncio.get_running_loop()._selector
+            assert original_fds <= set(selector.get_map())
+            assert all(sender.transport.get_extra_info("socket").getsockname()[0] == "127.0.0.1"
+                       for sender in engine.senders)
+            # MOCK failure injection only. Zeroconf's instance, startup, sockets,
+            # service registration, and async_close remain real production code.
+            if fault == "error":
+                monkeypatch.setattr(owner, "async_unregister_service",
+                                    AsyncMock(side_effect=OSError("injected unregister failure")))
+                with pytest.raises(OSError, match="injected unregister failure"):
+                    await advertiser.stop()
+            else:
+                entered = asyncio.Event()
+                async def stalled_unregister(_info):
+                    entered.set()
+                    await asyncio.Future()
+                monkeypatch.setattr(owner, "async_unregister_service", stalled_unregister)
+                stopping = asyncio.create_task(advertiser.stop())
+                await asyncio.wait_for(entered.wait(), 1)
+                stopping.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await stopping
+            await asyncio.sleep(0)
+            assert all(sock.fileno() == -1 for sock in sockets)
+            assert all(transport.is_closing() for transport in transports)
+            assert owner.zeroconf.done
+            assert not original_fds.intersection(selector.get_map())
+            assert advertiser._zeroconf is None and advertiser._infos == []
+            await advertiser.stop()
+            print(json.dumps({"lane": "PRODUCTION_ZEROCONF/loopback-teardown-with-MOCK-failure",
+                              "injected_failure": f"async_unregister_service {fault}",
+                              "owned_sockets_closed": len(sockets),
+                              "owned_selector_readers_removed": len(original_fds),
+                              "repeated_stop_is_noop": True,
+                              "physical_lan_or_app_interoperability": False}, sort_keys=True))
+    finally:
+        # The failing pre-fix regression must not leak its actual sockets.
+        if owner is not None:
+            async with asyncio.timeout(5):
+                await owner.async_close()

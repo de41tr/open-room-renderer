@@ -22,6 +22,7 @@ from .config import Config
 LOG = logging.getLogger(__name__)
 MDNS_GROUP = "224.0.0.251"
 MDNS_PORT = 5353
+ZEROCONF_CLOSE_TIMEOUT = 5.0
 DNS_CLASS_IN = 1
 DNS_CLASS_CACHE_FLUSH = 0x8001
 DNS_TYPE_A = 1
@@ -499,9 +500,19 @@ class MdnsAdvertiser:
                 if isinstance(self._zeroconf, CustomMdnsResponder):
                     await self._zeroconf.stop()
                 else:
-                    for info in self._infos:
-                        await self._zeroconf.async_unregister_service(info)
-                    await self._zeroconf.async_close()
+                    try:
+                        for info in self._infos:
+                            await self._zeroconf.async_unregister_service(info)
+                    finally:
+                        # Even failed/cancelled withdrawal must close owned sockets.
+                        # Bound this cleanup: an outer timeout may have already
+                        # cancelled unregister. Retain the handle on close failure
+                        # so a later stop can retry rather than orphan resources.
+                        async with asyncio.timeout(ZEROCONF_CLOSE_TIMEOUT):
+                            await self._zeroconf.async_close()
+                        self._infos.clear()
+                        self._zeroconf = None
+                    return
                 self._infos.clear()
                 self._zeroconf = None
 
