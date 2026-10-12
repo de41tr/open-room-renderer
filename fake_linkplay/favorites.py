@@ -21,12 +21,13 @@ from uuid import uuid4
 
 from aiohttp import web
 
+from .canonical_target import canonical_target_url
 from .capabilities import configured_presets
 from .config import Config
 from .mpv_backend import BackendError
 from .persistence import AtomicWriteCommittedError, atomic_write_text
 from .queue import PlaybackQueue, QueueItem
-from .radio import RadioResolutionError, public_station_reference
+from .radio import RadioResolutionError
 
 LOG = logging.getLogger(__name__)
 
@@ -256,20 +257,11 @@ class FavoritesStore:
         self._require_available()
         if item is None or not item.url:
             raise FavoriteError("no_current_target", "Current queue has no resolved direct target", 409)
-        url = item.url
-        provenance = item._radio_station
-        if provenance is not None:
-            # Only successful local resolution establishes this private tuple.
-            # Never persist its temporary target or infer trust from metadata.
-            try:
-                if (type(provenance) is not tuple or len(provenance) != 2
-                        or provenance[0] != item.url or item.stream_type != "station"
-                        or type(item.duration) not in (int, float) or item.duration != 0):
-                    raise RadioResolutionError("Invalid station provenance")
-                url = public_station_reference(provenance[1])
-            except RadioResolutionError:
-                raise FavoriteError("no_canonical_target",
-                    "Current station has no trusted canonical public reference", 409) from None
+        try:
+            url = canonical_target_url(item)
+        except RadioResolutionError:
+            raise FavoriteError("no_canonical_target",
+                "Current station has no trusted canonical public reference", 409) from None
         return self.add({"name": name, "url": url, "title": item.title,
                          "artist": item.artist, "album": item.album, "artwork": item.artwork})
 
