@@ -372,3 +372,36 @@ async def test_backend_loss_converges_without_polling_and_stays_failed_until_exp
     assert env.api.mpv.calls == [("load", first), ("load", second)]
     state = await command("getPlayerStatus")
     assert state["uri"] == second and state["status"] == "play" and state["transport_error"] == ""
+
+
+@pytest.mark.asyncio
+async def test_explicit_play_after_backend_loss_preserves_http_and_soap_failure_codes(local_events):
+    """Loopback protocol regression; established/dead backend is synthetic."""
+    env = local_events
+    first, replacement = "https://media.example.test/ready.wav", "https://media.example.test/replacement.wav"
+    async with env.client.get(env.base + "/httpapi.asp", params={"command": "setPlayerCmd:play:" + first}) as response:
+        assert response.status == 200 and await response.text() == "OK"
+    assert env.api.state.phase.value == "PLAYING"
+    env.api.mpv.fail = True
+    await eventually(lambda: env.api.state.phase.value == "ERROR")
+    # Match the native AP07 explicit retry: failed playback remains a gateway
+    # error. Only the transport/audio backend is mocked; routing is real HTTP.
+    async with env.client.get(env.base + "/httpapi.asp", params={"command": "setPlayerCmd:play:" + replacement}) as response:
+        body = await response.text()
+        assert response.status == 502, (response.status, body)
+        assert body == "Failed" and response.content_type == "text/plain"
+    namespace = "urn:schemas-upnp-org:service:AVTransport:1"
+    envelope = (f'<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>'
+                f'<u:Play xmlns:u="{namespace}"><Speed>1</Speed></u:Play></s:Body></s:Envelope>')
+    async with env.client.post(env.base + "/upnp/control/AVTransport", data=envelope, headers={
+        "SOAPACTION": f'"{namespace}#Play"', "Content-Type": "text/xml",
+    }) as response:
+        body = await response.text()
+        assert response.status == 500, (response.status, body)
+        assert "<errorCode>501</errorCode>" in body
+    async with env.client.get(env.base + "/httpapi.asp", params={"command": "getPlayerStatus"}) as response:
+        assert response.status == 200
+        state = await response.json()
+    assert state["status"] == "stop" and state["playback_phase"] == "ERROR"
+    assert state["transport_error"] and state["gain_confirmed"] is False
+    assert state["vol"] == "50" and state["mute"] == "0"

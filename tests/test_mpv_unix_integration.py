@@ -696,7 +696,7 @@ async def test_real_unix_ipc_owned_player_death_is_terminal_until_renderer_resta
                         assert spawn_log.read_text().splitlines() == [str(process.pid)]
                         # An explicit Play against the failed instance still cannot
                         # respawn it. Both surfaces report failure; restart is needed.
-                        await command(f"setPlayerCmd:play:{tracks[1]}", expected_status=503)
+                        assert await command(f"setPlayerCmd:play:{tracks[1]}", expected_status=502) == "Failed"
                         assert "<errorCode>501</errorCode>" in await soap("Play", "<Speed>1</Speed>", expected_status=500)
                         assert spawn_log.read_text().splitlines() == [str(process.pid)]
                         assert not endpoint.exists() and backend.process is None
