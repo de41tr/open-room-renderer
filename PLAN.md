@@ -4,15 +4,16 @@ Branch: `dot/renderer-autonomous-20261012`; base: `3672b9838e9c39ae8191613108f0d
 Work window ends 2026-10-12 20:00 UTC. Stabilization only after 19:00 UTC.
 No main-branch edits, merge, or release.
 
-## Current functional package (12:31 UTC)
+## Current functional package (12:53 UTC)
 
-Queue controls/authored files and the Python-floor scheduling repair have a full
-green checkpoint at `3e2455f`. Publish the reviewed client-only next/previous,
-explicit mute, absolute seek and current-queue mode controls, then verify their
-standard CI. Their final defaults and expanded short native CLI flow pass locally.
-Next, finish the small stable-ID favorite recall route/CLI using a detached preset
-snapshot and the unchanged playback path, avoiding numeric-slot compaction races.
-No core rewrite, new listener, authentication change or browser UI is included.
+Transport controls are published at `0b6defa`; PR synchronization/CI is still
+pending while the branch itself is verified. Last fully green checkpoint remains
+`3e2455f`. Do not re-push or change PR state just to force a refresh. Publish the
+naturally completed, reviewed stable-ID favorite recall checkpoint with its exact
+local/default/native evidence and an explicit hosted-verification limit. Keep the
+13-line preset helper extraction separate, without changing playback internals.
+Assess a strict offline M3U-to-authored-playlist convenience next; no fetch or
+backend change. Browser UI and additional multihour probes remain deferred.
 
 ## Ordered work
 

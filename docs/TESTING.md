@@ -1701,3 +1701,38 @@ seek to 8s remains paused at about 7.85s under the existing confirmation toleran
 The previous queue/file/restart-independent cleanup claims remain. Exact-final
 libmpv 0.37/0.40 runs pass in 8.518s/7.990s with 55 received events and the unchanged
 20s subprocess bound. This adds no second native test or shuffle-history claim.
+
+
+## Stable-ID favorite recall acceptance
+
+The new own-API/CLI recall resolves one detached preset snapshot under the library
+lock, never a stale numeric slot followed by another lookup. The 13-line preset
+playback block is extracted separately and reused; `_play_url`, recovery, staging
+and ownership logic are unchanged. Helper-only validation passed 137 existing
+favorite/MCU/radio checks, including the prior real libmpv 0.40 favorite case.
+Independent comparison with the original inline MCU code matched state, metadata,
+events, errors and backend mutations across success/failure/cancellation cases.
+Additional lock, edits-during-await, newer-owner and stale-cleanup probes passed.
+
+Final integrated defaults passed 3695/70 on Python 3.12 (180.03s) and 3552 +143/70 on
+Python 3.11 groups (138.47s/42.19s). The new subprocess-heavy favorite CLI file joins
+the existing second floor group; exact collection 3765 = 3622 + 143 has no missing,
+extra or duplicate IDs. Step/job/watchdog bounds remain unchanged. Production
+source digest before/after:
+`9d1286edd705e79a07223488bec14b51bc7e87a8544be2567af0db3b429561e2`.
+
+The existing short native favorites case now makes one actual CLI bodyless POST,
+Content-Length 0 and no Transfer-Encoding, without a preliminary GET. A managed B
+favorite moves slot 2→1 after deletion; a distinct A radio target occupies and
+plays from stale slot 2. Stable-ID recall loads B at a fresh native entry 3→4 with
+selected PCM and advancing position. Existing HTTP metadata and received GENA
+URI/title/source checks agree, and library bytes remain unchanged. All prior
+pywiim, edit-continuity, restart/no-autoplay, stable-radio fresh resolution and
+cleanup proofs remain. Exact-final 0.40/0.37 probes pass in 5.062s/5.069s, retaining
+16s async/18s outer bounds and the reaped CLI child's 4s bound. This is controlled
+loopback REAL_BACKEND/null; no new Unix-IPC, physical-audio or provider-WAN claim.
+
+At 12:50 UTC the published transport branch 0b6defa was hash-verified, while the PR
+head ref remained 3e2455f and its new CI was absent. Local success is not a substitute
+for that missing hosted result. Subsequent checkpoints must keep the distinction
+explicit until synchronization and CI actually complete.

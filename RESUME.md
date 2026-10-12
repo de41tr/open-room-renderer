@@ -190,3 +190,13 @@ Stable-ID favorite recall is in a separate private candidate; finish independent
 review and short native proof before integrating, and merge its CLI guard with
 the new transport guard. Browser UI remains deferred; do not replace supported
 browser interaction with a shell automation route. No extra multihour tests.
+
+12:53 UTC: transport head 0b6defa is published and hash-verified, but PR head/CI
+still lag at 3e2455f. Parent independently confirmed the mismatch. No blind repush,
+close/reopen or invented CI pass. Continue naturally completed tested checkpoints.
+Stable-ID favorites now pass final 3695/70 defaults, exact collection 3765 = 3622 + 143,
+and short native compaction proof on both versions. Publish the small existing
+preset-helper extraction separately from the new route/CLI, then native test and
+unchanged-budget third CLI-file partition, then docs. Helper-only baseline passes
+137 focused/native checks. Keep configured IDs explicitly positional within config.
+A strict offline M3U import is being assessed only; browser UI remains deferred.

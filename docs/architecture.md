@@ -260,3 +260,10 @@ outside HttpApi: `queue_client.py` frames and validates existing SOAP operations
 frames existing HTTP controls and checks their bounded acknowledgements. No backend, recovery or
 queue-staging logic moves into these adapters. Live queue export is deliberately
 not inferred from potentially resolved BrowseQueue URLs.
+
+Stable favorite recall keeps selection in `FavoritesStore.playback_snapshot`,
+then crosses a dedicated callback into the existing preset playback helper.
+The detached record is consumed before the first playback await; it is never
+converted back into a mutable numeric slot. `favorites_client.py` owns the strict
+single-request acknowledgement. Existing recovery/staging/ownership paths stay
+in place, and numeric public-client recall remains an independent legacy surface.

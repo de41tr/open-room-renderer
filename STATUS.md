@@ -2,7 +2,7 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (12:31 UTC)
+## Current checkpoint (12:53 UTC)
 
 Draft PR remains unmerged. Scheduling repair `3e2455f` passed all three standard
 jobs, verified at 12:31:26 UTC:
@@ -13,14 +13,22 @@ groups passed 3523 +130 tests /70 skips in 138.69s/42.86s. Both native architect
 passed every existing gate. The previous `763f7f7` stays failed for its 181.55s
 Python-floor timeout, despite all assertions and both native jobs passing.
 
-The next reviewed client-only package adds next/previous, mute on/off, absolute
-seek and current-queue mode changes. No renderer core or protocol handlers change.
-Final defaults pass 3674/70 on Python 3.12 (171.37s); grouped Python 3.11 passes
-3538 +136/70 (136.04s/37.87s). Sixteen actual CLI commands verify mode continuity,
-B→C→B native source changes, actual mute and paused seek, plus the earlier queue/
-authored-file flow, in about 8s on libmpv 0.37/0.40. This package's new hosted gate
-will be checked after publication. Stable-ID favorite recall is privately under
-independent and native review. Browser UI remains deferred without supported QA.
+Transport controls are published on branch head `0b6defa`. At 12:50 UTC, the
+remote branch and all source hashes were verified, but the PR head reference still
+pointed to `3e2455f` and no transport workflow had appeared. This is an observed
+synchronization delay, not a failed push or a new hosted pass. Do not merge/release
+or replace this missing evidence with local results.
+
+The next tested checkpoint adds stable managed-ID favorite recall through one
+bodyless request. A detached snapshot prevents deletion/slot compaction from
+selecting another target; configured recall still works with a corrupt managed
+library. A separate tiny extraction reuses the existing preset playback block.
+Independent old-MCU comparison and ownership/race tests pass. Final defaults pass
+3695/70 on Python 3.12 (180.03s), and grouped Python 3.11 passes 3552 +143/70
+(138.47s/42.19s). Actual CLI/native recall selects B after its ID moves slot2→1
+while stale slot2 plays A, with fresh native identity/progress and received GENA.
+Both libmpv versions pass the unchanged bounded favorite flow in about 5.1s.
+The new checkpoint will remain hosted-verification-pending until CI is observed.
 
 The requested behavior-neutral extraction began at 09:14:53 UTC after its prerequisite green gate.
 It moves exactly three stateless metadata-edit helpers into metadata_formatting.py,

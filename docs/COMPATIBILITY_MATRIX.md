@@ -357,7 +357,7 @@ fence. Repeat uses normal confirmed loading and makes no gapless-repeat promise.
 The renderer-owned JSON library is separate from OEM/provider preset-write APIs.
 Existing public `getPresetInfo`, `MCUKeyShortClick:N[:1]` and `preset_key` share one
 effective view: unchanged configuration-owned prefix followed by managed entries.
-Stable managed IDs identify edits; numeric slots are dense and can change after
+Stable managed IDs identify edits and owned recall; numeric slots are dense and can change after
 removal. Recall still selects one direct target, including a playlist/container
 URL; it does not resume an old multi-track position.
 
@@ -366,6 +366,7 @@ URL; it does not resume an old multi-track position.
 | GET `/orr/v1/favorites` | None | Versioned list with id, slot, editable, name, url and display fields |
 | POST `/orr/v1/favorites` | name, url; optional title/artist/album/artwork | 201 and created favorite |
 | POST `/orr/v1/favorites/current` | name | 201 and canonical selected direct target |
+| POST `/orr/v1/favorites/ID/play` | No body | 200 and `{"request_acknowledged":true,"favorite_id":"ID"}` |
 | PATCH `/orr/v1/favorites/ID` | name | 200 and renamed favorite |
 | DELETE `/orr/v1/favorites/ID` | No body | 200 and deleted ID |
 
@@ -377,6 +378,19 @@ XML text fail. HTTP(S) URL bytes and query encoding are preserved; userinfo and
 renderer audio-proxy paths, including encoded/dot-segment equivalents, are rejected.
 No library edit fetches media or changes the active queue, generation, position,
 volume or play mode. Playback still goes through the existing selected-URL path.
+
+Owned recall accepts a managed ID or strict `configured:N` (one to six digits,
+positive and no leading zero). Configured IDs identify configuration slots and
+can change meaning if that configuration is reordered; managed IDs are stable.
+It resolves a detached effective-preset snapshot
+under the library lock, preserving source and artwork, before awaiting playback.
+Later edits cannot retarget that request; deletion before admission returns 404.
+Malformed IDs or any body/chunked transfer return 400, managed-library unavailability
+returns 503, and backend/resolver failures return a fixed private-safe 502. Existing
+playback ownership, cleanup and recovery rules apply. The acknowledgement is not
+a continuing audio observation. The CLI requires that exact bounded acknowledgement
+and HTTP 200; it makes one request without redirects or retries, with an explicit
+unconfirmed-outcome warning on timeout.
 
 A corrupt/unreadable store is preserved: managed API reads/writes return 503 while
 configuration-owned recall and unrelated playback remain usable. Pre-replace

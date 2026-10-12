@@ -306,17 +306,28 @@ With the renderer running, manage its own local library through the CLI:
 open-room-renderer favorites list
 open-room-renderer favorites add "Morning radio" "https://media.example.test/live.m3u"
 open-room-renderer favorites save-current "Selected track"
+open-room-renderer favorites play FAVORITE_ID
+open-room-renderer favorites play configured:1
 open-room-renderer favorites rename FAVORITE_ID "New label"
 open-room-renderer favorites delete FAVORITE_ID
 ```
 
 Replace the example URL with a stable public or user-owned HTTP(S) media URL.
 Each command accepts `--host` and `--port` (defaults: `127.0.0.1`, `8080`). Use the
-returned stable favorite ID for edits, not its numeric playback slot. Existing
+returned stable favorite ID for edits and recall. Existing
 configuration-owned favorites stay first and read-only; new entries append.
 Deleting a managed entry compacts subsequent slots, so refresh the list before
 using `MCUKeyShortClick:N` or a public client's preset selector. Editing a favorite
 does not alter audio that is already playing.
+
+`favorites play ID` sends one bodyless request and selects a detached snapshot of
+that favorite. Deleting or renaming library entries after admission cannot change
+the requested source. Use the listed `configured:N` ID for a configuration-owned
+favorite. `configured:N` identifies a configuration slot; changing configuration
+order can change that slot. Managed IDs remain stable across library edits.
+The CLI reports `request_acknowledged`, not a claim that audio is still
+playing. A timeout leaves the outcome unconfirmed: check status before deciding
+whether to try again. The CLI never retries or follows a redirect.
 
 `add` optionally accepts `--title`, `--artist`, `--album` and `--artwork`.
 `save-current` saves the canonical selected direct URL and display metadata, not

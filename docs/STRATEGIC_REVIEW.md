@@ -4,23 +4,23 @@ Optimize useful, verified user workflows per hour, not test/commit/line counts.
 All work stays on the autonomous branch and draft PR; no merge or release.
 Stabilization starts 2026-10-12 19:00 UTC; active work ends at 20:00 UTC.
 
-## Current decision (2026-10-12 12:31 UTC)
+## Current decision (2026-10-12 12:56 UTC)
 
-- **COMPLETE:** queue load/show/index selection and explicit authored playlist
-  creation/restore have native source/progress/event proof. The first hosted
-  checkpoint's Python-floor timeout is retained; its reviewed same-runner
-  scheduling repair now has all standard jobs green, without relaxed caps or
-  omitted checks. Stop expanding infrastructure while the bounds hold.
-- **CONTINUE:** publish reviewed client-only next/previous/mute/seek/current-mode
-  commands. They expose existing useful behavior without core changes; the exact
-  expanded native flow and final default suites pass. Finish hosted verification.
-- **CONTINUE:** stable-ID favorite recall. Numeric slots move after deletion;
-  resolving a detached snapshot at request admission prevents wrong-target recall.
-  Estimated 45–60 minutes; keep the existing playback path and a tiny shared helper,
-  with independent race/failure and one short native verification.
-- **DEFER:** browser controller. Installed browser executables are not successful
-  QA. Supported cloud browser interaction has not established a working fixture;
-  no alternative exposure, permission change or unsupported automation route.
+- **COMPLETE locally / CONTINUE hosted verification:** common transport controls
+  are published and stable-ID favorite recall is fully reviewed/tested. Actual
+  native source, mute, paused-seek and compaction evidence establishes useful
+  workflows. PR synchronization remains behind the verified branch; do not label
+  that missing hosted result green, retry writes blindly or change PR state.
+- **CONTINUE:** publish naturally completed stable-ID recall, keeping its tiny
+  existing-helper extraction separate and preserving all old playback logic.
+  The old numeric public-client surface remains distinct from stable managed IDs.
+- **PIVOT:** strict offline M3U URL-list import into existing authored JSON files.
+  It removes manual transcription without fetching media or changing the backend.
+  Estimate 45–60 minutes; reuse existing safe reads/no-clobber writes and complete
+  SOAP-size validation. Reject HLS/player directives instead of ignoring their
+  semantics; disclose discarded EXTINF metadata and the strict subset.
+- **DEFER:** browser controller. Installed executables are not successful supported
+  browser QA. No alternative exposure, permission change or unsupported automation.
 - **DEFER:** extra multihour tests, broad core extraction and provider-account
   experiments. Hardware remains unavailable; useful software work continues.
 
@@ -36,8 +36,8 @@ risk and CONTINUE/PIVOT/DEFER; green counts alone are not functional completion.
 
 | Proposal | Category | Value / effort / risk | Next action |
 |---|---|---|---|
-| Common transport CLI controls | A_AUTONOM | Reviewed existing-contract convenience; low core risk | Publish tested commands and verify standard CI. |
-| Stable-ID favorite recall | A_AUTONOM | Prevent wrong selection after slot compaction; 45–60min, bounded ownership risk | Finish snapshot/callback review and short native proof; keep playback internals unchanged. |
+| Hosted verification of completed client checkpoints | A_AUTONOM | Functional work has exact local/native evidence; synchronization is delayed | Monitor PR/CI; publish only naturally completed tested checkpoints with honest pending status. |
+| Offline M3U URL-list import | A_AUTONOM | Avoid manual URL transcription; 45–60min, bounded format/file risk | Implement strict no-network subset using existing authored-file and request validation. |
 | Optional local controller page | A_AUTONOM / DEFER | Useful, but installed browsers alone do not establish supported QA | Keep deferred until a supported interaction route is genuinely verified. |
 | Further player-core / eventing decomposition | B_AWAITING_DECISION | Potential maintenance gain; major scope and ownership/timing risk | Defer this round. Present a concrete boundary/migration plan for explicit later decision; do other authorized work meanwhile. |
 | Merge or release | C_APPROVAL_REQUIRED | Distribution decision, not an implementation milestone | Do not act. Requires separate explicit authorization; current instruction prohibits it. Silence is not consent. |
