@@ -130,6 +130,7 @@ jobs:
             tests/test_libmpv_queue_navigation_intent.py tests/test_libmpv_repeat_queue.py \
             tests/test_libmpv_favorites.py \
             tests/test_libmpv_shuffle_queue.py tests/test_libmpv_queue_cli.py \
+            tests/test_libmpv_standard_dmr.py \
             tests/test_libmpv_source_ownership.py \
             tests/test_libmpv_admitted_load_root.py \
             tests/test_libmpv_station_refresh.py tests/test_libmpv_transport_uncertainty.py
@@ -140,11 +141,12 @@ jobs:
           ORR_TEST_UNIX_IPC: "1"
         run: .venv-ci/bin/python -m pytest -q -s tests/test_mpv_unix_integration.py
 
-      - name: Exercise real pywiim against production Unix IPC
+      - name: Exercise real pywiim and standard DMR against production Unix IPC
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         env:
           ORR_TEST_PYWIIM_UNIX: "1"
-        run: .venv-ci/bin/python -m pytest -q -s tests/test_pywiim_unix_integration.py
+          ORR_TEST_DMR_UNIX: "1"
+        run: .venv-ci/bin/python -m pytest -q -s tests/test_pywiim_unix_integration.py tests/test_standard_dmr_unix_integration.py
 
       - name: Exercise production Unix IPC across repeated playback lifetimes
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
