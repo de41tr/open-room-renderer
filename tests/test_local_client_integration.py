@@ -14,6 +14,7 @@ import socket
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
+from html import escape
 from typing import Any
 
 import pytest
@@ -75,6 +76,10 @@ class FakeAudioBackend:
         self._record("mute", value)
         self.mute_value = value
 
+    async def seek(self, seconds: int) -> None:
+        self._record("seek", seconds)
+        self.position = seconds
+
     async def snapshot(self) -> dict[str, object]:
         if self.snapshot_error:
             return {"backend-error": True}
@@ -96,6 +101,8 @@ class LocalRenderer:
     client: Any
     backend: FakeAudioBackend
     commands: list[str]
+    session: ClientSession
+    base_url: str
 
 
 def loopback_listener() -> socket.socket:
@@ -183,7 +190,7 @@ async def local_renderer(tmp_path, monkeypatch) -> AsyncIterator[LocalRenderer]:
             # The first pywiim request probes/caches the endpoint. Make it
             # read-only so probing cannot duplicate the first mutation.
             await client.get_status()
-            yield LocalRenderer(client, backend, commands)
+            yield LocalRenderer(client, backend, commands, session, f"http://127.0.0.1:{port}")
     finally:
         # aiohttp schedules connection-close callbacks for the next loop tick.
         await asyncio.sleep(0)
@@ -339,3 +346,110 @@ async def test_local_client_observes_backend_error_and_recovers(local_renderer) 
     recovered = await assert_transport(client, "play")
     assert recovered["playback_phase"] == "PLAYING"
     assert recovered["transport_error"] == ""
+
+
+async def create_client_pair(renderer: LocalRenderer) -> tuple[str, str]:
+    """The real client has no queue creation API; SOAP only sets up the fixture."""
+    urls = ("https://media.example.test/first.wav", "https://media.example.test/second.wav")
+    queue = ('<PlayList><QueueName>Client pair</QueueName>'
+             '<ListInfo><SourceName>UPnPServer</SourceName><TrackNumber>2</TrackNumber></ListInfo><Tracks>'
+             + ''.join(f'<Track{i}><Title>Track {i}</Title><URL>{url}</URL><Duration>120</Duration></Track{i}>'
+                       for i, url in enumerate(urls, 1)) + '</Tracks></PlayList>')
+    namespace = "urn:schemas-wiimu-com:service:PlayQueue:1"
+    body = ('<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>'
+            f'<u:CreateQueue xmlns:u="{namespace}"><QueueContext>{escape(queue)}</QueueContext>'
+            '</u:CreateQueue></s:Body></s:Envelope>')
+    async with renderer.session.post(renderer.base_url + "/upnp/control/PlayQueue", data=body.encode(),
+            headers={"SOAPACTION": f'"{namespace}#CreateQueue"', "Content-Type": "text/xml"}) as response:
+        assert response.status == 200, await response.text()
+    return urls
+
+
+@pytest.mark.asyncio
+async def test_local_client_next_previous_select_distinct_queue_resources(local_renderer) -> None:
+    client, backend = local_renderer.client, local_renderer.backend
+    first, second = await create_client_pair(local_renderer)
+    await client.resume()
+    assert (await assert_transport(client, "play"))["uri"] == backend.url == first
+    await client.next_track()
+    assert (await assert_transport(client, "play"))["uri"] == backend.url == second
+    raw = await client.send_command("getPlayerStatus")
+    assert raw["plicurr"] == raw["plicount"] == "2"
+    await client.previous_track()
+    assert (await assert_transport(client, "play"))["uri"] == backend.url == first
+    raw = await client.send_command("getPlayerStatus")
+    assert raw["plicurr"] == "1" and raw["plicount"] == "2"
+    assert [call[1] for call in backend.calls if call[0] == "loadfile"] == [first, second, first]
+    assert [command for command in local_renderer.commands if command.startswith("setPlayerCmd:")] == [
+        "setPlayerCmd:resume", "setPlayerCmd:next", "setPlayerCmd:prev"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["next_track", "previous_track"])
+async def test_local_client_empty_navigation_fails_without_mutation(local_renderer, method) -> None:
+    client, backend = local_renderer.client, local_renderer.backend
+    before = await client.send_command("getPlayerStatus")
+    with pytest.raises(pywiim.WiiMError):
+        await getattr(client, method)()
+    assert await client.send_command("getPlayerStatus") == before
+    assert backend.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method,index", [("previous_track", 1), ("next_track", 2)])
+async def test_local_client_queue_boundary_fails_without_mutation(local_renderer, method, index) -> None:
+    client, backend = local_renderer.client, local_renderer.backend
+    first, second = await create_client_pair(local_renderer)
+    await client.resume()
+    if index == 2:
+        await client.next_track()
+    before, calls = await client.send_command("getPlayerStatus"), list(backend.calls)
+    with pytest.raises(pywiim.WiiMError):
+        await getattr(client, method)()
+    assert await client.send_command("getPlayerStatus") == before
+    assert backend.calls == calls and backend.url == (first, second)[index - 1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["setPlayerCmd:next:1", "setPlayerCmd:prev:1",
+    "setPlayerCmd:next:", "setPlayerCmd:prev:", "setPlayerCmd:previous", "setPlayerCmd:Next"])
+async def test_local_client_unsupported_navigation_suffix_does_not_mutate(local_renderer, command) -> None:
+    client, backend = local_renderer.client, local_renderer.backend
+    await create_client_pair(local_renderer)
+    await client.resume()
+    before, calls = await client.send_command("getPlayerStatus"), list(backend.calls)
+    with pytest.raises(pywiim.WiiMError):
+        await client.send_command(command)
+    assert await client.send_command("getPlayerStatus") == before
+    assert backend.calls == calls
+
+
+@pytest.mark.asyncio
+async def test_local_client_failed_next_load_is_not_success(local_renderer) -> None:
+    client, backend = local_renderer.client, local_renderer.backend
+    _, second = await create_client_pair(local_renderer)
+    await client.resume()
+    backend.fail_operation = "loadfile"
+    with pytest.raises(pywiim.WiiMError):
+        await client.next_track()
+    status = await assert_transport(client, "stop")
+    assert status["playback_phase"] == "ERROR" and status["transport_error"]
+    assert status["stream_url"] == second
+    assert backend.idle and backend.url == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("paused", [False, True])
+async def test_local_client_previous_restarts_single_track_preserving_pause(local_renderer, paused) -> None:
+    client, backend = local_renderer.client, local_renderer.backend
+    await client.play_url(MEDIA_URL)
+    if paused:
+        await client.pause()
+    backend.position = 12
+    await client.previous_track()
+    status = await assert_transport(client, "pause" if paused else "play")
+    assert status["uri"] == backend.url == MEDIA_URL
+    assert status["position"] == backend.position == 0
+    assert backend.paused is paused
+    assert [call for call in backend.calls if call[0] == "loadfile"] == [("loadfile", MEDIA_URL)]
+    assert ("seek", 0) in backend.calls

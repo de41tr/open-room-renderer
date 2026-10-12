@@ -9,7 +9,7 @@ from xml.etree import ElementTree as ET
 import pytest
 
 from fake_linkplay.config import Config
-from fake_linkplay.http_api import HttpApi
+from fake_linkplay.http_api import HttpApi, parse_command
 from fake_linkplay.mpv_backend import BackendError, MpvBackend
 from fake_linkplay.queue import PlaybackQueue, QueueItem
 from fake_linkplay.state import PlaybackPhase, RendererState
@@ -372,24 +372,33 @@ async def test_pause_survives_seek_at_successor_transition(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action, index, url", [("Next", 3, C), ("Previous", 1, A)])
-async def test_navigation_reconciles_native_successor_before_computing_index(tmp_path, action, index, url):
+@pytest.mark.parametrize("surface", ["soap", "http"])
+async def test_navigation_reconciles_native_successor_before_computing_index(tmp_path, action, index, url, surface):
     api = make_api(tmp_path, urls=(A, B, C))
     await start(api)
     api.mpv.advance()
-    await api._execute_soap_side_effect(action, f"<{action}/>")
+    if surface == "soap":
+        await api._execute_soap_side_effect(action, f"<{action}/>")
+    else:
+        command = "setPlayerCmd:next" if action == "Next" else "setPlayerCmd:prev"
+        assert await api.execute(parse_command(command), "127.0.0.1") == "OK"
     assert api.state.queue.index == index and api.mpv.url == url
     assert mutations(api, "load") == [A, url]
     assert mutations(api, "stop") == [None]
 
 
 @pytest.mark.asyncio
-async def test_next_at_native_last_item_keeps_original_play_intent(tmp_path):
+@pytest.mark.parametrize("surface", ["soap", "http"])
+async def test_next_at_native_last_item_keeps_original_play_intent(tmp_path, surface):
     from fake_linkplay.soap import SoapFault
     api = make_api(tmp_path)
     await start(api)
     api.mpv.advance()
     with pytest.raises(SoapFault):
-        await api._execute_soap_side_effect("Next", "<Next/>")
+        if surface == "soap":
+            await api._execute_soap_side_effect("Next", "<Next/>")
+        else:
+            await api.execute(parse_command("setPlayerCmd:next"), "127.0.0.1")
     assert api.state.queue.index == 2 and api.state.phase == PlaybackPhase.PLAYING
     assert not api.mpv.paused and mutations(api, "load") == [A]
 

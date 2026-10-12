@@ -159,7 +159,7 @@ def parse_command(command: str) -> ParsedCommand:
         return ParsedCommand("volume", (command.rsplit(":", 1)[-1],))
     if command.startswith("setPlayerCmd:mute:"):
         return ParsedCommand("mute", (command.rsplit(":", 1)[-1],))
-    if command in {"setPlayerCmd:pause", "setPlayerCmd:resume", "setPlayerCmd:onepause", "setPlayerCmd:stop"}:
+    if command in {"setPlayerCmd:pause", "setPlayerCmd:resume", "setPlayerCmd:onepause", "setPlayerCmd:stop", "setPlayerCmd:next", "setPlayerCmd:prev"}:
         return ParsedCommand(command.rsplit(":", 1)[-1])
     return ParsedCommand(command)
 
@@ -1665,6 +1665,11 @@ class HttpApi:
                 await self._play_url(self.state.current_url)
             else:
                 await self._transport_command(command)
+            return "OK"
+        if name in {"next", "prev"}:
+            # Real HTTP clients use next/prev; retain exactly the same queue,
+            # owner, native-staging and single-track restart semantics as SOAP.
+            await self._execute_soap_side_effect("Next" if name == "next" else "Previous", "")
             return "OK"
         if name == "seek":
             if not parsed.args or not re.fullmatch(r"-?[0-9]+", parsed.args[0]):
