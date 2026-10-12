@@ -752,9 +752,9 @@ async def test_set_play_mode_updates_loop_state() -> None:
     api = make_api()
     from fake_linkplay.soap import SoapFault
     with pytest.raises(SoapFault):
-        await api._execute_soap_side_effect("SetPlayMode", "<SetPlayMode><NewPlayMode>REPEAT_ALL</NewPlayMode></SetPlayMode>")
+        await api._execute_soap_side_effect("SetPlayMode", "<SetPlayMode><NewPlayMode>SHUFFLE</NewPlayMode></SetPlayMode>")
     await api._execute_soap_side_effect("SetPlayMode", "<SetPlayMode><NewPlayMode>NORMAL</NewPlayMode></SetPlayMode>")
-    assert api.state.loop == "0"
+    assert api.state.loop == "4"
 
 
 @pytest.mark.asyncio

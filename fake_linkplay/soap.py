@@ -25,7 +25,7 @@ SERVICE_ALIASES = {
     "playqueue1": "PlayQueue",
 }
 READ_ACTIONS = {
-    "AVTransport": {"GetInfoEx", "GetPositionInfo", "GetMediaInfo", "GetTransportInfo", "GetCurrentTransportActions"},
+    "AVTransport": {"GetInfoEx", "GetPositionInfo", "GetMediaInfo", "GetTransportInfo", "GetTransportSettings", "GetCurrentTransportActions"},
     "RenderingControl": {"GetControlDeviceInfo", "StreamServicesCapability", "GetVolume", "GetMute", "GetChannel", "ListPresets"},
     "ConnectionManager": {"GetProtocolInfo", "GetCurrentConnectionIDs"},
     "PlayQueue": {"BrowseQueue", "BrowseQueueEx", "GetQueueIndex", "GetQueueLoopMode", "GetKeyMapping", "GetUserInfo"},

@@ -43,6 +43,7 @@ from .radio import RadioResolution, RadioResolutionError, resolve_station
 from .persistence import (AtomicWriteCommittedError, atomic_write_text, encode_active_dsp,
                           load_active_dsp, save_gain, validate_eq_records)
 from .queue import PlaybackQueue, QueueError, QueueItem, parse_didl_metadata, parse_queue_context, serialize_queue_context
+from .queue_policy import NORMAL, natural_successor, parse_loop_mode, parse_play_mode, play_mode_name
 from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
 from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
@@ -174,6 +175,8 @@ def parse_command(command: str) -> ParsedCommand:
         return ParsedCommand("playlist", (_decode_playback_argument(rest),))
     if command.startswith("setPlayerCmd:m3u:play:"):
         return ParsedCommand("m3u_play", (_decode_playback_argument(command.removeprefix("setPlayerCmd:m3u:play:")),))
+    if command.startswith("setPlayerCmd:loopmode:"):
+        return ParsedCommand("loopmode", (command.removeprefix("setPlayerCmd:loopmode:"),))
     if command.startswith("setPlayerCmd:seek:"):
         return ParsedCommand("seek", (command.rsplit(":", 1)[-1],))
     if command.startswith("setPlayerCmd:vol:"):
@@ -908,6 +911,7 @@ class HttpApi:
     def _native_staging_ready(self, generation: int) -> bool:
         return (generation == self.state.generation and self._native_ready_generation == generation
                 and self.state.phase == PlaybackPhase.PLAYING and self.state.intent == "play"
+                and self.state.queue.loop == NORMAL
                 and self.state.gain_confirmed and getattr(self.mpv, "gain_confirmed", False) is True
                 and getattr(self.mpv, "confirmed_dsp", None) is not None)
 
@@ -918,7 +922,8 @@ class HttpApi:
         the canonical queue's 1000-item bound). Removing by playlist index at
         EOF would be unsafe. Stop/replacement clears the native playlist.
         """
-        if (not self.cfg.native_queue_staging or generation != self.state.generation
+        if (not self.cfg.native_queue_staging or self.state.queue.loop != NORMAL
+                or generation != self.state.generation
                 or self._native_ready_generation != generation
                 or self._native_stage is not None or self.state.phase != PlaybackPhase.PLAYING
                 or self.state.intent != "play" or not self.state.gain_confirmed
@@ -1132,7 +1137,9 @@ class HttpApi:
                     station = bool(selected and selected.stream_type == "station" and selected.duration == 0)
                     if station and old_phase in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING} and self.state.intent == "play":
                         self._recover_station_after_end("source_eof" if snap.get("eof-reached") is True else "unexpected_idle")
-                    elif not station and old_phase in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING} and self.state.intent == "play" and self.state.queue.index < self.state.queue.count:
+                    elif (not station and old_phase in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING}
+                          and self.state.intent == "play"
+                          and natural_successor(self.state.queue.index, self.state.queue.count, self.state.queue.loop) is not None):
                         if self._queue_advance_task is None or self._queue_advance_task.done():
                             self._queue_advance_task = asyncio.create_task(self._advance_queue_after_eof(self.state.generation, self.state.queue))
             elif self.state.intent == "stop":
@@ -1572,6 +1579,11 @@ class HttpApi:
         """
 
         name = parsed.name
+        if name == "loopmode":
+            if len(parsed.args) != 1:
+                raise ValueError("Invalid loop mode command")
+            self._set_queue_loop_mode(parse_loop_mode(parsed.args[0]))
+            return "OK"
         if name.startswith("EQ") or name == "getChannelBalance" or name.startswith("setChannelBalance:"):
             return await self._run_dsp_command(name)
         if name in {"getStatusEx", "getStatus"}:
@@ -4131,11 +4143,9 @@ class HttpApi:
     def _build_queue_context(self) -> str:
         """Build the Linkplay-style QueueContext XML for the current item."""
 
-        if self.state.queue.items:
-            return serialize_queue_context(self.state.queue)
         url = self.queue_url or self.state.current_url
-        if not url:
-            return ""
+        if self.state.queue.items or not url:
+            return serialize_queue_context(self.state.queue)
         title = self.queue_title or self.state.title or "Network stream"
         source = self.queue_source or self.state.track_source or self._xml_text(self.queue_context, "SourceName") or self._xml_text(self.queue_context, "Source") or "radio"
         search_url = self.queue_search_url or self._xml_text(self.queue_context, "SearchUrl") or url
@@ -4151,6 +4161,7 @@ class HttpApi:
                 '<?xml version="1.0" ?>',
                 "<PlayList>",
                 f"  <QueueName>{escape(self.queue_name)}</QueueName>",
+                f"  <LoopMode>{self.state.queue.loop}</LoopMode>",
                 f"  <ListName>{escape(title)}</ListName>",
                 "  <ListInfo>",
                 "    <Radio>1</Radio>",
@@ -4219,6 +4230,21 @@ class HttpApi:
         self.state.totlen = self.queue_duration_sec
         self.queue_context = serialize_queue_context(queue)
 
+    def _set_queue_loop_mode(self, mode: int, queue_name: str = "") -> None:
+        """Change policy synchronously, without touching playback ownership."""
+        if queue_name and queue_name != self.state.queue.name:
+            raise SoapFault(402, "Invalid Args")
+        if mode == self.state.queue.loop:
+            return
+        if (self._native_stage is not None or self._native_current_id is not None
+                or self._native_owned_entries or self._native_cleanup_tasks
+                or self._native_output_uncertain):
+            # Forgetting staging is not backend cleanup. Require confirmed
+            # Stop before changing policy for an already-native playlist.
+            raise SoapFault(701, "Transition Not Available")
+        self.state.queue.loop = mode
+        self._schedule_event_notify(("AVTransport", "PlayQueue"))
+
     async def _advance_queue_after_eof(self, generation: int, queue: PlaybackQueue) -> None:
         """Auto-advance only while the original owner intent is still current."""
         index, item = queue.index, queue.current
@@ -4241,7 +4267,11 @@ class HttpApi:
                     return
                 if self._reject_foreign_source_observation(snapshot, ""):
                     return
-            await self._play_queue_index(index + 1, queue.name)
+            # A mode change does not invalidate the owner. Re-read it after
+            # the asynchronous ownership preflight, just before selection.
+            successor = natural_successor(index, queue.count, queue.loop)
+            if successor is not None:
+                await self._play_queue_index(successor, queue.name)
         except (BackendError, SoapFault, OSError, TimeoutError):
             if current() and self.state.phase != PlaybackPhase.ERROR:
                 self._mark_backend_failure()
@@ -4432,11 +4462,11 @@ class HttpApi:
             self._schedule_event_notify(("rendertransport1", "AVTransport"))
             return
         if action == "SetPlayMode":
-            mode = self._xml_text(body, "NewPlayMode") or self._xml_text(body, "PlayMode")
-            if mode != "NORMAL":
-                raise SoapFault(712, "Play Mode Not Supported")
-            self.state.loop = "0"
-            self.state.queue.loop = 0
+            try:
+                mode = parse_play_mode(self._xml_text(body, "NewPlayMode"))
+            except ValueError:
+                raise SoapFault(712, "Play Mode Not Supported") from None
+            self._set_queue_loop_mode(mode)
             return
         if action in {"Seek", "SeekForward", "SeekBackward"}:
             if action == "SeekForward":
@@ -4467,11 +4497,11 @@ class HttpApi:
             await self._play_queue_index(int(raw_index), self._xml_text(body, "QueueName"))
             return
         if action == "SetQueueLoopMode":
-            mode = self._xml_text(body, "LoopMode") or self._xml_text(body, "QueueLoopMode")
-            if mode != "0":
-                raise SoapFault(712, "Play Mode Not Supported")
-            self.state.loop = "0"
-            self.state.queue.loop = 0
+            try:
+                mode = parse_loop_mode(self._xml_text(body, "LoopMode"))
+            except ValueError:
+                raise SoapFault(712, "Play Mode Not Supported") from None
+            self._set_queue_loop_mode(mode, self._xml_text(body, "QueueName"))
             return
         if action in {"SetQueuePolicy", "AppendQueue", "AppendTracksInQueue", "AppendTracksInQueueEx", "RemoveTracksInQueue"}:
             raise SoapFault(401, "Invalid Action")
@@ -4545,21 +4575,6 @@ class HttpApi:
             "X-Plex-Platform": "Linux",
             "X-Plex-Device-Name": self.cfg.friendly_name,
         }
-
-    @staticmethod
-    def _loop_mode_value(mode: str) -> str:
-        """Normalize app loop mode names to renderer loop codes."""
-
-        normalized = mode.strip().upper()
-        if normalized in {"0", "NORMAL", "NONE"}:
-            return "0"
-        if normalized in {"1", "REPEAT_ONE", "REPEAT_TRACK", "SINGLE"}:
-            return "1"
-        if normalized in {"2", "REPEAT_ALL", "REPEAT"}:
-            return "2"
-        if normalized in {"3", "SHUFFLE", "RANDOM"}:
-            return "3"
-        return mode.strip() or "0"
 
     @staticmethod
     def _queue_item_is_episode(url: str, stream_type: str, content_type: str, queue_context: str) -> bool:
@@ -4962,6 +4977,7 @@ class HttpApi:
             '<InstanceID val="0">'
             f'<TransportState val="{escape(transport_state)}"/>'
             f'<TransportStatus val="{self.state.transport_status}"/>'
+            f'<CurrentPlayMode val="{play_mode_name(self.state.queue.loop)}"/>'
             f'<CurrentTrack val="{self.state.plicurr}"/>'
             f'<CurrentTrackDuration val="{self._event_attribute(track_duration)}"/>'
             f'<CurrentTrackURI val="{self._event_attribute(track_uri)}"/>'

@@ -13,6 +13,8 @@ import math
 import re
 from xml.etree import ElementTree as ET
 
+from .queue_policy import NORMAL, SUPPORTED_MODES
+
 
 MAX_QUEUE_BYTES = 1024 * 1024
 MAX_QUEUE_TRACKS = 1000
@@ -72,7 +74,7 @@ class PlaybackQueue:
     quality: str = ""
     items: list[QueueItem] = field(default_factory=list)
     index: int = 0
-    loop: int = 0
+    loop: int = NORMAL
     stream_id: str = ""
     show_name: str = ""
     stream_type: str = ""
@@ -119,8 +121,8 @@ class PlaybackQueue:
         if len(self.items) > max_tracks:
             raise QueueError("Queue exceeds track limit")
         self.validate_index(self.index)
-        if type(self.loop) is not int or self.loop != 0:
-            raise QueueError("Only queue loop mode 0 is supported")
+        if type(self.loop) is not int or self.loop not in SUPPORTED_MODES:
+            raise QueueError("Unsupported queue loop mode")
         for item in self.items:
             if not isinstance(item, QueueItem):
                 raise QueueError("Queue contains an invalid item")
@@ -409,7 +411,7 @@ def parse_queue_context(
         quality=_text(info, "Quality") or "",
         items=items,
         index=requested_index if items else 0,
-        loop=0 if loop is None else loop,
+        loop=NORMAL if loop is None else loop,
         stream_id=stream_id,
         show_name=_text(info, "ShowName") or "",
         stream_type=_text(info, "StreamType") or "",

@@ -38,7 +38,7 @@ def test_two_track_queue_preserves_numbering_and_requested_start():
         "https://media.example.test/audio-1.ogg", "https://media.example.test/audio-2.ogg",
     ]
     assert queue.current is queue.items[1]
-    assert queue.loop == 0
+    assert queue.loop == 4
 
 
 def test_defaults_and_names_are_explicit():
@@ -295,7 +295,7 @@ def test_invalid_parser_limits_are_rejected(kwargs):
         parse_queue_context("<PlayList/>", **kwargs)
 
 
-@pytest.mark.parametrize("value", ["1", "2", "-1", "bad"])
+@pytest.mark.parametrize("value", ["2", "3", "-1", "bad"])
 def test_unsupported_loop_modes_are_rejected(value):
     with pytest.raises(QueueError, match="loop mode"):
         parse_queue_context(playlist(fields=f"<LoopMode>{value}</LoopMode>"))
@@ -313,10 +313,10 @@ def test_invalid_mutable_model_cannot_be_serialized():
     with pytest.raises(QueueError, match="index"):
         serialize_queue_context(queue)
     queue.index = 1
-    queue.loop = 1
+    queue.loop = 2
     with pytest.raises(QueueError, match="loop"):
         serialize_queue_context(queue)
-    queue.loop = 0
+    queue.loop = 4
     queue.items[0] = replace(queue.items[0], metadata="invalid\x00text")
     with pytest.raises(QueueError, match="XML characters"):
         serialize_queue_context(queue)

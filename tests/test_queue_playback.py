@@ -191,11 +191,11 @@ async def test_owner_stop_prevents_scheduled_eof_advance(api):
 
 
 @pytest.mark.asyncio
-async def test_normal_loop_only_and_queue_event_values(api):
+async def test_normal_loop_and_queue_event_values(api):
     await create(api)
     await play(api, 2)
-    await api._execute_soap_side_effect("SetQueueLoopMode", "<SetQueueLoopMode><LoopMode>0</LoopMode></SetQueueLoopMode>")
-    for value in ["1", "2", "shuffle", ""]:
+    await api._execute_soap_side_effect("SetQueueLoopMode", "<SetQueueLoopMode><LoopMode>4</LoopMode></SetQueueLoopMode>")
+    for value in ["2", "3", "shuffle", ""]:
         with pytest.raises(SoapFault):
             await api._execute_soap_side_effect("SetQueueLoopMode", f"<SetQueueLoopMode><LoopMode>{value}</LoopMode></SetQueueLoopMode>")
     xml = ET.fromstring(api._event_body("PlayQueue"))
@@ -203,7 +203,7 @@ async def test_normal_loop_only_and_queue_event_values(api):
     assert props["CurrentPlayListName"] == "Two & tracks"
     assert props["CurrentIndex"] == "2"
     assert props["Count"] == "2"
-    assert props["LoopMode"] == "0"
+    assert props["LoopMode"] == "4"
 
 
 @pytest.mark.asyncio

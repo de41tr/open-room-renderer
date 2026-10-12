@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from xml.etree import ElementTree as ET
 
+from .queue_policy import NORMAL, PLAY_MODES, SUPPORTED_MODES
 from .soap import MUTATING_ACTIONS, READ_ACTIONS, SERVICE_TYPES
 
 
@@ -115,6 +116,10 @@ _ACTIONS: dict[str, dict[str, tuple[_Argument, ...]]] = {
             _out("RecordMedium", "RecordStorageMedium"),
             _out("WriteStatus", "RecordMediumWriteStatus"),
         ),
+        "GetTransportSettings": (
+            _INSTANCE, _out("PlayMode", "CurrentPlayMode"),
+            _out("RecQualityMode", "CurrentRecordQualityMode"),
+        ),
         "GetTransportInfo": (
             _INSTANCE, _out("CurrentTransportState", "TransportState"),
             _out("CurrentTransportStatus", "TransportStatus"),
@@ -157,8 +162,9 @@ _ACTIONS: dict[str, dict[str, tuple[_Argument, ...]]] = {
             _in("QueueName", "CurrentPlayListName"), _out("Count"), _out("CurrentIndex"),
             _out("PreloadingIndex"), _out("CurrentPage"), _out("TrackNums", "Count"),
         ),
-        "GetQueueLoopMode": (_in("QueueName", "CurrentPlayListName"), _out("LoopMode")),
-        "SetQueueLoopMode": (_in("QueueName", "CurrentPlayListName"), _in("LoopMode")),
+        # Public vendor clients omit QueueName; a supplied extension is checked.
+        "GetQueueLoopMode": (_out("LoopMode"),),
+        "SetQueueLoopMode": (_in("LoopMode"),),
         "GetKeyMapping": (_in("QueueName", "CurrentPlayListName"), _out("QueueContext")),
         "GetUserInfo": (
             _in("AccountSource", "A_ARG_TYPE_AccountSource"),
@@ -196,8 +202,9 @@ _VARIABLES: dict[str, _Variable] = {
     "TransportState": _Variable(allowed_values=("STOPPED", "PLAYING", "PAUSED_PLAYBACK", "TRANSITIONING")),
     "TransportStatus": _Variable(allowed_values=("OK", "ERROR_OCCURRED")),
     "TransportPlaySpeed": _Variable(allowed_values=("1",), default="1"),
-    "CurrentPlayMode": _Variable(allowed_values=("NORMAL",), default="NORMAL"),
-    "LoopMode": _Variable("ui4", value_range=(0, 0, 1), default="0"),
+    "CurrentPlayMode": _Variable(allowed_values=tuple(PLAY_MODES), default="NORMAL"),
+    "CurrentRecordQualityMode": _Variable(allowed_values=("NOT_IMPLEMENTED",)),
+    "LoopMode": _Variable("ui4", allowed_values=tuple(map(str, SUPPORTED_MODES)), default=str(NORMAL)),
     "AVTransportURI": _Variable("uri"),
     "AVTransportURIMetaData": _Variable(),
     "NextAVTransportURI": _Variable("uri"),

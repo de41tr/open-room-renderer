@@ -9,6 +9,7 @@ from html import escape as _html_escape
 from typing import Any
 
 from .config import Config
+from .queue_policy import NORMAL, play_mode_name
 from .upnp_schema import scpd_xml as _declared_scpd
 
 
@@ -208,7 +209,7 @@ def avtransport_response_fields(
     transport_state = {"play": "PLAYING", "pause": "PAUSED_PLAYBACK", "stop": "STOPPED", "transition": "TRANSITIONING"}.get(status, "STOPPED")
     transport_status = getattr(state, "transport_status", "OK")
     play_medium = getattr(state, "play_medium", "") or ("STATION-NETWORK" if current_uri else "NONE")
-    loop_mode = getattr(state, "loop", "0")
+    loop_mode = getattr(state, "loop", str(NORMAL))
     stream_capability = json.dumps(service_capability(cfg), separators=(",", ":"))
     if action == "GetMediaInfo":
         duration = seconds_to_hms(getattr(state, "totlen", 0))
@@ -267,6 +268,9 @@ def avtransport_response_fields(
                 "<SpotifyActive>0</SpotifyActive>",
             ]
         )
+    if action == "GetTransportSettings":
+        return (f"<PlayMode>{play_mode_name(int(loop_mode))}</PlayMode>"
+                "<RecQualityMode>NOT_IMPLEMENTED</RecQualityMode>")
     if action == "GetTransportInfo":
         return "\n".join(
             [
@@ -314,7 +318,7 @@ def playqueue_response_fields(action: str) -> str | None:
     if action in {"SetQueueLoopMode", "SetQueuePolicy"}:
         return ""
     if action == "GetQueueLoopMode":
-        return "<LoopMode>0</LoopMode>"
+        return f"<LoopMode>{NORMAL}</LoopMode>"
     if action == "GetQueueIndex":
         return "<CurrentIndex>1</CurrentIndex><PreloadingIndex>1</PreloadingIndex><CurrentPage>1</CurrentPage><TrackNums>1</TrackNums>"
     return None

@@ -9,7 +9,7 @@ This is scoped evidence, not a product certification. Updated 2026-10-12 UTC.
 | Selected-URI playback/control | Real production Unix IPC + libmpv/null HTTP flows on x86_64/AArch64 | Physical audio and Android pending |
 | Playback generations/EOF | UNIT/MOCK races + actual Unix IPC observer/queue EOF | Target hardware and WAN conditions pending |
 | Concrete multi-item queue | UNIT/MOCK + REAL_BACKEND/null indexed/Next/Previous/EOF selection | Unsupported provider headers fail explicitly |
-| Next/Previous; normal loop mode | Actual queue selection; normal mode only | Repeat/shuffle remain unsupported |
+| Queue navigation and repeat | REAL_BACKEND/null + HTTP/SOAP/received GENA: sequential, Repeat One, Repeat All | Shuffle pending; original app/hardware acceptance pending |
 | Discovery/identity and app-shaped handshake | Actual same-host multicast discovery/independent identities + local HTTP handshake; truthful typed SCPDs | Physical LAN and actual Android app pending |
 | GENA lifecycle/callback safety | Real local subscribe/renew/notify/expiry tests; actual callbacks in REAL_BACKEND/null workflow | Actual Android parser/client pending |
 | Synthetic WAV/MP3/FLAC decode | REAL_BACKEND, mpv null output | No audible/DAC assertion |
@@ -306,3 +306,48 @@ At 8291763 all three standard CI jobs passed after the bounded formatter extract
 60 selected libmpv checks (47 native/13 deterministic), six Unix IPC cases and
 eleven same-host Snapcast stages. No public behavior change or hardware claim
 is attributed to that extraction. XU4/original app: HARDWARE_ACCEPTANCE_PENDING.
+
+## Local queue repeat contract
+
+The queue package implements these explicit public-client modes:
+
+| Behavior | HTTP `loop` / PlayQueue `LoopMode` | AVTransport `NewPlayMode` |
+| --- | --- | --- |
+| Sequential default | `4` | `NORMAL` |
+| Repeat selected item | `1` | `REPEAT_ONE` |
+| Repeat queue, wrapping last to first | `0` | `REPEAT_ALL` |
+
+Use `setPlayerCmd:loopmode:N`, standard `SetPlayMode`, or vendor
+`SetQueueLoopMode` with `LoopMode`. The vendor setter accepts an optional
+nonempty `QueueName` only when it matches the current queue; the getter needs no
+arguments. `GetTransportSettings` returns `PlayMode` and
+`RecQualityMode=NOT_IMPLEMENTED`. HTTP status, queue XML, SOAP and GENA derive
+from the same queue policy; AVTransport LastChange includes `CurrentPlayMode`.
+Unsupported shuffle/random modes and informal aliases fail without mutation.
+
+The mapping is evidenced by [pywiim's public loop-mode adapter](https://github.com/mjcumming/pywiim/blob/main/pywiim/api/loop_mode.py)
+and independently by [wiimplay's PlayQueue values](https://github.com/shumatech/wiimplay/blob/ca9507803266b454b9072faa8556ba70f5931817/wiimdev/types.go#L47-L55)
+and [SOAP setter](https://github.com/shumatech/wiimplay/blob/ca9507803266b454b9072faa8556ba70f5931817/wiimdev/wiim.go#L155-L157).
+The [official WiiM HTTP API v1.2](https://www.wiimhome.com/pdf/HTTP%20API%20for%20WiiM%20Products.pdf)
+read table agrees, but its write table assigns `0` to sequential and `-1` to
+repeat-all. ORR deliberately uses the public-client dialect; there is no automatic
+dialect detection or original-app certification.
+
+**Compatibility correction:** earlier ORR called `0` normal, which public clients
+read as repeat-all. Sequential behavior remains the default but now reports `4`.
+Omitted queue mode defaults to `4`; explicitly supplied `0`, including externally
+saved old queue XML, now means Repeat All. Change such old documents to `4` for
+sequential playback. ORR has no persisted queue-state migration in this package.
+
+Repeat applies to observed finite-media end. Multi-item explicit Next/Previous remain
+numerical and nonwrapping (singleton Previous retains seek-to-zero), following the [AVTransport:1 contract](https://upnp.org/specs/av/UPnP-av-AVTransport-v1-Service.pdf);
+Repeat One does not trap manual Next. Mode changes alone do not restart playback,
+bump owner generation, resume paused media or clear errors. Live-station recovery
+keeps precedence and its finite retry budget. Failed repeated loads remain errors.
+Existing snapshots do not carry mpv end-file reasons: an unclassified post-ready
+source termination can also repeat. This is not reason-aware failure recovery.
+
+Opt-in native successor staging remains NORMAL-only. An actual mode change with
+an armed/owned native playlist, pending cleanup or uncertain output fails unchanged.
+Use confirmed Stop → set mode → Play; an unconfirmed Stop does not release the
+fence. Repeat uses normal confirmed loading and makes no gapless-repeat promise.

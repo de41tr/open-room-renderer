@@ -44,7 +44,6 @@ class RendererState:
     backend_original_url: str = ""
     last_error: str = ""
     mode: str = "0"
-    loop: str = "0"
     current_url: str = ""
     resolved_url: str = ""
     title: str = ""
@@ -57,6 +56,11 @@ class RendererState:
     curpos: int = 0
     totlen: int = 0
     queue: PlaybackQueue = field(default_factory=PlaybackQueue)
+
+    @property
+    def loop(self) -> str:
+        """Numeric wire value derived from the authoritative queue policy."""
+        return str(self.queue.loop)
 
     @property
     def plicount(self) -> int:

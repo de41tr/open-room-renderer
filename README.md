@@ -57,6 +57,7 @@ Working in this alpha:
 - can play direct DRM-free audio URLs,
 - uses `mpv` for actual playback,
 - supports play, pause, resume, stop, seek, volume, and mute,
+- supports real multi-track queues and [Repeat One / Repeat All](docs/COMPATIBILITY_MATRIX.md#local-queue-repeat-contract),
 - supports persistent device rename,
 - supports channel balance,
 - supports a 10-band parametric EQ through mpv filters.
