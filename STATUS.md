@@ -2,15 +2,37 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (15:33 UTC)
+## Current candidate (16:04 UTC)
 
-Offline-edit head `3737c93` passed all three standard jobs, verified at 15:18:55 UTC:
-https://github.com/de41tr/open-room-renderer/actions/runs/38267299183 .
+The bounded headless `discover --interface LOCAL_IPV4` command is independently
+reviewed. It returns sanitized, unauthenticated SSDP candidates, with a short
+absolute deadline, at most two searches, and strict packet/result bounds. It
+performs no HTTP/config/control action and never auto-selects a returned endpoint.
+A description port remains an unverified advertisement, not a confirmed API port.
+
+The existing real two-renderer loopback fixture now invokes the console wrapper
+against candidate source, observes both exact identities/endpoints and two
+kernel-reported TTL-0 searches, and traps zero HTTP requests at those endpoints.
+All five native discovery cases pass in 10.19s/10.22s, with the old 25s outer bound,
+negative cases and cleanup retained. This is same-host Linux discovery evidence;
+there is no new physical-LAN, hardware, installed-wheel or original-app claim.
+
+Final integrated defaults pass 4183/72 opt-in skips on Python 3.12 (201.09s),
+and 3938+245/72 on Python 3.11 (129.30s/77.21s), retaining 32 existing warnings.
+Production digest: `e8e2442a692c9fb9d727b41d86c222aa0257e70044e217394e2e599d508f52a3`.
+Publish feature, native acceptance and docs separately, then require full hosted CI.
+A separate final legacy host/proxy/netrc correction is privately reviewed; do not
+combine its unverified code into this checkpoint.
+
+## Latest verified hosted checkpoint (15:55 UTC)
+
+Favorite-target head `d9a94e2` passed all three standard jobs, verified at 15:55 UTC:
+https://github.com/de41tr/open-room-renderer/actions/runs/38271661061 .
 Both architectures passed all 65 libmpv checks and every later Unix/client/stress/
-install/clocked/discovery/Snapcast gate. x86_64/AArch64 jobs took 825.214s/857.156s;
-floor groups passed 3728+245/72 in 117.03s/59.78s. All existing caps remain.
+install/clocked/discovery/Snapcast gate. Defaults passed 4026/72 opt-in skips;
+floor groups passed 3781+245/72 in 129.95s/77.52s. All existing caps remain.
 
-The next reviewed feature repairs a managed favorite's URL without changing its
+The published feature repairs a managed favorite's URL without changing its
 stable ID, name or library position. The caller must explicitly choose keep or
 clear for title/artist/album/artwork. The new bounded PUT/client leaves legacy
 rename/current and playback clients unchanged. It does not resolve, play or retarget
@@ -29,10 +51,16 @@ Final combined defaults pass 4026/72 on Python 3.12 (199.30s), and 3781+245/72 o
 Python 3.11 (128.26s/74.23s), with 32 existing warnings. Production digest:
 `7feac68d6165add699b8041ebc68bfd0f2d0085fd58841773107fed46e0be3a5`.
 A separate workflow-only rebalance moves unchanged repeat/shuffle files to native
-group one: all 24 files/65 node IDs and marks remain, now 22+43. Hosted logs suggest
-about 30s less critical-path imbalance; its actual effect is still unverified.
-No time cap, assertion, runner or process count changes. This checkpoint requires
-complete hosted verification after publication.
+group one: all 24 files/65 node IDs and marks remain, now 22+43. Hosted groups
+passed in 227.43s/242.88s on x86_64 and 226.38s/239.28s on AArch64.
+No time cap, assertion, runner or process count changes. The reduced imbalance is
+observed; total-job timing still includes ordinary runner variability.
+
+Bounded SSDP-only candidate discovery is in private implementation, independent
+review and native acceptance. A final narrow legacy CLI transport correction is
+being implemented: validate endpoints and ignore ambient proxy/netrc settings,
+while preserving valid request bytes, outputs and existing redirect rejection.
+No speculative additional feature is scheduled before stabilization.
 
 The requested behavior-neutral extraction began at 09:14:53 UTC after its prerequisite green gate.
 It moves exactly three stateless metadata-edit helpers into metadata_formatting.py,

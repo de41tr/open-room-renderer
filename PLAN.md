@@ -4,20 +4,24 @@ Branch: `dot/renderer-autonomous-20261012`; base: `3672b9838e9c39ae8191613108f0d
 Work window ends 2026-10-12 20:00 UTC. Stabilization only after 19:00 UTC.
 No main-branch edits, merge, or release.
 
-## Current functional package (15:33 UTC)
+## Current functional package (15:58 UTC)
 
-Offline-edit checkpoint `3737c93` has full standard CI green. Publish reviewed
-managed-favorite target repair with explicit metadata policy, separate native
-acceptance and a small same-runner native scheduling rebalance. Final defaults,
-independent review and exact native v2 flows pass; require hosted CI.
+Favorite-target checkpoint `d9a94e2` has full standard CI green. Explicit target
+repair, its separate native acceptance and the same-runner native scheduling
+rebalance retain every existing gate and cap. The old source remains playing
+until later explicit stable-ID recall.
 
-Next: bounded SSDP-only candidate discovery for headless setup. Use one explicitly
+Publish the reviewed bounded SSDP-only candidate discovery package for headless
+setup, with separate native acceptance and documentation commits. Final default
+suites on both Python minors and the native multicast CLI flow pass; require full
+hosted CI. It uses one explicitly
 selected IPv4 interface, short absolute deadline and packet/result limits; never
 fetch LOCATION or load/write renderer configuration. Label unauthenticated results
 as candidates, not verified devices or a proven primary control port. Reuse actual
 same-host multicast acceptance. No new listener/auth/CORS or network settings.
-A specific older CLI proxy/netrc consistency gap is under consideration separately;
-any correction must remain narrow and preserve valid legacy payloads/outputs.
+A final narrow legacy CLI correction is privately developing endpoint validation
+and isolated Sessions: no ambient proxy/netrc settings, while preserving valid
+legacy payloads/outputs and the already-present redirect rejection.
 Defer broad core/security audits, browser UI and new multihour runs. Keep private
 packages isolated and publish only after the preceding checkpoint is green.
 Stabilization starts 19:00 UTC; active work ends 20:00 UTC today.

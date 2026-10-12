@@ -17,6 +17,19 @@ This is scoped evidence, not a product certification. Updated 2026-10-12 UTC.
 | Linux ARMv7 / Odroid XU4 | Architectural target | HARDWARE not run |
 | Spotify/TIDAL/AirPlay/Cast/multiroom | Unsupported/deferred | No cloud login or provisioning performed |
 
+The headless `discover --interface LOCAL_IPV4 [--timeout SECONDS]` CLI is a
+bounded SSDP-only address-hint reader. UNIT/MOCK tests exercise both production
+profile packets, Unicode optional header values, strict required framing and
+identity/LOCATION filters, source matching, conflicting endpoints, resource
+limits, socket cleanup and private argument errors. It does not fetch HTTP,
+query mDNS/DNS, load config, change state or automatically contact/control a
+candidate. Advertised addresses, description endpoints and UUIDs remain
+unauthenticated and unverified; a description port is not a verified primary API
+port. Empty results are only absence of matching observed replies. The actual
+console entry point also finds both owned loopback responders, with two
+kernel-observed TTL-0 multicast searches, no HTTP request and owned cleanup.
+That local native result does not establish physical-LAN/app/hardware acceptance.
+
 Neutral and compatibility profiles share independent product/version metadata.
 The compatibility profile changes protocol presentation and discovery identity;
 it does not claim to be original hardware. Existing IDs survive upgrades and
@@ -75,12 +88,14 @@ fake audio). Explicit URI wins over metadata resource hints; absent fields clear
 and unknown source/MIME are not invented. Matching backend title updates only
 refine generated fallback metadata. Original Android presentation is untested.
 
-Configured local music favorites now have matching one-based listing, slot
-counts and actual selection (`MCUKeyShortClick`, optional index1 only). Real
-pywiim loopback verifies two distinct selected resources with MOCK audio.
-Unknown/invalid entries do not become phantom playable slots. Favorites remain
-configuration-owned; provider preset editing and saved playlist resume are not
-implemented.
+Configured and managed local music favorites have matching one-based listing,
+slot counts and actual selection (`MCUKeyShortClick`, optional index1 only).
+Managed records additionally support stable-ID recall, rename, deletion and
+explicit target repair; configured records remain read-only. Unknown/invalid
+entries do not become phantom playable slots. Explicit private URL-playlist
+capture/edit/restore is implemented and restores stopped by default; automatic
+queue/position restoration at startup and provider-owned preset editing are not.
+See the scoped native favorite and authored-playlist evidence below.
 
 AP10 normal seek is confirmed from actual backend position (fixed ±1-second
 window) and preserves pause. HTTP/SOAP/Previous share the same bounded path.

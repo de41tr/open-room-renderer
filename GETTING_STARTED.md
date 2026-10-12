@@ -120,6 +120,46 @@ socket, and, on the same host, a different `--port` (for example 8081). Discover
 also needs distinct identities. Two live multicast responders on one host still
 need target-network acceptance.
 
+### Find a renderer address with bounded SSDP discovery
+
+```bash
+open-room-renderer discover --interface 192.0.2.10
+open-room-renderer discover --interface 192.0.2.10 --timeout 5
+```
+
+Replace the documentation address with an IPv4 address assigned to the computer
+running the command, on the interface you want to search. An explicit local IPv4
+is required; the command does not enumerate interfaces or load renderer config.
+For same-host loopback testing, explicitly use `127.0.0.1`.
+
+The JSON `candidates` contain `address`, `description_port`, `description_url`
+and a bounded advertised `identity`. All are explicitly
+`unverified_unauthenticated`: SSDP is a self-description that can be spoofed, not
+authentication or permission to control a device. The advertised description
+port is **not a verified primary API port**. Current renderers mount the full
+API on their configured listening ports, but this command neither checks those
+ports nor chooses one for later commands. It never automatically uses a result.
+
+Only replies advertising the bounded `OpenRoomRenderer` product token and
+MediaRenderer identity are considered. The HTTP description URL must use a
+literal IPv4 matching the reply's source, an explicit valid port, and exactly
+`/description.xml`. No description, status, mDNS or DNS lookup is performed.
+Nothing is saved, and config/identity state is not created or changed.
+
+The default absolute discovery deadline is 3 seconds; `--timeout` must be finite,
+above zero and at most 5 seconds. One ephemeral UDP socket sends at most two
+MediaRenderer M-SEARCH packets, on the selected interface with TTL 1 (TTL 0 for
+explicit loopback). It receives at most 256 datagrams of up to 4 KiB, retaining at
+most 64 unique candidates. Duplicate identities at different endpoints remain
+separate hints. The socket closes after the operation, errors or interruption.
+
+`truncated` and `limits_reached` report early receive/candidate limits;
+`oversized_datagrams` reports replies discarded for exceeding the packet limit.
+An empty array with `no_matching_replies_observed` means only that no matching
+replies were observed during this bounded search. It does not prove no renderer
+exists. This is a headless address-finding aid, not physical-LAN, app or hardware
+compatibility evidence.
+
 ## 4. Optional User Service
 
 After reviewing the generated unit and successfully testing foreground playback:

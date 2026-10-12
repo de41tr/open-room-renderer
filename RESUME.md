@@ -5,8 +5,8 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint 3737c93 passed all three jobs, verified at
-   15:18:55 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38267299183
+   Latest completed checkpoint d9a94e2 passed all three jobs, verified at
+   15:55 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38271661061
    Python floor uses complete bounded groups on the same runner, preserving the
    3-minute step/8-minute job; both native jobs retain all existing gates.
    The prior 763f7f7 remains failed solely for its floor time budget.
@@ -277,3 +277,22 @@ its hosted timing remains pending. Next implement bounded SSDP-only discovery,
 with no HTTP/config side effects or verified-identity claim. A narrow pre-existing
 legacy CLI proxy/netrc behavior is being considered, not a restarted broad audit.
 Keep the 19:00 UTC feature cutoff and 20:00 UTC active-work stop unchanged.
+
+15:58 UTC: d9a94e2 is fully green, verified at 15:55 UTC, including the native
+rebalance and target-repair flow. Native groups remain all 65 cases, now 22+43;
+x86 timings 227.43s/242.88s and AArch64 226.38s/239.28s. Floor groups passed
+3781+245/72 in 129.95s/77.52s. Discovery CLI is privately implemented with
+independent review; the real subprocess already found both owned loopback
+renderers without HTTP requests in the existing native fixture. Wait for exact
+final patch/review and run integrated defaults before publication. A separate
+legacy client host/proxy/netrc correction is in private implementation; keep its
+valid request bytes, outputs and redirect policy. No speculative next feature;
+reserve time for final assessment, clean full CI and 19:00/20:00 UTC deadlines.
+
+16:05 UTC: discovery candidate is independently approved and final integrated
+defaults pass 4183/72 on Python 3.12 (201.09s), grouped 3.11 (129.30s/77.21s).
+Production digest e8e2442a692c9fb9d727b41d86c222aa0257e70044e217394e2e599d508f52a3.
+Exact native console acceptance passed all five cases twice (10.19s/10.22s),
+with real TTL-0 multicast and no HTTP requests at either owned endpoint. Publish
+feature/native/docs separately and require full CI. Legacy isolation remains
+private until this checkpoint is green. Keep all deadlines and scope limits.

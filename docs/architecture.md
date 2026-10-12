@@ -40,6 +40,7 @@ aiohttp app in fake_linkplay.http_api
 - `fake_linkplay/favorites.py`: bounded renderer-owned library, atomic storage and its JSON routes; edits do not control playback.
 - `fake_linkplay/mpv_backend.py`: mpv process startup, JSON IPC commands, snapshots, volume/mute/seek, balance and PEQ filter graph.
 - `fake_linkplay/ssdp.py`: UDP multicast responder and periodic NOTIFY packets.
+- `fake_linkplay/discovery_client.py`: bounded explicit-interface SSDP candidate reader; no HTTP fetch, configuration or playback side effects.
 - `fake_linkplay/mdns.py`: optional mDNS/DNS-SD responder.
 - `fake_linkplay/upnp_description.py`: device description XML, SCPD XML, capability payload helpers.
 - `fake_linkplay/podcast.py`: simple playlist/podcast helpers.

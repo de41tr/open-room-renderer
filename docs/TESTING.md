@@ -40,6 +40,48 @@ in native CI. Do not replace production IPC to accommodate this sandbox. Physica
 LAN, ARMv7/Odroid, DAC/acoustic audio and original Android app validation remain
 separate acceptance steps.
 
+## Bounded headless SSDP discovery CLI
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_discovery_cli.py
+```
+
+This UNIT/MOCK suite uses fake sockets and monotonic clocks, never a physical
+network. Actual production SSDP packet builders cover neutral and compatibility
+profiles, including Unicode-friendly names and optional raw Unicode values.
+The parser splits byte CRLF only; Unicode separators cannot manufacture required
+headers. Tests reject hostile status/header framing, duplicate required headers,
+invalid product/identity forms and LOCATION values with nonliteral or source-mismatched
+hosts, invalid ports, userinfo, alternate paths, query/fragment or controls.
+
+Deterministic traffic checks cover an absolute deadline during continuous input,
+two maximum sends, the 256-datagram and 64-candidate caps, bounded duplicates,
+retained identity/endpoint conflicts, and the 4-KiB packet limit with a one-byte
+oversize sentinel. Setup/I/O errors and KeyboardInterrupt close the owned socket
+and print fixed private errors. Malformed discovery arguments, including leading
+flags, stay private without changing legacy diagnostics when a name or argument
+literally equals `discover`. HTTP, DNS, config and control entry points are guarded
+against calls. JSON contains only bounded address/description/identity hints and
+an explicit `unverified_unauthenticated` label; no arbitrary SERVER/ServiceName is
+printed. Empty matching results and early limit truncation are distinct.
+
+The existing opt-in `test_discovery_native.py` positive two-renderer fixture
+also invokes the installed console entry point before its original HTTP reads.
+It observes two real multicast M-SEARCH packets with kernel-reported TTL 0, exact
+fixture identities/endpoints, explicit unverified semantics, zero HTTP requests
+and no configuration/state files. The CLI child and multicast observer close;
+all original description, mDNS-negative, interface-isolation and teardown
+assertions and the 25-second outer bound remain. Exact local native runs passed
+all five cases in 10.19s/10.22s. The installed console wrapper loads the candidate
+source through explicit PYTHONPATH; this is not a new installed-wheel claim. The old CLI, an HTTP-fetch
+mutant and a false verified-identity mutant are rejected.
+
+This is real same-host loopback discovery evidence, not endpoint authentication,
+primary API-port verification, physical-LAN reachability, app behavior or audio.
+A denied native capability is NOT_RUN locally, not permission to change routes/
+interfaces or substitute a physical network. Explicit CI opt-in still fails
+when its required native capability is absent; there is no skip fallback.
+
 ## Playback generation and local client coverage
 
 `tests/test_playback_generations.py` checks delayed load/resolve/readiness,
@@ -2054,7 +2096,8 @@ The predecessor 3fd5df8 passed all three standard jobs, verified at 14:51:55 UTC
 https://github.com/de41tr/open-room-renderer/actions/runs/38264218792 .
 Native x86_64/AArch64 job times were 845.124s/865.381s; all prior gates passed.
 Its floor partition passed 3665+245/72 in 135.98s/97.64s without changed caps.
-The new offline-edit checkpoint's hosted result remains pending until observed.
+Offline-edit checkpoint 3737c93 subsequently passed all three jobs, verified
+at 15:18:55 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38267299183 .
 
 
 Final integrated target-repair v2 defaults pass 4026/72 on Python 3.12 (199.30s),
@@ -2070,9 +2113,26 @@ hosted logs measured 29.969s/29.939s combined probe time on x86_64/AArch64, moti
 an estimated 30–31s critical-path saving. This is not a hosted performance result.
 All test/runner contents are unchanged by the scheduling commit, and all 13 existing
 runner guards pass (independent 9.02s; parent 8.94s). Same 360s/7min/15min bounds and
-same two processes/runners remain; verify the new checkpoint's complete CI.
+same two processes/runners remain. The subsequent hosted checkpoint below
+verifies all gates; the estimate is retained as the original scheduling rationale.
 
 The predecessor 3737c93 passed all three standard jobs, verified 15:18:55 UTC:
 https://github.com/de41tr/open-room-renderer/actions/runs/38267299183 .
 Native x86_64/AArch64 jobs took 825.214s/857.156s with all prior gates passing;
-floor groups passed 3728+245/72 in 117.03s/59.78s. The new checkpoint is pending.
+floor groups passed 3728+245/72 in 117.03s/59.78s.
+
+Target-repair checkpoint d9a94e2 passed all three jobs, verified 15:55 UTC:
+https://github.com/de41tr/open-room-renderer/actions/runs/38271661061 .
+Both architectures passed 4026/72 defaults and all 65 libmpv checks, now 22+43;
+x86 groups took 227.43s/242.88s and AArch64 226.38s/239.28s. Every later production
+Unix/client/stress/install/clocked/discovery/Snapcast gate passed. Python 3.11
+groups passed 3781+245/72 in 129.95s/77.52s, with unchanged cases and caps.
+
+
+Final integrated discovery defaults pass 4183/72 opt-in skips on Python 3.12
+(201.09s), and 3938+245/72 on Python 3.11 (129.30s/77.21s), with 32 existing
+warnings. Production digest:
+`e8e2442a692c9fb9d727b41d86c222aa0257e70044e217394e2e599d508f52a3`.
+Independent review found no defect, including private continuous-traffic and
+parser/legacy-diagnostic probes. The exact native CLI extension passes locally
+as scoped above. Complete hosted CI is required after publication.
