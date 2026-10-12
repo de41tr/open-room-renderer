@@ -36,6 +36,7 @@ from aiohttp import web
 from .capabilities import configured_presets, capability_fields, configured_sources, service_capability
 from .config import Config
 from .log_safety import redact_media_urls
+from .metadata_formatting import metadata_with_art, metadata_with_duration, metadata_with_url
 from .mpv_backend import LIVE_STATION_HISTORY_OPTIONS, BackendError, MpvBackend
 from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_target, validate_callback_url
 from .radio import RadioResolution, RadioResolutionError, resolve_station
@@ -3535,50 +3536,19 @@ class HttpApi:
     def _metadata_with_art(self, metadata: str, art_url: str, is_live: bool | None = None) -> str:
         """Insert or replace artwork and live-state tags in metadata."""
 
-        if not metadata:
-            return metadata
-
-        def upsert_tag(text: str, tag: str, value: str) -> str:
-            escaped_value = escape(value)
-            pattern = rf"<(?:\w+:)?{re.escape(tag)}[^>]*>.*?</(?:\w+:)?{re.escape(tag)}>"
-            replacement = f"<{tag}>{escaped_value}</{tag}>"
-            if re.search(pattern, text, re.IGNORECASE | re.DOTALL):
-                return re.sub(pattern, replacement, text, count=1, flags=re.IGNORECASE | re.DOTALL)
-            insert_at = re.search(r"</(?:\w+:)?item>", text, re.IGNORECASE)
-            if insert_at:
-                return text[: insert_at.start()] + replacement + text[insert_at.start() :]
-            return text + replacement
-
-        updated = metadata
-        if art_url:
-            updated = upsert_tag(updated, "upnp:albumArtURI", art_url)
-            updated = upsert_tag(updated, "song:image", art_url)
-        if is_live is not None:
-            updated = upsert_tag(updated, "song:isLive", "1" if is_live else "0")
-        return updated
+        return metadata_with_art(metadata, art_url, is_live)
 
     @staticmethod
     def _metadata_with_url(metadata: str, url: str) -> str:
         """Replace the first DIDL ``res`` URL with the resolved media URL."""
 
-        if not metadata or not url:
-            return metadata
-
-        def replace(match: re.Match[str]) -> str:
-            return f"{match.group(1)}{escape(url)}{match.group(3)}"
-
-        return re.sub(r"(<res\b[^>]*>)(.*?)(</res>)", replace, metadata, count=1, flags=re.IGNORECASE | re.DOTALL)
+        return metadata_with_url(metadata, url)
 
     @staticmethod
     def _metadata_with_duration(metadata: str, duration_sec: int) -> str:
         """Insert or update DIDL duration metadata in seconds."""
 
-        if not metadata:
-            return metadata
-        value = str(max(0, duration_sec))
-        if re.search(r"<res\b[^>]*\bduration=", metadata, re.IGNORECASE):
-            return re.sub(r'(<res\b[^>]*\bduration=")[^"]*(")', rf"\g<1>{value}\2", metadata, count=1, flags=re.IGNORECASE)
-        return re.sub(r"(<res\b)", rf'\1 duration="{value}"', metadata, count=1, flags=re.IGNORECASE)
+        return metadata_with_duration(metadata, duration_sec)
 
     @staticmethod
     def _hms_to_seconds(value: str) -> int:

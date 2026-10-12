@@ -33,7 +33,8 @@ aiohttp app in fake_linkplay.http_api
 
 - `fake_linkplay/cli.py`: command-line entry point, config loading, startup/shutdown orchestration.
 - `fake_linkplay/config.py`: YAML config model, generated UUID, persisted device name, persisted channel balance.
-- `fake_linkplay/http_api.py`: HTTP API, SOAP-ish endpoints, queue handling, TuneIn-compatible playback flow, device settings, EQ persistence, log redaction.
+- `fake_linkplay/http_api.py`: HTTP/SOAP endpoints and current playback, queue, eventing, settings and DSP orchestration.
+- `fake_linkplay/metadata_formatting.py`: pure metadata artwork/live-tag, resource-URI and duration edits; no state, network or backend access.
 - `fake_linkplay/state.py`: in-memory renderer state and status payload generation.
 - `fake_linkplay/mpv_backend.py`: mpv process startup, JSON IPC commands, snapshots, volume/mute/seek, balance and PEQ filter graph.
 - `fake_linkplay/ssdp.py`: UDP multicast responder and periodic NOTIFY packets.
@@ -41,6 +42,44 @@ aiohttp app in fake_linkplay.http_api
 - `fake_linkplay/upnp_description.py`: device description XML, SCPD XML, capability payload helpers.
 - `fake_linkplay/podcast.py`: simple playlist/podcast helpers.
 - `fake_linkplay/utils.py`: logging setup, LAN IP detection, filesystem helpers.
+
+
+## Bounded extraction and target responsibilities
+
+This iteration extracts only three pure metadata-edit functions. HttpApi keeps
+its existing helper signatures as delegation wrappers; DIDL construction and its
+dynamic attribute-escaping call remain in place. Existing string/regex behavior,
+including awkward legacy cases, is preserved rather than repaired in the move.
+No await, I/O, state transition, callback scheduling or timing policy is added.
+
+The target below is a map for later incremental work, not a claim that a new
+player-core framework or all these module boundaries already exist:
+
+- **Protocol adapters:** HTTP/SOAP dispatch currently remains in HttpApi, with
+  `soap.py`, `upnp_description.py` and discovery modules alongside it. Adapters
+  validate requests and format results; they must not invent successful state.
+- **Player core:** guarded commands, owner intent/generations, readiness, failure
+  cleanup and recovery remain in HttpApi with `RendererState` and `MpvBackend`.
+  A later extraction would preserve that single ownership contract and its
+  locking/order tests. None of this logic moves in the current refactor.
+- **Queue:** `queue.py` owns item/index validation and queue parsing/serialization.
+  Native sequencing/staging orchestration stays where it is; queue data must not
+  independently claim that a decoder changed source.
+- **Eventing:** leases, coalescing, delivery order and retries remain in HttpApi.
+  A future event publisher should consume authoritative snapshots, including
+  pending/error phases, rather than control playback. Pure XML formatting is separate from subscription lifecycle.
+- **DSP:** existing validation/persistence helpers and MpvBackend retain the
+  confirmed gain/filter transactions and startup restore ordering. A future
+  service boundary must keep configuration distinct from effective output.
+- **Service adapters:** `radio.py` resolves bounded anonymous public-station
+  selections into concrete resources/provenance. Additional providers would
+  require their own lawful lifecycle; a source label is not an implementation.
+
+Dependency direction should stay simple: protocol adapters issue commands to
+the player/queue contract; the player owns backend effects; eventing consumes
+observed state. Pure representation helpers accept values and return strings.
+Further extraction should be one tested seam at a time, on a separate commit,
+without changing supported payloads, faults or owner timing.
 
 ## Startup Flow
 
@@ -147,7 +186,8 @@ Only synthetic tests should be added around EQ behavior. Do not copy proprietary
 
 ## Balance Flow
 
-Balance is persisted as `channel_balance` and applied on startup. Runtime changes eventually call:
+Balance is persisted in the confirmed active DSP context, with legacy
+`channel_balance` as a read fallback, and restored on startup. Runtime changes call:
 
 ```text
 MpvBackend.channel_balance(value)
@@ -159,7 +199,8 @@ _audio_filter_graph()
 lavfi pan filter
 ```
 
-Values are clamped to `-1.0..1.0`.
+Values are validated in `-1.0..1.0`; invalid values fail rather than silently
+clamping. This refactor does not change DSP behavior.
 
 ## mpv Integration
 
