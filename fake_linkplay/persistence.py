@@ -54,8 +54,16 @@ def load_gain(state_dir: str | Path) -> tuple[int, bool] | None:
         return None
     if len(encoded) > 4096:
         raise ValueError("Persisted gain exceeds its size limit")
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate gain field")
+            result[key] = value
+        return result
+
     try:
-        payload = json.loads(encoded)
+        payload = json.loads(encoded, object_pairs_hook=unique_object)
     except (ValueError, UnicodeError, RecursionError):
         raise ValueError("Invalid persisted gain document") from None
     if (not isinstance(payload, dict) or set(payload) != {"version", "volume", "mute"}

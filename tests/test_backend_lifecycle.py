@@ -575,6 +575,27 @@ async def test_cli_initializes_configured_gain_after_stopping_backend(monkeypatc
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('encoded', [
+    '{"version":1,"volume":25,"mute":true,"mute":false}',
+    '{"version":1,"volume":0,"volume":100,"mute":false}',
+    '{"version":2,"version":1,"volume":25,"mute":false}',
+])
+async def test_cli_rejects_duplicate_saved_gain_before_creating_backend(tmp_path, monkeypatch, encoded):
+    config = tmp_path / 'renderer.yaml'
+    config.write_text(f'state_dir: {tmp_path}\ndefault_volume: 12\ndefault_mute: true\n')
+    path = tmp_path / 'gain.json'
+    path.write_text(encoded)
+    backend_factory = Mock(side_effect=AssertionError('Backend must not be constructed'))
+    monkeypatch.setattr(cli, 'MpvBackend', backend_factory)
+
+    with pytest.raises(ValueError, match='Invalid persisted gain document'):
+        await cli.serve(str(config))
+
+    backend_factory.assert_not_called()
+    assert path.read_text() == encoded
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["backend.start", "backend.initialize_gain", "runner0.setup", "site0.start", "runner1.setup", "site1.start", "runner2.setup", "site2.start", "ssdp.start", "mdns.start"])
 async def test_cli_cleans_every_partially_started_resource_after_failure(monkeypatch, stage):
     harness = ServiceHarness(monkeypatch, fail=stage)
