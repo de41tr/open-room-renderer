@@ -1,12 +1,14 @@
-"""Client-only authored playlists: create explicit files and restore via SOAP."""
+"""Client-only authored playlists: create/import offline and restore via SOAP."""
 from __future__ import annotations
 
 import argparse
 import sys
 
 from .playlist_files import (PLAYLIST_MODES, PlaylistCommittedError, PlaylistError,
-                             PlaylistFileExistsError, PlaylistFileTypeError, load_playlist, save_playlist,
+                             PlaylistFileExistsError, PlaylistFileTypeError, load_playlist,
+                             read_playlist_bytes, save_playlist,
                              validate_playlist)
+from .playlist_m3u import M3UError, decode_m3u_urls
 from .queue_client import QueueClient, QueueClientError, explicit_queue, prepare_replace
 
 
@@ -21,6 +23,12 @@ def add_playlist_parser(subparsers: argparse._SubParsersAction) -> None:
     create.add_argument("--mode", choices=PLAYLIST_MODES, default="normal")
     create.add_argument("--overwrite", action="store_true")
     create.add_argument("urls", nargs="+")
+    importer = commands.add_parser("import-m3u", help="convert a strict M3U URL list offline",
+        description="Import the supported UTF-8 M3U URL-list subset into a new private JSON file. "
+                    "Titles and durations are discarded; no media is fetched or played.")
+    importer.add_argument("input", metavar="INPUT")
+    importer.add_argument("output", metavar="OUTPUT")
+    importer.add_argument("--name", required=True)
     restore = commands.add_parser("restore", help="replace the queue, stopped unless --play is given")
     restore.add_argument("file")
     restore.add_argument("--play", action="store_true")
@@ -31,7 +39,11 @@ def add_playlist_parser(subparsers: argparse._SubParsersAction) -> None:
 def run_playlist(args: argparse.Namespace) -> int:
     """Validate all input before writing a file or contacting a renderer."""
     try:
-        if args.playlist_cmd == "create":
+        if args.playlist_cmd == "import-m3u":
+            payload = validate_playlist({"version": 1, "name": args.name,
+                                         "index": 1, "mode": "normal",
+                                         "urls": decode_m3u_urls(read_playlist_bytes(args.input))})
+        elif args.playlist_cmd == "create":
             payload = validate_playlist({"version": 1, "name": args.name,
                                          "index": args.start_index, "mode": args.mode,
                                          "urls": args.urls})
@@ -41,7 +53,10 @@ def run_playlist(args: argparse.Namespace) -> int:
                                start_index=payload["index"], mode=payload["mode"])
         # Validate the whole escaped SOAP request before any file/network write.
         prepare_replace(queue)
-        if args.playlist_cmd == "create":
+        if args.playlist_cmd == "import-m3u":
+            save_playlist(args.output, payload)
+            print("M3U URL list imported. Titles and durations were not saved.")
+        elif args.playlist_cmd == "create":
             save_playlist(args.file, payload, overwrite=args.overwrite)
             print("Authored playlist saved.")
         else:
@@ -53,10 +68,15 @@ def run_playlist(args: argparse.Namespace) -> int:
         print("Playlist saved, but crash durability is unconfirmed. "
               "Inspect the destination before retrying.", file=sys.stderr)
     except PlaylistFileExistsError:
-        print("Playlist not saved: destination already exists. "
-              "Use --overwrite to replace it explicitly.", file=sys.stderr)
+        if args.playlist_cmd == "import-m3u":
+            print("Playlist not saved: destination already exists. Choose a new output file.", file=sys.stderr)
+        else:
+            print("Playlist not saved: destination already exists. "
+                  "Use --overwrite to replace it explicitly.", file=sys.stderr)
     except PlaylistFileTypeError:
         print("Playlist path must be a regular file; symbolic links are not accepted.", file=sys.stderr)
+    except M3UError:
+        print("Invalid M3U URL list. Check the supported UTF-8 subset and limits.", file=sys.stderr)
     except PlaylistError:
         print("Invalid authored playlist. Check the v1 schema, UTF-8, index, mode and limits.", file=sys.stderr)
     except QueueClientError as exc:
