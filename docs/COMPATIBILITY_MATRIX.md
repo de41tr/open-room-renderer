@@ -179,3 +179,15 @@ pending their own results. The actual installed SIGHUP cycle and injected
 Zeroconf withdrawal-failure cleanup passed on both architectures at 8d643657.
 That run's ARM whole job failed its final optional Snapcast signal check; the
 failure is retained and under diagnosis. Physical-LAN/app acceptance remains open.
+
+
+At ba7b3120, native mpv0.37 finite-history/changing-metadata and first-level
+M3U/PLS child gates passed on both x86_64 and AArch64. The only failed test expected
+HTTP 503 rather than the existing 502 after real owned-player death; correcting
+that test does not change production behavior. Its full restart tail still needs
+native verification. The active finite-policy hour remains pending.
+
+A separate INTEGRATION/EMULATED_ARMV7 probe passed real 32-bit ARM Python/C-extension
+imports, persisted identity and loopback HTTP/SOAP with MOCK/unavailable audio.
+Native ARMv7 installation, subprocess chain, mpv/ALSA and hardware stay NOT_RUN;
+no successful emulator import is presented as installation or audio proof.

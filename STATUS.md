@@ -586,7 +586,7 @@ token is invalidated or shutdown begins. Failed Stop/readback preserves explicit
 backend-control uncertainty instead of claiming silence or retrying the source.
 
 An actual libmpv nested-M3U fixture demonstrates the original problem: the inner
-MP3 is decoding while outer-source readiness fails. With cleanup the HTTP502
+MP3 is decoding while outer-source readiness fails. With cleanup the HTTP 502
 returns only after confirmed idle and cleared actual identity; a subsequent
 valid source plays. Nested playlist ancestry is still unsupported. Independent
 review covered observer-error, shutdown and newer-owner interleavings.
@@ -1111,3 +1111,46 @@ Snapcast diagnostics-only addition, the combined finite-policy snapshot passed
 2300 /57 on Python3.11 in 66.73s and 2338 /19 with real libmpv in 380.49s. The final
 Snapcast/helper/supervisor checks separately passed 72 on Python3.11. Production
 bytes and the active frozen final-policy hour are unchanged by those diagnostics.
+
+## Production finite-policy verification and exact error contract
+
+[ba7b3120 run](https://github.com/de41tr/open-room-renderer/actions/runs/38206823992)
+passed 39 real libmpv cases on both native architectures, including changing ICY
+and first-level playlist children. Five of six production Unix cases passed.
+The single failure on each runner was the new owned-player-death test expecting
+HTTP 503; the established renderer contract correctly returned HTTP 502 and plain
+`Failed`. No production status behavior is changed to satisfy a test. The exact
+expectation is corrected and a real-loopback/MOCK-backend regression now checks
+HTTP 502, SOAP 500/fault 501, persistent ERROR and unconfirmed gain. The actual
+fresh-restart portion after that failed assertion still needs its next native run.
+
+Real pywiim, installed SIGTERM/SIGINT/SIGHUP cycles, discovery and all eleven
+same-host Snapcast stages passed on both architectures. Production Unix stress
+ran 185.793s /184.996s with 132/136 loads, 301/311 protocol agreements, and complete
+owned cleanup. The older ARM Snapcast window failure remains unexplained;
+later passes do not retroactively change it or establish two-host synchronization.
+The active finite-policy hour's production bytes are unchanged by this test fix.
+
+## Limited ARMv7 ABI and protocol execution
+
+Checkpoint ba7b3120 also passed a separate INTEGRATION/EMULATED_ARMV7 experiment
+under direct QEMU 7.2.22 with real Debian ARM hard-float CPython 3.11.2, 32-bit pointers
+and `cpython-311-arm-linux-gnueabihf` ABI. The CLI/API/config modules and six actual
+ELF32 ARM dependency extensions imported. aiohttp 3.14.5, requests 2.34.2,
+zeroconf 0.151.5 and PyYAML 6.0 meet the declared runtime requirements. Persisted
+UUID, generated XML and libyaml C parsing passed. Actual loopback HTTP/SOAP used
+ARM aiohttp C parsers and correctly projected an explicitly MOCK/unavailable
+backend as stop/ERROR with unconfirmed gain. No player or audio was exercised.
+
+Debian Release signatures, package-index/archive hashes and 16 official-PyPI wheel
+hashes were verified. Dependencies were privately extracted, not installed into
+a venv. PRoot failed at forbidden ptrace; direct QEMU cannot launch the ordinary
+ARM child subprocess chain here. No security workaround or installer shim was
+used. Native ARMv7 installation, pip/entry-point/uninstall semantics, mpv/ALSA,
+service reboot and Pi/XU4 hardware remain NOT_RUN. This reproduces no installer
+bug and does not justify a production change or costly additional CI lane.
+
+The exact test correction plus current documentation passed 2318 default tests
+with 57 explicit native-only skips locally. Production digest remains
+`b3ae8a5c7ad01696b12be6feb52c16fe51fed9ad6128015992b6d14fd055b5ef`; the active
+frozen hour is unaffected. Full native death-to-restart acceptance is pending.

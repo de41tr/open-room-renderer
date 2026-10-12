@@ -321,8 +321,12 @@ Owned children, IPC pathname, subscriptions, monitors and listeners are cleaned
 up. This is a focused process/control acceptance case, not a service-manager
 restart, measured acoustic silence or hardware test.
 
-This new death case is gated for the existing standard native CI lane and has
-not been run in the development sandbox, where Unix sockets are disallowed.
+The first native CI execution at ba7b3120 reached the explicit retry after real
+owned-player death on both architectures, then failed because the test expected
+503 instead of the established 502. The exact assertion now requires 502/plain
+`Failed`, with an additional loopback regression. Its later fresh-restart tail
+still awaits native execution. Unix sockets remain disallowed in the local
+sandbox; no alternate transport is credited as that process-death result.
 The local deterministic counterparts in `test_backend_lifecycle.py` and
 `test_gena_lifecycle.py` use fake child/IPC or fake audio with real loopback
 HTTP/SOAP/GENA; neither establishes actual process death. No libmpv substitution
@@ -1057,3 +1061,19 @@ or short captures can still fail before all channel summaries exist. Synthetic
 phase jumps reproduce the observed 5/7 failure shape without proving the ARM
 cause. The historical failed job remains failed, and the next native run is
 needed to establish current delivery behavior.
+
+
+### Emulated ARMv7 scope
+
+A bounded direct-[QEMU user-mode](https://www.qemu.org/docs/master/user/main.html)
+probe at ba7b3120 executed Debian ARM hard-float Python 3.11.2 and actual ARM C
+extensions, including aiohttp request/response parsers. Imports, persistent UUID,
+XML and actual loopback HTTP/SOAP error status passed with MOCK/unavailable audio.
+Debian signed package metadata and exact official-PyPI wheel hashes were checked.
+This is INTEGRATION/EMULATED_ARMV7, not native ARM hardware or installation.
+
+Dependencies were extracted into private import paths. The unprivileged PRoot
+route failed at ptrace, and direct QEMU's ordinary ARM child exec failed; no
+security workaround or subprocess shim was introduced. Thus the unmodified
+installer's venv/pip/entry-point/receipt/uninstall chain remains NOT_RUN on ARMv7.
+The successful native AArch64 installation lane does not fill that separate gap.

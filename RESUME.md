@@ -5,17 +5,17 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   The extended 4ef68e4 checkpoint passed over fifteen minutes of production
-   Unix-IPC stress on native x86_64/AArch64, plus the Python3.11 floor:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38203316362
-   Routine limits remain 180s stress /6min step /15min native job /8min floor.
-4. At 8d643657, both architectures passed actual owned/external CLI SIGHUP,
-   SIGINT/SIGTERM and mDNS failure/cancellation resource cleanup. x86_64 and
-   Python3.11 fully passed; ARM failed the final optional Snapcast PCM gate:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38205184583
-   Gain was correct but a short-window signal check failed. Preserve the failure;
-   Added bounded diagnostics retain strict thresholds and multi-channel window
-   data; await new native evidence. Do not simply call the old whole run green.
+   At ba7b3120, all 39 real libmpv cases and five production Unix cases passed on
+   x86_64/AArch64. The sole failure was a new death-test assertion expecting 503
+   instead of the established HTTP 502. This correction changes tests only;
+   await the full kill-to-fresh-restart native tail in the next run.
+   https://github.com/de41tr/open-room-renderer/actions/runs/38206823992
+   Routine limits stay 180s stress /6min step /15min native job /8min floor.
+4. Current native evidence verifies finite radio history/metadata, guarded
+   M3U/PLS children, real pywiim, repeated-lifetime stress, installed CLI signals,
+   discovery and all 11 same-host Snapcast stages on both architectures. The
+   older 8d ARM Snapcast failure remains unexplained, not erased by later passes;
+   bounded diagnostics and every original signal threshold remain in place.
 5. Zero backward history suppressed native changing ICY titles. The corrected
    shared per-file policy is 1MiB plus demuxer-donate-buffer=no. Cap alone can
    borrow forward capacity and is insufficient. Local native title/DIDL/reset
