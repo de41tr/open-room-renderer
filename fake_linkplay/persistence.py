@@ -35,7 +35,10 @@ def atomic_write_text(path: Path, value: str) -> None:
             raise AtomicWriteCommittedError("State replaced; directory durability unconfirmed") from exc
         raise
     finally:
-        Path(temporary).unlink(missing_ok=True)
+        # A successful replace has already removed the source pathname. Do
+        # not risk a cleanup error masking a committed write as uncommitted.
+        if not committed:
+            Path(temporary).unlink(missing_ok=True)
 
 
 def _gain_values(volume: object, mute: object) -> tuple[int, bool]:
