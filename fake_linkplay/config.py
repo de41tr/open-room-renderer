@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import os
+import tempfile
 import uuid as uuidlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -273,25 +275,61 @@ def load_or_create_uuid(state_dir: str | Path, *, wiim_home_profile: bool = Fals
         UUID string persisted in ``state_dir/uuid``.
 
     Side Effects:
-        Creates the state directory and writes a UUID file on first run.
+        Creates the state directory and atomically publishes a fully written,
+        fsynced UUID on first run. Requires hard links and directory fsync.
+        Publication is never rolled back, even if directory sync fails.
     """
 
     directory = ensure_dir(state_dir)
     uuid_path = directory / "uuid"
-    if uuid_path.exists():
-        value = normalize_uuid(uuid_path.read_text())
-        if not value:
-            raise ValueError(f"Persisted UUID is empty: {uuid_path}")
-        return value
+    try:
+        return _read_uuid(uuid_path)
+    except FileNotFoundError:
+        pass
     entropy = uuidlib.uuid4()
     # FF is a compatibility discriminator, not an OEM identifier. The remaining
     # UUID entropy belongs to this installation; do not clone a hardware ID.
     value = f"FF00{entropy.hex.upper()}" if wiim_home_profile else str(entropy)
+    descriptor, temporary = tempfile.mkstemp(prefix=".uuid.", dir=directory)
+    published = False
     try:
-        with uuid_path.open("x") as stream:
-            stream.write(value + "\n")
-    except FileExistsError:
-        return load_or_create_uuid(state_dir, wiim_home_profile=wiim_home_profile)
+        try:
+            try:
+                # Retain ownership even if constructing the text stream fails.
+                with os.fdopen(descriptor, "w", encoding="utf-8", closefd=False) as stream:
+                    stream.write(value + "\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            finally:
+                os.close(descriptor)
+            try:
+                # Atomic no-clobber publication. Replacing a competing creator's
+                # UUID would silently change the installation's identity.
+                os.link(temporary, uuid_path)
+            except FileExistsError:
+                value = _read_uuid(uuid_path)
+            published = True
+        finally:
+            # Remove only this creator's private name, never the published ID.
+            # Sync afterward so successful cleanup is included in the sync.
+            Path(temporary).unlink(missing_ok=True)
+        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            # A losing creator also confirms the directory before returning.
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    except OSError as exc:
+        if published:
+            raise OSError("UUID published; directory durability unconfirmed") from exc
+        raise
+    return value
+
+
+def _read_uuid(path: Path) -> str:
+    value = normalize_uuid(path.read_text())
+    if not value:
+        raise ValueError(f"Persisted UUID is empty: {path}")
     return value
 
 

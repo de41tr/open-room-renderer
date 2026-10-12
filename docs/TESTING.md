@@ -130,6 +130,28 @@ then exercises local controls and two-track selection with a fake backend.
 `test_capability_consistency.py` compares complete capability documents across
 HTTP, SOAP control and transport reads. All are independent of vendor clouds.
 
+`test_identity_publication.py` uses real local files, controlled partial writes
+and eight concurrent subprocess creators with distinct synthetic proposals.
+First-run UUID creation writes and fsyncs a private same-directory file, then
+hard-links it atomically to `uuid` without overwriting an existing destination.
+Both the winner and losing creators remove only their own private link and
+fsync the state directory before returning. A partial write or pre-publication
+file-sync/link failure cannot publish an empty/truncated UUID. Hard-link support
+is required; unsupported filesystems fail without a direct-write/replace fallback.
+After publication, cleanup/directory-open/sync failures fail startup explicitly
+while preserving the full published ID; a restart reuses it. A reader can see
+the complete published file before the creator finishes its directory sync.
+
+Existing nonempty normalized/legacy identities and explicit configured IDs retain
+their previous semantics without rewrite or stricter format validation. Existing
+empty or unreadable UUIDs still fail; an old nonempty truncated file cannot be
+distinguished safely from an intentional legacy ID and is not auto-repaired.
+An abruptly killed creator can leave an ignored `.uuid.*` temporary file; only
+the canonical `uuid` is adopted. Tests exercise Linux local filesystem behavior
+and synthetic failures, not power loss, network filesystems or hardware storage
+guarantees. Directory fsync does not certify persistence of newly created ancestor
+directories. Existing-file reads do not recertify durability or modify the file.
+
 `test_device_rename_persistence.py` uses local HTTP with synthetic storage and
 refresh faults. Rename atomically saves UTF-8 before updating live fields; failure
 before replacement preserves the previous file/name and does not refresh discovery.
