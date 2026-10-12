@@ -50,3 +50,8 @@ Lost-acknowledgement owner controls and retired-native-output races now have a
 reviewed fence. Actual-client HTTP navigation and encoded-media URI preservation
 are fixed. Next verify the installed CLI process boundary and genuine pywiim
 production IPC in native CI, then complete the frozen continuous-station run.
+
+Installed CLI and genuine pywiim production-IPC gates now pass both architectures.
+The Python3.11 runtime floor is locally verified; a separate bounded CI floor job is added. A reproduced wrong-resource playlist parse is corrected. Next: evaluate
+unused backward history for explicit non-seekable live stations and complete
+continuous-stream endurance without changing the existing run or its budgets.

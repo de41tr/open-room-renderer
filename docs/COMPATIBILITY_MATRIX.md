@@ -147,7 +147,12 @@ including staging-enabled operation; live-provider availability remains unverifi
 The repeated-lifetime production Unix stress lane passed on both native architectures in run38198310911 (three lifetimes each).
 
 Actual pywiim navigation and percent-encoded media resources now have real-client
-loopback and separate real-libmpv decoder evidence. The new production Unix-client
-and installed CLI restart/signal lanes await their exact native CI result. Lost
+loopback and separate real-libmpv decoder evidence. The production Unix-client
+and installed CLI restart/signal lanes passed on both architectures in run38200058359. Lost
 Stop/Pause acknowledgements expose ERROR and preserve owner intent instead of
 automatically advancing or restarting the queue.
+
+Python3.11.17 has actual x86_64 default-suite and selected real-libmpv evidence at
+9f5f529; this does not imply ARMv7/Bookworm acceptance. Public-client playlist
+URIs now preserve ports, encoded bytes and literal colons, with real local
+M3U/PLS decoding and honest pre-mutation faults for unsupported legacy indexes.

@@ -14,6 +14,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  python-floor:
+    name: Python 3.11 / default suite
+    # Keep the runtime floor separate from the Python 3.12 native audio lanes.
+    # This standard x86_64 runner does not establish ARMv7 or Pi coverage.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      PYTHONPATH: .
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out contribution without saved credentials
+        timeout-minutes: 1
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up the minimum supported Python minor version
+        timeout-minutes: 2
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          architecture: x64
+          # No dependency cache; the native opt-in suites run in their own job.
+
+      - name: Install Python test dependencies
+        timeout-minutes: 2
+        # The default suite needs no mpv, FFmpeg or PulseAudio installation.
+        run: python -m pip --isolated install --index-url https://pypi.org/simple --disable-pip-version-check --no-cache-dir -e '.[dev]'
+
+      - name: Verify the runtime floor and record dependencies
+        timeout-minutes: 1
+        run: |
+          python -c 'import sys; assert sys.version_info[:2] == (3, 11), sys.version'
+          python --version
+          uname -m
+          python -m pip check
+          python -m pip freeze
+
+      - name: Run default unit and local-client suite on Python 3.11
+        timeout-minutes: 3
+        run: python -m pytest -q -rs
+
   renderer-tests:
     name: Renderer / ${{ matrix.runner }}
     strategy:

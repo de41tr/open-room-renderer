@@ -768,3 +768,59 @@ transport remains restricted. The combined default snapshot passed 2190 tests
 with 41 explicit opt-in skips. With the real-libmpv option enabled, the same
 combined regression suite passed 2218 tests with 13 separate opt-in native cases
 skipped in 291.85s. Installed CLI/actual-client production IPC still await CI.
+
+## Verified native checkpoint 9f5f529 and Python floor
+
+[Run38200058359](https://github.com/de41tr/open-room-renderer/actions/runs/38200058359)
+passed every lane on x86_64 and AArch64. The actual pywiim2.3.9 client used
+production Unix IPC with mpv0.37, selected two distinct generated resources,
+and delivered the exact encoded media path/query unchanged. Parsed client,
+canonical HTTP, native readback and ordered GENA agreed for play, pause, resume,
+Next/Previous, volume, mute/unmute and Stop. The null-output gate checks actual
+gain settings, not audible gain. Its fixture child and all owned tasks/listeners
+were cleaned up.
+
+The installed CLI passed owned/external mpv scenarios on both architectures,
+with SIGTERM and SIGINT across same-port/socket restarts. UUID, name, volume,
+mute and balance survived restart; actual native state was restored even after
+the surviving external player was deliberately changed. Owned children/sockets
+were removed, while the external peer was preserved until fixture teardown.
+These two scenarios took 7.97s / 10.23s, leaving the complete jobs below eleven
+minutes. This is actual installed process acceptance, not systemd boot or hardware.
+
+The exact 9f5f529 source also passed an isolated CPython3.11.17/x86_64 run:
+2190 default tests /41 gated skips, plus six actual libmpv0.40/null or digital-PCM
+cases and one supporting encoding unit test. Controls, seek/queue, gain/mute,
+load options, native staging and uncertain owner controls were exercised.
+Official-PyPI dependencies passed a 35-package compatibility check. The runtime
+came from uv's official Astral CPython distribution; independent archive checksum
+verification was unavailable, and no security/newest-version certification is
+claimed. This does not prove ARMv7, Debian bookworm's own package combination or
+all Python patch/dependency versions. Local Unix sockets remained restricted.
+
+## Complete public-client playlist resources
+
+A real pywiim play_playlist request was previously split at URI colons, including
+ports or a legitimate final `:3`. A reproduced request for an AAC playlist could
+therefore decode a different MP3 playlist and still report success. Complete
+unindexed URIs now remain intact, including escaped path/signature values.
+
+Only a fully quoted inner URI followed by a literal colon has a distinguishable
+legacy index. Exact index0 is this renderer's supported start-at-first form;
+other or empty indices fault before native Stop, queue replacement, generation
+changes or events. This is separate from the canonical queue's one-based index.
+Candidate queue validation also precedes existing native-stage interruption.
+Independent native tests proved both the intended AAC resource and rejection
+without disturbing paused staged playback. Local verification: 2203 default
+passes /41 skips, plus98 focused/native-format cases in the publication snapshot.
+Production-native results for this new revision must be checked separately.
+
+A separate standard x86_64 Python3.11 default-suite CI job now protects the
+declared runtime floor. It uses verified immutable first-party checkout/setup
+actions, official-PyPI dependencies, no dependency cache, no native package
+installation, and an eight-minute whole-job cap. Existing native jobs and their
+fifteen-minute caps are unchanged. The first hosted floor result is pending.
+
+The playlist publication snapshot also passed the full default suite on actual
+CPython3.11.17: 2203 passed /41 gated skips in65.16s. The selected Python3.11
+real-libmpv evidence above remains tied to checkpoint9f5f529.
