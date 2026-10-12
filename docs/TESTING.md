@@ -135,6 +135,45 @@ SIGTERM during startup/teardown while renderer resources are mocked. They verify
 that cleanup executes instead of the interpreter exiting early on the signal.
 These are not production AF_UNIX or real mpv-process shutdown acceptance.
 
+## Real CLI service and installed-entry-point lifecycle
+
+```sh
+ORR_TEST_CLI_LIFECYCLE=1 PYTHONPATH=. .venv/bin/python -m pytest -q -s \
+  tests/test_cli_lifecycle_native.py
+```
+
+This separate REAL_BACKEND/null lane starts the actual
+`python -m fake_linkplay.cli serve` process, without importing or replacing its
+backend in the worker. Each owned/external-mpv scenario exercises two lifetimes
+on the same private generated config, state, socket and high HTTP/UPnP ports.
+Real CLI HTTP commands play generated WAV audio, pause/resume, set volume and
+stop; independent native readback confirms the decoded source, advancing time,
+null audio output, gain and balance graph. Restart must restore generated UUID,
+name, volume, mute and balance; the surviving external player is deliberately
+changed between lifetimes so stale native settings cannot masquerade as restore.
+
+SIGTERM after idle and SIGINT during playback must return zero and release both
+HTTP listeners. An owned native child must be reaped and its socket removed;
+an external native PID/socket must survive both renderer exits before the fixture
+reaps it. Each scenario runs under the existing signal-safe group supervisor with
+a 90-second hard deadline. HTTP binds/advertised addresses/discovery interface
+are explicit loopback; discovery is disabled because its broad protocol coverage
+belongs to the separate discovery lane. No host service, account or security
+setting is changed.
+
+Set `ORR_TEST_CLI_EXECUTABLE` to an absolute installed `open-room-renderer` entry
+point to run the identical lane from outside the source tree without inherited
+`PYTHONPATH` or `PYTHONHOME`. Native installer CI runs only this installed-entry
+lane before uninstall; the source-module command above remains available locally. `ORR_TEST_MPV_BINARY` can select a trusted real mpv
+executable. The fixture adds only null/config/script safety flags with a
+PID-preserving exec wrapper; production defaults and IPC stay unchanged.
+
+Without the exact opt-in these tests skip. With it, missing mpv or forbidden
+AF_UNIX is a failure, never a skip or alternate transport. The current sandbox
+rejects AF_UNIX at preflight, so this new lane is a native CI candidate until its
+own run passes. Its helper/isolation tests run in the default suite. Null output proves neither audible audio nor hardware,
+physical LAN, original app or systemd/reboot behavior.
+
 ## Established-station source recovery
 
 `test_station_recovery.py` covers generation/queue/item identity, finite retry

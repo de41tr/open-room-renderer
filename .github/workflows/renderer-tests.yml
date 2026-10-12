@@ -111,6 +111,11 @@ jobs:
           print("Installation architecture:", receipt["environment"]["machine"])
           print("No service enabled, no physical audio or reboot claim.")
           PY
+          # The installed entry point must serve from a private working
+          # directory without inheriting source PYTHONPATH, then survive both
+          # signal/restart cycles and release only its own native resources.
+          ORR_TEST_CLI_LIFECYCLE=1 ORR_TEST_CLI_EXECUTABLE="$prefix/venv/bin/open-room-renderer" \
+            .venv-ci/bin/python -m pytest -q -s tests/test_cli_lifecycle_native.py
           .venv-ci/bin/python "$prefix/uninstall.py" --prefix "$prefix" --uninstall
           test -f "$prefix/state/uuid"
           test ! -e "$prefix/venv/bin/open-room-renderer"
