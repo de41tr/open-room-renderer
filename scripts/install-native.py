@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIN_PYTHON = (3, 11)
 MIN_MPV = (0, 37)
 MANIFEST = "installed-files.json"
+WEB_ASSETS = ("index.html", "style.css", "controller.js", "app.js")
 
 
 def run(*args: str) -> str:
@@ -131,7 +132,17 @@ WantedBy=default.target
 
 
 def source_files(root: Path = ROOT) -> list[Path]:
-    return [root / name for name in ("pyproject.toml", "README.md", "LICENSE")] + sorted((root / "fake_linkplay").rglob("*.py"))
+    files = [root / name for name in ("pyproject.toml", "README.md", "LICENSE")]
+    files += sorted((root / "fake_linkplay").rglob("*.py"))
+    # Keep the installation snapshot narrow: no arbitrary files from web_assets.
+    files += [root / "fake_linkplay/web_assets" / name for name in WEB_ASSETS]
+    for source in files:
+        if any(path.is_symlink() for path in (source, *source.parents)
+               if path == root or root in path.parents):
+            raise ValueError(f"Installation source must not traverse symlinks: {source}")
+        if not source.is_file():
+            raise ValueError(f"Missing regular installation source file: {source}")
+    return files
 
 
 def source_receipt(snapshot: Path = ROOT) -> dict:

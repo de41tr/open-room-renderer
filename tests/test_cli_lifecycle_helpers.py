@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import errno
+from email.message import Message
+import io
 import json
 import os
 from pathlib import Path
@@ -13,7 +15,7 @@ import pytest
 
 from fake_linkplay.config import load_config
 from tools.acceptance_cli_lifecycle import (
-    assert_ports_closed, child_environment, free_ports,
+    assert_ports_closed, assert_web_assets, child_environment, free_ports,
     native_preflight, wait_for, write_config, write_null_wrapper,
 )
 
@@ -124,3 +126,39 @@ def test_safety_wrapper_rejects_removed_required_flag_before_spawn(tmp_path, mon
     with pytest.raises(AssertionError, match="Missing required null-output fixture safety options"):
         write_null_wrapper(tmp_path, tmp_path / "never executed")
     assert not (tmp_path / "bin/mpv").exists()
+
+
+@pytest.mark.parametrize("fault", [None, "wrong_body", "wrong_type", "wrong_status", "oversize", "empty_source"])
+def test_web_assets_probe_requires_actual_bodies_and_types(tmp_path, fault):
+    routes = {"/ui/": ("index.html", "text/html"),
+              "/ui/index.html": ("index.html", "text/html"),
+              "/ui/style.css": ("style.css", "text/css"),
+              "/ui/controller.js": ("controller.js", "text/javascript"),
+              "/ui/app.js": ("app.js", "text/javascript")}
+    for name, _ in routes.values():
+        (tmp_path / name).write_bytes(name.encode() if fault != "empty_source" else b"")
+    calls = []
+
+    class Opener:
+        def open(self, url, timeout):
+            route = url.removeprefix("http://127.0.0.1:45001")
+            name, content_type = routes[route]
+            assert timeout == 3
+            calls.append(route)
+            body = name.encode()
+            if fault == "wrong_body":
+                body = b"fallback page"
+            elif fault == "oversize":
+                body = b"x" * 1048577
+            response = io.BytesIO(body)
+            response.status = 404 if fault == "wrong_status" else 200
+            response.headers = Message()
+            response.headers["Content-Type"] = "text/plain" if fault == "wrong_type" else content_type + "; charset=utf-8"
+            return response
+
+    if fault:
+        with pytest.raises(AssertionError):
+            assert_web_assets(Opener(), "http://127.0.0.1:45001", tmp_path)
+    else:
+        assert assert_web_assets(Opener(), "http://127.0.0.1:45001", tmp_path) == list(routes)
+        assert calls == list(routes)

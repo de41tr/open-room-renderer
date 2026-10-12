@@ -1,6 +1,7 @@
 """Native profile checks: no privilege changes, service starts, or network installs."""
 from __future__ import annotations
 
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -131,6 +132,14 @@ def test_stage_load_restart_distinct_identity_and_safe_uninstall(installer, tmp_
         assert receipt["mode"] == "staged-only"
         assert receipt["source"]["source_sha256"]
         assert not (prefix / "venv").exists()
+        assets = prefix / "source/fake_linkplay/web_assets"
+        assert {path.name for path in assets.iterdir()} == {"index.html", "style.css", "controller.js", "app.js"}
+        manifest = json.loads((prefix / installer.MANIFEST).read_text())
+        entries = {entry["path"]: entry for entry in manifest["files"]}
+        for name in ("index.html", "style.css", "controller.js", "app.js"):
+            body = (ROOT / "fake_linkplay/web_assets" / name).read_bytes()
+            assert (assets / name).read_bytes() == body
+            assert entries[f"source/fake_linkplay/web_assets/{name}"]["sha256"] == hashlib.sha256(body).hexdigest()
     config = load_config(first / "config.yaml")
     assert config.http_api_port == config.upnp_port == 8080
     assert not config.mirror_port_80
@@ -143,17 +152,22 @@ def test_stage_load_restart_distinct_identity_and_safe_uninstall(installer, tmp_
     foreign.write_text("keep this")
     edited = first / "config.yaml"
     edited.write_text(edited.read_text() + "\n# User edit\n")
+    edited_asset = first / "source/fake_linkplay/web_assets/style.css"
+    edited_asset.write_text(edited_asset.read_text() + "\n/* User edit */\n")
     installer.uninstall(first, dry_run=True)
     assert (first / "source/pyproject.toml").exists()
     installer.uninstall(first, dry_run=False)
     assert not (first / "source/pyproject.toml").exists()
     assert foreign.read_text() == "keep this"
     assert edited.is_file()
+    assert edited_asset.read_text().endswith("/* User edit */\n")
+    assert not (first / "source/fake_linkplay/web_assets/index.html").exists()
     assert (first / "state/uuid").read_text().strip() == config.uuid
     assert (first / installer.MANIFEST).is_file()  # retained with modified owned files
     assert (first / "uninstall.py").is_file()
     installer.uninstall(second, dry_run=False)
     assert (second / "state/uuid").is_file()
+    assert not (second / "source/fake_linkplay/web_assets").exists()
 
 
 def test_native_refuses_existing_prefix(installer, tmp_path):
@@ -384,3 +398,46 @@ def test_32bit_userspace_on_arm64_kernel_is_not_claimed_as_ci(installer, monkeyp
     assert "32-bit ARM" in info["validation"]
     assert "untested" in info["validation"]
     assert "CI" not in info["validation"]
+
+
+def test_staged_web_assets_are_allowlisted_and_all_affect_source_receipt(installer, tmp_path):
+    prefix = tmp_path / "staged"
+    installer.install(prefix, port=8080, stage_only=True, dry_run=False, require_alsa=False)
+    snapshot = prefix / "source"
+    assets = snapshot / "fake_linkplay/web_assets"
+    original = installer.source_receipt(snapshot)["source_sha256"]
+    for name in ("index.html", "style.css", "controller.js", "app.js"):
+        path = assets / name
+        body = path.read_bytes()
+        path.write_bytes(body + b"\nChanged asset\n")
+        assert installer.source_receipt(snapshot)["source_sha256"] != original
+        path.write_bytes(body)
+    for name in ("unexpected.js", "private.json", "private.txt"):
+        (assets / name).write_text("not installation input")
+    assert installer.source_receipt(snapshot)["source_sha256"] == original
+    selected = installer.source_files(snapshot)
+    assert {path.name for path in selected if path.parent == assets} == {
+        "index.html", "style.css", "controller.js", "app.js"}
+
+
+@pytest.mark.parametrize("replacement", ["missing", "file_symlink", "directory_symlink"])
+def test_source_assets_reject_missing_files_and_symlinks(installer, tmp_path, replacement):
+    prefix = tmp_path / "staged"
+    installer.install(prefix, port=8080, stage_only=True, dry_run=False, require_alsa=False)
+    snapshot = prefix / "source"
+    assets = snapshot / "fake_linkplay/web_assets"
+    if replacement == "directory_symlink":
+        outside = tmp_path / "outside-assets"
+        assets.rename(outside)
+        assets.symlink_to(outside, target_is_directory=True)
+    else:
+        target = assets / "app.js"
+        target.unlink()
+        if replacement == "file_symlink":
+            outside = tmp_path / "outside.js"
+            outside.write_text("not an owned source")
+            target.symlink_to(outside)
+    with pytest.raises(ValueError, match="Missing regular|must not traverse symlinks"):
+        installer.source_files(snapshot)
+    with pytest.raises(ValueError, match="Missing regular|must not traverse symlinks"):
+        installer.source_receipt(snapshot)
