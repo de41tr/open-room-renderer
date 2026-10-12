@@ -1,16 +1,24 @@
-"""Local URL playlists: create/import offline, snapshot, and restore via SOAP."""
+"""Local URL playlists: author/edit offline, snapshot, and restore via SOAP."""
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 
 from .playlist_client import fetch_current_playlist
+from .playlist_edits import append_playlist, move_playlist, remove_playlist
 from .playlist_files import (PLAYLIST_MODES, PlaylistCommittedError, PlaylistError,
                              PlaylistFileExistsError, PlaylistFileTypeError, load_playlist,
                              read_playlist_bytes, save_playlist,
                              validate_playlist)
 from .playlist_m3u import M3UError, decode_m3u_urls
 from .queue_client import QueueClient, QueueClientError, explicit_queue, prepare_replace
+
+
+def _positive_index(value: str) -> int:
+    if not re.fullmatch(r"[1-9][0-9]*", value):
+        raise argparse.ArgumentTypeError("Index must be positive ASCII digits")
+    return int(value)
 
 
 def add_playlist_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -30,6 +38,19 @@ def add_playlist_parser(subparsers: argparse._SubParsersAction) -> None:
     importer.add_argument("input", metavar="INPUT")
     importer.add_argument("output", metavar="OUTPUT")
     importer.add_argument("--name", required=True)
+    for command in ("append", "remove", "move"):
+        editor = commands.add_parser(command, help=f"{command} URL occurrences into a new file offline",
+            description="Edit a valid authored URL playlist into a new private file. "
+                        "The source is unchanged; no media is fetched or played.")
+        editor.add_argument("input", metavar="INPUT")
+        editor.add_argument("output", metavar="OUTPUT")
+        if command == "append":
+            editor.add_argument("urls", nargs="+", metavar="URL")
+        elif command == "remove":
+            editor.add_argument("--index", required=True, type=_positive_index)
+        else:
+            editor.add_argument("--from-index", required=True, type=_positive_index)
+            editor.add_argument("--to-index", required=True, type=_positive_index)
     current = commands.add_parser("save-current", help="save the current queue as a private URL playlist",
         description="Save one current-queue URL snapshot without changing playback. "
                     "This is not a lossless backup; metadata and playback state are omitted. "
@@ -53,6 +74,12 @@ def run_playlist(args: argparse.Namespace) -> int:
             payload = validate_playlist({"version": 1, "name": args.name,
                                          "index": 1, "mode": "normal",
                                          "urls": decode_m3u_urls(read_playlist_bytes(args.input))})
+        elif args.playlist_cmd == "append":
+            payload = append_playlist(load_playlist(args.input), args.urls)
+        elif args.playlist_cmd == "remove":
+            payload = remove_playlist(load_playlist(args.input), args.index)
+        elif args.playlist_cmd == "move":
+            payload = move_playlist(load_playlist(args.input), args.from_index, args.to_index)
         elif args.playlist_cmd == "create":
             payload = validate_playlist({"version": 1, "name": args.name,
                                          "index": args.start_index, "mode": args.mode,
@@ -70,6 +97,9 @@ def run_playlist(args: argparse.Namespace) -> int:
         elif args.playlist_cmd == "import-m3u":
             save_playlist(args.output, payload)
             print("M3U URL list imported. Titles and durations were not saved.")
+        elif args.playlist_cmd in {"append", "remove", "move"}:
+            save_playlist(args.output, payload)
+            print("Edited URL playlist saved. Playback was not changed.")
         elif args.playlist_cmd == "create":
             save_playlist(args.file, payload, overwrite=args.overwrite)
             print("Authored playlist saved.")
@@ -82,7 +112,7 @@ def run_playlist(args: argparse.Namespace) -> int:
         print("Playlist saved, but crash durability is unconfirmed. "
               "Inspect the destination before retrying.", file=sys.stderr)
     except PlaylistFileExistsError:
-        if args.playlist_cmd in {"import-m3u", "save-current"}:
+        if args.playlist_cmd in {"import-m3u", "save-current", "append", "remove", "move"}:
             print("Playlist not saved: destination already exists. Choose a new output file.", file=sys.stderr)
         else:
             print("Playlist not saved: destination already exists. "
