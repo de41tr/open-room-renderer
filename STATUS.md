@@ -8,10 +8,21 @@ jobs in [run 38311038205](https://github.com/de41tr/open-room-renderer/actions/r
 The workflow is PR-only; there is no separate main-commit run. This baseline
 result does not certify new changes.
 
-Current work: separate DSP preset-library ownership from active backend
-transactions, and extract shared pure protocol contracts. Next priority is a
-fully functioning local browser controller. No new feature is claimed complete
-at this initial checkpoint. See PLAN.md for the current milestones/deadline.
+The first architecture milestone is IMPLEMENTED and independently reviewed:
+EqPresetLibrary owns saved-curve validation/storage; queue_protocol owns pure
+authored queue/request contracts. Playback and active DSP transactions retain
+existing authority, lock order and error semantics. Differential observations
+match the baseline exactly (51 DSP, 102 queue/adapter). Short integrated actual
+libmpv 0.37/0.40 DSP/restore replays pass; full integrated checks and exact-head
+hosted CI remain separate evidence. Integrated Python 3.12 defaults pass 4598
+/73; complete Python 3.11 groups pass 4348+250 /73 (136.46s/70.96s). Existing
+assertions, skips, CI workflow and caps are unchanged. Exact published-head
+native CI is PENDING until verified; earlier green runs cannot substitute.
+
+Architecture stops at these cohesive seams; the next priority is now a functional
+browser controller. Safe canonical projection, strict same-origin admission,
+frontend and actual-native Web wiring acceptance are being implemented. No Web
+or Spotify feature is claimed complete at this checkpoint.
 
 Hardware/original-app acceptance remains HARDWARE_PENDING. Spotify is not yet
 assessed or implemented in this phase; no account authorization is available.

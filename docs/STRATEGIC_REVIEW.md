@@ -1,3 +1,27 @@
+# Next-phase strategic review
+
+## Architecture checkpoint and pivot
+
+Two bounded, cohesive extractions remove saved-DSP-library ownership and pure
+queue-authoring contracts from orchestration/transport adapters. They preserve
+one playback authority, existing locks and effects. Compatibility costs are a
+mutable library forwarding property and legacy function/error exports; private
+internal helper override dispatch is not an extension contract. Stateful player
+recovery/staging remains intentionally concentrated rather than risk a rewrite.
+
+The highest-value next step is a complete local browser controller. Architecture
+work stops at these seams once integrated checks pass; the 3–4-hour allocation
+is a ceiling, not a target to fill. UI implementation proceeds independently while
+CI runs. Existing long-duration evidence is retained without a redundant rerun.
+After functional UI, spend at most one hour on evidence-based optional Spotify
+sidecar feasibility, then choose implementation or a reasoned deferral.
+
+No new user decision is needed for these reversible steps. The active hard stop
+is 2026-10-13 18:00 UTC; no large/risky work starts after 16:30 UTC and stabilization
+starts at 17:00 UTC. All older strategic task boundaries below are historical.
+
+---
+
 # Strategic review
 
 Optimize useful, verified user workflows per hour, not test/commit/line counts.

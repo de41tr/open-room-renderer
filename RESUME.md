@@ -23,6 +23,13 @@ redistribution or private firmware/traces. Hardware/app gaps do not block softwa
 Review value/risk every 90–120 minutes, report meaningful milestones, and pivot
 away from diminishing-return tests/refactoring. See PLAN.md and STATUS.md.
 
+Early architecture checkpoint: EqPresetLibrary and queue_protocol are integrated
+and independently reviewed. Full defaults pass 4598/73 on 3.12 and 4348+250/73
+on 3.11; short actual DSP/restore replays pass libmpv 0.37/0.40. Publish the two
+behavior-neutral extractions separately, verify exact-head hosted CI, and continue
+Web UI implementation. Do not spend the remaining architecture allocation on a
+player-core rewrite. Browser, hardware and account acceptance remain distinct.
+
 ---
 
 ## Historical completed handovers

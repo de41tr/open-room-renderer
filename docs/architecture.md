@@ -144,6 +144,49 @@ lock order, or introducing a broader service framework requires a separate user
 decision and a wider design/test plan. New providers/authentication or changes to
 supported protocols likewise remain outside this refactor.
 
+## Saved DSP library and authored queue contracts
+
+`eq_presets.EqPresetLibrary` owns saved curve lookup, save/delete/rename,
+name matching, and bounded JSON load/write. Pure EQ request/name/band helpers
+reuse the existing canonical persistence validator. The component receives only
+ordinary values, a state-directory path, and a narrow text-writer callback. It
+never receives HttpApi, Config, RendererState or the backend; it adds no lock,
+await, task or reverse import.
+
+HttpApi retains the active plugin/source caches, balance, restore/readback gates,
+transaction snapshot/rollback, backend effects and active-state persistence.
+Its existing DSP command lock still encloses the shielded transaction; backend
+DSP/gain lock order is unchanged. Library loading never activates a curve.
+Successful library persistence returns before the renderer sets its committed
+flag and persists active metadata. Pre-replacement errors, committed-directory
+fsync failures, and a failed second write preserve the existing distinction.
+
+The existing `eq_presets` attribute is a mutable read/write property onto the
+single library mapping, including rollback replacement. The old constants and
+helper names remain callable, and the HttpApi text-writer patch seam remains.
+The property no longer appears as a stored entry in `vars(api)`. Private
+subordinate helper overrides are not extension hooks for the independent
+library's internal calls. This is an intentional Python-private compatibility
+limit, not a changed HTTP/DSP contract.
+
+`queue_protocol` owns pure authored URL/name validation, explicit queue creation,
+mode identifiers, complete escaped SOAP request framing and its bounded size
+validation. Server queue export and offline playlist edits now import that
+contract without pulling in `queue_client`, requests or CLI transport. The queue
+client retains HTTP sessions, response parsing, uncertain-outcome policy and
+CLI behavior. Legacy imports remain re-exports of the same helper/error objects;
+the exception's defining module is now `queue_protocol`. The client-private
+request builder still forwards its existing patched size limit.
+
+Dependency direction is renderer/client/playlist adapter → pure queue contract
+→ canonical queue/policy. Runtime queues are never duplicated or owned by the
+contract module. Both extractions reduce actual responsibility/dependency
+coupling while leaving playback generations and scheduling untouched.
+
+The architecture phase deliberately stops here before a player-core rewrite.
+Further work prioritizes a useful browser controller. Stateful source ownership,
+recovery and native staging still warrant a wider design before extraction.
+
 ## Startup Flow
 
 ```text

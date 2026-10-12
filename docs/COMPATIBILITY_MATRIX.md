@@ -1,5 +1,17 @@
 # Compatibility matrix
 
+## Current next-phase scope
+
+The new phase starts from merged main `ad21bd4` and works only in Draft PR #2.
+DSP library and pure queue contracts now have separate responsibility boundaries;
+protocol, playback, active DSP and existing acceptance contracts are unchanged.
+Focused synthetic before/after evidence is identical; short actual libmpv
+0.37/0.40 DSP/restore replays pass. Exact-head full CI remains independently
+required. Web UI and optional Spotify work are in progress, not yet accepted.
+HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
+
+The older matrix below retains its own checkpoint/evidence scope.
+
 This is scoped evidence, not a product certification. Updated 2026-10-12 UTC.
 Application/test checkpoint `1d05480` passed all three standard jobs, verified
 at 17:16 UTC: [recorded CI](https://github.com/de41tr/open-room-renderer/actions/runs/38281381125).

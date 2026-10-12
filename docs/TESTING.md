@@ -1,5 +1,29 @@
 # Test evidence and limits
 
+## Next-phase architecture boundary checks
+
+The saved DSP library and shared authored-queue contracts were extracted without
+changing existing assertions, opt-in skips, workflows or time caps. Six library
+ownership/persistence cases and four import/identity cases protect the new seams.
+The independent review found no blocking issue. Synthetic differential checks
+compare **51 DSP observations** and **102 queue/adapter observations** with exact
+baseline equality, including wire bytes, exception semantics and persisted bytes.
+These are UNIT/MOCK/HTTP evidence, not native or physical acceptance.
+
+The integrated short DSP + restore replay passes actual libmpv 0.37 and 0.40
+(2 cases each, 4.46s/4.19s). It retains the existing measured digital PCM checks,
+actual CLI children, and restore-before-first-samples assertion. The first local
+invocations failed before native initialization because the prepared libraries'
+dependency directories were omitted from LD_LIBRARY_PATH; corrected environment
+runs passed with no code/test changes. Do not classify those failed invocations
+as successful tests. Production Unix IPC remains separately verified by hosted CI.
+
+Exact integrated defaults pass **4598 /73 unchanged opt-in skips** on Python
+3.12 (203.14s), and **4348 +250 /73** on Python 3.11 (136.46s/70.96s), under the
+unchanged 165-second group watchdog. Existing 32 warnings remain. Hosted native
+results are PENDING until verified for the published head. Baseline or separate
+single-extraction runs do not certify later changes. No new endurance run is planned.
+
 ## Local DSP CLI acceptance
 
 ```sh

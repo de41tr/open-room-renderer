@@ -20,6 +20,10 @@ No main push, merge or release is authorized.
 5. **STABILIZATION:** no new large/risky work after 16:30 UTC; stabilize from
    17:00 UTC. Stop at 18:00 UTC even if CI remains PENDING.
 
+**Early pivot decision:** two cohesive extractions are implemented and reviewed;
+finish integrated verification, publish them separately, and move to Web UI.
+The architecture budget is a maximum, not a reason to add lower-value refactors.
+
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
 and independent review precede milestone publication. Full native CI follows
 cohesive milestones; unchanged older endurance evidence is not rerun without
