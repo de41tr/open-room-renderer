@@ -26,6 +26,7 @@ from .playlist_cli import add_playlist_parser, run_playlist
 from .queue_client import PrivateClientArgumentParser, add_queue_commands, run_queue_command
 from .ssdp import SsdpServer
 from .state import RendererState
+from .transport_client import COMMANDS, add_transport_commands, run_transport_command
 from .upnp_description import description_xml
 from .utils import setup_logging
 
@@ -248,6 +249,7 @@ def build_parser(*, private_client_errors: bool = False) -> argparse.ArgumentPar
     p.add_argument("value", type=int)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8080)
+    add_transport_commands(sub)
     add_queue_commands(sub)
     add_playlist_parser(sub)
     favorites = sub.add_parser("favorites", help="manage renderer-owned local favorites")
@@ -283,7 +285,10 @@ def main(argv: list[str] | None = None) -> int:
     """
 
     argv = sys.argv[1:] if argv is None else argv
-    args = build_parser(private_client_errors=any(arg in {"queue", "playlist"} for arg in argv)).parse_args(argv)
+    private_errors = any(arg in {"queue", "playlist", *COMMANDS} for arg in argv)
+    args = build_parser(private_client_errors=private_errors).parse_args(argv)
+    if args.cmd in COMMANDS:
+        return run_transport_command(args)
     if args.cmd == "queue":
         return run_queue_command(args)
     if args.cmd == "playlist":

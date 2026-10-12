@@ -119,7 +119,7 @@ def test_canonical_input_rejects_resolved_url_substitution():
 
 
 @pytest.mark.parametrize("action,fields", [
-    ("ReplaceQueue", {"QueueName": NAME}), ("PlayQueueWithIndex", {}),
+    ("ReplaceQueue", {"QueueName": NAME}), ("PlayQueueWithIndex", {}), ("SetQueueLoopMode", {}),
     ("BrowseQueue", {"QueueContext": serialize_queue_context(client.explicit_queue(NAME, [URL]))}),
 ])
 def test_strict_success_response(action, fields):
@@ -316,3 +316,23 @@ def test_cr_name_is_rejected_before_network_because_server_ack_normalizes_cr(mon
         else:
             instance.play_index("One\rTwo", 1)
     forbidden.assert_not_called()
+
+
+def test_mode_validates_before_network_and_reuses_strict_single_shot_transport(monkeypatch):
+    forbidden = Mock(side_effect=AssertionError("network was used"))
+    monkeypatch.setattr(client.requests, "Session", forbidden)
+    for mode in ("repeat", "NORMAL", 4, True, None, []):
+        with pytest.raises(client.QueueClientError, match="Invalid queue input"):
+            client.QueueClient().set_mode(mode)
+    forbidden.assert_not_called()
+    for reply in (FakeResponse(response("PlayQueueWithIndex")),
+                  FakeResponse(response("SetQueueLoopMode", {"LoopMode": "4"})),
+                  FakeResponse(b"OK"), requests.Timeout(URL)):
+        session = FakeSession(reply)
+        monkeypatch.setattr(client.requests, "Session", lambda: session)
+        with pytest.raises(client.QueueClientError) as error:
+            client.QueueClient().set_mode("normal")
+        assert str(error.value) == client._MODE_UNCONFIRMED
+        assert len(session.calls) == 1 and session.closed
+        if isinstance(reply, FakeResponse):
+            assert reply.closed

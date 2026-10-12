@@ -19,12 +19,14 @@ SECRET_URL = "https://media.example.test/track?token=synthetic-secret&name=a b"
 
 
 @contextmanager
-def http_peer(status, body="OK", *, disconnect=False, location=None):
+def http_peer(status, body="OK", *, disconnect=False, location=None, request_headers=None):
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             requests.append(self.path)
+            if request_headers is not None:
+                request_headers.append(dict(self.headers))
             if disconnect:
                 self.close_connection = True
                 return

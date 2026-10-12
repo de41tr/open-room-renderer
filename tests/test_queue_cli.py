@@ -264,3 +264,25 @@ def test_empty_queue_browse_preserves_zero_index_and_count():
         result = invoke(port, "show")
     assert len(seen) == 1 and result.returncode == 0 and result.stderr == ""
     assert json.loads(result.stdout) == {"name": NAME, "count": 0, "index": 0, "mode": "normal", "items": []}
+
+
+@pytest.mark.parametrize("mode,wire_mode", [
+    ("normal", 4), ("repeat-one", 1), ("repeat-all", 0),
+    ("shuffle-once", 3), ("shuffle-repeat-all", 2),
+])
+def test_mode_changes_current_queue_with_only_advertised_loopmode_input(mode, wire_mode):
+    with peer([ack("SetQueueLoopMode")]) as (port, seen):
+        result = invoke(port, "mode", mode)
+    assert result.returncode == 0 and result.stderr == ""
+    assert json.loads(result.stdout) == {"mode_request_acknowledged": True, "mode": mode}
+    assert len(seen) == 1
+    assert decode_request(seen[0], "SetQueueLoopMode") == {"LoopMode": str(wire_mode)}
+
+
+def test_mode_rejects_name_guard_and_invalid_mode_without_contacting_renderer():
+    with peer([ack("SetQueueLoopMode")]) as (port, seen):
+        for arguments in (("normal", "--name", NAME), (URLS[0],)):
+            result = invoke(port, "mode", *arguments)
+            assert result.returncode == 2 and result.stdout == ""
+            assert result.stderr == "Invalid client command arguments. Run open-room-renderer --help.\n"
+        assert seen == []

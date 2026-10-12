@@ -34,6 +34,8 @@ _INVALID_RESPONSE = "Queue request failed: invalid renderer response."
 _REQUEST_FAILED = "Queue request failed: could not confirm the renderer response."
 _REPLACE_UNCONFIRMED = ("Queue replacement was not confirmed. "
                         "Inspect queue show and status before retrying.")
+_MODE_UNCONFIRMED = ("Queue mode change was not confirmed. "
+                     "Inspect queue show and status before retrying.")
 _PLAY_UNCONFIRMED = ("Playback was not confirmed. "
                      "Inspect queue show and status before retrying.")
 _REPLACED_PLAY_UNCONFIRMED = ("Queue replaced; playback was not confirmed. "
@@ -145,7 +147,7 @@ def parse_response(encoded: bytes, action: str) -> dict[str, str]:
     """Require exact SOAP 1.1 framing and unique scalar response fields."""
     try:
         required = {"BrowseQueue": {"QueueContext"}, "ReplaceQueue": {"QueueName"},
-                    "PlayQueueWithIndex": set()}[action]
+                    "PlayQueueWithIndex": set(), "SetQueueLoopMode": set()}[action]
         if not isinstance(encoded, bytes) or len(encoded) > MAX_SOAP_BYTES:
             raise ValueError
         text = encoded.decode("utf-8-sig")
@@ -186,7 +188,7 @@ def parse_response(encoded: bytes, action: str) -> dict[str, str]:
         raise QueueClientError(_INVALID_RESPONSE) from None
 
 
-def _endpoint(host: str, port: int) -> str:
+def _endpoint(host: str, port: int, *, path: str = CONTROL_PATH) -> str:
     try:
         if not isinstance(host, str) or type(port) is not int or not 1 <= port <= 65535:
             raise ValueError
@@ -199,7 +201,7 @@ def _endpoint(host: str, port: int) -> str:
             host = f"[{host}]"
         elif not re.fullmatch(r"[A-Za-z0-9.-]{1,253}", host):
             raise ValueError
-        return f"http://{host}:{port}{CONTROL_PATH}"
+        return f"http://{host}:{port}{path}"
     except (ValueError, TypeError):
         raise QueueClientError("Invalid renderer host or port.") from None
 
@@ -275,6 +277,16 @@ class QueueClient:
         except QueueClientError:
             raise QueueClientError(_PLAY_UNCONFIRMED) from None
 
+    def set_mode(self, mode: str) -> None:
+        """Change only the current queue's mode; SCPD has no QueueName input."""
+        if not isinstance(mode, str) or mode not in MODES:
+            raise QueueClientError(_INVALID_INPUT)
+        body = _request_body("SetQueueLoopMode", {"LoopMode": str(MODES[mode])})
+        try:
+            self._send("SetQueueLoopMode", body)
+        except QueueClientError:
+            raise QueueClientError(_MODE_UNCONFIRMED) from None
+
 
 def queue_summary(queue: PlaybackQueue, *, include_urls: bool = False) -> dict[str, object]:
     """Project structural queue state; omit all provider/display metadata."""
@@ -298,17 +310,19 @@ class PrivateClientArgumentParser(argparse.ArgumentParser):
 
 
 def add_queue_commands(subparsers) -> None:
-    queue = subparsers.add_parser("queue", help="show, replace or play an explicit local queue",
+    queue = subparsers.add_parser("queue", help="show, replace, play or change the current queue mode",
         description="Local queue controls. A queue name does not guard against same-name concurrent replacement.")
     commands = queue.add_subparsers(dest="queue_cmd", required=True)
-    for command in ("show", "load", "play-index"):
+    for command in ("show", "load", "play-index", "mode"):
         help_text = {"show": "show canonical ordering/index/mode; not a canonical URL export",
                      "load": "replace the entire queue and stop playback; --play explicitly starts it",
-                     "play-index": "request playback at a one-based index, without rewriting the queue"}[command]
+                     "play-index": "request playback at a one-based index, without rewriting the queue",
+                     "mode": "change the current queue mode without replacing or restarting playback"}[command]
         parser = commands.add_parser(command, help=help_text, description=help_text)
         parser.add_argument("--host", default="127.0.0.1")
         parser.add_argument("--port", type=int, default=8080)
-        parser.add_argument("--name", required=command != "show")
+        if command != "mode":
+            parser.add_argument("--name", required=command != "show")
         if command == "show":
             parser.add_argument("--include-urls", action="store_true",
                 help="include renderer-reported URLs, potentially resolved or credential-bearing")
@@ -318,6 +332,8 @@ def add_queue_commands(subparsers) -> None:
             parser.add_argument("--play", action="store_true")
             parser.add_argument("urls", nargs="+", metavar="URL",
                 help="1–1000 explicit HTTP(S) URLs; no usernames/passwords or renderer proxies")
+        elif command == "mode":
+            parser.add_argument("mode", choices=tuple(MODES))
         else:
             parser.add_argument("index", type=int, metavar="N")
 
@@ -333,6 +349,9 @@ def run_queue_command(args: argparse.Namespace) -> int:
             result = {"queue_replaced": True, "name": queue.name, "index": queue.index,
                       "count": queue.count, "mode": args.mode,
                       "playback_request_acknowledged": args.play}
+        elif args.queue_cmd == "mode":
+            client.set_mode(args.mode)
+            result = {"mode_request_acknowledged": True, "mode": args.mode}
         else:
             client.play_index(args.name, args.index)
             result = {"playback_request_acknowledged": True, "name": args.name, "index": args.index}
