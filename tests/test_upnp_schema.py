@@ -1,5 +1,6 @@
 """UNIT/MOCK: implemented SCPD contracts, not Android or audio acceptance."""
 from html import escape
+from hashlib import sha256
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from xml.etree import ElementTree as ET
@@ -19,8 +20,9 @@ SERVICES = tuple(SERVICE_TYPES)
 READS = [(service, action) for service in SERVICES for action in sorted(READ_ACTIONS[service])]
 
 
-def contract(service, *, enable_plex=False):
-    root = ET.fromstring(scpd_xml(service, enable_plex=enable_plex))
+def contract(service, *, enable_plex=False, include_control_source=False):
+    root = ET.fromstring(scpd_xml(service, enable_plex=enable_plex,
+                                  include_control_source=include_control_source))
     actions = {
         node.findtext("s:name", namespaces=NS): node
         for node in root.findall("s:actionList/s:action", NS)
@@ -45,8 +47,9 @@ def arguments(action, direction=None):
     return result
 
 
-def variable_for(service, action, argument, direction, *, enable_plex=False):
-    _, actions, variables = contract(service, enable_plex=enable_plex)
+def variable_for(service, action, argument, direction, *, enable_plex=False, include_control_source=False):
+    _, actions, variables = contract(service, enable_plex=enable_plex,
+                                      include_control_source=include_control_source)
     return variables[next(ref for name, _, ref in arguments(actions[action], direction) if name == argument)]
 
 
@@ -165,15 +168,17 @@ def test_android_rendering_inputs_use_actual_types_and_both_channels(action, arg
     ("RenderingControl", "SetVolume"), ("RenderingControl", "SetMute"),
     *[("AVTransport", action) for action in sorted(MUTATING_ACTIONS["AVTransport"])],
 ])
-def test_android_control_source_is_an_ordinary_string_input(service, action):
-    variable = variable_for(service, action, "ControlSource", "in")
+def test_control_source_is_only_declared_on_legacy_scpds(service, action):
+    _, actions, _ = contract(service)
+    assert "ControlSource" not in [name for name, _, _ in arguments(actions[action], "in")]
+    variable = variable_for(service, action, "ControlSource", "in", include_control_source=True)
     assert variable.findtext("s:dataType", namespaces=NS) == "string"
     assert not allowed_values(variable)
 
 
 @pytest.mark.parametrize("channel", ["Master", "Single"])
 def test_schema_driven_android_volume_request_passes_soap_framing(channel):
-    _, actions, _ = contract("RenderingControl")
+    _, actions, _ = contract("RenderingControl", include_control_source=True)
     values = {"InstanceID": "0", "Channel": channel, "DesiredVolume": "7", "ControlSource": "WiiMApp"}
     body = "".join(f"<{name}>{escape(values[name])}</{name}>"
                    for name, _, _ in arguments(actions["SetVolume"], "in"))
@@ -278,7 +283,8 @@ def test_removed_registry_action_is_not_advertised(monkeypatch):
     monkeypatch.setitem(READ_ACTIONS, "ConnectionManager", {"GetProtocolInfo"})
     _, actions, variables = contract("ConnectionManager")
     assert set(actions) == {"GetProtocolInfo"}
-    assert "CurrentConnectionIDs" not in variables
+    # Its direct event still declares the state variable without the action.
+    assert variables["CurrentConnectionIDs"].attrib["sendEvents"] == "yes"
 
 
 def make_api(tmp_path, *, enable_plex=False):
@@ -328,7 +334,7 @@ async def test_scpd_queue_creation_output_matches_actual_selected_name(tmp_path,
     assert node.findtext("QueueName") == api.state.queue.name == "Synthetic & queue"
 
 
-@pytest.mark.parametrize("service", ["AVTransport", "RenderingControl", "PlayQueue"])
+@pytest.mark.parametrize("service", SERVICES)
 def test_direct_event_properties_are_declared_and_typed(tmp_path, service):
     api = make_api(tmp_path)
     root = ET.fromstring(api._event_body(service))
@@ -351,11 +357,37 @@ def test_direct_event_properties_are_declared_and_typed(tmp_path, service):
     ("PlayQueue", "/upnp/PlayQueueSCPD.xml"),
 ])
 @pytest.mark.parametrize("enable_plex", [False, True])
-async def test_scpd_route_aliases_use_the_same_configured_contract(tmp_path, service, path, enable_plex):
+async def test_scpd_routes_preserve_canonical_and_legacy_contracts(tmp_path, service, path, enable_plex):
     api = make_api(tmp_path, enable_plex=enable_plex)
     request = make_mocked_request("GET", path)
     match = await api.app().router.resolve(request)
     response = await match.handler(request)
     assert response.status == 200
     assert response.content_type == "application/xml"
-    assert response.text == scpd_xml(service, enable_plex=enable_plex)
+    legacy = path in {"/upnp/rendertransportSCPD.xml", "/upnp/rendercontrolSCPD.xml"}
+    assert response.text == scpd_xml(service, enable_plex=enable_plex, include_control_source=legacy)
+
+
+@pytest.mark.parametrize("service,legacy_digest", [
+    ("AVTransport", "121f7f2ef525706a84f3cccab110d5e381c4069656d305c5d3b45651439dd69f"),
+    ("RenderingControl", "67b627bb31533f9eb8e7bfe655a905b2d38d37108a72bb84448543c2614aef4c"),
+])
+def test_legacy_scpd_bytes_are_preserved_and_canonical_only_removes_control_source(service, legacy_digest):
+    # Exact compatibility alias contract published at d91140d. An intentional
+    # future contract revision must review these hashes, rather than silently
+    # changing the old vendor input requirements with the standard schema.
+    legacy_xml = scpd_xml(service, include_control_source=True)
+    assert sha256(legacy_xml.encode()).hexdigest() == legacy_digest
+    legacy = ET.fromstring(legacy_xml)
+    canonical = ET.fromstring(scpd_xml(service))
+    for argument_list in legacy.findall("s:actionList/s:action/s:argumentList", NS):
+        for argument in list(argument_list):
+            if argument.findtext("s:name", namespaces=NS) == "ControlSource":
+                argument_list.remove(argument)
+    table = legacy.find("s:serviceStateTable", NS)
+    for variable in list(table):
+        if variable.findtext("s:name", namespaces=NS) == "A_ARG_TYPE_ControlSource":
+            table.remove(variable)
+    ET.indent(legacy)
+    ET.indent(canonical)
+    assert ET.tostring(legacy) == ET.tostring(canonical)

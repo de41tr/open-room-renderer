@@ -121,8 +121,9 @@ async def test_invalid_framing_cannot_mutate(api, kind):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["RenderingControl", "rendercontrol1"])
 @pytest.mark.parametrize("channel", ["Master", "Single"])
-async def test_supported_volume_accepts_client_extensions(api, path, channel):
-    response = await api.soap(request("SetVolume", f"<InstanceID>0</InstanceID><Channel>{channel}</Channel><DesiredVolume>7</DesiredVolume><ControlSource>WiiMApp</ControlSource>", "RenderingControl", path=path))
+@pytest.mark.parametrize("control_source", ["", "<ControlSource>WiiMApp</ControlSource>"])
+async def test_supported_volume_accepts_optional_client_extensions(api, path, channel, control_source):
+    response = await api.soap(request("SetVolume", f"<InstanceID>0</InstanceID><Channel>{channel}</Channel><DesiredVolume>7</DesiredVolume>{control_source}", "RenderingControl", path=path))
     assert response.status == 200
     assert api.mpv.calls == [("volume", 7)]
     assert api.state.volume == 7
@@ -205,3 +206,31 @@ async def test_production_backend_requires_acknowledgement(method, args):
     with pytest.raises(BackendError):
         await getattr(backend, method)(*args)
     backend.command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target,seconds", [
+    ("0:0:5", 5), ("00:00:05", 5), ("1:2:3", 3723),
+    ("001:02:03", 3723), ("0:59:59", 3599),
+])
+async def test_seek_accepts_padded_or_unpadded_ascii_time(api, target, seconds):
+    # Isolate lexical adaptation; confirmed seek/state fences have separate tests.
+    api._seek_command = AsyncMock()
+    response = await api.soap(request("Seek", f"<Unit>REL_TIME</Unit><Target>{target}</Target>"))
+    assert response.status == 200
+    api._seek_command.assert_awaited_once_with(seconds)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", [
+    "0:60:0", "0:0:60", "0:000:5", "0:0:005", "0::5", "0:5", "5",
+    "-1:0:5", "+0:0:5", "0:-1:5", "0:0:+5", "0:0:5.0", "0:0:5:0",
+    "0:\n0:5", "0:0:5\x01", "0:0:\t5", "0:０:5", "0:0:٥", "０:0:5",
+])
+async def test_invalid_seek_time_is_rejected_before_any_mutation(api, target):
+    before = asdict(api.state)
+    api._seek_command = AsyncMock()
+    response = await api.soap(request("Seek", f"<Unit>REL_TIME</Unit><Target>{target}</Target>"))
+    assert fault_code(response) == "402"
+    api._seek_command.assert_not_awaited()
+    assert asdict(api.state) == before and not api.mpv.calls

@@ -149,16 +149,17 @@ async def test_expired_sid_cannot_be_renewed_or_delivered(local_events):
     ({"NT": "upnp:event", "CALLBACK": "<http://127.0.0.1/a><http://127.0.0.1/b>"}, 412),
     ({"NT": "upnp:event", "CALLBACK": "<http://127.0.0.1/events>", "TIMEOUT": "forever"}, 400),
 ])
-async def test_invalid_subscription_has_no_outbound_side_effect(local_events, headers, status):
+@pytest.mark.parametrize("service", ["AVTransport", "ConnectionManager"])
+async def test_invalid_subscription_has_no_outbound_side_effect(local_events, headers, status, service):
     env = local_events
-    assert (await env.subscribe(headers=headers))[0] == status
+    assert (await env.subscribe(service, headers=headers))[0] == status
     assert not env.api.event_subscribers and not env.receipts
 
 
 @pytest.mark.asyncio
 async def test_wrong_service_and_forwarded_peer_cannot_hijack_lease(local_events):
     env = local_events
-    assert (await env.subscribe("ConnectionManager"))[0] == 404
+    assert (await env.subscribe("UnknownService"))[0] == 404
     status, headers = await env.subscribe()
     sid = headers["SID"]
     assert status == 200
@@ -405,3 +406,27 @@ async def test_explicit_play_after_backend_loss_preserves_http_and_soap_failure_
     assert state["status"] == "stop" and state["playback_phase"] == "ERROR"
     assert state["transport_error"] and state["gain_confirmed"] is False
     assert state["vol"] == "50" and state["mute"] == "0"
+
+
+@pytest.mark.asyncio
+async def test_connection_manager_alias_snapshot_renewal_and_unsubscribe(local_events):
+    env = local_events
+    status, headers = await env.subscribe("renderconnmgr1")
+    assert status == 200
+    sid = headers["SID"]
+    await eventually(lambda: len(env.receipts) == 1)
+    assert env.receipts[0][0]["SEQ"] == "0"
+    assert properties(env.receipts[0][1]) == {
+        "SourceProtocolInfo": "", "SinkProtocolInfo": "http-get:*:audio/*:*",
+        "CurrentConnectionIDs": "",
+    }
+    assert (await env.subscribe("ConnectionManager", {"SID": sid}))[0] == 200
+    status, duplicate = await env.subscribe("ConnectionManager")
+    assert status == 200 and duplicate["SID"] == sid
+    assert len(env.api.event_subscribers) == 1
+    await eventually(lambda: len(env.receipts) == 2)
+    assert env.receipts[1][0]["SEQ"] == "1"
+    assert (await env.subscribe("AVTransport", {"SID": sid}))[0] == 412
+    assert await env.unsubscribe(sid, "AVTransport") == 412
+    assert await env.unsubscribe(sid, "ConnectionManager") == 200
+    assert await env.unsubscribe(sid, "renderconnmgr1") == 412

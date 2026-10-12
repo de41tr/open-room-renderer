@@ -273,7 +273,7 @@ _EVENT_VARIABLES = {
         "TrackSource", "PlayMedium", "DeviceName", "GroupName",
     },
     "RenderingControl": {"LastChange", "Volume", "Mute", "DeviceName", "GroupName"},
-    "ConnectionManager": set(),
+    "ConnectionManager": {"SourceProtocolInfo", "SinkProtocolInfo", "CurrentConnectionIDs"},
     "PlayQueue": {
         "LastChange", "QueueContext", "CurrentPlayListName", "CurrentIndex", "LoopMode",
         "Count", "TrackSource", "TrackURI", "TrackTitle", "DeviceName", "GroupName",
@@ -281,12 +281,14 @@ _EVENT_VARIABLES = {
 }
 
 
-def scpd_xml(service_name: str, *, enable_plex: bool = False) -> str:
+def scpd_xml(service_name: str, *, enable_plex: bool = False, include_control_source: bool = False) -> str:
     """Render a service's implemented argument contract as a UPnP 1.0 SCPD.
 
     ``service_name`` is a canonical key from ``soap.SERVICE_TYPES``; aliases
     are resolved by HTTP routes.  Unknown services raise ``ValueError``.
     ``enable_plex`` only enables the implemented PlayQueue UserLogin action.
+    ``include_control_source`` preserves legacy alias input contracts. Canonical
+    SCPDs omit this optional SOAP extension: UPnP arguments cannot be optional.
     Registry additions without a matching schema fail closed rather than
     silently publishing an action with an invented or empty signature.
     """
@@ -308,7 +310,8 @@ def scpd_xml(service_name: str, *, enable_plex: bool = False) -> str:
     for name in sorted(advertised):
         action = ET.SubElement(action_list, "action")
         ET.SubElement(action, "name").text = name
-        arguments = _ACTIONS[service_name][name]
+        arguments = tuple(argument for argument in _ACTIONS[service_name][name]
+                          if include_control_source or argument != _CONTROL_SOURCE)
         if arguments:
             argument_list = ET.SubElement(action, "argumentList")
             for spec in arguments:

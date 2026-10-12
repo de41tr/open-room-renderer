@@ -30,6 +30,8 @@ def description_xml(cfg: Config) -> str:
     model_description = "Independent Linux network audio renderer"
     model_number = cfg.model_number
     friendly_name = cfg.linkplay_instance_name if cfg.wiim_home_profile else cfg.friendly_name
+    # Retain compatibility aliases, but publish canonical services last for
+    # clients whose service-type lookup keeps the final entry.
     return f"""<?xml version="1.0"?>
 <root xmlns="urn:schemas-upnp-org:device-1-0">
   <specVersion><major>1</major><minor>0</minor></specVersion>
@@ -47,11 +49,12 @@ def description_xml(cfg: Config) -> str:
     <UDN>uuid:{escape(cfg.upnp_uuid)}</UDN>
     <presentationURL>http://{cfg.resolved_advertise_ip}:{cfg.http_api_port}/httpapi.asp?command=getStatusEx</presentationURL>
     <serviceList>
-      {service("urn:schemas-upnp-org:service:AVTransport:1", "urn:upnp-org:serviceId:AVTransport", "/upnp/control/AVTransport", "/upnp/event/AVTransport", "/upnp/AVTransport.xml")}
       {service("urn:schemas-upnp-org:service:AVTransport:1", "urn:upnp-org:serviceId:AVTransport1", "/upnp/control/rendertransport1", "/upnp/event/rendertransport1", "/upnp/rendertransportSCPD.xml")}
-      {service("urn:schemas-upnp-org:service:RenderingControl:1", "urn:upnp-org:serviceId:RenderingControl", "/upnp/control/RenderingControl", "/upnp/event/RenderingControl", "/upnp/RenderingControl.xml")}
+      {service("urn:schemas-upnp-org:service:AVTransport:1", "urn:upnp-org:serviceId:AVTransport", "/upnp/control/AVTransport", "/upnp/event/AVTransport", "/upnp/AVTransport.xml")}
       {service("urn:schemas-upnp-org:service:RenderingControl:1", "urn:upnp-org:serviceId:RenderingControl1", "/upnp/control/rendercontrol1", "/upnp/event/rendercontrol1", "/upnp/rendercontrolSCPD.xml")}
-      {service("urn:schemas-upnp-org:service:ConnectionManager:1", "urn:upnp-org:serviceId:ConnectionManager1", "/upnp/control/renderconnmgr1", "", "/upnp/renderconnmgrSCPD.xml")}
+      {service("urn:schemas-upnp-org:service:RenderingControl:1", "urn:upnp-org:serviceId:RenderingControl", "/upnp/control/RenderingControl", "/upnp/event/RenderingControl", "/upnp/RenderingControl.xml")}
+      {service("urn:schemas-upnp-org:service:ConnectionManager:1", "urn:upnp-org:serviceId:ConnectionManager1", "/upnp/control/renderconnmgr1", "/upnp/event/renderconnmgr1", "/upnp/renderconnmgrSCPD.xml")}
+      {service("urn:schemas-upnp-org:service:ConnectionManager:1", "urn:upnp-org:serviceId:ConnectionManager", "/upnp/control/ConnectionManager", "/upnp/event/ConnectionManager", "/upnp/ConnectionManager.xml")}
       {service("urn:schemas-wiimu-com:service:PlayQueue:1", "urn:wiimu-com:serviceId:PlayQueue", "/upnp/control/PlayQueue", "/upnp/event/PlayQueue", "/upnp/PlayQueue.xml")}
       {service("urn:schemas-wiimu-com:service:PlayQueue:1", "urn:wiimu-com:serviceId:PlayQueue1", "/upnp/control/PlayQueue1", "/upnp/event/PlayQueue1", "/upnp/PlayQueueSCPD.xml")}
     </serviceList>
@@ -72,13 +75,19 @@ def service(service_type: str, service_id: str, control: str, event: str, scpd: 
       </service>"""
 
 
-def scpd_xml(service_name: str, *, enable_plex: bool = False) -> str:
+def scpd_xml(service_name: str, *, enable_plex: bool = False, include_control_source: bool = False) -> str:
     """Render only implemented service actions and their typed contracts."""
-    return _declared_scpd(service_name, enable_plex=enable_plex)
+    return _declared_scpd(service_name, enable_plex=enable_plex, include_control_source=include_control_source)
 
 
 def rendering_control_scpd_xml() -> str:
     return scpd_xml("RenderingControl")
+
+
+def connection_manager_properties() -> dict[str, str]:
+    """Existing static capabilities; no allocated connection is advertised."""
+    return {"SourceProtocolInfo": "", "SinkProtocolInfo": "http-get:*:audio/*:*",
+            "CurrentConnectionIDs": ""}
 
 
 def soap_response(action: str = "OK", service_name: str = "", inner_xml: str | None = None) -> str:

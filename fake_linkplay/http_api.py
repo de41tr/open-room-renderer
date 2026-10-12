@@ -50,7 +50,7 @@ from .queue_policy import (NORMAL, ShuffleRandom, is_shuffle, natural_successor,
                            shuffle_exhausted, shuffle_step)
 from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
-from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
+from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, connection_manager_properties, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
 
 LOG = logging.getLogger(__name__)
 PLEX_CALLBACK_URL = "com.linkplay.wiimhome://callback?category=oauth&service=plex"
@@ -3847,13 +3847,15 @@ class HttpApi:
         """Serve the AVTransport SCPD XML."""
 
         LOG.info("HTTP SCPD remote=%s host=%s path=%s", request.remote, request.host, request.path_qs)
-        return web.Response(text=scpd_xml("AVTransport"), content_type="application/xml")
+        return web.Response(text=scpd_xml("AVTransport",
+            include_control_source=request.path == "/upnp/rendertransportSCPD.xml"), content_type="application/xml")
 
     async def rendering_xml(self, request: web.Request) -> web.Response:
         """Serve the RenderingControl SCPD XML."""
 
         LOG.info("HTTP SCPD remote=%s host=%s path=%s", request.remote, request.host, request.path_qs)
-        return web.Response(text=scpd_xml("RenderingControl"), content_type="application/xml")
+        return web.Response(text=scpd_xml("RenderingControl",
+            include_control_source=request.path == "/upnp/rendercontrolSCPD.xml"), content_type="application/xml")
 
     async def connmanager_xml(self, request: web.Request) -> web.Response:
         """Serve the ConnectionManager SCPD XML."""
@@ -3914,9 +3916,11 @@ class HttpApi:
                     raise SoapFault(402, "Invalid Args")
                 result = self._playqueue_response_fields(action, action_body)
             elif action == "GetProtocolInfo":
-                result = "<Source></Source><Sink>http-get:*:audio/*:*</Sink>"
+                properties = connection_manager_properties()
+                result = (f"<Source>{escape(properties['SourceProtocolInfo'])}</Source>"
+                          f"<Sink>{escape(properties['SinkProtocolInfo'])}</Sink>")
             elif action == "GetCurrentConnectionIDs":
-                result = "<ConnectionIDs></ConnectionIDs>"
+                result = f"<ConnectionIDs>{escape(connection_manager_properties()['CurrentConnectionIDs'])}</ConnectionIDs>"
             else:
                 raise SoapFault(401, "Invalid Action")
             if result is None:
@@ -4442,7 +4446,7 @@ class HttpApi:
                 raise SoapFault(701, "Transition Not Available")
         if action == "Seek" and self._xml_text(body, "Unit") not in {"", "REL_TIME"}:
             raise SoapFault(710, "Seek Mode Not Supported")
-        if action == "Seek" and not re.fullmatch(r"\d+:[0-5]\d:[0-5]\d", self._xml_text(body, "Target")):
+        if action == "Seek" and not re.fullmatch(r"[0-9]+:[0-5]?[0-9]:[0-5]?[0-9]", self._xml_text(body, "Target")):
             raise SoapFault(402, "Invalid Args")
         if action == "UserLogin":
             account_source = self._xml_text(body, "AccountSource")
@@ -4768,7 +4772,7 @@ class HttpApi:
     @staticmethod
     def _event_service(value: str) -> str | None:
         service = SERVICE_ALIASES.get(value.lower())
-        return service if service in {"AVTransport", "RenderingControl", "PlayQueue"} else None
+        return service if service in {"AVTransport", "RenderingControl", "ConnectionManager", "PlayQueue"} else None
 
     @staticmethod
     def _event_lease(value: str) -> int:
@@ -4992,6 +4996,8 @@ class HttpApi:
         """Build the XML propertyset body for a UPnP event service."""
 
         service_key = service.lower()
+        if self._event_service(service) == "ConnectionManager":
+            return self._event_propertyset(connection_manager_properties())
         device_name = self.cfg.linkplay_instance_name if self.cfg.wiim_home_profile else self.cfg.friendly_name
         if service_key in {"rendercontrol1", "renderingcontrol"}:
             if not self.state.gain_confirmed:
