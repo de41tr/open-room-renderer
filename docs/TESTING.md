@@ -1380,3 +1380,61 @@ The old bodies move without algorithm changes; DIDL construction/escaping and
 all stateful code remain untouched. Existing metadata/status/GENA and full
 native/Unix/installed-client regressions still gate the refactor. No additional
 provider, original-app, hardware or performance claim follows from extraction.
+
+## Deferred XU4 / DAC / original-app acceptance
+
+**HARDWARE_ACCEPTANCE_PENDING.** The XU4 and original app are currently unavailable;
+there is no known test date. Do not block software work or reinterpret hosted ARM64,
+limited ARMv7 emulation, null decode or digital PCM as this acceptance.
+
+When the owner makes a device available, use this bounded first session (about
+45–60 minutes). Record the exact reviewed commit, OS/architecture, Python/mpv
+versions, DAC model and selected ALSA device, controller/app version and profile.
+Keep real identifiers, addresses, app screenshots and any captures private; publish
+only sanitized aggregate results. Stop at a failed prerequisite rather than
+changing firewall, network/security settings or installing privileged services
+without the required approval.
+
+1. **Install / identity (10 min):** follow the isolated native installer in
+   GETTING_STARTED.md as a non-root account on the actual ARMv7 XU4. Verify its
+   installed CLI and production Unix IPC, restart twice using the same state
+   directory, and confirm identity/name persistence. Do not delete state to
+   resolve a discovery problem. Record receipt-owned uninstall separately.
+2. **ALSA / DAC (10 min):** select the intended device explicitly after checking
+   mpv's device listing. Start with low volume and synthetic/user-owned files.
+   Verify two clearly distinct WAVs, then MP3/FLAC, actual audible output,
+   pause/resume, volume, exact commanded mute and Stop. Record observed clicks,
+   underruns or channel errors; digital-null evidence cannot clear these checks.
+3. **LAN / controller (10 min):** test the neutral profile first from a separate
+   LAN client, discover the advertised instance, and run a two-track queue through
+   Play → Pause → Resume → Next → volume/mute → Stop. Check real second-source
+   identity and HTTP/SOAP/received GENA agreement, not merely a playing label.
+4. **Original app (10–15 min):** use the explicit compatibility profile and its
+   advertised address. Record discovery, device details, queue/metadata/control
+   behavior and unsupported-service visibility. Test port80 only through the
+   separately reviewed non-root service option when approved; do not run the
+   renderer as root or change global interpreter capabilities. An app failure
+   remains ANDROID_APP failed/pending even when public-client tests pass.
+5. **Recovery / cleanup (5–10 min):** after basic audio passes, stop and restart
+   the owned renderer/backend, verify silence and no orphan process, then explicit
+   new playback. Treat DAC unplug, system boot and two-host synchronization as
+   separate later cases, not implied successes of this short session.
+
+Record each step as PASS / FAIL / NOT_RUN with its evidence scope. A completed
+session may establish individual HARDWARE / REAL_AUDIO / ANDROID_APP results;
+it is not a blanket WiiM replacement or long-term reliability certification.
+
+
+### Four-hour changing-ICY qualified evidence (2026-10-12)
+
+The existing opt-in sustained test completed a 14,402.516s baseline and cleanup
+with its original thresholds: 1,795/1,795 autonomous titles plus matching raw
+HTTP/SOAP/received GENA, 1,348 broader protocol agreements, one native load/source/
+request and no disconnects. History remained 1,047,520–1,048,560 bytes; live RSS
+peak growth was 4,428 KiB. Cleanup returned task/FD/thread counts to 1/7/1 with
+no children or subscriptions; retained RSS +42,512 KiB stayed below the unchanged
+49,152 KiB pre-start budget. Ten pytest checks passed in 14,408.70s; only one is
+the real sustained case. Full frozen source and production digests are in
+STATUS.md. This was libmpv0.40, loopback AAC/ADTS and null output; its older frozen
+code cannot certify later commits, hardware, WAN or Unix IPC endurance. Do not
+launch another multihour run without a concrete new information need.

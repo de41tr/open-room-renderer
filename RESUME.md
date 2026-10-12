@@ -5,9 +5,9 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint 07c72c5 passed all three jobs, including the
+   Latest completed checkpoint 8291763 passed all three jobs, including the
    complete owned-player SIGKILL/error/fresh-backend explicit-restart tail:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38226980559
+   https://github.com/de41tr/open-room-renderer/actions/runs/38230830981
    Both architectures passed 60 libmpv-lane checks (47 native/13 unit) and six Unix cases. Normal
    limits stay 180s stress /6min step /15min native job /8min Python3.11 floor.
 4. Native evidence also verifies real pywiim, repeated-lifetime stress, installed
@@ -37,11 +37,12 @@
    Its exact 240.821s replay passed 30/30 autonomous title/callback and metadata
    agreements, one source/load/request, retained-history plateau and cleanup.
    Frozen source b8c7c3828554d0d0bdd0cd04258d01537956d38a2a191b41d43879603f3fc2b4.
-   A separately frozen four-hour changing-title run is ACTIVE from
-   06:06:23.924497 UTC; earliest qualifying finish is 10:06:23.924497 UTC plus
-   teardown. Its source digest is the one above and production digest the one
-   in step 7. No extended-duration pass is claimed before completion. Keep
-   original failed/zero/final-constant results separately scoped.
+   The separately frozen four-hour changing-title run PASSED at 10:06:26.620761 UTC
+   including cleanup: 14,402.516s baseline, 1,795/1,795 autonomous title/surface
+   agreements, one load/source/request, zero disconnects and 4,428 KiB live RSS
+   growth. All 27 source entries and both frozen digests matched. Resources returned
+   to one task/seven FDs/one thread/zero children. No new multihour run is planned.
+   Keep original failed/zero/final-constant and this result separately scoped.
    Checkpoint 3e74b24 adds five real rolling-HLS cases. CI38210542104 has
    failures in both expanded libmpv lanes: segment-return loses playback-time
    during its two-second hold. x86 also loses time immediately after child path
@@ -95,12 +96,23 @@
 11. User-requested small behavior-neutral HttpApi extraction is gated on full
     green standard CI for the current functional fixes. Prefer pure DIDL/XML/
     metadata formatting; no playback/recovery/staging logic refactor or new deps.
-    Timer ACTIVE from 2026-10-12 09:14:53 UTC: target 10:44:53 UTC, hard 11:14:53 UTC
+    Timer COMPLETE: started 2026-10-12 09:14:53 UTC: target 10:44:53 UTC, hard 11:14:53 UTC
     including native verification.
-    Reviewed extraction and full local suites passed; hosted CI is still the
-    completion gate. Scope: three stateless helpers and exact-signature wrappers;
+    Reviewed extraction, full local suites and all three hosted jobs passed by
+    09:51:33 UTC, elapsed 36m40s. Scope: three stateless helpers and exact-signature wrappers;
     DIDL creation/dynamic attribute escaping stay in HttpApi. Keep
     all protocol payload/error/state/timing interfaces unchanged, separate commit.
-    Abort if risky or not native-green within budget and record next-iteration
-    architecture/extraction plan. Preserve the running frozen radio test.
+    The target architecture is recorded; no further extraction is active.
+    The frozen radio test has now completed and cleaned up.
 12. At the deadline stop owned active processes and provide the honest handover.
+
+Strategic update 2026-10-12 09:37UTC: after the current refactor reaches full green
+CI, prioritize useful local features (repeat/shuffle/playlist navigation/presets)
+over additional edge-case or long-run expansion. Keep at most five proposals in
+docs/STRATEGIC_REVIEW.md with A_AUTONOM/B_AWAITING_DECISION/C_APPROVAL_REQUIRED
+and evidence/value/effort/risk decisions. Review about every 90–120 minutes and
+after major packages. No new unnecessary multihour tests. XU4/original-app work
+is HARDWARE_ACCEPTANCE_PENDING; do not wait for unavailable hardware. Prepare
+the bounded later acceptance plan after higher-value software work. Final handover
+adds three practical constraints, three debts, three missing features and user
+decisions. Existing branch, publication, safety and deadline limits remain.

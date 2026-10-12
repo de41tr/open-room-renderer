@@ -2,10 +2,10 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (09:32 UTC)
+## Current checkpoint (10:08 UTC)
 
-Draft PR remains unmerged. Published `07c72c5` passed all three standard jobs:
-https://github.com/de41tr/open-room-renderer/actions/runs/38226980559 .
+Draft PR remains unmerged. Published `8291763` passed all three standard jobs:
+https://github.com/de41tr/open-room-renderer/actions/runs/38230830981 .
 Both architectures passed the 60-test libmpv lane (47 actual native cases plus
 13 deterministic helpers), six production Unix cases, actual pywiim, stress,
 installed lifecycle, clocked transitions, discovery and eleven Snapcast stages.
@@ -18,8 +18,8 @@ with unchanged HttpApi wrappers. DIDL creation, dynamic escaping, parsing and al
 playback/recovery/staging/event lifecycle behavior stay in place. The exact patch
 is independently reviewed, including byte/error/effect comparisons. Final local
 default suites passed 2813 /66 on Python3.11/3.12, and both complete selected
-libmpv lanes passed 60 checks. Full hosted verification remains the completion gate. Target 10:44:53 UTC; hard stop
-11:14:53 UTC including native CI. The short target architecture is in
+libmpv lanes passed 60 checks. All three hosted jobs passed by 09:51:33 UTC;
+the bounded extraction completed in 36m40s, inside its 90-minute target. The short target architecture is in
 `docs/architecture.md`; this is a small seam, not a new framework.
 
 At `3e74b24`, expanded live-HLS/libmpv lanes failed: both architectures lost native
@@ -39,9 +39,12 @@ remained unchanged. Its production/source digests are recorded below; this is
 loopback AAC/libmpv0.40/null evidence, separate from changing-ICY, Unix IPC or
 hardware. Earlier failed and zero-policy runs keep their original scope.
 
-A separately frozen four-hour changing-ICY run began 06:06:23.924497 UTC;
-earliest qualifying finish is 10:06:23.924497 UTC plus teardown. Its requested
-14400s duration and all gates are unchanged. It remains IN_PROGRESS.
+The separately frozen four-hour changing-ICY run PASSED: baseline
+06:06:23.924497–10:06:26.449348 UTC, 14,402.516s; cleanup finished at
+10:06:26.620761 UTC. All 1,795 autonomous title changes agreed across HTTP/SOAP/GENA,
+with one load/source/request, zero disconnects and 4,428 KiB live RSS growth.
+Full source and production digests stayed unchanged; see the scoped evidence below.
+Repeat One / All is the next functional package, still under implementation.
 
 ## Baseline
 
@@ -1581,6 +1584,36 @@ Python3.12 in 79.04s and Python3.11 in 80.47s. The complete selected libmpv lane
 passed 60 checks on 0.37 in 410.55s and 0.40 in 413.67s (47 actual native cases, 13
 deterministic helpers). No thresholds, timing budgets or opt-in defaults changed.
 Production digest: `93e39232b679ab4d321aaf4f98bdfa4befe61138dcdb04cf3e7dae1ea6ee381e`.
-The separate refactor commit still requires its complete hosted standard CI
-within the recorded budget before being considered finished. Frozen radio
+The separate refactor commit and verification record, head 8291763, passed all
+three hosted standard CI jobs by 09:51:33 UTC (36m40s after extraction began). Frozen radio
 provenance and all earlier limitations remain unchanged.
+
+
+## Qualified four-hour changing-radio result
+
+The existing frozen run completed on 2026-10-12 at 10:06:26.620761 UTC including
+cleanup. Pytest exited zero: 10 passed in 14,408.70s (one real sustained case and
+its deterministic gate checks). Requested baseline 14,400s; observed 14,402.516s,
+native playback progress 14,402.104s. All 1,795/1,795 synthetic titles arrived
+through autonomous native metadata callbacks and matched HTTP/SOAP/received GENA;
+1,348 broader protocol agreements also passed. Exactly one handle/load/source/
+request and zero disconnects; no hidden reload or reconnect is credited.
+
+Backward-history plateau: 1,047,520–1,048,560 bytes. Live peak RSS growth was
+4,428 KiB above the warm baseline; live resources stayed at five tasks, twelve
+FDs, ten threads and zero children. Cleanup closed the native handle, listener
+and client, removed subscriptions/pending tasks and ended the stream handler.
+Resources returned to one task, seven FDs, one thread and zero children. Cleanup
+RSS remained 42,512 KiB above pre-start, within the unchanged 49,152 KiB budget;
+the retained RSS was within budget, not a claim that all RSS returned to zero.
+
+All 27 frozen source-manifest entries and before/after checks matched:
+- Source: `b8c7c3828554d0d0bdd0cd04258d01537956d38a2a191b41d43879603f3fc2b4`
+- Production: `b3ae8a5c7ad01696b12be6feb52c16fe51fed9ad6128015992b6d14fd055b5ef`
+
+Scope: REAL_BACKEND/libmpv 0.40, synthetic AAC/ADTS over loopback, null output,
+x86_64. It predates later production commits including the formatter extraction;
+do not transfer four-hour evidence to their different source digests. No physical
+DAC, WAN/provider reliability, original app or production-Unix endurance claim
+follows. Earlier failed/default/zero-history results remain separately recorded.
+No further multihour run is planned; development has pivoted to useful queue modes.

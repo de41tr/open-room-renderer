@@ -87,7 +87,7 @@ SOAP and GENA bytes/fields, errors, state, timing and interfaces unchanged.
 
 Target 90 minutes, hard maximum 120 minutes including native CI verification.
 Record the actual UTC start, target finish and hard stop here and in RESUME.md
-when the green gate opens; the timer is ACTIVE. Use a separate refactor
+when the green gate opens; the timer is now COMPLETE. Use a separate refactor
 commit, existing regression coverage and only necessary extraction tests.
 No new dependencies/frameworks, large rewrite, or fundamental playback/recovery/
 queue-staging logic changes. If risky or unable to obtain native-green within
@@ -99,10 +99,21 @@ Refactor green gate confirmed: 07c72c5, all three standard CI jobs passed in
 https://github.com/de41tr/open-room-renderer/actions/runs/38226980559 .
 Actual start: 2026-10-12 09:14:53 UTC. Target finish: 10:44:53 UTC.
 Hard stop: 11:14:53 UTC, including complete native CI verification.
-Status: ACTIVE; extraction/review and full local verification passed. Await the
-separate refactor commit's complete standard CI. Extract only the three stateless
+Status: COMPLETED at 09:51:33 UTC, elapsed 36m40s. Revision 8291763 passed all
+three standard CI jobs in run 38230830981. Extracted only the three stateless
 metadata-edit helpers into
 metadata_formatting.py, retaining exact-signature HttpApi wrappers. DIDL creation
 and dynamic attribute escaping remain in place. No protocol dispatch, state or
 playback logic moves. Abort/retain a concrete plan if unsafe or not native-green
 by the hard stop.
+
+Strategic update 2026-10-12 09:37UTC: after the current refactor reaches full green
+CI, prioritize useful local features (repeat/shuffle/playlist navigation/presets)
+over additional edge-case or long-run expansion. Keep at most five proposals in
+docs/STRATEGIC_REVIEW.md with A_AUTONOM/B_AWAITING_DECISION/C_APPROVAL_REQUIRED
+and evidence/value/effort/risk decisions. Review about every 90–120 minutes and
+after major packages. No new unnecessary multihour tests. XU4/original-app work
+is HARDWARE_ACCEPTANCE_PENDING; do not wait for unavailable hardware. Prepare
+the bounded later acceptance plan after higher-value software work. Final handover
+adds three practical constraints, three debts, three missing features and user
+decisions. Existing branch, publication, safety and deadline limits remain.

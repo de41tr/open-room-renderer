@@ -212,7 +212,11 @@ Unix HLS, real WAN, encryption/DRM, adaptive variants and hardware acceptance.
 The final finite-policy constant-title hour passed 3600.675s with one load/request,
 362 protocol agreements, peak RSS growth 1936 KiB and complete cleanup. This is
 separately frozen loopback AAC/libmpv0.40/null evidence, not changing-ICY endurance.
-The four-hour changing-ICY run started 06:06:23.924 UTC and remains in progress.
+The separately frozen four-hour changing-ICY run subsequently PASSED at
+10:06:26.620761 UTC including cleanup: 14,402.516s, 1,795/1,795 titles and
+HTTP/SOAP/GENA agreements, one source/load/request, zero disconnects and bounded
+resources. This is libmpv0.40 loopback/null evidence on its original source hash,
+not production Unix IPC, WAN, newer-code endurance or hardware/app acceptance.
 
 At 3e74b24, hosted HLS playlist recovery and three owner-command cases passed;
 segment-return failed on both architectures because native playback-time became
@@ -293,5 +297,12 @@ standard CI is a separate completion gate; no new capability is advertised.
 
 The extracted-code snapshot passed 2813 /66 default checks on Python3.11/3.12
 and 60 selected libmpv checks on both 0.37/0.40. This is behavior-preservation
-evidence for a limited code move. Its hosted standard-CI completion is pending
-separately; physical output, original Android and two-host limits remain.
+evidence for a limited code move. Hosted completion is recorded below; physical
+output, original Android and two-host limits remain.
+
+
+At 8291763 all three standard CI jobs passed after the bounded formatter extraction
+(run38230830981). Native x86_64/AArch64 passed the existing full gates, including
+60 selected libmpv checks (47 native/13 deterministic), six Unix IPC cases and
+eleven same-host Snapcast stages. No public behavior change or hardware claim
+is attributed to that extraction. XU4/original app: HARDWARE_ACCEPTANCE_PENDING.
