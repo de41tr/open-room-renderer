@@ -29,6 +29,21 @@ all legacy and new controls; a UI-only switch is not sufficient arbitration.
 If legal/account/audio-contract constraints block a safe useful first stage,
 record the ADR and prioritize DSP preset/band UI, playlists and diagnostics.
 
+The Spotify feasibility pass completed within its one-hour cap. The accepted
+[ADR](adr/001-spotify-sidecar.md) selects official Soloist as the future standalone
+candidate but defers integration, with separate account, target-hardware, policy
+and output-arbitration gates. No account work or speculative second player was
+started. This preserves the existing renderer and redirects effort to real
+DSP-band/preset editing through its checked transactions.
+
+The DSP editor now exposes the useful existing engine rather than adding a new
+one: checked bands, safe drafts and saved-preset management, with native graph
+and discriminating PCM verification. Next, continue the bounded stopped-only
+playlist workflow. The existing native jobs nearly filled their 15-minute caps;
+reuse the already-tested default-suite partition on each same runner, preserving
+exact coverage/caps. One local replay supports the change; hosted improvement
+must be measured on the next exact-head run.
+
 No new user decision is needed for these reversible steps. The active hard stop
 is 2026-10-13 18:00 UTC; no large/risky work starts after 16:30 UTC and stabilization
 starts at 17:00 UTC. All older strategic task boundaries below are historical.

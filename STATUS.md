@@ -17,7 +17,8 @@ libmpv 0.37/0.40 DSP/restore replays pass; full integrated checks and exact-head
 hosted CI remain separate evidence. Integrated Python 3.12 defaults pass 4598
 /73; complete Python 3.11 groups pass 4348+250 /73 (136.46s/70.96s). Existing
 assertions, skips, CI workflow and caps are unchanged. Exact published-head
-native CI is PENDING until verified; earlier green runs cannot substitute.
+native CI passed all three jobs at architecture head `5b86bdd` in
+[run 38317217424](https://github.com/de41tr/open-room-renderer/actions/runs/38317217424).
 
 Architecture stopped at those cohesive seams. The local Web controller is now
 IMPLEMENTED and independently reviewed: Now Playing/position/artwork, transport
@@ -32,17 +33,47 @@ wheel/real HTTP asset checks pass; 157 focused checks and 28 Node/DOM-double
 checks pass independently. Final integrated Python 3.12 defaults pass **4755
 /74 opt-in skips** in 203.45s; Python 3.11 complete groups pass **4505+250 /74**
 in 137.65s/71.10s under unchanged caps. Exact newly published-head hosted CI
-is PENDING until verified; earlier architecture results cannot certify the UI.
+passed all three jobs at Web head `81a3d72` in
+[run 38319222442](https://github.com/de41tr/open-room-renderer/actions/runs/38319222442).
+That run includes all 67 native checks, real Unix IPC on both native architectures
+and an explicit Node version check. It does not certify later DSP changes.
 
 BROWSER_ACCEPTANCE_PENDING: no real browser/layout/focus acceptance is claimed.
 The complete UI is locally reproducible at the renderer's existing `/ui/` path;
 see docs/WEB_UI.md and docs/WEB_BROWSER_ACCEPTANCE.md. Legacy unauthenticated
 routes remain a trusted-LAN security limitation, not fixed by Web-only guards.
-Spotify feasibility is the next bounded step; no provider adapter/account/music
-acceptance is claimed yet.
+The bounded Spotify comparison is complete. [ADR 001](docs/adr/001-spotify-sidecar.md)
+prefers a separately user-installed official Soloist experiment, verifies ARMv7
+and local WS, and defers integrated playback because all-entry audio arbitration
+and combined-provider policy scope are unresolved. Standalone personal Soloist
+is expressly supported; no blanket prohibition is claimed. Provider integration
+is BLOCKED/DEFERRED, with ACCOUNT_PENDING and HARDWARE_PENDING. No client/key,
+provider code, fake playback or proprietary binary was added. Remaining work
+prioritizes practical playlist/diagnostic features.
 
-Hardware/original-app acceptance remains HARDWARE_PENDING. Spotify is not yet
-assessed or implemented in this phase; no account authorization is available.
+The ten-band DSP editor and saved-preset load/save/rename/delete are IMPLEMENTED
+and independently reviewed. Web revisions are admitted inside the existing DSP
+lock; incomplete effects remain explicit, and unsent drafts are never saved as
+active curves. Final integrated Python 3.12 and 3.11 complete groups each pass
+**4551+250 /74** after the dialog and installation fixes. Actual libmpv 0.37/0.40 Web and PCM checks pass; the new guarded
+Web -12 dB curve measures **-12.0387 dB at 1 kHz** on both versions.
+Exact new-head hosted CI remains PENDING. Playlist work is a separate candidate
+and is not covered by these results.
+
+A delivery review caught a native-installer snapshot omission that left out the
+four Web assets. The explicit asset/provenance fix is integrated, independently
+reviewed and verified through a staged-source offline installed wheel and actual
+HTTP routes. The existing hosted installed-CLI lifecycle now checks the assets
+on each restart; its exact-head native result remains PENDING. A reproduced
+delayed dialog-close/reopen race is also fixed and covered by 50 Node checks.
+
+Native CI default tests now reuse the existing two-process partition on the same
+runner. Exact collection/skip parity and one full grouped replay pass; local wall
+time was 139.519s versus the preceding 204.38s serial pytest run. Hosted savings
+are unmeasured. No runners, tests, assertions, skips or existing caps changed.
+
+Hardware/original-app acceptance remains HARDWARE_PENDING. No provider account
+authorization is available.
 The historical reports below retain their own exact-source scope and failures.
 
 ---

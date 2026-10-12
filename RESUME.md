@@ -23,21 +23,35 @@ redistribution or private firmware/traces. Hardware/app gaps do not block softwa
 Review value/risk every 90–120 minutes, report meaningful milestones, and pivot
 away from diminishing-return tests/refactoring. See PLAN.md and STATUS.md.
 
-Early architecture checkpoint: EqPresetLibrary and queue_protocol are integrated
-and independently reviewed. Full defaults pass 4598/73 on 3.12 and 4348+250/73
-on 3.11; short actual DSP/restore replays pass libmpv 0.37/0.40. Publish the two
-behavior-neutral extractions separately, verify exact-head hosted CI, and continue
-Web UI implementation. Do not spend the remaining architecture allocation on a
-player-core rewrite. Browser, hardware and account acceptance remain distinct.
+Published Draft PR #2: https://github.com/de41tr/open-room-renderer/pull/2 .
+Architecture head `5b86bdd` passed all three jobs in run 38317217424; first Web
+head `81a3d72` passed all three in run 38319222442, including 67 native checks.
+These are scoped checkpoints, not evidence for later changes.
 
-Web controller is now integrated and independently reviewed. Final web_ui hash
-48291360edf8462fff2f741930b26f3afca00c0bc56f2eaa9d06008d588dacbc;
-HttpApi hash b113e07ef3d8d7ebe8093d380608b612dd5478b84631625a094e7ea1dea0f742.
-It serves the existing listener, typed same-origin controls and packaged assets.
-Short final native Web runs pass 0.37/0.40; no real-browser claim. Publish feature,
-native/CI evidence and operator documentation separately, verify exact-head CI,
-then continue the <=1-hour Spotify feasibility task. No provider account login,
-unsafe two-engine playback or proprietary distribution is authorized.
+The ten-band/preset Web editor is integrated and independently reviewed. Full
+local defaults pass 4551+250 /74 on both 3.12 and 3.11 after the final
+dialog/installation corrections. Actual 0.37/0.40
+Web+PCM tests pass; guarded Web -12 dB applies measure -12.0387 dB at 1 kHz.
+DSP feature, native acceptance, same-runner default-suite scheduling, native
+asset packaging and documentation are separate commits. Verify the exact new
+head's hosted CI before claiming the new checkpoint green.
+The scheduling change preserves exact node/skip coverage and the 15-minute job
+cap; its 139.519s local grouped replay is not a hosted timing claim.
+
+Spotify feasibility is complete: see docs/adr/001-spotify-sidecar.md and the
+pinned source comparison. Integration is deferred on explicit policy-scope and
+all-entry output-arbitration gates; standalone Soloist DIY use is supported.
+No account, key, client download or provider code was added.
+
+Native installation now includes the exact four Web assets in its source
+snapshot/provenance. Independent staged-wheel/isolated HTTP checks pass; hosted
+installed-CLI lifecycle must still confirm the new route assertions. Shared
+favorite/preset delayed-close races are fixed; final Node checks pass 50/50.
+
+Continue the independently reviewed stopped-only playlist workflow candidate
+while CI runs. Keep candidate evidence distinct from published checkpoints.
+Do not repeat old soak tests or known blocked browser routes. Genuine browser,
+physical ARMv7/DAC/original-app and account acceptance remain pending.
 
 ---
 

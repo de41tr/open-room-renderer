@@ -1,5 +1,86 @@
 # Test evidence and limits
 
+## Web DSP editor: locked state and measured audio
+
+The band/preset extension reuses the existing DSP transaction, with a Web-only
+admission check inside its existing lock. Independent review includes queued
+context/library changes, repeated cancellation, legacy exception identity and
+post-commit effects. A reproduced percent-escaped plugin edge applies and saves
+successfully but fails a legacy return parser; the Web result now truthfully says
+applied/follow-up-unknown instead of falsely claiming persistence failed. Legacy
+parser behavior is unchanged. OSError-specific storage classification is scoped
+to the fixed Web band/load paths, whose only post-confirmation I/O is persistence.
+
+Final integrated defaults pass **4791/74** on Python 3.12 (204.38s), and
+**4541+250/74** on Python 3.11 (137.52s/71.36s). Independent focused review passes
+414 backend/persistence/race cases plus 48 Node/DOM-double cases. The unchanged
+real-native Web and PCM test cases are extended, not replaced: all 160 original
+assertions, 14 captures, nine CLI children and time bounds remain.
+
+The PCM flow first retains every old legacy setup/readback check, then verifies
+a flat native graph, applies the negative curve through the guarded Web endpoint,
+and reuses the original capture/assertions. A no-op Web apply would therefore
+fail. The -12 dB/1 kHz request measures **-12.0387 dB** on actual libmpv 0.37 and
+0.40. Final integrated Web+PCM tests pass 2/2 in 7.09s/7.52s. The null flow also
+verifies complete band graph changes, bypass retention, saved-preset restoration,
+PENDING concealment, locked stale rejection and zero native writes for library
+save/rename/delete. This is actual ctypes-backed native/digital-PCM evidence,
+not production Unix Web control, browser rendering or physical audio.
+
+BROWSER_ACCEPTANCE_PENDING and HARDWARE_PENDING remain; see the extended manual
+checklist. Exact newly published-head hosted CI is independently required.
+
+A subsequent independent lifecycle review reproduced queued native dialog-close
+events erasing a freshly reopened favorite/preset draft. Two narrow open-state
+guards fix that race; both regressions fail before the correction and pass after.
+The final 50 Node/DOM checks pass, including unchanged immediate private-input
+cleanup and accurately modeled native Escape events. This focused final delta
+follows the complete Python runs above; it is still not real-browser acceptance.
+
+## Native installation includes the browser controller
+
+Review found the native installer's Python-only source snapshot omitted the Web
+assets even though direct-checkout wheel packaging worked. The installer now
+explicitly selects exactly four assets, includes them in provenance/ownership
+hashes and rejects missing or symlink-traversed inputs. Modified owned assets
+remain protected during uninstall; arbitrary adjacent files are not packaged.
+
+Independent review passes 54 focused tests (two native opt-in skips), additional
+selection/path checks, wheel/RECORD/source/stage/installed byte comparisons and
+receipt recomputation. An actual staged-source offline wheel was installed into
+an isolated target; Python `-I` outside the checkout served `/ui/` plus all four
+assets through real aiohttp with exact bodies/MIME. That local proof uses an idle
+fixture backend, not native CLI/Unix IPC. The existing hosted installed-entry
+lane now verifies all five routes on every owned/external restart cycle; every
+old lifecycle assertion and the 90-second supervisor cap remains. Hosted native
+lifecycle completion must be verified on the new exact head.
+
+The final integrated source, including the dialog correction and installation
+fix, passes complete default groups on both interpreters: Python 3.12
+**4551+250 /74** (137.78s/71.01s), Python 3.11 **4551+250 /74**
+(139.46s/70.05s). Thus final default coverage is **4801 passed, 74 skipped**
+on each. The existing 165-second floor watchdog was unchanged.
+
+## Same-runner default-suite scheduling
+
+Native Python 3.12 jobs reuse the existing Python 3.11 two-process partition,
+with no additional runner. Collection-only comparison proves the same 4,865
+unique nodes (4,615 + 250), identical skip/skipif/xfail metadata and 74 skips.
+One executed grouped replay passes 4541/74 + 250/0 in **139.519s wall**, compared
+with the preceding 204.38s serial pytest duration. This is a single local
+comparison, not a controlled benchmark or hosted x86/ARM timing claim.
+
+The helper's explicit 900-second watchdog starts after the unchanged 15-minute
+whole-job clock, so the existing job cap remains the effective bound. All later
+native gates, assertions and caps are unchanged. Peak CPU/memory contention can
+increase, and helper logs are buffered until group completion. Ten existing
+helper tests and independent workflow/collection review pass.
+
+First-Web hosted evidence is complete at `81a3d72`: all three jobs in
+[run 38319222442](https://github.com/de41tr/open-room-renderer/actions/runs/38319222442),
+including 67 native checks and explicit Node presence. Later DSP/scheduling
+changes require their own exact-head CI; prior green does not cover them.
+
 ## Functional Web controller checks
 
 The final Web boundary has focused real-loopback HTTP/MOCK tests for all typed

@@ -9,9 +9,15 @@ Focused synthetic before/after evidence is identical; short actual libmpv
 0.37/0.40 DSP/restore replays pass. Exact-head full CI remains independently
 required. The functional local Web UI is IMPLEMENTED with software/native wiring
 checks: playback/seek, volume/mute, queue selection/modes, favorite management,
-balance and EQ bypass. BROWSER_ACCEPTANCE_PENDING is explicit; real-browser
+balance, EQ bypass, ten-band editing and saved-preset management. First-Web
+head `81a3d72` has all three hosted jobs green (run 38319222442); later DSP
+changes have full local checks and measured native PCM, with new-head CI pending.
+BROWSER_ACCEPTANCE_PENDING is explicit; real-browser
 layout/interaction is not inferred from Node/DOM doubles. Optional Spotify is
-not yet assessed or accepted in this checkpoint.
+assessed in [ADR 001](adr/001-spotify-sidecar.md): official Soloist ARMv7/WS is
+verified in documentation; integrated playback is BLOCKED/DEFERRED pending
+policy/output-arbitration design and account/hardware tests. No provider playback
+or shared DSP is claimed.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.

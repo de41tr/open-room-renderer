@@ -225,6 +225,23 @@ another site; cross-site data/script/frame requests and mutations remain blocked
 This does not authenticate or retrofit the existing legacy control routes.
 See [Web security and operation](WEB_UI.md) for precise boundaries.
 
+### Web DSP editing without another state owner
+
+The editor's revision is an HMAC over the complete active DSP snapshot and
+bounded saved library. Opaque preset IDs do not expose private plugin/name text.
+They are process-scoped views, not another playback revision authority or cache.
+A synchronous Web-only admission hook runs inside `_dsp_command_lock`, after
+existing restore reconciliation and before snapshot/proposal/task creation.
+It validates the current revision and typed action, resolves current context,
+and produces one fixed existing DSP command. Legacy callers omit the optional
+argument and keep the original path, shielding, rollback and exceptions.
+
+Only ordinary Web exceptions are classified while the lock is still held;
+cancellation/BaseException behavior remains. Backend application, library commit,
+active-state persistence and unknown follow-up outcomes stay distinct. The
+additional Web-specific hook is deliberate coupling inside the transaction,
+not a new lock or independent DSP service. See [the exact contract](WEB_DSP_EDITOR.md).
+
 ## Startup Flow
 
 ```text

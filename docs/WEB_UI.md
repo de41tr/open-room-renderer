@@ -26,8 +26,8 @@ include the four static assets.
 - Favorites: add a direct HTTP(S) URL, save current, play, rename and delete.
   Configuration-owned favorites remain read-only. Selecting a queue entry plays
   it; Next/Previous on a stopped queue preserve stopped selection semantics.
-- Confirmed channel balance and EQ enable/bypass. The first UI does not edit EQ
-  bands or presets, or import/edit/export playlist files.
+- Confirmed channel balance, EQ enable/bypass, all ten EQ bands and preset
+  load/save/rename/delete. Playlist import/edit/export is a separate increment.
 
 Sliders show a local draft and require an explicit Apply/Set/Seek action. Cancel
 sends nothing. Polling does not overwrite an unfinished edit. The supported
@@ -60,6 +60,37 @@ selection or restart invalidates stale intent rather than interpreting an old
 row as a new track. State and favorites reads also have to agree on the server
 session before favorite controls become fresh. Closed dialogs clear entered
 URLs; closing a dialog does not cancel a command already sent.
+
+## Ten-band EQ and presets
+
+Open **Sound → Edit bands** to change frequency, gain, Q and filter type in the
+active Global/Wi-Fi context. **Apply curve** sends all ten bands together;
+**Discard edits** restores the current confirmed view. Start at low volume:
+positive boosts can clip. The editor retains the backend's exact ranges and
+six supported modes; pass filters still affect sound at zero gain.
+
+Applying bands preserves the current EQ enable/bypass setting. **Load** enables
+EQ and applies the selected preset. **Save active curve** saves only confirmed
+settings already applied on the renderer, never an unsent draft. Built-in
+presets are read-only; save under a new name rather than silently overwrite.
+Rename/delete of a preset shared by multiple stored plugin contexts explicitly
+warns and requires confirmation that all those contexts are affected.
+
+If another controller changes the active curve, source, name or library while
+you edit, the original revision becomes stale. Review the current state and
+make a fresh choice; the UI does not automatically rebase/retry the draft.
+A restart also invalidates previous editor IDs. Pending/unconfirmed DSP hides
+editor values rather than presenting desired settings as current.
+
+The renderer distinguishes backend-applied persistence failure, library
+replacement with unconfirmed durability, and a post-application follow-up whose
+outcome is unknown. For example, actual DSP can be applied even though saving
+restart settings failed. Keep the warning and reread the current state; do not
+infer rollback or click repeated automatic retries. The existing lock/shield
+keeps each transaction intact if its browser request is interrupted.
+
+See [the DSP editor contract](WEB_DSP_EDITOR.md) for precise numeric bounds,
+opaque identifiers, locked revision checks and effect codes.
 
 ## Browser security and privacy scope
 
@@ -109,3 +140,12 @@ viewport and exact server revision when performing it.
 **HARDWARE_PENDING:** physical ARMv7/Odroid XU4, DAC/acoustic sound, physical LAN
 and original WiiM Home app remain untested. See [testing scope](TESTING.md) and
 [compatibility limits](COMPATIBILITY_MATRIX.md).
+
+## Native installation
+
+The native installer copies the four packaged Web assets into its owned source
+snapshot, includes them in source/ownership hashes and installs them into the
+venv. Use a newly built installation for this branch; an older installed prefix
+does not acquire UI assets merely because the checkout changed. The normal
+owned-uninstall rules preserve modified assets and state. Installation acceptance
+checks actual `/ui/` and static-resource responses from the isolated executable.

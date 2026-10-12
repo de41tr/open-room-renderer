@@ -31,6 +31,14 @@ final integrated checks, keep exact-head CI separate, and start the bounded
 Spotify comparison without waiting idly on CI. Do not add provider controls that
 pretend two independent audio engines share one playback/DSP authority.
 
+**DSP/backlog checkpoint:** ten-band editing and saved-preset management now have
+independent review, full local floor/default coverage and discriminating actual
+native PCM evidence. Publish the cohesive milestone and its bounded same-runner
+CI scheduling improvement. Spotify feasibility is complete and integration is
+DEFERRED (ADR 001); prioritize stopped-only playlist loading/editing next, without
+introducing another playback authority. Exact new-head CI and real browser QA
+remain distinct gates.
+
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
 and independent review precede milestone publication. Full native CI follows
 cohesive milestones; unchanged older endurance evidence is not rerun without

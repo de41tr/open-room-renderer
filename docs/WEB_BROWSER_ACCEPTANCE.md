@@ -27,3 +27,21 @@ Use the running renderer's existing HTTP port and open `/ui/` in a real browser 
 - Confirm a stale queue selection is rejected instead of playing a different entry after replacement. Read failures or another open controller's changes must not silently become optimistic success.
 
 Record browser/version, viewport, server revision, passes/failures, and screenshots only after actually performing these checks. Audio/hardware validation remains a separate gate.
+
+## DSP editor addition
+
+- Repeat layout checks at 320, 375, 768 and 1440 px and 200% zoom. Band controls
+  should remain reachable without page-wide overflow; keyboard navigation and
+  collapsed Edit bands details must work in the real browser.
+- Edit several bands while polling continues, then Apply or Discard. Verify
+  readback and actual sound separately. Applying while bypassed must not enable
+  EQ; loading a preset must clearly enable it.
+- Save the active curve, rename it and delete it. Built-ins must remain read-only.
+  Shared-context warnings and explicit confirmation must be visible before
+  whole-preset rename/delete. Saving an unsent draft must be unavailable.
+- Change DSP from another controller while a draft/dialog is open. Old revision
+  submissions must reject without silently rebasing. Restart, Escape and Cancel
+  must not resurrect old drafts or let a late response wipe newer inputs.
+- Check that PENDING/UNKNOWN hides unconfirmed current editor values, that Stop
+  remains available during a pending apply, and that a lost response is never
+  automatically retried. Physical/audible validation remains separate.
