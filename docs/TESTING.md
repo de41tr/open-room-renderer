@@ -130,6 +130,19 @@ then exercises local controls and two-track selection with a fake backend.
 `test_capability_consistency.py` compares complete capability documents across
 HTTP, SOAP control and transport reads. All are independent of vendor clouds.
 
+`test_device_rename_persistence.py` uses local HTTP with synthetic storage and
+refresh faults. Rename atomically saves UTF-8 before updating live fields; failure
+before replacement preserves the previous file/name and does not refresh discovery.
+If replacement succeeds but directory durability cannot be confirmed, the live name
+matches the new file and refresh is attempted, but HTTP returns 502/`Failed`.
+A refresh failure likewise returns 502; cancellation propagates. Neither rolls
+back a committed name, and status notification is still scheduled. A same-name
+retry repeats refresh. Concurrent renames are serialized through the callback.
+These tests re-read actual config/state files and check stable identity after
+restart; they do not simulate power loss or verify remote discovery reception.
+HTTP `OK` requires successful local persistence and completion of the configured
+refresh callback, which may be a no-op when discovery is disabled or stopped.
+
 ## Callback and proxy verification
 
 `test_gena_lifecycle.py` exercises real local subscription/NOTIFY HTTP: transient

@@ -201,6 +201,7 @@ class HttpApi:
             state.gain_confirmed = False
         self.mpv = mpv
         self.on_rename = on_rename
+        self._rename_lock = asyncio.Lock()
         self.queue_url = ""
         self.queue_title = ""
         self.queue_name = "CurrentQueue"
@@ -1607,15 +1608,7 @@ class HttpApi:
             requested_name = self._decode_device_name_command(name)
             if not requested_name or len(requested_name) > 128 or re.search(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]", requested_name):
                 raise ValueError("Invalid device name")
-            if requested_name:
-                self.device_name_override = requested_name
-                self.cfg.friendly_name = requested_name
-                self.cfg.mdns_instance_name = requested_name
-                self._persist_runtime_value("device_name", requested_name)
-                if self.on_rename is not None:
-                    await self.on_rename()
-                LOG.info("Persisted WiiM Home device rename request name=%s", requested_name)
-                self._schedule_event_notify()
+            await self._rename_device(requested_name)
             return "OK"
         if name == "getbtstatus":
             return {"status": "0", "bt_status": "0", "connect": "0"}
@@ -2116,15 +2109,39 @@ class HttpApi:
         except BackendError as exc:
             raise ValueError("Invalid EQ parameters") from exc
 
-    def _persist_runtime_value(self, name: str, value: str) -> None:
-        """Persist a small runtime setting under the configured state dir."""
+    async def _rename_device(self, requested_name: str) -> None:
+        """Commit locally before refresh; never roll back an already-replaced name."""
 
-        try:
-            state_dir = Path(self.cfg.state_dir)
-            state_dir.mkdir(parents=True, exist_ok=True)
-            (state_dir / name).write_text(value.strip() + "\n")
-        except OSError as exc:
-            LOG.warning("could not persist runtime value %s: %s", name, exc)
+        async with self._rename_lock:
+            durability_error: AtomicWriteCommittedError | None = None
+            try:
+                atomic_write_text(Path(self.cfg.state_dir) / "device_name", requested_name + "\n")
+            except AtomicWriteCommittedError as exc:
+                # Replacement already happened. Keep live/restart state aligned,
+                # but do not acknowledge unconfirmed directory durability as OK.
+                durability_error = exc
+                LOG.warning("Device name replaced; directory durability unconfirmed")
+            # No await separates the successful/committed save and live update.
+            # Other write failures propagate without changing live/discovery state.
+            self.device_name_override = requested_name
+            self.cfg.friendly_name = requested_name
+            self.cfg.mdns_instance_name = requested_name
+            try:
+                if self.on_rename is not None:
+                    await self.on_rename()
+            except asyncio.CancelledError:
+                LOG.warning("Device name applied; discovery refresh cancelled")
+                raise
+            except Exception as exc:
+                # A failed refresh may already have withdrawn old advertisements.
+                # A same-name retry must run refresh again, not pretend to undo it.
+                LOG.warning("Device name applied; discovery refresh failed")
+                raise OSError("Device name applied; discovery refresh failed") from exc
+            finally:
+                self._schedule_event_notify()
+            if durability_error is not None:
+                raise durability_error
+            LOG.info("Persisted WiiM Home device rename request name=%s", requested_name)
 
     @staticmethod
     def _decode_device_name_command(command: str) -> str:
