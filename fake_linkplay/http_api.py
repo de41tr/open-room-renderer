@@ -226,6 +226,7 @@ class HttpApi:
         self._monitor_interval = 0.5
         self._queue_advance_task: asyncio.Task | None = None
         self._admitted_load_generation: int | None = None
+        self._admitted_load_entry_id: int | None = None
         self._native_stage: NativeQueueStage | None = None
         self._native_current_id: int | None = None
         self._native_ready_generation: int | None = None
@@ -792,6 +793,29 @@ class HttpApi:
             return True
         return False
 
+    def _reject_replaced_load_root(self, snapshot: dict, generation: int) -> bool:
+        """Reject only a causal ACK's coherently replaced parentless root.
+
+        Container descendants receive new IDs too. Native merge-files can
+        create a parentless EDL entry internally, so EDL roots are ambiguous.
+        Missing ACKs and native-core restarts reusing IDs are outside this proof.
+        A later property sample must never manufacture an acknowledged ID.
+        """
+        if (generation != self.state.generation or self._admitted_load_generation != generation
+                or self._admitted_load_entry_id is None or snapshot.get("backend-error")
+                or not self._native_source_observation_coherent(snapshot)):
+            return False
+        active = self._native_active(snapshot)
+        if (active is None or snapshot.get("playlist-path") or active.get("playlist-path")
+                or snapshot["path"].lower().startswith("edl://")
+                or active.get("id") == self._admitted_load_entry_id):
+            return False
+        prior_error = self.state.last_error if self.state.phase == PlaybackPhase.ERROR else ""
+        self._mark_source_ownership_lost()
+        if prior_error:
+            self.state.last_error = prior_error
+        return True
+
     def _adopt_native_successor(self, snapshot: dict) -> bool:
         stage = self._native_stage
         if (stage is None or stage.failed or self.state.phase == PlaybackPhase.ERROR
@@ -1033,6 +1057,7 @@ class HttpApi:
             # The admitted load's own readiness/cleanup transaction still
             # owns this window. Unproven nested descendants are not evidence
             # of a post-ready external takeover. Backend errors stay visible.
+            self._reject_replaced_load_root(snap, self.state.generation)
             return
         self._adopt_native_successor(snap)
         if self.state.phase == PlaybackPhase.ERROR:
@@ -1786,12 +1811,12 @@ class HttpApi:
             return "OK"
         return {"error": "Failed", "command": name}
 
-    async def _gain_reconciling_call(self, operation) -> None:
+    async def _gain_reconciling_call(self, operation):
         """Do not advertise known gain while any reconciling operation is pending."""
         self._gain_operations += 1
         self.state.gain_confirmed = False
         try:
-            await self._backend_call(operation)
+            result = await self._backend_call(operation)
         except BaseException:
             self._gain_uncertain = True
             raise
@@ -1800,6 +1825,7 @@ class HttpApi:
         finally:
             self._gain_operations -= 1
             self.state.gain_confirmed = self._gain_operations == 0 and not self._gain_uncertain
+        return result
 
     async def _set_confirmed_gain(self, *, volume: int | None = None, mute: bool | None = None) -> None:
         """Publish and persist only backend-confirmed gain, in command order."""
@@ -2656,6 +2682,14 @@ class HttpApi:
             async with asyncio.timeout(3.0), self._backend_lock:
                 if not owns_load():
                     return
+                if self._admitted_load_entry_id is not None:
+                    snapshot = await self.mpv.snapshot()
+                    if not owns_load():
+                        return
+                    if snapshot.get("backend-error"):
+                        raise BackendError("Backend unavailable before playback cleanup")
+                    if self._reject_replaced_load_root(snapshot, generation):
+                        return
                 if recovery is not None:
                     self._station_recovery_loading = True
                 try:
@@ -2757,6 +2791,7 @@ class HttpApi:
                     load_identity = (self.state.backend_url, self.state.backend_original_url)
                     load_attempted = True
                     self._admitted_load_generation = generation
+                    self._admitted_load_entry_id = None
                     # A new admitted load can replace/restart mpv and reuse a
                     # child ID. Pause/Resume alone does not reset this budget.
                     self._station_child_history_attempt = None
@@ -2764,7 +2799,11 @@ class HttpApi:
                         # Only entering the guarded mutation consumes the
                         # initially materialized target, even if ACK fails.
                         selected._radio_resolution_attempted = True
-                    await self._gain_reconciling_call(self.mpv.loadfile(playback_url, mpv_options))
+                    load_reply = await self._gain_reconciling_call(self.mpv.loadfile(playback_url, mpv_options))
+                    data = load_reply.get("data") if isinstance(load_reply, dict) else None
+                    entry_id = data.get("playlist_entry_id") if isinstance(data, dict) else None
+                    if type(entry_id) is int and entry_id >= 0:
+                        self._admitted_load_entry_id = entry_id
                     # Record actual backend identity even if a newer owner
                     # command arrived during the bounded, locked mutation.
                     self.state.backend_url = playback_url
@@ -2808,6 +2847,7 @@ class HttpApi:
             if not ready:
                 raise SourcePlaybackError("Source did not confirm playback")
             self._admitted_load_generation = None
+            self._admitted_load_entry_id = None
             # An idle observation during readiness may have cleared identity.
             # Audio confirmation belongs to this still-current loaded source.
             self.state.backend_url = playback_url
@@ -2853,6 +2893,7 @@ class HttpApi:
         finally:
             if self._admitted_load_generation == generation:
                 self._admitted_load_generation = None
+                self._admitted_load_entry_id = None
 
         # Staging starts only after the loaded source's readiness/cleanup
         # transaction ends. Its failure must not re-enter that old load's Stop
@@ -3141,6 +3182,8 @@ class HttpApi:
             last_snapshot = snapshot
             if snapshot.get("backend-error"):
                 raise BackendError("Backend control failed during readiness")
+            if self._reject_replaced_load_root(snapshot, generation):
+                return False
             if not self._mpv_snapshot_matches_source(snapshot, playback_url):
                 continue
             if snapshot.get("idle-active") is not True and self._mpv_snapshot_has_audio(snapshot):
