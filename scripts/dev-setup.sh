@@ -12,7 +12,8 @@ echo "        Package names vary by distribution, especially Python venv support
 echo
 
 missing=0
-for tool in python mpv curl jq ip; do
+PYTHON="${PYTHON:-python3}"
+for tool in "$PYTHON" mpv curl jq ip; do
   if command -v "$tool" >/dev/null 2>&1; then
     echo "[setup] found: $tool"
   else
@@ -21,7 +22,7 @@ for tool in python mpv curl jq ip; do
   fi
 done
 
-if ! python -m venv --help >/dev/null 2>&1; then
+if ! "$PYTHON" -m venv --help >/dev/null 2>&1; then
   echo "[setup] missing: Python venv support"
   missing=1
 else
@@ -35,9 +36,14 @@ if [[ "$missing" == "1" ]]; then
   exit 2
 fi
 
+if ! "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
+  echo "[setup] Python 3.11 or newer is required. Use PYTHON=python3.11 (or newer)." >&2
+  exit 2
+fi
+
 echo
 echo "[setup] Creating virtual environment"
-python -m venv .venv
+"$PYTHON" -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"

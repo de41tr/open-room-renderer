@@ -362,7 +362,11 @@ Behavior:
 - `pause`: pause without clearing queue.
 - `resume`: continue.
 - `stop`: stop playback; queue may remain.
-- `next`/`previous`: change index and start if possible.
+- `next`/`previous`: when stopped, select the neighboring queue item without
+  starting playback; if already playing, start the selected item. Multi-item navigation
+  while paused is rejected without resuming audio. An explicit play request is
+  required to start a stopped selection. Loaded finite single-item `previous` retains
+  its existing pause-preserving restart behavior.
 - `seek`: update backend position for seekable media.
 
 ## Open Network Stream

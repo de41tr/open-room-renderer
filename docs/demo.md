@@ -8,7 +8,9 @@ This is a safe local demo. No app internals, no raw dumps, no secret sauce.
 ./scripts/run.sh
 ```
 
-Keep it running. It will print the URLs it is advertising.
+Keep it running. The neutral profile uses TCP port 8080 and a persistent identity.
+It does not invoke sudo. Install prerequisites first as described in
+[Getting Started](../GETTING_STARTED.md).
 
 ## Check The Boring Stuff
 
@@ -32,15 +34,18 @@ This verifies the project through a client-level path, not just curl.
 
 Use a controller app on the same network and look for the renderer name.
 
-For app discovery, prefer:
+To deliberately test app-shaped discovery, stop the neutral runner first and use:
 
 ```bash
-./scripts/run.sh
+./scripts/run-app-compat.sh
 ```
 
-`run-dev.sh` is a developer diagnostics path and is not the recommended demo start command.
+This is an experimental compatibility profile with SSDP and mDNS. The original
+Android app acceptance remains untested; protocol tests do not substitute for it.
 
-The app-compat profile only advertises the TuneIn-style service path that currently works. It should not show extra music-service tiles that the renderer cannot actually handle.
+The app-compat profile advertises the implemented TuneIn-style queue interface.
+This does not establish current public-provider or original-app acceptance.
+Unsupported provider services stay inactive rather than appearing as playable tiles.
 
 If it does not appear:
 
@@ -49,24 +54,27 @@ If it does not appear:
 - router client isolation off,
 - firewall not blocking local traffic,
 - multicast working.
-- mDNS enabled by using `run.sh`,
+- mDNS enabled when using the app-compat profile,
 - app restarted after old failed discovery attempts.
 
-The renderer uses port 80 by default:
+Both runners default to port **8080**. Some controller apps still probe plain
+`http://device-ip/` (port 80) despite the advertised discovery port. An explicit
+port-80 request is:
 
 ```bash
-./scripts/run.sh
+APP_COMPAT_PORT80=1 ./scripts/run-app-compat.sh
 ```
 
-Port 80 is the default because some controller apps still probe the classic `http://device-ip/` endpoint during discovery or setup. Using it by default avoids a common discovery failure.
+The runner checks the bind prerequisite and reports failure rather than invoking
+sudo. Review the optional dedicated non-root system-service template in
+[Getting Started](../GETTING_STARTED.md#optional-app-compatible-port-80-service)
+if your appliance needs port 80. No global interpreter capabilities or firewall
+changes are needed for the normal high-port demo.
 
-To run app-compat mode without sudo/port 80:
+For bounded unprivileged address hints, use the [explicit-interface discovery CLI](../GETTING_STARTED.md#find-a-renderer-address-with-bounded-ssdp-discovery).
+Its results are unauthenticated candidates; it does not fetch or control them.
 
-```bash
-APP_COMPAT_PORT80=0 ./scripts/run.sh
-```
-
-Discovery helper:
+Optional private packet-diagnosis helper:
 
 ```bash
 ./scripts/sniff-ssdp.sh

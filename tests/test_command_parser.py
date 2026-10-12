@@ -23,3 +23,10 @@ def test_volume_bounds_command_name() -> None:
     parsed = parse_command("setPlayerCmd:vol:101")
     assert parsed.name == "volume"
     assert parsed.args == ("101",)
+
+
+def test_next_previous_exact_command_parsing() -> None:
+    assert parse_command("setPlayerCmd:next").name == "next"
+    assert parse_command("setPlayerCmd:prev").name == "prev"
+    for command in ("setPlayerCmd:next:1", "setPlayerCmd:prev:", "setPlayerCmd:previous"):
+        assert parse_command(command).name == command

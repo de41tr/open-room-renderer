@@ -202,6 +202,43 @@ These should look like folder/container browsers. Once a file is selected, playb
 
 Spotify Connect, Tidal Connect, Qobuz Connect, Roon, Squeezelite, and HiPlay should not be represented as simple HTTP service adapters. They imply separate protocol support. Only advertise them if the renderer actually starts and integrates the corresponding official/open service stack.
 
+## Free receiver feasibility under the current P2 boundary
+
+Reviewed 2026-10-12. Free/open-source software does not grant a music subscription,
+provider API access, device certification, or permission to redistribute music.
+This work permits no provider-cloud authentication, registration, DRM bypass,
+OEM/private-key material, or proprietary firmware. No provider runtime or account
+flow was tested in this review. TIDAL restrictions below are from indexed primary
+portal text; its directly opened SPA did not expose readable content in this
+check. Separate partner agreements are not inferred or excluded.
+Licenses below identify the main projects;
+dependencies and any redistributed binaries need their own notice/source review.
+
+| Route | Software and runtime boundary | Account/provisioning boundary | Current decision |
+|---|---|---|---|
+| librespot / Spotify Connect | MIT-licensed Rust client and headless Connect receiver, with separate audio and discovery backends. This is not Spotify's official Embedded SDK. | Upstream explicitly requires Spotify Premium. OAuth, access-token and discovery login are authentication routes; discovery does not make playback anonymous. Its README also warns about Spotify's permission to use the service. | Read-only research; no login, receiver launch, cached credentials or advertised capability. Free software does not mean Spotify Free support. [Project](https://github.com/librespot-org/librespot), [authentication options](https://github.com/librespot-org/librespot/wiki/Options). |
+| Official Spotify Embedded SDK | Partner-supplied SDK, separate from the Web API or librespot. | Spotify's commercial-hardware route requires approved company onboarding, evaluation agreement/NDA, client/product identity and commercial licensing/certification. | Outside the no-registration/provisioning boundary. No implied official support. [Onboarding](https://developer.spotify.com/documentation/commercial-hardware/onboarding), [requirements](https://developer.spotify.com/documentation/commercial-hardware/implementation/requirements/technical). |
+| Official TIDAL app SDK | The Web SDK is Apache-2.0 licensed; Web, Android and iOS SDKs implement app functionality. They do not create a TIDAL Connect receiver. | Public API/SDK requests need access tokens and app credentials. Public developer terms require registration and limit full-length playback to the subscriber Embed Player; SDK features alone do not confer broader playback rights. Playback must use the official, unmodified Player module under the published guidelines. | Read-only research. No generic mpv media-URL extraction or full-track renderer claim. [Web SDK](https://github.com/tidal-music/tidal-sdk-web), [authorization](https://developer.tidal.com/documentation/api-sdk/api-sdk-authorization), [terms](https://developer.tidal.com/documentation/guidelines/guidelines-developer-terms), [guidelines](https://developer.tidal.com/documentation/guidelines/guidelines-developer-guidelines). |
+| TIDAL Connect / other approved partner playback | A distinct device integration, not the public app SDK. | The official Connect developer page restricts integrations to device partners. A separate partner agreement cannot be inferred from open SDK source or a working third-party player. | Outside scope; no partner enrollment or advertised support. [TIDAL Connect developer boundary](https://developer.tidal.com/documentation/connect). |
+| Shairport Sync / AirPlay | Main code is MIT licensed with other component licenses. AirPlay 2 also needs NQPTP timing, exclusive UDP ports 319/320 and suitable audio timing; a pipe/file sink is not proof of synchronized physical output. | Local user-owned audio does not inherently need a music-provider account. However, the current source contains an embedded RSA private-key constant, and its upstream heritage documents ROM-derived key provenance. | Unmodified runtime excluded by the current no-OEM/private-key boundary. Do not assume selecting AirPlay 2 removes that dependency. No installation or compatibility claim. [Project/runtime](https://github.com/mikebrady/shairport-sync), [AirPlay 2 limits](https://github.com/mikebrady/shairport-sync/blob/master/AIRPLAY2.md), [licenses](https://github.com/mikebrady/shairport-sync/blob/master/LICENSES), [source](https://github.com/mikebrady/shairport-sync/blob/master/common.c), [upstream provenance](https://github.com/abrasive/shairport#thanks). |
+| Snapcast with synthetic/user-owned PCM | GPL-3.0-or-later server/client; distributes an existing player's PCM and provides separate group/control interfaces. It is not a provider catalog or Connect receiver. | No provider login, device registration or OEM credentials are needed for the isolated local-PCM route. Snapcast's optional librespot/AirPlay source wrappers do not remove those sources' restrictions. | Continue only as the existing opt-in experiment. Same-host digital delivery/control has evidence; two-host clocks, physical output and WiiM grouping remain unverified. [Project](https://github.com/snapcast/snapcast), [license notice](https://github.com/snapcast/snapcast/blob/develop/server/snapserver.cpp), [existing acceptance](TESTING.md#optional-snapcast-digitalcontrol-experiment). |
+
+The useful next permitted experiment is an isolated Snapcast downstream-failure
+case added to the existing production-IPC acceptance path: interrupt the owned
+server or ingress reader during generated PCM, verify bounded renderer control
+responses, observe actual downstream silence/recovery, and prove complete owned
+process/FIFO cleanup. Retain the earlier unexplained Snapcast failure separately
+from later passes. Do not convert missing downstream audio into a claim that the
+source stopped without observing it, and do not introduce host services or LAN
+targets for this experiment.
+
+Discovery, successful control replies, decoded PCM, two-host timing and audible
+output are separate acceptance levels. A source label, an mDNS announcement or
+same-host file capture cannot justify an advertised provider/multiroom capability.
+The current decisions are engineering scope/evidence limits, not legal compliance
+certification. Provider terms and project requirements must be rechecked before
+any future integration.
+
 ## Practical Rule for Publication
 
 Public documentation should describe the renderer's own stable interfaces and observed generic compatibility patterns. It should avoid publishing service credentials, private app secrets, protected media URL mechanisms, or instructions that would bypass third-party access controls.

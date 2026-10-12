@@ -12,7 +12,8 @@ wiim_home_profile: true
 
 uuid: null
 discovery_uuid: null
-mdns_instance_name: "Open Room Renderer"
+# Null generates a stable, distinct instance per installation.
+mdns_instance_name: null
 bootid: "000000000000000000000000000000000000"
 security: "http"
 
@@ -29,6 +30,7 @@ advertise_ip: null
 mpv_socket: "/tmp/open-room-renderer-mpv.sock"
 auto_spawn_mpv: true
 default_volume: 50
+default_mute: false
 log_level: "INFO"
 state_dir: ".state/app-compat"
 
@@ -58,6 +60,8 @@ plex_user_info_mode: "not_login"
 enable_stream_service_sentinels: false
 
 proxy_on_demand_audio: false
+# Exact LAN media hosts only; loopback/metadata destinations stay forbidden.
+proxy_allowed_lan_hosts: []
 range_seek_reload: false
 channel_balance: "0.0"
 

@@ -1,0 +1,183 @@
+"""Same-runner scheduling preserves both groups and owns every cleanup signal."""
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "run-native-groups.py"
+pytestmark = pytest.mark.skipif(os.name != "posix", reason="Native CI uses POSIX process groups")
+
+
+@pytest.fixture
+def runner():
+    spec = importlib.util.spec_from_file_location("native_group_runner", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def command(code):
+    return [sys.executable, "-c", code]
+
+
+def test_groups_overlap_and_retain_complete_separate_logs(runner, tmp_path, capsys):
+    commands = []
+    for index in range(2):
+        commands.append(command(
+            "from pathlib import Path; import sys, time\n"
+            f"Path({str(tmp_path / str(index))!r}).touch()\n"
+            "deadline = time.monotonic() + 3\n"
+            f"while not Path({str(tmp_path / str(1-index))!r}).exists():\n"
+            " assert time.monotonic() < deadline, 'Other group never started'\n"
+            " time.sleep(.01)\n"
+            f"print('stdout-{index}'); print('stderr-{index}', file=sys.stderr)\n"))
+    assert runner.run_groups(commands, tmp_path / "logs", 5) == 0
+    output = capsys.readouterr().out
+    for index in range(2):
+        log = (tmp_path / "logs" / f"group-{index + 1}.log").read_text()
+        assert f"stdout-{index}" in log and f"stderr-{index}" in log
+        assert log in output
+        assert f"Native group {index + 1} (exit 0)" in output
+
+
+@pytest.mark.parametrize("failed_group", [0, 1])
+def test_one_failure_does_not_skip_or_terminate_other_group(runner, tmp_path, capsys, failed_group):
+    commands = [command("import time; time.sleep(.15); print('finished-success')")] * 2
+    commands[failed_group] = command("print('finished-failure'); raise SystemExit(7)")
+    assert runner.run_groups(commands, tmp_path, 3) == 1
+    output = capsys.readouterr().out
+    assert "finished-success" in output and "finished-failure" in output
+    assert "(exit 7)" in output and "(exit 0)" in output
+
+
+def test_launch_failure_still_runs_other_group(runner, tmp_path, capsys):
+    assert runner.run_groups([[str(tmp_path / "missing")], command("print('other-completed')")],
+                             tmp_path, 3) == 1
+    output = capsys.readouterr().out
+    assert "Could not start group 1" in output and "other-completed" in output
+
+
+@pytest.fixture
+def trees(tmp_path):
+    script = tmp_path / "tree.py"
+    script.write_text(
+        "from pathlib import Path\nimport os, signal, subprocess, sys, time\n"
+        "root = Path(sys.argv[1])\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        "if len(sys.argv) == 2:\n"
+        " child = subprocess.Popen([sys.executable, __file__, str(root), 'descendant'])\n"
+        " while not root.with_suffix('.descendant').exists(): time.sleep(.01)\n"
+        " root.with_suffix('.parent').write_text(str(os.getpid()))\n"
+        " print('tree-ready-' + root.name, flush=True)\n"
+        "else:\n"
+        " root.with_suffix('.descendant').write_text(str(os.getpid()))\n"
+        "time.sleep(60)\n")
+    return [[sys.executable, str(script), str(tmp_path / f"tree-{i}")] for i in range(2)]
+
+
+def assert_trees_stopped(tmp_path):
+    pids = list(tmp_path.glob("tree-*.parent")) + list(tmp_path.glob("tree-*.descendant"))
+    assert len(pids) == 4, "Both groups and their descendants must have started"
+    for pid_file in pids:
+        pid = int(pid_file.read_text())
+        # Container PID 1 may defer orphan zombie reaping; a zombie cannot run.
+        state = Path(f"/proc/{pid}/stat")
+        deadline = time.monotonic() + 2
+        while state.exists():
+            try:
+                if state.read_text().split()[2] == "Z":
+                    break
+            except FileNotFoundError:
+                break
+            assert time.monotonic() < deadline, f"Owned process {pid} remains live"
+            time.sleep(.01)
+
+
+def test_timeout_kills_owned_trees_and_preserves_unrelated_process(runner, trees, tmp_path, capsys):
+    unrelated = subprocess.Popen(command("import time; time.sleep(60)"), start_new_session=True)
+    try:
+        start = time.monotonic()
+        assert runner.run_groups(trees, tmp_path / "logs", 2) == 124
+        assert time.monotonic() - start < 8
+        assert unrelated.poll() is None
+        assert_trees_stopped(tmp_path)
+        output = capsys.readouterr().out
+        assert "tree-ready-tree-0" in output and "tree-ready-tree-1" in output
+        assert "exceeded 2s timeout" in output
+    finally:
+        unrelated.terminate()
+        unrelated.wait(timeout=3)
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
+def test_interrupt_cleans_both_trees_and_prints_both_logs(trees, tmp_path, signum):
+    code = ("import json, runpy, sys; from pathlib import Path; "
+            "ns = runpy.run_path(sys.argv[1]); "
+            "raise SystemExit(ns['run_groups'](json.loads(sys.argv[2]), Path(sys.argv[3]), 30))")
+    process = subprocess.Popen([sys.executable, "-c", code, str(SCRIPT), json.dumps(trees),
+                                str(tmp_path / "logs")], stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True, start_new_session=True)
+    try:
+        deadline = time.monotonic() + 5
+        while len(list(tmp_path.glob("tree-*.parent"))) != 2:
+            assert time.monotonic() < deadline
+            assert process.poll() is None
+            time.sleep(.02)
+        process.send_signal(signum)
+        output, _ = process.communicate(timeout=8)
+        assert process.returncode == 128 + signum, output
+        assert "tree-ready-tree-0" in output and "tree-ready-tree-1" in output
+        assert_trees_stopped(tmp_path)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.communicate(timeout=8)
+
+
+def test_workflow_keeps_explicit_native_groups_and_existing_budget():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/renderer-tests.yml").read_text())
+    jobs = workflow["jobs"]
+    native = jobs["renderer-tests"]
+    assert native["timeout-minutes"] == 15
+    assert jobs["python-floor"]["timeout-minutes"] == 8
+    assert native["strategy"]["matrix"]["runner"] == ["ubuntu-24.04", "ubuntu-24.04-arm"]
+    lane = next(step for step in native["steps"] if step["name"] ==
+                "Run explicit real libmpv null and digital-PCM lanes")
+    assert lane["run"].count(":::") == 1
+    assert "--timeout 360" in lane["run"]
+    stability = next(step for step in native["steps"] if "across repeated playback" in step["name"])
+    assert stability["timeout-minutes"] == 6
+    assert stability["env"]["ORR_TEST_UNIX_STABILITY_SECONDS"] == "180"
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
+def test_timeout_must_be_positive_and_finite(runner, tmp_path, timeout):
+    with pytest.raises(ValueError):
+        runner.run_groups([command("pass"), command("pass")], tmp_path, timeout)
+
+
+def test_floor_keeps_all_default_files_and_existing_step_budget():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/renderer-tests.yml").read_text())
+    floor = workflow["jobs"]["python-floor"]
+    step = next(step for step in floor["steps"] if step["name"] ==
+                "Run default unit and local-client suite on Python 3.11")
+    assert step["timeout-minutes"] == 3
+    assert "--timeout 165" in step["run"]
+    assert "tests -rs --ignore=tests/test_queue_cli.py --ignore=tests/test_playlist_cli.py" in step["run"]
+    assert "::: tests/test_queue_cli.py tests/test_playlist_cli.py" in step["run"]
+    assert "--ignore=tests/test_favorite_play_cli.py" in step["run"]
+    assert "--ignore=tests/test_favorites_cli.py" in step["run"]
+    assert step["run"].rstrip().endswith("tests/test_favorites_cli.py")
+    assert "::: tests/test_queue_cli.py tests/test_playlist_cli.py tests/test_favorite_play_cli.py" in step["run"]
+    assert floor["runs-on"] == "ubuntu-24.04"
+    assert floor["timeout-minutes"] == 8

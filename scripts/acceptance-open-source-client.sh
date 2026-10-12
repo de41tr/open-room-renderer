@@ -7,8 +7,8 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 LOG="logs/acceptance/acceptance-${STAMP}.log"
 SERVER_LOG="logs/acceptance/server-${STAMP}.log"
 HOST="${HOST:-127.0.0.1}"
-API_PORT="${API_PORT:-80}"
-UPNP_PORT="${UPNP_PORT:-80}"
+API_PORT="${API_PORT:-8080}"
+UPNP_PORT="${UPNP_PORT:-8080}"
 NAME="${NAME:-Open Room Renderer}"
 TEST_URL="${TEST_URL:-https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3}"
 KEEP_SERVER="${KEEP_SERVER:-0}"
@@ -45,28 +45,15 @@ data = yaml.safe_load(Path("configs/config.example.yaml").read_text()) or {}
 data["http_api_port"] = api_port
 data["upnp_port"] = upnp_port
 data["state_dir"] = f".state/acceptance-{api_port}-{upnp_port}"
+data["mpv_socket"] = f"{data['state_dir']}/mpv.sock"
 data["enable_mdns"] = False
 data["enable_ssdp"] = True
 output.write_text(yaml.safe_dump(data, sort_keys=False))
 PY
   if (( API_PORT < 1024 || UPNP_PORT < 1024 )); then
-    echo "About to use sudo for privileged port binding."
-    echo "Why sudo is needed: acceptance now defaults to port 80, and Linux normally restricts ports below 1024 to privileged processes."
-    echo "What will run with sudo: only the renderer process started for this acceptance test."
+    fail "Start the explicitly authorized port-80 service first, or use API_PORT=8080 UPNP_PORT=8080. This check never invokes sudo."
   fi
-  if command -v open-room-renderer >/dev/null 2>&1; then
-    if (( API_PORT < 1024 || UPNP_PORT < 1024 )); then
-      sudo -E .venv/bin/open-room-renderer serve --config "$TEMP_CONFIG" >"$SERVER_LOG" 2>&1 &
-    else
-      open-room-renderer serve --config "$TEMP_CONFIG" >"$SERVER_LOG" 2>&1 &
-    fi
-  else
-    if (( API_PORT < 1024 || UPNP_PORT < 1024 )); then
-      sudo -E .venv/bin/fake-linkplay serve --config "$TEMP_CONFIG" >"$SERVER_LOG" 2>&1 &
-    else
-      fake-linkplay serve --config "$TEMP_CONFIG" >"$SERVER_LOG" 2>&1 &
-    fi
-  fi
+  .venv/bin/open-room-renderer serve --config "$TEMP_CONFIG" >"$SERVER_LOG" 2>&1 &
   SERVER_PID="$!"
   echo "Started renderer pid=${SERVER_PID}"
 fi

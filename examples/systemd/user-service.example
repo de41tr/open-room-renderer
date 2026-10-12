@@ -1,25 +1,20 @@
-# Example user-level systemd service for Open Room Renderer.
-#
-# Copy this to:
-#   ~/.config/systemd/user/open-room-renderer.service
-#
-# Then adjust WorkingDirectory and ExecStart for your checkout path.
-# This example runs as your normal user, not root.
-
+# First run: python3 scripts/install-native.py
+# Prefer the generated open-room-renderer.service when using a custom prefix.
+# Review and copy to ~/.config/systemd/user/open-room-renderer.service.
+# No privileged port, root service, or global Python capability is needed.
 [Unit]
-Description=Open Room Renderer local audio sink
-After=network-online.target sound.target
-Wants=network-online.target
+Description=Open Room Renderer (unprivileged native profile)
+After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/YOUR_USER/open-room-renderer
-ExecStart=/home/YOUR_USER/open-room-renderer/.venv/bin/open-room-renderer serve --config /home/YOUR_USER/open-room-renderer/configs/config.example.yaml
+WorkingDirectory=%h/.local/share/open-room-renderer
+ExecStart=%h/.local/share/open-room-renderer/venv/bin/open-room-renderer serve --config %h/.local/share/open-room-renderer/config.yaml
 Restart=on-failure
 RestartSec=5
-
-# Keep logs in the user journal. Do not enable verbose raw HTTP logging for
-# public bug reports.
+TimeoutStopSec=45
+UMask=0077
+NoNewPrivileges=yes
 Environment=PYTHONUNBUFFERED=1
 
 [Install]

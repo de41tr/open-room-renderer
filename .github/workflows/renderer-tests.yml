@@ -1,0 +1,251 @@
+name: Renderer tests
+
+# PR branches only. Do not run the same revision again for a push, and never
+# use pull_request_target to execute contribution code with privileged access.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renderer-tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  python-floor:
+    name: Python 3.11 / default suite
+    # Keep the runtime floor separate from the Python 3.12 native audio lanes.
+    # This standard x86_64 runner does not establish ARMv7 or Pi coverage.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      PYTHONPATH: .
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out contribution without saved credentials
+        timeout-minutes: 1
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up the minimum supported Python minor version
+        timeout-minutes: 2
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          architecture: x64
+          # No dependency cache; the native opt-in suites run in their own job.
+
+      - name: Install Python test dependencies
+        timeout-minutes: 2
+        # The default suite needs no mpv, FFmpeg or PulseAudio installation.
+        run: python -m pip --isolated install --index-url https://pypi.org/simple --disable-pip-version-check --no-cache-dir -e '.[dev]'
+
+      - name: Verify the runtime floor and record dependencies
+        timeout-minutes: 1
+        run: |
+          python -c 'import sys; assert sys.version_info[:2] == (3, 11), sys.version'
+          python --version
+          uname -m
+          python -m pip check
+          python -m pip freeze
+
+      - name: Run default unit and local-client suite on Python 3.11
+        timeout-minutes: 3
+        # Preserve every default test and the existing cap on this same runner.
+        # Isolate subprocess-heavy CLI cases; the other group discovers all others.
+        run: |
+          python scripts/run-native-groups.py --timeout 165 \
+            --log-dir "$RUNNER_TEMP/orr-default-python311" -- \
+            tests -rs --ignore=tests/test_queue_cli.py --ignore=tests/test_playlist_cli.py \
+            --ignore=tests/test_favorite_play_cli.py --ignore=tests/test_favorites_cli.py \
+            ::: tests/test_queue_cli.py tests/test_playlist_cli.py tests/test_favorite_play_cli.py \
+            tests/test_favorites_cli.py
+
+  renderer-tests:
+    name: Renderer / ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        # Standard public-repository runners; ARM64 is not ARMv7 or Pi hardware.
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out contribution without saved credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install official Ubuntu native dependencies
+        id: setup
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y mpv libmpv2 ffmpeg pulseaudio pulseaudio-utils python3.12-venv
+          /usr/bin/python3.12 -m venv .venv-ci
+          .venv-ci/bin/python -m pip install --upgrade pip
+          .venv-ci/bin/python -m pip install -e '.[dev]'
+
+      - name: Record the actual environment
+        run: |
+          uname -m
+          dpkg --print-architecture
+          .venv-ci/bin/python --version
+          mpv --version
+          dpkg-query -W mpv libmpv2
+          .venv-ci/bin/python -m pip freeze
+          echo 'Null/PCM outputs only; no physical audio, ARMv7, or Raspberry Pi claim.'
+          # Read-only inventory for a possible later browser QA lane; no install/start.
+          for browser in google-chrome chromium chromium-browser firefox; do
+            command -v "$browser" || true
+          done
+
+      - name: Run default unit and local-client suite
+        run: .venv-ci/bin/python -m pytest -q -rs
+
+      - name: Run explicit real libmpv null and digital-PCM lanes
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 7
+        run: |
+          library="$(dpkg-query -L libmpv2 | grep '/libmpv\.so\.2$')"
+          test -n "$library" && test -f "$library"
+          export ORR_TEST_LIBMPV_PATH="$(readlink -f "$library")"
+          # Two independent explicit groups share this runner. No test is removed;
+          # failures retain both complete logs and do not skip the other group.
+          .venv-ci/bin/python scripts/run-native-groups.py \
+            --timeout 360 --log-dir "$RUNNER_TEMP/orr-libmpv" -- \
+            tests/test_libmpv_integration.py tests/test_libmpv_gain.py \
+            tests/test_libmpv_dsp.py tests/test_libmpv_recovery.py \
+            tests/test_libmpv_dsp_restore.py tests/test_libmpv_formats.py tests/test_libmpv_live_metadata.py \
+            tests/test_libmpv_live_hls.py \
+            tests/test_libmpv_invalid_media.py \
+            tests/test_libmpv_repeat_queue.py tests/test_libmpv_shuffle_queue.py \
+            ::: \
+            tests/test_libmpv_load_options.py tests/test_libmpv_station_cache.py tests/test_libmpv_load_cleanup.py \
+            tests/test_libmpv_station_playlist_cache.py \
+            tests/test_libmpv_stall_recovery.py tests/test_libmpv_queue_staging.py \
+            tests/test_libmpv_queue_navigation_intent.py \
+            tests/test_libmpv_favorites.py \
+            tests/test_libmpv_queue_cli.py \
+            tests/test_libmpv_standard_dmr.py \
+            tests/test_libmpv_source_ownership.py \
+            tests/test_libmpv_admitted_load_root.py \
+            tests/test_libmpv_station_refresh.py tests/test_libmpv_transport_uncertainty.py
+
+      - name: Run explicit production Unix IPC and lifecycle lane
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          ORR_TEST_UNIX_IPC: "1"
+        run: .venv-ci/bin/python -m pytest -q -s tests/test_mpv_unix_integration.py
+
+      - name: Exercise real pywiim and standard DMR against production Unix IPC
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          ORR_TEST_PYWIIM_UNIX: "1"
+          ORR_TEST_DMR_UNIX: "1"
+        run: .venv-ci/bin/python -m pytest -q -s tests/test_pywiim_unix_integration.py tests/test_standard_dmr_unix_integration.py
+
+      - name: Exercise production Unix IPC across repeated playback lifetimes
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 6
+        env:
+          ORR_TEST_UNIX_STABILITY: "1"
+          ORR_TEST_UNIX_STABILITY_SECONDS: "180"
+        run: .venv-ci/bin/python -m pytest -q -s tests/test_mpv_unix_stability.py
+
+      - name: Verify isolated native installation and owned uninstall
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          prefix="$RUNNER_TEMP/orr-native"
+          .venv-ci/bin/python scripts/install-native.py --prefix "$prefix"
+          "$prefix/venv/bin/python" -I - "$prefix" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          from xml.etree import ElementTree
+          import fake_linkplay
+          from fake_linkplay.config import Config, load_config
+          from fake_linkplay.upnp_description import description_xml
+          prefix = Path(sys.argv[1]).resolve()
+          assert Path(fake_linkplay.__file__).resolve().is_relative_to(prefix / "venv")
+          first = load_config(prefix / "config.yaml")
+          second = load_config(prefix / "config.yaml")
+          assert first.uuid == second.uuid and first.uuid
+          assert first.http_api_port == first.upnp_port == Config().http_api_port == 8080
+          first.advertise_ip = "127.0.0.1"
+          ElementTree.fromstring(description_xml(first))
+          receipt = json.loads((prefix / "installation-receipt.json").read_text())
+          assert receipt["mode"] == "installed"
+          assert receipt["source"]["revision"] and receipt["source"]["source_sha256"]
+          print("Installed site-packages, stable identity, neutral ports and description verified.")
+          print("Installation architecture:", receipt["environment"]["machine"])
+          print("No service enabled, no physical audio or reboot claim.")
+          PY
+          # The installed entry point must serve from a private working
+          # directory without inheriting source PYTHONPATH, then survive both
+          # signal/restart cycles and release only its own native resources.
+          ORR_TEST_CLI_LIFECYCLE=1 ORR_TEST_CLI_EXECUTABLE="$prefix/venv/bin/open-room-renderer" \
+            .venv-ci/bin/python -m pytest -q -s tests/test_cli_lifecycle_native.py
+          .venv-ci/bin/python "$prefix/uninstall.py" --prefix "$prefix" --uninstall
+          test -f "$prefix/state/uuid"
+          test ! -e "$prefix/venv/bin/open-room-renderer"
+
+      - name: Measure clocked digital queue transitions
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          ORR_TEST_CLOCKED_QUEUE: "1"
+        run: .venv-ci/bin/python -m pytest -q -s tests/test_clocked_queue_transition.py
+
+      - name: Verify actual multicast discovery and discovered playback
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          ORR_TEST_DISCOVERY: "1"
+          ORR_TEST_DISCOVERY_PLAYBACK: "1"
+        run: .venv-ci/bin/python -m pytest -q -s tests/test_discovery_native.py tests/test_discovery_playback_native.py
+
+      - name: Verify private Snapcast distribution through production IPC
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 2
+        run: |
+          packages="$RUNNER_TEMP/orr-snapcast-packages"
+          prefix="$RUNNER_TEMP/orr-snapcast-prefix"
+          mkdir -p "$packages" "$prefix"
+          # Download verified distro packages and extract data only. Never run
+          # their maintainer scripts, create service users or enable daemons.
+          (cd "$packages" && apt-get download snapserver snapclient)
+          for package in "$packages"/*.deb; do
+            test "$(dpkg-deb -f "$package" Architecture)" = "$(dpkg --print-architecture)"
+            dpkg-deb -f "$package" Package Version Architecture
+            sha256sum "$package"
+            dpkg-deb -x "$package" "$prefix"
+          done
+          for executable in "$prefix/usr/bin/snapserver" "$prefix/usr/bin/snapclient"; do
+            test -x "$executable"
+            ldd "$executable" > "$RUNNER_TEMP/orr-snapcast-libraries.txt"
+            if grep -q 'not found' "$RUNNER_TEMP/orr-snapcast-libraries.txt"; then
+              cat "$RUNNER_TEMP/orr-snapcast-libraries.txt"
+              exit 1
+            fi
+          done
+          output="/tmp/orr-snapcast-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          .venv-ci/bin/python tools/acceptance_snapcast.py --orr-ipc \
+            --snapserver "$prefix/usr/bin/snapserver" \
+            --snapclient "$prefix/usr/bin/snapclient" --mpv /usr/bin/mpv --output "$output"
+          .venv-ci/bin/python - "$output/evidence.json" <<'PY'
+          import json, sys
+          evidence = json.load(open(sys.argv[1]))
+          assert evidence["success"] and evidence["production_unix_ipc"].startswith("PASS:")
+          print(json.dumps({"lane": evidence["lane"],
+              "production_unix_ipc": evidence["production_unix_ipc"],
+              "versions": {key: value.splitlines()[0] for key, value in evidence["versions"].items()},
+              "stages": {key: {"gains": [item["expected_gain"] for item in value["pcm"]],
+                  "rms": [[channel["rms"] for channel in item["channels"]] for item in value["pcm"]]}
+                  for key, value in evidence["stages"].items()},
+              "cleanup": evidence["cleanup"], "two_host_synchronization": "NOT_RUN"}, sort_keys=True))
+          PY

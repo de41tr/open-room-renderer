@@ -1,16 +1,25 @@
 import pytest
+from html import escape
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from fake_linkplay.config import Config, ExperimentalSource, load_config
 from fake_linkplay.http_api import EventSubscriber, HttpApi, ParsedCommand
 from fake_linkplay.mpv_backend import MpvBackend, redact_sensitive as redact_mpv_sensitive
+from fake_linkplay.radio import RadioResolution
 from fake_linkplay.state import RendererState
 
 
 class DummyMpv(MpvBackend):
+    # This lightweight state double bypasses real backend commands entirely.
+    # Real startup/retry graph confirmation is exercised by the DSP peer tests.
+    stage_initial_dsp = None
+
     def __init__(self) -> None:
         super().__init__("/tmp/nonexistent", False)
         self.loaded_url = ""
+        self.idle = True
+        self.paused = False
         self.load_count = 0
         self.load_options: dict[str, str] | None = None
         self.seeked_to = 0
@@ -18,11 +27,24 @@ class DummyMpv(MpvBackend):
         self.channel_balance_value = 0.0
         self.peq_bands: list[dict[str, float]] = []
 
+    @property
+    def confirmed_dsp(self):
+        return self.channel_balance_value, self.peq_bands
+
+
+    async def configure_dsp(self, balance, bands):
+        await self.channel_balance(balance)
+        await self.peq(bands)
+
+
     async def snapshot(self):  # type: ignore[override]
         return {
-            "idle-active": False,
-            "core-idle": False,
+            "idle-active": self.idle,
+            "core-idle": self.idle,
+            "pause": self.paused,
             "filename": self.loaded_url,
+            "path": self.loaded_url,
+            "path": self.loaded_url,
             "playback-time": self.seeked_to,
             "duration": self.duration if self.loaded_url else None,
             "track-list": [{"type": "audio", "selected": True}],
@@ -33,17 +55,19 @@ class DummyMpv(MpvBackend):
 
     async def loadfile(self, url: str, options: dict[str, str] | None = None) -> None:  # type: ignore[override]
         self.loaded_url = url
+        self.idle = False
+        self.paused = False
         self.load_options = options
         self.load_count += 1
 
     async def pause(self) -> None:  # type: ignore[override]
-        return None
+        self.paused = True
 
     async def resume(self) -> None:  # type: ignore[override]
-        return None
+        self.paused = False
 
     async def stop(self) -> None:  # type: ignore[override]
-        return None
+        self.idle = True
 
     async def seek(self, seconds: int) -> None:  # type: ignore[override]
         self.seeked_to = seconds
@@ -74,7 +98,7 @@ def test_renderer_state_basic_transitions() -> None:
     state.mark_playing("https://media.example.test/stream.mp3")
     assert state.status == "play"
     assert state.mode == "10"
-    assert state.track_source == "CustomRadio"
+    assert state.track_source == ""  # Playback alone cannot identify a provider.
     state.mark_pause()
     assert state.status == "pause"
     state.mark_transitioning()
@@ -103,8 +127,8 @@ async def test_wiim_home_profile_status_uses_discovery_uuid_and_security() -> No
     assert payload["upnp_uuid"] == "uuid:FF310001BD4CE65900AF9543000000000000"
     assert payload["security"] == "http"
     assert payload["model"] == "MUZO Cobblestone"
-    assert payload["project"] == "WiiM_Pro"
-    assert payload["MAC"] == "02:00:00:00:00:00"
+    assert payload["project"] == "Open_Room_Renderer"
+    assert payload["MAC"] == cfg.wiim_mac
     assert payload["wmrm_capability"] == 0
     assert payload["capability"] == "0x0"
     assert payload["BatteryFlag"] == "0"
@@ -114,8 +138,8 @@ async def test_wiim_home_profile_status_uses_discovery_uuid_and_security() -> No
     assert payload["securemode"] == "0"
     assert payload["upnp_version"] == "1000"
     assert payload["VersionUpdate"] == "0"
-    assert payload["NewVer"] == "4.8.999999"
-    assert payload["preset_key"] == "6"
+    assert payload["NewVer"] == "0.1.0"
+    assert payload["preset_key"] == "0"
 
 
 @pytest.mark.asyncio
@@ -192,13 +216,9 @@ async def test_stream_services_capability_includes_known_control_and_experimenta
     payload = await api.execute(ParsedCommand("getStreamServicesCapability"), "127.0.0.1")
     assert isinstance(payload, dict)
     ids = [item["id"] for item in payload["streamServices"]]
-    assert "RadioParadise2" in ids
-    assert "newTuneIn" in ids
-    assert "tunein" in ids
-    assert "Samba" in ids
-    assert "ARDSounds" in ids
-    tunein = next(item for item in payload["streamServices"] if item["id"] == "newTuneIn")
-    assert tunein["version"] == "1.1"
+    assert ids == ["ARDSounds"]
+    assert payload["streamServices"][0]["experimental"] is True
+
 
 
 @pytest.mark.asyncio
@@ -253,7 +273,7 @@ async def test_tunein_minimal_capability_exposes_only_new_tunein() -> None:
 
 
 @pytest.mark.asyncio
-async def test_plex_service_can_be_added_to_minimal_tunein_capability() -> None:
+async def test_plex_experiment_is_inactive_in_minimal_tunein_capability() -> None:
     cfg = Config(
         uuid="00000000-0000-4000-8000-000000000000",
         advertise_ip="127.0.0.1",
@@ -270,13 +290,15 @@ async def test_plex_service_can_be_added_to_minimal_tunein_capability() -> None:
     plex = status["streamServicesCapability"]["streamServices"][1]
     assert plex["version"] == "1.4"
     assert plex["removable"] is True
-    assert plex["replayGain"] is True
+    assert plex["replayGain"] is False
     assert status["streamServicesCapability"]["streamServices"][0]["version"] == "1.4"
-    assert status["supported_services"] == "newTuneIn,Plex"
+    assert status["supported_services"] == "newTuneIn"
     assert status["streams"] == "200"
     assert "streamAll" not in status
     assert "streams_all" not in status
-    assert {"id": "Plex", "name": "Plex", "source": "Plex", "enabled": True} in status["music_services"]
+    assert not any(item["id"].lower() == "plex" for item in status["music_services"])
+    assert plex["active"] is plex["configurable"] is False
+    assert plex["experimental"] is True
 
 
 @pytest.mark.asyncio
@@ -318,12 +340,13 @@ async def test_stream_service_sentinels_can_be_added_for_manage_gate_diagnostics
     services = status["streamServicesCapability"]["streamServices"]
     assert [item["id"] for item in services] == ["Plex", "newTuneIn", "Deezer2", "SoundCloud", "OPS", "LPRP", "HM", "LPDZ", "SC"]
     assert all(item["version"] == "1.4" for item in services)
-    assert status["supported_services"] == "Plex,newTuneIn,Deezer2,SoundCloud,OPS,LPRP,HM,LPDZ,SC"
-    assert [item["id"] for item in status["music_services"]] == ["Plex", "newTuneIn", "Deezer2", "SoundCloud", "OPS", "LPRP", "HM", "LPDZ", "SC"]
+    assert status["supported_services"] == "newTuneIn"
+    assert [item["id"] for item in status["music_services"]] == ["newTuneIn"]
+    assert all(not item["active"] for item in services[2:])
 
 
 @pytest.mark.asyncio
-async def test_deezer_login_returns_json_user_info_and_updates_get_user_info() -> None:
+async def test_deezer_sentinel_cannot_claim_login_or_premium() -> None:
     cfg = Config(
         uuid="00000000-0000-4000-8000-000000000000",
         advertise_ip="127.0.0.1",
@@ -332,18 +355,14 @@ async def test_deezer_login_returns_json_user_info_and_updates_get_user_info() -
     )
     api = HttpApi(cfg, RendererState.from_config(cfg), DummyMpv())
     login_body = "<u:UserLogin><AccountSource>Deezer2</AccountSource></u:UserLogin>"
-    login_response = api._playqueue_response_fields("UserLogin", login_body)
-    assert login_response is not None
-    assert "local-deezer2-user" in login_response
-    assert "&quot;msg&quot;:&quot;success&quot;" in login_response
-
+    from fake_linkplay.soap import SoapFault
+    with pytest.raises(SoapFault):
+        api._playqueue_response_fields("UserLogin", login_body)
     info_body = "<u:GetUserInfo><AccountSource>Deezer2</AccountSource></u:GetUserInfo>"
     info_response = api._playqueue_response_fields("GetUserInfo", info_body)
-    assert info_response is not None
-    assert "local-deezer2-user" in info_response
-    assert "&quot;subscription&quot;:&quot;premium&quot;" in info_response
-    assert "/deezer/collection" in info_response
-    assert "/deezer/search" in info_response
+    assert "not login" in info_response
+    assert "premium" not in info_response
+    assert "access-token" not in info_response
 
 
 def test_deezer_http_stub_contains_collection_and_drm_free_track() -> None:
@@ -393,7 +412,7 @@ def test_plex_user_info_is_persisted_and_reloaded(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_plex_legacy_gate_is_explicit_opt_in() -> None:
+async def test_plex_legacy_gate_cannot_claim_unimplemented_playback() -> None:
     cfg = Config(
         uuid="00000000-0000-4000-8000-000000000000",
         advertise_ip="127.0.0.1",
@@ -405,11 +424,11 @@ async def test_plex_legacy_gate_is_explicit_opt_in() -> None:
     api = HttpApi(cfg, RendererState.from_config(cfg), DummyMpv())
     status = await api.execute(ParsedCommand("getStatusEx"), "127.0.0.1")
     assert isinstance(status, dict)
-    assert status["supported_services"] == "newTuneIn,Plex,PLEX"
-    assert int(status["streams"]) & (1 << 43)
-    assert int(status["streams_all"]) & (1 << 43)
+    assert status["supported_services"] == "newTuneIn"
+    assert not int(status["streams"]) & (1 << 43)
+    assert "streams_all" not in status
     assert "streamAll" not in status
-    assert {"id": "PLEX", "name": "Plex", "source": "Plex", "enabled": True} in status["music_services"]
+    assert not any(item["id"].lower() == "plex" for item in status["music_services"])
 
 
 @pytest.mark.asyncio
@@ -417,65 +436,65 @@ async def test_stream_services_active_toggle_returns_status_only() -> None:
     api = make_api()
     payload = await api.execute(ParsedCommand("SetStreamServicesCapability:Active:Roon"), "127.0.0.1")
     assert isinstance(payload, dict)
-    assert payload == {"status": "0"}
+    assert payload["error"] == "Failed"
 
 
 @pytest.mark.asyncio
-async def test_tunein_create_queue_uses_search_url_and_playqueue_loads_it() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1", state_dir=f"/tmp/fake-linkplay-test-{uuid4()}")
-    mpv = DummyMpv()
-    api = HttpApi(cfg, RendererState.from_config(cfg), mpv)
-    body = (
-        "<CreateQueue><QueueContext>"
-        "&lt;PlayList&gt;&lt;ListName&gt;The JOY FM&lt;/ListName&gt;"
-        "&lt;ListInfo&gt;&lt;SourceName&gt;newTuneIn&lt;/SourceName&gt;"
-        "&lt;SearchUrl&gt;http://api.radiotime.com/profiles/s29850/media?partnerId=wfk5AKYX&amp;amp;latlon=,&amp;amp;version=2.0&lt;/SearchUrl&gt;"
-        "&lt;PicUrl&gt;http://cdn-profiles.tunein.com/s29850/images/logoq.png&lt;/PicUrl&gt;"
-        "&lt;/ListInfo&gt;&lt;/PlayList&gt;"
-        "</QueueContext></CreateQueue>"
+async def test_tunein_create_queue_resolves_station_and_preserves_provider_metadata() -> None:
+    api = make_api()
+    direct_url = "https://media.example.test/station.mp3"
+    search_url = "http://api.radiotime.com/profiles/s12345/media?partnerId=synthetic&latlon=,&version=2.0"
+    artwork = "http://cdn-profiles.tunein.com/s12345/images/logoq.png"
+    context = (
+        "<PlayList><ListName>Synthetic Station</ListName><ListInfo>"
+        "<SourceName>newTuneIn</SourceName>"
+        f"<SearchUrl>{escape(search_url)}</SearchUrl><PicUrl>{artwork}</PicUrl>"
+        "</ListInfo></PlayList>"
     )
+    api._resolve_station_id = AsyncMock(return_value=RadioResolution(direct_url, "s12345"))
     api._resolve_playback_url = _identity_resolver  # type: ignore[method-assign]
-    await api._execute_soap_side_effect("CreateQueue", body)
-    assert api.queue_url == "http://api.radiotime.com/profiles/s29850/media?partnerId=wfk5AKYX&latlon=,&version=2.0"
+    await api._execute_soap_side_effect("CreateQueue", f"<CreateQueue><QueueContext>{escape(context)}</QueueContext></CreateQueue>")
+    api._resolve_station_id.assert_awaited_once_with("s12345")
+    assert api.queue_url == direct_url
     assert api.queue_source == "newTuneIn"
-    assert api.queue_search_url == api.queue_url
-    assert api.state.album_art_uri == "http://cdn-profiles.tunein.com/s29850/images/logog.png"
+    assert api.queue_search_url == search_url
+    assert api.state.album_art_uri == artwork
     assert "<SourceName>newTuneIn</SourceName>" in api.queue_context
     assert "<TrackSource>newTuneIn</TrackSource>" in api.queue_context
-    assert "<PicUrl>http://cdn-profiles.tunein.com/s29850/images/logog.png</PicUrl>" in api.queue_context
-    assert "<upnp:albumArtURI>http://cdn-profiles.tunein.com/s29850/images/logog.png</upnp:albumArtURI>" in api.state.track_metadata
-    assert "<song:image>http://cdn-profiles.tunein.com/s29850/images/logog.png</song:image>" in api.state.track_metadata
-    assert "<SearchUrl>http://api.radiotime.com/profiles/s29850/media?partnerId=wfk5AKYX&amp;latlon=,&amp;version=2.0</SearchUrl>" in api.queue_context
+    assert f"<PicUrl>{artwork}</PicUrl>" in api.queue_context
+    assert f"<upnp:albumArtURI>{artwork}</upnp:albumArtURI>" in api.state.track_metadata
+    assert f"<song:image>{artwork}</song:image>" in api.state.track_metadata
+    assert f"<SearchUrl>{escape(search_url)}</SearchUrl>" in api.queue_context
+    assert api.state.totlen == 0
     meta = api.state.as_meta_info()
-    assert meta["albumArtURI"] == "http://cdn-profiles.tunein.com/s29850/images/logog.png"
-    assert meta["picurl"] == "http://cdn-profiles.tunein.com/s29850/images/logog.png"
+    assert meta["albumArtURI"] == artwork
+    assert meta["picurl"] == artwork
     await api._execute_soap_side_effect("PlayQueueWithIndex", "<PlayQueueWithIndex><Index>1</Index></PlayQueueWithIndex>")
-    assert mpv.loaded_url == api.queue_url
+    assert api.mpv.loaded_url == direct_url
     assert api.state.track_source == "newTuneIn"
 
 
 @pytest.mark.asyncio
-async def test_play_after_stop_reloads_existing_queue_url() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1")
-    mpv = DummyMpv()
-    api = HttpApi(cfg, RendererState.from_config(cfg), mpv)
-    body = (
-        "<CreateQueue><QueueContext>"
-        "&lt;PlayList&gt;&lt;ListName&gt;The Bone&lt;/ListName&gt;"
-        "&lt;ListInfo&gt;&lt;SourceName&gt;newTuneIn&lt;/SourceName&gt;"
-        "&lt;SearchUrl&gt;http://api.radiotime.com/profiles/s29409/media?partnerId=wfk5AKYX&lt;/SearchUrl&gt;"
-        "&lt;/ListInfo&gt;&lt;/PlayList&gt;"
-        "</QueueContext></CreateQueue>"
+async def test_play_after_stop_refreshes_existing_public_station() -> None:
+    api = make_api()
+    direct_url = "https://media.example.test/station.mp3"
+    context = (
+        "<PlayList><ListName>Synthetic Station</ListName>"
+        "<ListInfo><SourceName>newTuneIn</SourceName><StreamId>s12345</StreamId>"
+        "</ListInfo></PlayList>"
     )
+    api._resolve_station_id = AsyncMock(return_value=RadioResolution(direct_url, "s12345"))
     api._resolve_playback_url = _identity_resolver  # type: ignore[method-assign]
-    await api._execute_soap_side_effect("CreateQueue", body)
+    await api._execute_soap_side_effect("CreateQueue", f"<CreateQueue><QueueContext>{escape(context)}</QueueContext></CreateQueue>")
     await api._execute_soap_side_effect("PlayQueueWithIndex", "<PlayQueueWithIndex><Index>1</Index></PlayQueueWithIndex>")
     await api._execute_soap_side_effect("Stop", "<Stop />")
     await api._execute_soap_side_effect("Play", "<Play />")
-    assert mpv.load_count == 2
-    assert mpv.loaded_url == api.queue_url
+    assert api.mpv.load_count == 2
+    assert api.mpv.loaded_url == direct_url
     assert api.state.status == "play"
     assert api.state.track_source == "newTuneIn"
+    assert api._resolve_station_id.await_count == 2
+    assert all(call.args == ("s12345",) for call in api._resolve_station_id.await_args_list)
 
 
 @pytest.mark.asyncio
@@ -489,7 +508,7 @@ async def test_direct_http_play_uses_custom_radio_source() -> None:
 
 def test_avtransport_event_body_contains_current_play_state_and_metadata() -> None:
     api = make_api()
-    api.state.current_url = "http://api.radiotime.com/profiles/s29850/media"
+    api.state.current_url = "https://media.example.test/station.mp3"
     api.state.title = "The JOY FM"
     api.state.track_source = "newTuneIn"
     api.state.play_medium = "RADIO-NETWORK"
@@ -557,7 +576,7 @@ def test_plex_tokens_are_redacted_from_log_previews() -> None:
     assert "sample-token" not in redacted
     assert "sample-access" not in redacted
     assert "sample-refresh" not in redacted
-    assert "X-Plex-Token=***" in redacted
+    assert "?[redacted]" in redacted
 
 
 def test_private_network_and_device_ids_are_redacted_from_log_previews() -> None:
@@ -577,7 +596,7 @@ def test_mpv_url_redaction_hides_tokens_and_private_ips() -> None:
     assert "172.16.1.2" not in redacted
     assert "sample-token" not in redacted
     assert "[private-ip]" in redacted
-    assert "X-Plex-Token=***" in redacted
+    assert "?[redacted]" in redacted
 
 
 def test_stream_service_login_fields_are_redacted_from_log_previews() -> None:
@@ -599,52 +618,45 @@ def test_tunein_json_duration_accepts_actions_play_duration_milliseconds() -> No
     assert HttpApi._json_duration_seconds(text) == 2880
 
 
+def _episode_queue_body(duration: int | None = 2880) -> str:
+    """A supplied playable episode, with provider hints only in ListInfo."""
+    duration_field = f"<Duration>{duration}</Duration>" if duration is not None else ""
+    context = (
+        "<PlayList><ListName>Synthetic Episode</ListName><ListInfo>"
+        "<SourceName>newTuneIn</SourceName><StreamId>t12345</StreamId>"
+        "<SearchUrl>http://api.radiotime.com/profiles/t12345/media?partnerId=synthetic</SearchUrl>"
+        "<PicUrl>https://art.example.test/logoq.png</PicUrl>"
+        "<StreamType>episode</StreamType><ContentType>radio</ContentType>"
+        "</ListInfo><Tracks><Track1><Title>Synthetic Episode</Title>"
+        f"<URL>https://media.example.test/show.mp3</URL>{duration_field}"
+        "</Track1></Tracks></PlayList>"
+    )
+    return f"<CreateQueue><QueueContext>{escape(context)}</QueueContext></CreateQueue>"
+
+
 @pytest.mark.asyncio
 async def test_tunein_episode_queue_marks_metadata_not_live() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1")
-    api = HttpApi(cfg, RendererState.from_config(cfg), DummyMpv())
-    body = (
-        "<CreateQueue><QueueContext>"
-        "&lt;PlayList&gt;&lt;ListName&gt;Mit wem habt ihr gerade Streit? - mit Muddern&lt;/ListName&gt;"
-        "&lt;ListInfo&gt;&lt;SourceName&gt;newTuneIn&lt;/SourceName&gt;"
-        "&lt;SearchUrl&gt;http://api.radiotime.com/profiles/t554419790/media?partnerId=wfk5AKYX&lt;/SearchUrl&gt;"
-        "&lt;PicUrl&gt;http://cdn-profiles.tunein.com/p235703/images/logoq.png&lt;/PicUrl&gt;"
-        "&lt;StreamType&gt;episode&lt;/StreamType&gt;&lt;ContentType&gt;radio&lt;/ContentType&gt;"
-        "&lt;/ListInfo&gt;&lt;/PlayList&gt;"
-        "</QueueContext></CreateQueue>"
-    )
-    api._resolve_playback_url = _identity_resolver  # type: ignore[method-assign]
-    await api._execute_soap_side_effect("CreateQueue", body)
+    api = make_api()
+    await api._execute_soap_side_effect("CreateQueue", _episode_queue_body())
     assert api.queue_is_live is False
+    assert api.state.queue.current.stream_type == "episode"
+    assert api.state.queue.current.content_type == "radio"
     assert "<StreamType>episode</StreamType>" in api.queue_context
     assert "<song:isLive>0</song:isLive>" in api.state.track_metadata
-
-
-async def _episode_resolver(url: str) -> str:
-    return "https://media.example.test/show.mp3"
+    assert api.state.totlen == 2880
 
 
 @pytest.mark.asyncio
-async def test_tunein_episode_queue_uses_resolved_audio_url_in_queue_context() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1", http_api_port=59152)
-    api = HttpApi(cfg, RendererState.from_config(cfg), DummyMpv())
-    api._resolve_playback_url = _episode_resolver  # type: ignore[method-assign]
-    api._probe_audio_duration_seconds = _no_duration_probe  # type: ignore[method-assign]
-    body = (
-        "<CreateQueue><QueueContext>"
-        "&lt;PlayList&gt;&lt;ListName&gt;BlueMoon&lt;/ListName&gt;"
-        "&lt;ListInfo&gt;&lt;SourceName&gt;newTuneIn&lt;/SourceName&gt;"
-        "&lt;SearchUrl&gt;http://api.radiotime.com/profiles/t553952764/media?partnerId=wfk5AKYX&lt;/SearchUrl&gt;"
-        "&lt;StreamType&gt;episode&lt;/StreamType&gt;"
-        "&lt;/ListInfo&gt;&lt;/PlayList&gt;"
-        "</QueueContext></CreateQueue>"
-    )
-    await api._execute_soap_side_effect("CreateQueue", body)
-    assert api.queue_resolved_url == "https://media.example.test/show.mp3"
+async def test_tunein_episode_queue_uses_supplied_audio_url_in_queue_context() -> None:
+    api = make_api()
+    api._resolve_station_id = AsyncMock(side_effect=AssertionError("Direct episodes need no station lookup"))
+    await api._execute_soap_side_effect("CreateQueue", _episode_queue_body())
+    assert api.queue_url == "https://media.example.test/show.mp3"
     assert "<URL>https://media.example.test/show.mp3</URL>" in api.queue_context
     await api._execute_soap_side_effect("PlayQueueWithIndex", "<PlayQueueWithIndex><Index>1</Index></PlayQueueWithIndex>")
     assert api.mpv.loaded_url == "https://media.example.test/show.mp3"
     assert api.mpv.load_options == {}
+    api._resolve_station_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -656,51 +668,38 @@ async def test_tunein_episode_can_use_local_audio_proxy_when_enabled() -> None:
         proxy_on_demand_audio=True,
     )
     api = HttpApi(cfg, RendererState.from_config(cfg), DummyMpv())
-    api._resolve_playback_url = _episode_resolver  # type: ignore[method-assign]
-    api._probe_audio_duration_seconds = _no_duration_probe  # type: ignore[method-assign]
-    body = (
-        "<CreateQueue><QueueContext>"
-        "&lt;PlayList&gt;&lt;ListName&gt;BlueMoon&lt;/ListName&gt;"
-        "&lt;ListInfo&gt;&lt;SourceName&gt;newTuneIn&lt;/SourceName&gt;"
-        "&lt;SearchUrl&gt;http://api.radiotime.com/profiles/t553952764/media?partnerId=wfk5AKYX&lt;/SearchUrl&gt;"
-        "&lt;StreamType&gt;episode&lt;/StreamType&gt;"
-        "&lt;/ListInfo&gt;&lt;/PlayList&gt;"
-        "</QueueContext></CreateQueue>"
-    )
-    await api._execute_soap_side_effect("CreateQueue", body)
+    await api._execute_soap_side_effect("CreateQueue", _episode_queue_body())
     await api._execute_soap_side_effect("PlayQueueWithIndex", "<PlayQueueWithIndex><Index>1</Index></PlayQueueWithIndex>")
     assert api.mpv.loaded_url == "http://127.0.0.1:59152/proxy/audio?url=https%3A%2F%2Fmedia.example.test%2Fshow.mp3"
     assert api.mpv.load_options == {}
 
 
 @pytest.mark.asyncio
-async def test_episode_seek_rel_time_updates_position_and_duration() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1", http_api_port=59152)
-    mpv = DummyMpv()
-    api = HttpApi(cfg, RendererState.from_config(cfg), mpv)
-    api._resolve_playback_url = _episode_resolver  # type: ignore[method-assign]
-    api._probe_audio_duration_seconds = _no_duration_probe  # type: ignore[method-assign]
-    body = (
-        "<CreateQueue><QueueContext>"
-        "&lt;PlayList&gt;&lt;ListName&gt;BlueMoon&lt;/ListName&gt;"
-        "&lt;ListInfo&gt;&lt;SourceName&gt;newTuneIn&lt;/SourceName&gt;"
-        "&lt;SearchUrl&gt;http://api.radiotime.com/profiles/t553952764/media?partnerId=wfk5AKYX&lt;/SearchUrl&gt;"
-        "&lt;StreamType&gt;episode&lt;/StreamType&gt;"
-        "&lt;/ListInfo&gt;&lt;/PlayList&gt;"
-        "</QueueContext></CreateQueue>"
-    )
-    await api._execute_soap_side_effect("CreateQueue", body)
-    assert api.state.totlen == 3600
-    assert 'duration="3600"' in api.state.track_metadata
+async def test_episode_seek_rel_time_updates_position_and_preserves_supplied_duration() -> None:
+    api = make_api()
+    await api._execute_soap_side_effect("CreateQueue", _episode_queue_body())
+    assert api.state.totlen == 2880
+    assert 'duration="2880"' in api.state.track_metadata
+    await api._execute_soap_side_effect("PlayQueueWithIndex", "<PlayQueueWithIndex><Index>1</Index></PlayQueueWithIndex>")
     await api._execute_soap_side_effect("Seek", "<Seek><Unit>REL_TIME</Unit><Target>00:00:30</Target></Seek>")
-    assert mpv.seeked_to == 30
+    assert api.mpv.seeked_to == 30
     assert api.state.curpos == 30
+    assert api.state.totlen == 2880
 
 
-def test_seek_ready_uses_playback_progress_over_demux_underrun() -> None:
+@pytest.mark.asyncio
+async def test_episode_without_supplied_duration_does_not_invent_one_hour() -> None:
+    api = make_api()
+    await api._execute_soap_side_effect("CreateQueue", _episode_queue_body(duration=None))
+    assert api.queue_is_live is False
+    assert api.state.queue.current.duration == api.queue_duration_sec == api.state.totlen == 0
+    assert 'duration="3600"' not in api.state.track_metadata
+
+
+def test_seek_ready_accepts_near_target_despite_stale_demux_underrun() -> None:
     api = make_api()
     snapshot = {
-        "playback-time": 2736.2,
+        "playback-time": 2734.6,
         "core-idle": False,
         "idle-active": False,
         "pause": False,
@@ -708,19 +707,19 @@ def test_seek_ready_uses_playback_progress_over_demux_underrun() -> None:
         "track-list": [{"type": "audio", "selected": True}],
         "demuxer-cache-state": {"underrun": True},
     }
-    assert api._snapshot_is_seek_ready(snapshot, 2734, 1.5, True, 20.0, 4.0)
+    assert api._snapshot_is_seek_ready(snapshot, 2734)
 
 
 def test_seek_ready_rejects_idle_snapshot() -> None:
     api = make_api()
     snapshot = {
-        "playback-time": 2736.2,
+        "playback-time": 2734.6,
         "core-idle": True,
         "idle-active": True,
         "cache-buffering-state": 100,
         "track-list": [{"type": "audio", "selected": True}],
     }
-    assert not api._snapshot_is_seek_ready(snapshot, 2734, 1.5, True, 20.0, 4.0)
+    assert not api._snapshot_is_seek_ready(snapshot, 2734)
 
 
 @pytest.mark.asyncio
@@ -751,16 +750,17 @@ async def test_live_sync_ignores_mpv_segment_duration() -> None:
 @pytest.mark.asyncio
 async def test_set_play_mode_updates_loop_state() -> None:
     api = make_api()
-    await api._execute_soap_side_effect("SetPlayMode", "<SetPlayMode><NewPlayMode>REPEAT_ALL</NewPlayMode></SetPlayMode>")
-    assert api.state.loop == "2"
+    await api._execute_soap_side_effect("SetPlayMode", "<SetPlayMode><NewPlayMode>SHUFFLE</NewPlayMode></SetPlayMode>")
+    assert api.state.loop == "3"
+    await api._execute_soap_side_effect("SetPlayMode", "<SetPlayMode><NewPlayMode>NORMAL</NewPlayMode></SetPlayMode>")
+    assert api.state.loop == "4"
 
 
 @pytest.mark.asyncio
 async def test_previous_restarts_current_track() -> None:
     api = make_api()
-    api.state.current_url = "https://example.test/audio.mp3"
-    api.state.status = "play"
-    api.state.curpos = 45
+    await api._play_url("https://example.test/audio.mp3")
+    api.mpv.seeked_to = api.state.curpos = 45
     await api._execute_soap_side_effect("Previous", "<Previous />")
     assert api.state.curpos == 0
     assert api.mpv.seeked_to == 0
@@ -768,6 +768,7 @@ async def test_previous_restarts_current_track() -> None:
 
 def test_rendering_response_fields_reflect_volume_and_mute() -> None:
     api = make_api()
+    api.state.gain_confirmed = True  # Serializer fixture supplies confirmed values.
     api.state.volume = 42
     api.state.mute = True
     assert "<CurrentVolume>42</CurrentVolume>" == api._rendering_response_fields("GetVolume")
@@ -812,17 +813,17 @@ async def test_settings_queries_use_wiim_home_model_shapes() -> None:
 async def test_audio_output_capability_queries_are_typed_disabled_models() -> None:
     api = make_api()
     assert await api.execute(ParsedCommand("getSpdifOutMaxCap"), "127.0.0.1") == {
-        "ver": "1.0",
-        "sampleRate": "48000",
-        "bitDepth": "16",
-        "cfgType": "pcm",
+        "ver": "0",
+        "sampleRate": "0",
+        "bitDepth": "0",
+        "cfgType": "",
         "multiList": [],
     }
     assert await api.execute(ParsedCommand("getCoaxOutMaxCap"), "127.0.0.1") == {
-        "ver": "1.0",
-        "sampleRate": "48000",
-        "bitDepth": "16",
-        "cfgType": "pcm",
+        "ver": "0",
+        "sampleRate": "0",
+        "bitDepth": "0",
+        "cfgType": "",
         "multiList": [],
     }
     assert await api.execute(ParsedCommand("GetFadeFeature"), "127.0.0.1") == {"FadeFeature": 0}
@@ -904,20 +905,17 @@ async def _identity_resolver(url: str) -> str:
     return url
 
 
-async def _no_duration_probe(url: str) -> int:
-    return 0
-
-
 @pytest.mark.asyncio
-async def test_volume_is_clamped() -> None:
+async def test_out_of_range_volume_does_not_raise_gain() -> None:
     api = make_api()
-    assert await api.execute(ParsedCommand("volume", ("150",)), "127.0.0.1") == "OK"
-    assert api.state.volume == 100
+    with pytest.raises(ValueError):
+        await api.execute(ParsedCommand("volume", ("150",)), "127.0.0.1")
+    assert api.state.volume == 50
 
 
 @pytest.mark.asyncio
-async def test_eq_lv2_bands_are_stored_and_returned() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1")
+async def test_eq_lv2_bands_are_stored_and_returned(tmp_path) -> None:
+    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1", state_dir=str(tmp_path))
     mpv = DummyMpv()
     api = HttpApi(cfg, RendererState.from_config(cfg), mpv)
     command = (
@@ -992,10 +990,10 @@ async def test_eq_save_and_list_are_ok() -> None:
     payload = await api.execute(ParsedCommand("EQv2GetList:http://moddevices.com/plugins/caps/Eq4p"), "127.0.0.1")
     assert isinstance(payload, dict)
     assert payload["preset"] == ["Flat", "Bass Boost", "Treble Boost"]
-    assert payload["custom"] == ["test"]
+    assert payload["custom"] == []  # Saved on EqNp, so unavailable for Eq4p.
 
     weird = await api.execute(
-        ParsedCommand('EQv2Load:{"pluginURI":"http://moddevices.com/plugins/caps/Eq4p","Name":"{Name=test, Type=custom, channelMode=Stereo, UpdateAt=0}"}'),
+        ParsedCommand('EQv2Load:{"pluginURI":"http://moddevices.com/plugins/caps/EqNp","Name":"{Name=test, Type=custom, channelMode=Stereo, UpdateAt=0}"}'),
         "127.0.0.1",
     )
     assert isinstance(weird, dict)

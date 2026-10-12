@@ -1,0 +1,23 @@
+# Supported YAML format. The former .toml example was not loadable.
+# For stable per-install paths and a generated user unit, use install-native.py.
+friendly_name: "Open Room Renderer"
+manufacturer: "Independent"
+model_name: "Linux Room Renderer"
+uuid: null
+http_api_port: 8080
+upnp_port: 8080
+mirror_port_80: false
+bind_address: "0.0.0.0"
+advertise_ip: null
+# Relative paths require the working directory to be writable and private.
+mpv_socket: ".state/mpv.sock"
+state_dir: ".state"
+auto_spawn_mpv: true
+default_volume: 50
+default_mute: false
+enable_mdns: true
+enable_ssdp: true
+log_wiim_http_details: false
+proxy_allowed_lan_hosts: []
+podcast_presets: []
+experimental_sources: []

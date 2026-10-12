@@ -11,21 +11,23 @@ import asyncio
 import logging
 import socket
 import struct
+import sys
 from dataclasses import dataclass
+from email.utils import formatdate
 
 from .config import Config
 
 LOG = logging.getLogger(__name__)
 SSDP_ADDR = "239.255.255.250"
 SSDP_PORT = 1900
-SERVER = "Linux/6.x UPnP/1.0 Linkplay/4.8"
-WIIM_SERVER = "Linux/2.6.21 http"
+SERVER = "Linux/6.x UPnP/1.0 OpenRoomRenderer/0.1"
 STS = (
     "ssdp:wiimudevice",
     "upnp:rootdevice",
     "urn:schemas-upnp-org:device:MediaRenderer:1",
     "urn:schemas-upnp-org:service:AVTransport:1",
     "urn:schemas-upnp-org:service:RenderingControl:1",
+    "urn:schemas-upnp-org:service:ConnectionManager:1",
     "urn:schemas-wiimu-com:service:PlayQueue:1",
 )
 
@@ -34,20 +36,19 @@ def usn(cfg: Config, st: str) -> str:
     """Return the stable USN value for a search/notify target."""
 
     base = f"uuid:{cfg.upnp_uuid}"
-    return base if st == "upnp:rootdevice" else f"{base}::{st}"
+    return base if st.lower() == base.lower() else f"{base}::{st}"
 
 
 def response_packet(cfg: Config, st: str) -> bytes:
     """Build an SSDP M-SEARCH response packet for ``st``."""
 
-    server = WIIM_SERVER if cfg.wiim_home_profile else SERVER
     lines = [
         "HTTP/1.1 200 OK",
         "CACHE-CONTROL: max-age=1800",
-        f"DATE: Mon, 18 May 2026 00:00:00 GMT",
+        f"DATE: {formatdate(usegmt=True)}",
         "EXT:",
         f"LOCATION: {cfg.description_url}",
-        f"SERVER: {server}",
+        f"SERVER: {SERVER}",
         f"ST: {st}",
         f"USN: {usn(cfg, st)}",
         "DEVICE-SOURCE: SSDP",
@@ -56,14 +57,13 @@ def response_packet(cfg: Config, st: str) -> bytes:
     ]
     if cfg.wiim_home_profile and st == "urn:schemas-upnp-org:device:MediaRenderer:1":
         lines.insert(5, f"Bootid.upnp.org: {cfg.bootid}")
-        lines.insert(6, f"ServiceName: {cfg.linkplay_instance_name}")
+        lines.insert(6, f"ServiceName: ##hexStr##{cfg.linkplay_instance_name.encode('utf-8').hex().upper()}")
     return "\r\n".join(lines).encode()
 
 
 def notify_packet(cfg: Config, nt: str, nts: str = "ssdp:alive") -> bytes:
     """Build an SSDP NOTIFY packet for an advertised target."""
 
-    server = WIIM_SERVER if cfg.wiim_home_profile else SERVER
     lines = [
         "NOTIFY * HTTP/1.1",
         f"HOST: {SSDP_ADDR}:{SSDP_PORT}",
@@ -71,7 +71,7 @@ def notify_packet(cfg: Config, nt: str, nts: str = "ssdp:alive") -> bytes:
         f"LOCATION: {cfg.description_url}",
         f"NT: {nt}",
         f"NTS: {nts}",
-        f"SERVER: {server}",
+        f"SERVER: {SERVER}",
         f"USN: {usn(cfg, nt)}",
         "DEVICE-SOURCE: SSDP",
         "",
@@ -100,12 +100,23 @@ class SsdpServer:
             except OSError:
                 pass
             self.sock.bind(("", SSDP_PORT))
-            mreq = struct.pack("4s4s", socket.inet_aton(SSDP_ADDR), socket.inet_aton("0.0.0.0"))
+            interface = self.cfg.discovery_interface or "0.0.0.0"
+            if self.cfg.discovery_interface:
+                self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(interface))
+                if sys.platform.startswith("linux"):
+                    # Exclude memberships joined by other sockets/interfaces.
+                    self.sock.setsockopt(socket.IPPROTO_IP, getattr(socket, "IP_MULTICAST_ALL", 49), 0)
+            mreq = struct.pack("4s4s", socket.inet_aton(SSDP_ADDR), socket.inet_aton(interface))
             self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
             self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
             self.sock.setblocking(False)
         except OSError as exc:
+            if self.sock is not None:
+                self.sock.close()
+                self.sock = None
             LOG.error("SSDP multicast setup failed: %s", exc)
+            if self.cfg.discovery_interface is not None:
+                raise
             return
         loop = asyncio.get_running_loop()
         self.tasks.append(loop.create_task(self._listen()))
@@ -115,10 +126,17 @@ class SsdpServer:
     async def stop(self) -> None:
         """Cancel SSDP tasks and close the UDP socket."""
 
-        for task in self.tasks or []:
-            task.cancel()
-        if self.sock:
-            self.sock.close()
+        tasks = self.tasks or []
+        try:
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            # Cancellation of shutdown must not strand the listener socket.
+            if self.sock:
+                self.sock.close()
+                self.sock = None
 
     async def _listen(self) -> None:
         """Handle incoming M-SEARCH datagrams and send matching responses."""
@@ -145,7 +163,7 @@ class SsdpServer:
         assert self.sock is not None
         loop = asyncio.get_running_loop()
         while True:
-            for target in STS:
+            for target in self._advertised_targets():
                 await loop.sock_sendto(self.sock, notify_packet(self.cfg, target), (SSDP_ADDR, SSDP_PORT))
             await asyncio.sleep(30)
 
@@ -158,12 +176,20 @@ class SsdpServer:
                 return line.split(":", 1)[1].strip()
         return ""
 
-    @staticmethod
-    def _targets_for_search(st: str) -> tuple[str, ...]:
+    def _advertised_targets(self) -> tuple[str, ...]:
+        """Include the UUID target required for each advertised UPnP device."""
+
+        return (*STS, f"uuid:{self.cfg.upnp_uuid}")
+
+    def _targets_for_search(self, st: str) -> tuple[str, ...]:
         """Map a requested search target to advertised targets to return."""
 
-        if st in {"ssdp:all", ""}:
-            return STS
+        st = st.strip()
+        own_uuid = f"uuid:{self.cfg.upnp_uuid}"
+        if st.lower() == own_uuid.lower():
+            return (own_uuid,)
+        if st == "ssdp:all":
+            return self._advertised_targets()
         if st == "upnp:rootdevice":
             return ("upnp:rootdevice",)
         if st == "ssdp:wiimudevice":
