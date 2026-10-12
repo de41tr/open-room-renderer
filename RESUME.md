@@ -6,8 +6,8 @@
    dot/renderer-autonomous-20261012; never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Read STATUS.md, PLAN.md and docs/TESTING.md. Last verified native checkpoint
-   21f1a01794dbcbdc5383cb530d343026b8cda5cf passed all lanes on x86_64/AArch64:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38193687112
+   e62daf23b2cd2faf462a9efd1d2bc38cd5dc8ef7 passed all lanes on x86_64/AArch64:
+   https://github.com/de41tr/open-room-renderer/actions/runs/38194471807
 4. Actual same-host multicast discovery now leads through fetched endpoint, two
    distinct decoded sources and production Unix-IPC controls with HTTP/SOAP/GENA
    agreement. Failed/unready source loads now confirm same-owner Stop/idle.
@@ -29,3 +29,7 @@
    use its native CI lane and clearly separate local libmpv/null evidence. Physical
    LAN, original Android, DAC/acoustic audio, ARMv7/Pi/XU4 and service reboot remain
    NOT_RUN. Do not stop simply because a checkpoint is green.
+
+Native probe supervision and the optional Snapcast acceptance tool are reviewed.
+Monitor the new private-package production-IPC Snapcast CI gate; standalone
+control/PCM success alone is not ORR IPC or two-host synchronization evidence.

@@ -118,3 +118,44 @@ jobs:
           ORR_TEST_DISCOVERY: "1"
           ORR_TEST_DISCOVERY_PLAYBACK: "1"
         run: .venv-ci/bin/python -m pytest -q -s tests/test_discovery_native.py tests/test_discovery_playback_native.py
+
+      - name: Verify private Snapcast distribution through production IPC
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 2
+        run: |
+          packages="$RUNNER_TEMP/orr-snapcast-packages"
+          prefix="$RUNNER_TEMP/orr-snapcast-prefix"
+          mkdir -p "$packages" "$prefix"
+          # Download verified distro packages and extract data only. Never run
+          # their maintainer scripts, create service users or enable daemons.
+          (cd "$packages" && apt-get download snapserver snapclient)
+          for package in "$packages"/*.deb; do
+            test "$(dpkg-deb -f "$package" Architecture)" = "$(dpkg --print-architecture)"
+            dpkg-deb -f "$package" Package Version Architecture
+            sha256sum "$package"
+            dpkg-deb -x "$package" "$prefix"
+          done
+          for executable in "$prefix/usr/bin/snapserver" "$prefix/usr/bin/snapclient"; do
+            test -x "$executable"
+            ldd "$executable" > "$RUNNER_TEMP/orr-snapcast-libraries.txt"
+            if grep -q 'not found' "$RUNNER_TEMP/orr-snapcast-libraries.txt"; then
+              cat "$RUNNER_TEMP/orr-snapcast-libraries.txt"
+              exit 1
+            fi
+          done
+          output="/tmp/orr-snapcast-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          .venv-ci/bin/python tools/acceptance_snapcast.py --orr-ipc \
+            --snapserver "$prefix/usr/bin/snapserver" \
+            --snapclient "$prefix/usr/bin/snapclient" --mpv /usr/bin/mpv --output "$output"
+          .venv-ci/bin/python - "$output/evidence.json" <<'PY'
+          import json, sys
+          evidence = json.load(open(sys.argv[1]))
+          assert evidence["success"] and evidence["production_unix_ipc"].startswith("PASS:")
+          print(json.dumps({"lane": evidence["lane"],
+              "production_unix_ipc": evidence["production_unix_ipc"],
+              "versions": {key: value.splitlines()[0] for key, value in evidence["versions"].items()},
+              "stages": {key: {"gains": [item["expected_gain"] for item in value["pcm"]],
+                  "rms": [[channel["rms"] for channel in item["channels"]] for item in value["pcm"]]}
+                  for key, value in evidence["stages"].items()},
+              "cleanup": evidence["cleanup"], "two_host_synchronization": "NOT_RUN"}, sort_keys=True))
+          PY

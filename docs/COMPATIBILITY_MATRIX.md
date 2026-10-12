@@ -127,3 +127,10 @@ physical-network reachability or original Android compatibility is inferred.
 Experimental Plex capability entries remain inactive and absent from playable
 service lists/legacy bits, including explicit diagnostic profiles. Account
 scaffolding is not complete playback integration and no account flow was run.
+
+Optional Snapcast acceptance now has actual same-host digital delivery, group
+controls, gain/mute and reconnect evidence using official binaries. It is a
+separate tool with no advertised renderer capability or mandatory dependency.
+The production ORR Unix-IPC gate awaits CI; two-host synchronization, physical
+output and WiiM grouping remain NOT_RUN. See TESTING.md for exact invocation,
+private evidence handling and non-atomic group-volume limits.

@@ -457,3 +457,51 @@ eight explicit native IPC/discovery/clocked cases skipped locally. Independent
 review cleared the unchanged adversarial repros and production15-second grace.
 The seven actual no-EOF scenarios are now in the native CI libmpv lane; monitor
 that revision separately. Prior21f1a017 CI passed all lanes on both architectures.
+
+## Bounded native probe supervision
+
+The native acceptance supervisors now clean only their owned process group after
+SIGTERM/SIGHUP/SIGINT, timeout, spawn failure, abnormal worker exit and normal
+exit with leftover descendants. Signal handlers are restored. Independent real
+Snapcast and synthetic clocked-wrapper interruption checks found zero survivors;
+previous supervisors could leave detached processes running. This is test/tool
+lifecycle code, not a production playback transport change.
+
+## Optional Snapcast digital/control experiment
+
+This is a standalone acceptance tool, not an advertised multiroom feature or a
+mandatory runtime dependency. Official Debian Snapcast0.31.0 and mpv0.40.0 passed
+real same-host PCM delivery to two file-output clients, join/leave/rejoin, group
+mute, non-atomic per-client volume fan-out and reconnect retention. Every stage
+checks decoded stereo frequency/RMS and live source/group/control state, rather
+than accepting silent output alone as proof of mute.
+
+```sh
+python tools/acceptance_snapcast.py \
+  --snapserver /absolute/path/to/snapserver \
+  --snapclient /absolute/path/to/snapclient \
+  --mpv /absolute/path/to/mpv --output /tmp/orr-snapcast-new-run
+```
+
+The output directory must be new. Keep it private: it contains generated audio,
+raw digital captures and upstream logs, which can contain the host name. Only
+reviewed aggregate metrics may be shared. The tool uses quiet generated48kHz
+stereo, a private FIFO, file outputs, synthetic per-run identities, loopback
+listeners and an isolated child D-Bus address. It installs nothing and starts no
+host service. Its whole owned process group has a90-second hard deadline.
+
+On a native Unix-socket-capable Linux host with project dependencies installed,
+add `--orr-ipc` to require the unmodified production HttpApi/MpvBackend path and
+additional downstream PCM checks for HTTP play, gain, mute, restore and Stop.
+This gate is NOT_RUN in the restricted development host. CI downloads signed-
+index-verified Ubuntu Snapcast packages and extracts data only, without running
+maintainer scripts or enabling their services, then runs this separate gate.
+Record its actual result before claiming ORR-to-Snapcast acceptance.
+
+Same-host file delivery does not establish two-host clock skew, DAC timing or
+acoustic synchronization. Group volume uses acknowledged per-client fan-out,
+not an atomic group transaction. Upstream mpv gain and per-room Snapcast gain
+remain separate; no vendor group compatibility or account flow is implemented.
+Primary references: [Snapcast](https://github.com/snapcast/snapcast),
+[mpv/FIFO setup](https://github.com/snapcast/snapcast/blob/develop/doc/player_setup.md#mpv),
+and [control API](https://github.com/snapcast/snapcast/blob/develop/doc/json_rpc_api/control.md).

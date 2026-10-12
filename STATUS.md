@@ -685,3 +685,21 @@ eight explicit native IPC/discovery/clocked cases skipped locally. Independent
 review cleared the unchanged adversarial repros and production15-second grace.
 The seven actual no-EOF scenarios are now in the native CI libmpv lane; monitor
 that revision separately. Prior21f1a017 CI passed all lanes on both architectures.
+
+## Native probe lifecycle and optional distribution gate
+
+Independent review reproduced and fixed detached child leaks on termination in
+acceptance supervisors. Shared tool-only supervision now handles signals, timeouts
+and abnormal worker exit, with deterministic and actual-process checks.
+The Snapcast experiment remains standalone and optional. Real official binaries
+passed seven PCM/control stages with verified ownership and live source/group
+state; the prepared production Unix-IPC mode awaits native CI. No service
+capability, hardware or two-host synchronization claim was added.
+
+Exact rebased helper/tool snapshot:1955 default tests passed,29 explicit native
+skips. Separate local standalone acceptance and independent signal-kill checks
+passed. Current production head e62daf23 passed all native CI lanes on x86_64
+and AArch64, including all seven no-EOF station scenarios:
+[run38194471807](https://github.com/de41tr/open-room-renderer/actions/runs/38194471807).
+Actual production-grace recovery took16.04/16.03 seconds on those runners;
+exhaustion used exactly three retries and confirmed idle.
