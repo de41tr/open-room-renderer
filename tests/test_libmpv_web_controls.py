@@ -15,6 +15,7 @@ import json
 import locale
 import os
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -57,6 +58,8 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
     for track, frequency in zip(tracks, (440, 660)):
         _write_tone(track, frequency)
     entered, release = asyncio.Event(), asyncio.Event()
+    dsp_entered, dsp_release = asyncio.Event(), asyncio.Event()
+    dsp_tasks: list[asyncio.Task] = []
     media_requests: list[str] = []
 
     async def media(request):
@@ -262,6 +265,134 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
             evidence["dsp"] = {"native_combined_graph": graph, "bypass_preserves_balance": True,
                                "scope": "native af readback only; samples are measured by the separate existing DSP gate"}
 
+            # Extend this same native lifetime with the complete Web editor.
+            # The only held operation delays the inherited, real native PEQ
+            # call; it never substitutes a graph, acknowledgement or snapshot.
+            async def editor():
+                dsp = (await snapshot())["dsp"]
+                assert dsp["status"] == "CONFIRMED", dsp
+                view = dsp["editor"]
+                assert re.fullmatch(r"[0-9a-f]{64}", view["revision"])
+                assert view["source"] == "global" and view["channel_mode"] == "Stereo"
+                assert [entry["param_name"] for entry in view["bands"]] == [
+                    f"{letter}_{field}" for letter in "abcdefghij" for field in ("freq", "gain", "q", "mode")]
+                assert all(re.fullmatch(r"[0-9a-f]{64}", entry["id"]) for entry in view["presets"])
+                assert "synthetic.web" not in json.dumps(view), "Editor leaked the plugin identifier"
+                return view
+
+            def curve(view, **changes):
+                return [{**entry, "value": changes.get(entry["param_name"], entry["value"])}
+                        for entry in view["bands"]]
+
+            async def edit(action, view, **fields):
+                return await command(action, expected_dsp=view["revision"], **fields)
+
+            original_editor = await editor()
+            cut_bands = curve(original_editor, a_freq=660, a_gain=-6, a_q=1, a_mode=1)
+            original_peq = backend.peq
+
+            async def held_peq(bands):
+                dsp_entered.set()
+                await dsp_release.wait()
+                await original_peq(bands)
+
+            backend.peq = held_peq
+            before = len(backend.commands)
+            applying = asyncio.create_task(edit("dsp_bands", original_editor, bands=cut_bands))
+            dsp_tasks.append(applying)
+            await asyncio.wait_for(dsp_entered.wait(), timeout=2)
+            pending = (await snapshot())["dsp"]
+            assert pending == {"status": "PENDING", "balance": None, "eq_enabled": None,
+                               "name": "", "editor": None}, pending
+            assert not applying.done() and backend.read_property("af") == graph
+
+            # Observe the second HTTP command entering the normal dispatcher
+            # before releasing PEQ, proving it actually waits behind the lock.
+            dispatch_entered = asyncio.Event()
+            original_dispatch = api.web_api._dispatch
+
+            async def observed_dispatch(value):
+                dispatch_entered.set()
+                return await original_dispatch(value)
+
+            api.web_api._dispatch = observed_dispatch
+            stale = asyncio.create_task(edit("dsp_bands", original_editor, expected=409,
+                                             bands=curve(original_editor, a_gain=-18)))
+            dsp_tasks.append(stale)
+            try:
+                await asyncio.wait_for(dispatch_entered.wait(), timeout=2)
+                assert not stale.done() and api._dsp_command_lock.locked()
+            finally:
+                api.web_api._dispatch = original_dispatch
+                backend.peq = original_peq
+                dsp_release.set()
+            await applying
+            rejected = await stale
+            assert rejected["error"] == "stale_dsp" and rejected["outcome"] == "REJECTED"
+            native_edits = backend.commands[before:]
+            assert len(native_edits) == 1 and native_edits[0][:2] == ["af", "add"], native_edits
+            cut_graph = backend.read_property("af")
+            assert cut_graph != graph
+            assert "equalizer=f=660.000" in cut_graph[0]["params"]["graph"]
+            assert ":g=-6.000" in cut_graph[0]["params"]["graph"]
+            edited = await editor()
+            assert edited["bands"] == cut_bands and edited["revision"] != original_editor["revision"]
+            assert backend.read_property("volume") == 25 and backend.read_property("mute") is False
+            assert backend.read_property("playlist") == native_before
+
+            # Library-only mutations must not write to the audio backend at all.
+            before = len(backend.commands)
+            await edit("dsp_preset_save", edited, name="Web native cut")
+            saved_editor = await editor()
+            saved_preset = next(entry for entry in saved_editor["presets"] if entry["name"] == "Web native cut")
+            assert saved_preset["kind"] == "saved" and saved_preset["shared"] is False
+            assert saved_editor["bands"] == cut_bands and saved_editor["revision"] != edited["revision"]
+            assert backend.commands[before:] == [] and backend.read_property("af") == cut_graph
+
+            await command("eq", enabled=False)
+            assert backend.read_property("af") == bypass
+            bypass_editor = await editor()
+            bypass_bands = curve(bypass_editor, a_gain=-9)
+            before = len(backend.commands)
+            await edit("dsp_bands", bypass_editor, bands=bypass_bands)
+            assert backend.commands[before:] == [] and backend.read_property("af") == bypass
+            assert (await snapshot())["dsp"]["eq_enabled"] is False
+            bypass_edited = await editor()
+            assert bypass_edited["bands"] == bypass_bands
+            await edit("dsp_preset_load", bypass_edited, preset_id=saved_preset["id"])
+            restored_editor = await editor()
+            assert restored_editor["bands"] == cut_bands
+            assert (await snapshot())["dsp"]["eq_enabled"] is True
+            assert backend.read_property("af") == cut_graph
+
+            before = len(backend.commands)
+            await edit("dsp_preset_rename", restored_editor, preset_id=saved_preset["id"], name="Renamed native cut")
+            renamed_editor = await editor()
+            renamed = next(entry for entry in renamed_editor["presets"] if entry["name"] == "Renamed native cut")
+            assert renamed["id"] != saved_preset["id"] and renamed["kind"] == "saved"
+            assert not any(entry["id"] == saved_preset["id"] for entry in renamed_editor["presets"])
+            assert renamed_editor["bands"] == cut_bands
+            assert backend.commands[before:] == [] and backend.read_property("af") == cut_graph
+            await edit("dsp_preset_delete", renamed_editor, preset_id=renamed["id"])
+            deleted_editor = await editor()
+            assert not any(entry["id"] == renamed["id"] for entry in deleted_editor["presets"])
+            assert deleted_editor["bands"] == cut_bands
+            assert backend.commands[before:] == [] and backend.read_property("af") == cut_graph
+            assert backend.read_property("playlist") == native_before
+            assert backend.read_property("volume") == 25 and backend.read_property("mute") is False
+            evidence["dsp_editor"] = {
+                "scope": "REAL_BACKEND/null/readback; no added PCM matrix or physical-output claim",
+                "native_web_cut_graph": cut_graph, "complete_bands": len(cut_bands),
+                "pending_hides_editor": True, "stale_after_lock": 409, "stale_extra_native_mutations": 0,
+                "bypass_edit_retained": True, "saved_load_restores_curve_and_enables": True,
+                "save_rename_delete_native_mutations": 0, "opaque_preset_ids": True,
+                "source_and_gain_retained": True,
+            }
+            # Preserve the original favorite/source-change retention proof.
+            await edit("dsp_bands", deleted_editor, bands=original_editor["bands"])
+            assert backend.read_property("af") == graph
+            assert (await editor())["bands"] == original_editor["bands"]
+
             saved = await command("favorite_current", name="Second owned tone", guard=True)
             identifier = saved["favorite_id"]
             async with session.get(server.make_url(BASE + "/favorites")) as response:
@@ -286,6 +417,12 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
             await canonical(1, "STOPPED")
     finally:
         release.set()
+        dsp_release.set()
+        for task in dsp_tasks:
+            if not task.done():
+                task.cancel()
+        if dsp_tasks:
+            await asyncio.gather(*dsp_tasks, return_exceptions=True)
         if pending_play is not None and not pending_play.done():
             pending_play.cancel()
             await asyncio.gather(pending_play, return_exceptions=True)
@@ -331,6 +468,8 @@ def test_real_libmpv_web_controls(tmp_path: Path) -> None:
     assert evidence["lane"] == "REAL_BACKEND/null/Web-JSON"
     assert all(evidence["cleanup"].values())
     assert {sample["source"] for sample in evidence["decoded"]} == {1, 2}
+    assert evidence["dsp_editor"]["complete_bands"] == 40
+    assert evidence["dsp_editor"]["stale_extra_native_mutations"] == 0
     print(json.dumps(evidence, sort_keys=True))
 
 

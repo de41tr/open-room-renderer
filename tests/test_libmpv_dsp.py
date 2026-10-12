@@ -3,7 +3,7 @@
 Opt in with ORR_TEST_LIBMPV_PATH=/absolute/path/to/libmpv.so.2 and run:
     PYTHONPATH=. .venv/bin/pytest -q -s tests/test_libmpv_dsp.py
 
-Actual CLI DSP children and HTTP gain/EQ setup commands use production HttpApi
+Actual CLI DSP children, Web band apply and HTTP gain/EQ setup commands use production HttpApi
 and inherited MpvBackend controls; a test-only ctypes command adapter connects
 them to actual libmpv. Generated,
 finite stereo tones have peak <= 500/32768 and volume is explicitly set to 25
@@ -283,6 +283,35 @@ async def _exercise_digital_dsp(
             await set_band(freq=1000, gain=-12, mode=1, q=1)
             assert "equalizer=f=1000.000" in own_graph()
             cut_graph = graph()
+            # Keep the legacy setup/readback proof above, then remove its cut
+            # before reusing the same capture to measure the new Web path.
+            # A no-op Web command cannot pass: its input is verified flat.
+            await set_band(freq=1000, gain=0, mode=1, q=1)
+            assert graph() == []
+            web_base = f"http://127.0.0.1:{port}/orr/v1/web"
+            async with session.get(web_base + "/state") as response:
+                web_state = await response.json()
+                assert response.status == 200, web_state
+            assert web_state["dsp"]["status"] == "CONFIRMED"
+            assert web_state["dsp"]["eq_enabled"] is True
+            editor = web_state["dsp"]["editor"]
+            web_bands = [{**entry, "value": -12 if entry["param_name"] == "a_gain" else entry["value"]}
+                         for entry in editor["bands"]]
+            assert len(web_bands) == 40
+            async with session.post(web_base + "/command", headers={
+                    "Origin": f"http://127.0.0.1:{port}", "X-ORR-CSRF": web_state["csrf_token"]},
+                    json={"action": "dsp_bands", "expected_dsp": editor["revision"], "bands": web_bands}) as response:
+                acknowledgement = await response.json()
+                assert response.status == 200 and acknowledgement == {"request_acknowledged": True}, acknowledgement
+            assert graph() == cut_graph
+            async with session.get(web_base + "/state") as response:
+                applied = await response.json()
+                assert response.status == 200, applied
+            assert applied["dsp"]["status"] == "CONFIRMED" and applied["dsp"]["editor"]["bands"] == web_bands
+            evidence["web_band_apply"] = {
+                "flat_graph_before_request": True, "native_cut_restored": True,
+                "confirmed_snapshot": True, "measured_by_existing_capture": "eq_minus_12db",
+            }
             cut = await capture("eq_minus_12db")
             expected_cut = 10 ** (-12 / 20)
             assert cut["channels"][0]["normalized_rms_ratio"] == pytest.approx(expected_cut, rel=0.02)
