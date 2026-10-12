@@ -506,3 +506,62 @@ async def test_real_unix_ipc_named_load_options_and_per_file_reset(native_worksp
         "start_position": position, "per_file_options_reset": True,
         "gain_preserved": True, "fixture_child_reaped": True,
     }, sort_keys=True))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extension", ["m3u", "pls"])
+async def test_real_unix_ipc_station_child_history_guard_and_reset(native_workspace, extension) -> None:
+    """First and naturally advanced children use guarded file-local policy."""
+    directory, executable = native_workspace
+    tracks = (directory / "first.wav", directory / "second.wav")
+    for path, frequency in zip(tracks, (440, 660)):
+        _write_tone(path, frequency)
+        with wave.open(str(path), "rb") as source:
+            params, frames = source.getparams(), source.readframes(4 * 16000)
+        with wave.open(str(path), "wb") as output:
+            output.setparams(params)
+            output.writeframes(frames)
+    container = directory / ("station." + extension)
+    container.write_text("#EXTM3U\nfirst.wav\nsecond.wav\n" if extension == "m3u" else
+                         "[playlist]\nNumberOfEntries=2\nFile1=first.wav\nFile2=second.wav\nVersion=2\n")
+    async with _external_player(directory, executable) as (backend, process):
+        cfg = Config(uuid="00000000-0000-4000-8000-000000000000", state_dir=str(directory / "state"),
+                     auto_spawn_mpv=False, enable_ssdp=False, enable_mdns=False)
+        api = HttpApi(cfg, RendererState.from_config(cfg), backend)
+        runner = web.AppRunner(api.app(), shutdown_timeout=1)
+        try:
+            async with asyncio.timeout(20):
+                await runner.setup()
+                default = await _property(backend, "options/demuxer-max-back-bytes")
+                donation_default = await _property(backend, "options/demuxer-donate-buffer")
+                queue = PlaybackQueue(items=[QueueItem(str(container), stream_type="station")], index=1)
+                await api._replace_queue(queue)
+                await api._play_queue_index(1, queue.name)
+                identity = None
+                for path in tracks:
+                    async def child_ready() -> bool:
+                        return (await _property(backend, "path") == str(path)
+                                and await _property(backend, "playback-time") > .2
+                                and await _property(backend, "options/demuxer-max-back-bytes") == LIVE_STATION_BACK_BYTES
+                                and await _property(backend, "option-info/demuxer-max-back-bytes/set-locally") is True
+                                and await _property(backend, "options/demuxer-donate-buffer") is False
+                                and await _property(backend, "option-info/demuxer-donate-buffer/set-locally") is True)
+                    await _eventually("station child history", child_ready, timeout=7)
+                    if identity is not None:
+                        assert not await backend.apply_station_child_history(*identity)
+                    entries = await _property(backend, "playlist")
+                    active = next(entry for entry in entries if entry.get("current") and entry.get("playing"))
+                    identity = (entries.index(active), active["id"], await _property(backend, "pid"))
+                    assert api.state.current_url == api.state.backend_original_url == str(container)
+                await api._play_url(str(tracks[0]))
+                assert await _property(backend, "options/demuxer-max-back-bytes") == default
+                assert await _property(backend, "option-info/demuxer-max-back-bytes/set-locally") is False
+                assert await _property(backend, "options/demuxer-donate-buffer") is donation_default
+                assert await _property(backend, "option-info/demuxer-donate-buffer/set-locally") is False
+                assert not await backend.apply_station_child_history(*identity)
+                assert await _property(backend, "options/demuxer-max-back-bytes") == default
+                await api._transport_command("stop")
+                assert await _property(backend, "idle-active") is True
+        finally:
+            await runner.cleanup()
+    assert process.returncode is not None

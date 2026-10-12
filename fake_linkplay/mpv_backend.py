@@ -760,6 +760,44 @@ class MpvBackend:
             filters.append(f"pan=stereo|c0={left:.3f}*c0|c1={right:.3f}*c1")
         return ",".join(filters)
 
+    async def apply_station_child_history(self, position: int, entry_id: int, pid: int) -> bool:
+        """Set/read the shared file-local policy for one native active entry.
+
+        A Python lock cannot stop mpv naturally advancing between an observation
+        and a write. mpv expands this property name and executes synchronous set
+        in the same core command. A changed/missing entry expands to an invalid
+        empty name and cannot change another file's option. Only integer identity
+        is interpolated; media URLs never enter the expression.
+        """
+        if any(type(value) is not int or value < 0 for value in (position, entry_id, pid)):
+            raise ValueError("Station child identity must contain nonnegative integers")
+
+        def guarded(value: str) -> str:
+            for name, expected in reversed((("pid", pid),
+                    (f"playlist/{position}/id", entry_id),
+                    (f"playlist/{position}/current", "yes"),
+                    (f"playlist/{position}/playing", "yes"))):
+                value = "${?=" + name + "==" + str(expected) + ":" + value + "}"
+            return value
+
+        # Disable donation first: a finite backward limit alone can borrow
+        # the forward allocation. Each mutation is independently guarded by
+        # exactly the same native identity; a transition between writes safely
+        # rejects the later write. Partial application is never confirmed.
+        for name in ("demuxer-donate-buffer", "demuxer-max-back-bytes"):
+            response = await self.command(["expand-properties", "set",
+                guarded("file-local-options/" + name), LIVE_STATION_HISTORY_OPTIONS[name]], timeout=0.5)
+            if response.get("error") != "success":
+                return False
+        # Read both effective values and both file-local flags under the same
+        # guard. ACKs alone cannot establish application to the original entry.
+        response = await self.command(["expand-text", guarded(
+            "${=options/demuxer-max-back-bytes}|${=options/demuxer-donate-buffer}|"
+            "${=option-info/demuxer-max-back-bytes/set-locally}|"
+            "${=option-info/demuxer-donate-buffer/set-locally}")], timeout=0.5)
+        return (response.get("error") == "success"
+                and response.get("data") == f"{LIVE_STATION_BACK_BYTES}|no|yes|yes")
+
     async def get_property(self, name: str) -> Any:
         """Read a single mpv property, returning ``None`` on mpv errors."""
 

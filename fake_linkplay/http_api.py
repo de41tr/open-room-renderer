@@ -232,6 +232,7 @@ class HttpApi:
         self._native_owned_entries: tuple[tuple[int, str], ...] = ()
         self._native_staging_timeout = 3.0
         self._native_cleanup_tasks: set[asyncio.Task] = set()
+        self._station_child_history_attempt: tuple[PlaybackQueue, QueueItem, str, str, int] | None = None
         self._station_recovery: StationRecovery | None = None
         self._station_recovery_task: asyncio.Task | None = None
         self._station_recovery_loading = False
@@ -400,6 +401,8 @@ class HttpApi:
         self._proxy_sources.clear()
         native_ready = self._native_ready_generation == self.state.generation
         generation = self.state.accept_command(intent)
+        if intent == "stop":
+            self._station_child_history_attempt = None
         stage = self._native_stage
         if preserve_native:
             self._native_ready_generation = generation if native_ready else None
@@ -948,6 +951,12 @@ class HttpApi:
         try:
             async with self._backend_lock:
                 snap = await self.mpv.snapshot()
+                if await self._apply_station_child_history_locked(generation, snap):
+                    if generation != self.state.generation:
+                        return
+                    # The optional policy transaction can yield up to two
+                    # seconds. Never publish its older input observation.
+                    snap = await self.mpv.snapshot()
         except (BackendError, OSError, TimeoutError):
             if generation == self.state.generation:
                 self._mark_backend_failure()
@@ -2635,6 +2644,9 @@ class HttpApi:
                 try:
                     load_identity = (self.state.backend_url, self.state.backend_original_url)
                     load_attempted = True
+                    # A new admitted load can replace/restart mpv and reuse a
+                    # child ID. Pause/Resume alone does not reset this budget.
+                    self._station_child_history_attempt = None
                     if selected and (station_id or provenance and provenance[0] == url):
                         # Only entering the guarded mutation consumes the
                         # initially materialized target, even if ACK fails.
@@ -2761,6 +2773,77 @@ class HttpApi:
             # ordinary media seeking and the user's native defaults unchanged.
             return dict(LIVE_STATION_HISTORY_OPTIONS)
         return {}
+
+    async def _apply_station_child_history_locked(self, generation: int, snapshot: dict) -> bool:
+        """One bounded best-effort policy attempt per proven first-level child.
+
+        The normal observer/readiness path owns the backend lock. Never start a
+        detached writer, retry an unchanged failed entry, or change global opts.
+        Playback continues if this optional memory reduction cannot be verified.
+        True means it yielded; the caller must refresh its state observation.
+        """
+        queue, item, index = self.state.queue, self.state.queue.current, self.state.queue.index
+        source, original = self.state.backend_url, self.state.backend_original_url
+
+        def current() -> bool:
+            return (generation == self.state.generation and self.state.intent in {"play", "pause"}
+                    and self.state.phase not in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}
+                    and not self._native_output_uncertain
+                    and self.state.queue is queue and queue.current is item and queue.index == index
+                    and self.state.backend_url == source and self.state.backend_original_url == original
+                    and bool(self._mpv_playback_options(original, source)))
+
+        def child(snap: dict) -> dict | None:
+            active = self._native_active(snap)
+            if (snap.get("backend-error") or snap.get("idle-active") is not False
+                    or snap.get("path") == source or self._native_entries(snap) is None
+                    or not self._mpv_snapshot_matches_source(snap, source)
+                    or not all(entry.get("playlist-path") == source for entry in snap["playlist"])):
+                return None
+            return active
+
+        active = child(snapshot) if current() else None
+        if active is None or item is None:
+            return False
+        token = (queue, item, source, active["filename"], active["id"])
+        previous = self._station_child_history_attempt
+        if (previous is not None and previous[0] is queue and previous[1] is item
+                and previous[2:] == token[2:]):
+            return False
+        self._station_child_history_attempt = token
+        invoked = False
+        try:
+            async with asyncio.timeout(2.0):
+                # Obtain core identity before a fresh source proof. The numeric
+                # PID guard also rejects replacement mpv processes reusing IDs.
+                pid = await self.mpv.get_property("pid")
+                if not current():
+                    return True
+                fresh = await self.mpv.snapshot()
+                if fresh.get("backend-error"):
+                    raise BackendError("Native child source readback unavailable")
+                observed = child(fresh)
+                if (not current() or observed is None or observed.get("id") != active["id"]
+                        or observed.get("filename") != active["filename"]):
+                    return True
+                position = fresh["playlist"].index(observed)
+                if type(pid) is not int or pid < 0:
+                    raise BackendError("Native core identity unavailable")
+                invoked = True
+                confirmed = await self.mpv.apply_station_child_history(position, active["id"], pid)
+                if not current():
+                    return True
+                if not confirmed:
+                    raise BackendError("Native entry policy readback unconfirmed")
+        except (BackendError, OSError, TimeoutError, AttributeError):
+            LOG.warning("station child history outcome=unconfirmed generation=%s entry=%s; native defaults may remain",
+                        generation, active["id"])
+        finally:
+            # A newer Pause/Resume may still own this same native file. If no
+            # write was admitted, let its generation make the first attempt.
+            if not invoked and not current() and self._station_child_history_attempt is token:
+                self._station_child_history_attempt = None
+        return True
 
     @staticmethod
     def _mpv_seek_reload_options() -> dict[str, str]:
@@ -2929,6 +3012,10 @@ class HttpApi:
             await asyncio.sleep(0.5)
             async with self._backend_lock:
                 snapshot = await self.mpv.snapshot()
+                if await self._apply_station_child_history_locked(generation, snapshot):
+                    if generation != self.state.generation:
+                        return False
+                    snapshot = await self.mpv.snapshot()
             if generation != self.state.generation:
                 return False
             last_snapshot = snapshot
