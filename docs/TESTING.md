@@ -1667,3 +1667,37 @@ deterministic helpers), six Unix cases and every later client, stress, installed
 CLI, clocked, discovery and same-host Snapcast gate passed. Python 3.11's timeout
 keeps the overall checkpoint failed. The exact scheduling repair also passed
 all 13 scheduler fixtures under Python 3.12 in 8.93s.
+
+
+## Local transport CLI coverage
+
+`tests/test_transport_client.py` checks the next/previous/mute/seek wire mapping,
+nonnegative integer seek and explicit mute validation before networking, safe
+malformed-argument diagnostics, shared host/port handling, literal bounded `OK`
+acknowledgements, no redirects/retries/environment proxy/netrc, and resource
+closure. Existing queue client/CLI tests cover current-queue mode mapping with
+only the advertised LoopMode input, its strict empty SOAP response and no name
+guard. Existing command tests continue to exercise unchanged legacy behavior.
+
+`tests/test_transport_client_renderer.py` runs actual CLI children against
+production loopback HttpApi with deterministic mock audio. It checks mode changes
+without queue/metadata replacement or playback restart, HTTP shuffle-history
+navigation with stopped selection and paused refusal, plus seek/mute preserving
+transport intent. These tests establish client/server contracts, not native
+playback, sound output, original-app interoperability or endurance.
+
+The scheduling repair `3e2455f` subsequently passed all three standard jobs,
+verified at 2026-10-12 12:31:26 UTC. Hosted Python 3.11 groups passed 3523 +130/70
+in 138.69s/42.86s, preserving the original step/job caps. Both native architectures
+passed all 64 libmpv checks and every later gate. This does not relabel 763f7f7.
+
+Final local transport integration passed 3674/70 on Python 3.12 in 171.37s and
+3538+136/70 on grouped Python 3.11 in 136.04s/37.87s. Exact production digest:
+`1edc38286ccbe72c702b42684f4d2fafe83b37e317d85e8b6f04889983cada38`.
+The existing native CLI test now executes 16 real CLI children. Mode changes
+preserve native ID/generation/mutation counts; normal navigation proves B→C→B
+with fresh entry IDs; actual mute properties agree with HTTP/SOAP/GENA; absolute
+seek to 8s remains paused at about 7.85s under the existing confirmation tolerance.
+The previous queue/file/restart-independent cleanup claims remain. Exact-final
+libmpv 0.37/0.40 runs pass in 8.518s/7.990s with 55 received events and the unchanged
+20s subprocess bound. This adds no second native test or shuffle-history claim.

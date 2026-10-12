@@ -452,7 +452,7 @@ and normal-only native staging restrictions remain. Shuffle makes no gapless cla
 
 ## Renderer-owned queue CLI and authored files
 
-`queue show`, `queue load` and `queue play-index` are local convenience clients
+`queue show`, `queue load`, `queue play-index` and `queue mode` are local convenience clients
 of the existing PlayQueue SOAP service, not new renderer actions. `load` sends
 one ReplaceQueue with QueueContext only; it replaces the complete queue and stops
 playback. Its selected one-based index is silent unless `--play` explicitly follows
@@ -460,6 +460,24 @@ with PlayQueueWithIndex. That second request is sent only after an exact success
 replacement response. `play-index` always requests playback, without rewriting
 the queue. Different-name requests fail; a name is not a revision/CAS token for
 concurrent same-name replacement.
+
+`queue mode MODE` sends one SetQueueLoopMode with **LoopMode only**, as declared
+by the service's SCPD, and requires the corresponding empty SOAP success response.
+It addresses the current queue without a name/revision guard, replacement, browse
+or Play request. A rejection/uncertain response never triggers another mutation.
+
+The local `next`, `previous`, `mute on|off` and `seek SECONDS` CLI controls map to
+existing `setPlayerCmd:next`, `setPlayerCmd:prev`, `setPlayerCmd:mute:1|0` and
+`setPlayerCmd:seek:N`. Navigation deliberately uses HTTP shuffle/history semantics,
+not SOAP numeric Next/Previous. Seek input is a nonnegative ASCII integer absolute
+position; state, media and duration admission remain renderer responsibilities.
+Existing stopped/paused intent is preserved. These client commands accept only
+HTTP 200 with the complete literal two-byte `OK` acknowledgement, bound both
+read chunks and accumulated response bytes, and never print remote error bodies. They share
+queue host/port validation, disable redirects/environment proxy/netrc/retries,
+close their response/session, and use the same 10-second connect/read inactivity
+timeout. Acknowledgement is not observed playback; uncertain requests tell the
+user to inspect status before deciding whether to retry.
 
 `show` projects canonical order, count, index and mode. URLs and opaque/display
 metadata are omitted by default. The explicit `--include-urls` output is labeled

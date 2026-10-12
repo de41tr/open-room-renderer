@@ -340,6 +340,31 @@ rejected, but token-bearing queries cannot all be detected. Do not save credenti
 signed temporary URLs or account-scoped references. See the precise
 [local-library API contract](docs/COMPATIBILITY_MATRIX.md#editable-local-favorites).
 
+## Local transport controls
+
+Use the CLI for ordinary controls without writing HTTP requests:
+
+```sh
+open-room-renderer next
+open-room-renderer previous
+open-room-renderer mute on
+open-room-renderer mute off
+open-room-renderer seek 45
+```
+
+`seek` takes an absolute nonnegative integer number of seconds. Fractions,
+negative numbers and implicit mute toggles are rejected before networking.
+The renderer still decides whether the selected media and transport state allow
+seeking. `next` and `previous` use HTTP queue navigation, including shuffle
+history. Stopped navigation selects silently; unavailable paused navigation
+fails without resuming. These commands accept `--host` and `--port`, defaulting
+to `127.0.0.1:8080` (bare or bracketed IPv6 hosts are also accepted).
+
+A successful JSON result says `request_acknowledged`, not that audio was observed.
+Only the renderer's exact `OK` response is accepted. The client never redirects
+or retries a command, and ignores environment proxies and netrc credentials.
+An uncertain result may already have taken effect; inspect status before retrying.
+
 ## Multi-track queues and authored playlists
 
 Use existing queue controls without writing SOAP by hand:
@@ -349,6 +374,7 @@ open-room-renderer queue load --name "Evening" --start-index 2 --mode repeat-all
   "https://media.example.test/first.wav" "https://media.example.test/second.wav"
 open-room-renderer queue show --name "Evening"
 open-room-renderer queue play-index 2 --name "Evening"
+open-room-renderer queue mode shuffle-once
 ```
 
 Replace example URLs with your own playable HTTP(S) references. `load` replaces
@@ -359,7 +385,11 @@ commands remain available. Commands contacting the renderer accept `--host` and
 `--port`, defaulting to `127.0.0.1:8080`.
 
 Modes are `normal`, `repeat-one`, `repeat-all`, `shuffle-once` and
-`shuffle-repeat-all`. `show` returns the queue name, count, current index, mode
+`shuffle-repeat-all`. `queue mode MODE` changes the **current queue** without
+replacing it or requesting playback. It takes no `--name`: the existing service
+advertises only a LoopMode input, so there is no name/revision guard against a
+concurrent controller. Unavailable mode changes are reported without retrying.
+`show` returns the queue name, count, current index, mode
 and canonical item positions. It omits URLs and opaque/display metadata by default.
 `--include-urls` explicitly reveals renderer-reported URLs, which may be resolved
 or credential-bearing. **This is not a canonical live-queue export.**

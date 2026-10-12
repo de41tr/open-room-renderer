@@ -5,11 +5,11 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint b69a60a passed all three jobs, including the
-   complete owned-player SIGKILL/error/fresh-backend explicit-restart tail:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38243274967
-   Both architectures passed 63 libmpv-lane checks (50 native/13 unit) and six Unix cases. Normal
-   limits stay 180s stress /6min step /15min native job /8min Python3.11 floor.
+   Latest completed checkpoint 3e2455f passed all three jobs, verified at
+   12:31:26 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38248110922
+   Python floor uses complete bounded groups on the same runner, preserving the
+   3-minute step/8-minute job; both native jobs retain all existing gates.
+   The prior 763f7f7 remains failed solely for its floor time budget.
 4. Native evidence also verifies real pywiim, repeated-lifetime stress, installed
    CLI signals, discovery and all eleven same-host Snapcast stages. The earlier
    8d ARM Snapcast failure remains unexplained; later passes do not erase it or
@@ -182,3 +182,11 @@ checks and every later gate. The checkpoint stays FAILED solely for the Python 3
 180s time budget. Publish the separately reviewed scheduling correction now.
 Read-only CI inventory found preinstalled browsers, but no supported actual
 browser QA route has been established; keep the controller UI deferred.
+
+12:31 UTC: publish the reviewed local transport CLI package after the now-green
+scheduling repair. Final default suites pass 3674/70; exact 16-command native
+flow passes both 0.37/0.40 with the original 20s bound. No renderer core changes.
+Stable-ID favorite recall is in a separate private candidate; finish independent
+review and short native proof before integrating, and merge its CLI guard with
+the new transport guard. Browser UI remains deferred; do not replace supported
+browser interaction with a shell automation route. No extra multihour tests.

@@ -2,32 +2,25 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (11:58 UTC)
+## Current checkpoint (12:31 UTC)
 
-Draft PR remains unmerged. Published `b69a60a` passed all three standard jobs,
-verified at 11:45:54 UTC:
-https://github.com/de41tr/open-room-renderer/actions/runs/38243274967 .
-Shuffle Once / Shuffle Repeat All and stable public-radio save-current favorites
-are now verified hosted checkpoints. Both native architectures passed 63 libmpv
-checks (50 actual native cases plus 13 deterministic helpers), six production
-Unix cases, real pywiim, bounded stress, installed lifecycle, clocked transitions,
-discovery and eleven same-host Snapcast stages. Native jobs took 760.062s (x86_64)
-and 766.334s (AArch64), within the unchanged 900s limit. All default lanes passed
-3235 checks /69 opt-in skips. Earlier failed checkpoints remain recorded below.
+Draft PR remains unmerged. Scheduling repair `3e2455f` passed all three standard
+jobs, verified at 12:31:26 UTC:
+https://github.com/de41tr/open-room-renderer/actions/runs/38248110922 .
+The Python floor now runs the same complete default collection in two bounded
+groups on its existing runner, preserving the 180s step and 8-minute job. Hosted
+groups passed 3523 +130 tests /70 skips in 138.69s/42.86s. Both native architectures
+passed every existing gate. The previous `763f7f7` stays failed for its 181.55s
+Python-floor timeout, despite all assertions and both native jobs passing.
 
-The next reviewed package adds client-only queue show/load/play-index and explicit
-authored playlist create/restore, with stopped-by-default replacement and no live
-queue export claim. Final integrated defaults pass 3652/70 on Python 3.11/3.12.
-Nine real CLI subprocesses select three distinct native sources with protocol/event
-agreement on libmpv 0.37/0.40 in about 5.1s. No renderer core changes are included.
-Published client package `763f7f7` completed all 3652 Python 3.11 tests in
-181.55s, but failed the unchanged 180s step cap. Both native jobs passed all stages, including 64 libmpv checks and every later
-Unix/client/stress/install/clocked/discovery/Snapcast gate.
-A scheduling-only correction preserves all test node IDs exactly once on the same
-runner: the two subprocess-heavy CLI files run beside the remaining suite, with a
-165s watchdog inside the unchanged 3-minute step/8-minute job. The exact local
-Python 3.11 run passes 3523 +130 tests /70 skips (130.51s longest group). No
-functional code, assertion, skip policy, dependency or audio threshold changes.
+The next reviewed client-only package adds next/previous, mute on/off, absolute
+seek and current-queue mode changes. No renderer core or protocol handlers change.
+Final defaults pass 3674/70 on Python 3.12 (171.37s); grouped Python 3.11 passes
+3538 +136/70 (136.04s/37.87s). Sixteen actual CLI commands verify mode continuity,
+B→C→B native source changes, actual mute and paused seek, plus the earlier queue/
+authored-file flow, in about 8s on libmpv 0.37/0.40. This package's new hosted gate
+will be checked after publication. Stable-ID favorite recall is privately under
+independent and native review. Browser UI remains deferred without supported QA.
 
 The requested behavior-neutral extraction began at 09:14:53 UTC after its prerequisite green gate.
 It moves exactly three stateless metadata-edit helpers into metadata_formatting.py,

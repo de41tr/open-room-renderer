@@ -4,15 +4,15 @@ Branch: `dot/renderer-autonomous-20261012`; base: `3672b9838e9c39ae8191613108f0d
 Work window ends 2026-10-12 20:00 UTC. Stabilization only after 19:00 UTC.
 No main-branch edits, merge, or release.
 
-## Current functional package (11:46 UTC)
+## Current functional package (12:31 UTC)
 
-Repeat, editable favorites, Shuffle and stable-radio save-current have green
-hosted checkpoints through `b69a60a`. Implement a bounded client-only CLI workflow
-for multi-track queue inspection/loading/index playback and explicitly authored
-playlist create/restore using existing SOAP actions. Restore must stop by default;
-optional playback follows only a confirmed replacement. Do not treat resolved
-BrowseQueue URLs as canonical export. Separate protocol and file responsibilities,
-review partial-failure behavior, then verify actual different native sources.
+Queue controls/authored files and the Python-floor scheduling repair have a full
+green checkpoint at `3e2455f`. Publish the reviewed client-only next/previous,
+explicit mute, absolute seek and current-queue mode controls, then verify their
+standard CI. Their final defaults and expanded short native CLI flow pass locally.
+Next, finish the small stable-ID favorite recall route/CLI using a detached preset
+snapshot and the unchanged playback path, avoiding numeric-slot compaction races.
+No core rewrite, new listener, authentication change or browser UI is included.
 
 ## Ordered work
 
