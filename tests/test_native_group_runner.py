@@ -164,3 +164,16 @@ def test_workflow_keeps_explicit_native_groups_and_existing_budget():
 def test_timeout_must_be_positive_and_finite(runner, tmp_path, timeout):
     with pytest.raises(ValueError):
         runner.run_groups([command("pass"), command("pass")], tmp_path, timeout)
+
+
+def test_floor_keeps_all_default_files_and_existing_step_budget():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/renderer-tests.yml").read_text())
+    floor = workflow["jobs"]["python-floor"]
+    step = next(step for step in floor["steps"] if step["name"] ==
+                "Run default unit and local-client suite on Python 3.11")
+    assert step["timeout-minutes"] == 3
+    assert "--timeout 165" in step["run"]
+    assert "tests -rs --ignore=tests/test_queue_cli.py --ignore=tests/test_playlist_cli.py" in step["run"]
+    assert "::: tests/test_queue_cli.py tests/test_playlist_cli.py" in step["run"]
+    assert floor["runs-on"] == "ubuntu-24.04"
+    assert floor["timeout-minutes"] == 8
