@@ -22,6 +22,7 @@ from .config import load_config
 from .http_api import HttpApi
 from .mdns import MdnsAdvertiser
 from .mpv_backend import BackendError, MpvBackend
+from .queue_client import PrivateClientArgumentParser, add_queue_commands, run_queue_command
 from .ssdp import SsdpServer
 from .state import RendererState
 from .upnp_description import description_xml
@@ -226,10 +227,11 @@ def favorites_request(
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(*, private_client_errors: bool = False) -> argparse.ArgumentParser:
     """Build the command-line parser used by the console script."""
 
-    parser = argparse.ArgumentParser(prog="open-room-renderer")
+    parser_type = PrivateClientArgumentParser if private_client_errors else argparse.ArgumentParser
+    parser = parser_type(prog="open-room-renderer")
     sub = parser.add_subparsers(dest="cmd", required=True)
     serve_p = sub.add_parser("serve")
     serve_p.add_argument("--config", default="configs/config.example.yaml")
@@ -245,6 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("value", type=int)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8080)
+    add_queue_commands(sub)
     favorites = sub.add_parser("favorites", help="manage renderer-owned local favorites")
     favorites_sub = favorites.add_subparsers(dest="favorites_cmd", required=True)
     for name in ("list", "add", "save-current", "rename", "delete"):
@@ -277,7 +280,10 @@ def main(argv: list[str] | None = None) -> int:
         Process exit status.
     """
 
-    args = build_parser().parse_args(argv)
+    argv = sys.argv[1:] if argv is None else argv
+    args = build_parser(private_client_errors="queue" in argv).parse_args(argv)
+    if args.cmd == "queue":
+        return run_queue_command(args)
     if args.cmd == "serve":
         asyncio.run(serve(args.config))
         return 0
