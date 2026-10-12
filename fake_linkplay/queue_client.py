@@ -10,10 +10,8 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
-import posixpath
 import re
 import sys
-from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
 
 import requests
@@ -22,14 +20,12 @@ from .queue import (MAX_QUEUE_BYTES, MAX_QUEUE_TRACKS, MAX_XML_DEPTH, PlaybackQu
                     QueueError, QueueItem, parse_queue_context, serialize_queue_context)
 from .queue_policy import NORMAL, REPEAT_ONE, REPEAT_ALL, SHUFFLE_ONCE, SHUFFLE_REPEAT_ALL
 
-SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/"
-SERVICE_TYPE = "urn:schemas-wiimu-com:service:PlayQueue:1"
-CONTROL_PATH = "/upnp/control/PlayQueue"
-MAX_SOAP_BYTES = MAX_QUEUE_BYTES
-MODES = {"normal": NORMAL, "repeat-one": REPEAT_ONE, "repeat-all": REPEAT_ALL,
-         "shuffle-once": SHUFFLE_ONCE, "shuffle-repeat-all": SHUFFLE_REPEAT_ALL}
+# Compatibility exports: pure queue users should import queue_protocol directly.
+from .queue_protocol import (CONTROL_PATH, MAX_SOAP_BYTES, MODES, SERVICE_TYPE, SOAP_NS,
+                             QueueClientError, _INVALID_INPUT, explicit_queue,
+                             prepare_replace, request_body as _protocol_request_body,
+                             validate_name, validate_url)
 
-_INVALID_INPUT = "Invalid queue input. Check the name, URLs, index, mode and size limits."
 _INVALID_RESPONSE = "Queue request failed: invalid renderer response."
 _REQUEST_FAILED = "Queue request failed: could not confirm the renderer response."
 _REPLACE_UNCONFIRMED = ("Queue replacement was not confirmed. "
@@ -42,93 +38,9 @@ _REPLACED_PLAY_UNCONFIRMED = ("Queue replaced; playback was not confirmed. "
                               "Inspect queue show and status before retrying.")
 
 
-class QueueClientError(ValueError):
-    """A fixed, private-safe client failure; never contains remote text."""
-
-
-def validate_name(name: str) -> str:
-    """Require an XML-safe identity; raw CR cannot round-trip in server ACKs."""
-    try:
-        if not isinstance(name, str) or name != name.strip() or "\r" in name:
-            raise ValueError
-        PlaybackQueue(name=name)
-    except (QueueError, ValueError, TypeError, UnicodeError):
-        raise QueueClientError(_INVALID_INPUT) from None
-    return name
-
-
-def validate_url(value: str) -> str:
-    """Validate an explicit HTTP(S) reference without rewriting any bytes."""
-    try:
-        if not isinstance(value, str) or not value or value != value.strip():
-            raise ValueError
-        parts = urlsplit(value)
-        if (parts.scheme not in {"http", "https"} or not parts.netloc or not parts.hostname
-                or parts.username is not None or parts.password is not None
-                or "@" in parts.netloc or parts.port == 0
-                or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value)
-                or "\\" in value or any(char in value for char in "<>")):
-            raise ValueError
-        path = posixpath.normpath("/" + unquote(parts.path).lstrip("/")).rstrip("/")
-        if path == "/proxy/audio":
-            raise ValueError
-        # Reuse the queue model's XML character validation, including surrogates.
-        PlaybackQueue(items=[QueueItem(url=value)], index=1)
-    except (QueueError, ValueError, TypeError, UnicodeError):
-        raise QueueClientError(_INVALID_INPUT) from None
-    return value
-
-
-def explicit_queue(name: str, urls: list[str], *, start_index: int = 1,
-                   mode: str = "normal") -> PlaybackQueue:
-    """Build an explicit queue; validate the complete escaped request too."""
-    try:
-        if not isinstance(urls, list) or not 1 <= len(urls) <= MAX_QUEUE_TRACKS:
-            raise ValueError
-        if not isinstance(mode, str) or mode not in MODES:
-            raise ValueError
-        queue = PlaybackQueue(name=validate_name(name), index=start_index, loop=MODES[mode],
-                              items=[QueueItem(url=validate_url(url)) for url in urls])
-        prepare_replace(queue)
-        return queue
-    except (QueueError, ValueError, TypeError, UnicodeError):
-        raise QueueClientError(_INVALID_INPUT) from None
-
-
 def _request_body(action: str, fields: dict[str, str]) -> bytes:
-    envelope = ET.Element(f"{{{SOAP_NS}}}Envelope")
-    body = ET.SubElement(envelope, f"{{{SOAP_NS}}}Body")
-    node = ET.SubElement(body, f"{{{SERVICE_TYPE}}}{action}")
-    for key, value in fields.items():
-        ET.SubElement(node, key).text = value
-    try:
-        encoded = ET.tostring(envelope, encoding="utf-8", xml_declaration=True)
-    except (ValueError, TypeError, UnicodeError):
-        raise QueueClientError(_INVALID_INPUT) from None
-    if len(encoded) > MAX_SOAP_BYTES:
-        raise QueueClientError(_INVALID_INPUT)
-    return encoded
-
-
-def prepare_replace(queue: PlaybackQueue) -> bytes:
-    """Validate a queue and its full SOAP frame before any network side effect.
-
-    Playlist authors may supply display fields using PlaybackQueue/QueueItem.
-    Resolved URLs are not canonical input and are rejected rather than preferred
-    by serialize_queue_context. This helper never contacts the renderer.
-    """
-    try:
-        if not isinstance(queue, PlaybackQueue) or not 1 <= queue.count <= MAX_QUEUE_TRACKS:
-            raise ValueError
-        queue.validate()
-        validate_name(queue.name)
-        for item in queue.items:
-            validate_url(item.url)
-            if item.resolved_url:
-                raise ValueError
-        return _request_body("ReplaceQueue", {"QueueContext": serialize_queue_context(queue)})
-    except (QueueError, ValueError, TypeError, UnicodeError):
-        raise QueueClientError(_INVALID_INPUT) from None
+    # Keep the existing client-local size boundary while sharing the encoder.
+    return _protocol_request_body(action, fields, max_bytes=MAX_SOAP_BYTES)
 
 
 def _prepare_play(name: str, index: int) -> bytes:

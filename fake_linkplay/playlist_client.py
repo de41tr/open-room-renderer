@@ -6,7 +6,8 @@ import re
 import requests
 
 from .playlist_files import MAX_PLAYLIST_BYTES, decode_playlist
-from .queue_client import QueueClientError, _endpoint, explicit_queue, prepare_replace
+from .queue_client import QueueClientError, _endpoint
+from .queue_protocol import explicit_queue, prepare_replace
 
 PATH = "/orr/v1/queue/playlist"
 _FAILED = "Playlist not saved: could not confirm a valid renderer response. No retry was sent."

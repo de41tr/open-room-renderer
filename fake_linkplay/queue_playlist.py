@@ -12,7 +12,7 @@ from aiohttp import web
 from .canonical_target import canonical_target_url
 from .playlist_files import encode_playlist, validate_playlist
 from .queue import PlaybackQueue
-from .queue_client import MODES, explicit_queue, prepare_replace
+from .queue_protocol import MODES, explicit_queue, prepare_replace
 
 PATH = "/orr/v1/queue/playlist"
 _MODE_NAMES = {value: name for name, value in MODES.items()}
