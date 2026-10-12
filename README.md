@@ -116,6 +116,12 @@ unit; review [Getting Started](GETTING_STARTED.md) before enabling it.
 Use `ORR_CONFIG=/absolute/path/config.yaml ./scripts/run.sh` to retain an explicit
 custom YAML profile. The old `fake-linkplay` command remains a compatibility alias.
 
+The `status`, `play`, `pause`, `resume`, `stop` and `volume` CLI commands print
+successful HTTP response bodies and exit zero. HTTP errors, redirects, timeouts
+and connection failures exit nonzero with a short error on stderr. Redirects are
+not followed; use the renderer's direct host and port. Error messages omit the
+request URL and response body because media URLs may contain credentials.
+
 ## Trying The Phone App
 
 App compatibility is an explicit experimental profile:

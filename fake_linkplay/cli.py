@@ -161,11 +161,25 @@ async def serve(config_path: str) -> None:
             raise asyncio.CancelledError
 
 
-def api_get(host: str, port: int, command: str) -> None:
-    """Run one HTTP API command and print the raw response body."""
+def api_get(host: str, port: int, command: str) -> int:
+    """Print a successful response or a safe error and return an exit status."""
 
     url = f"http://{host}:{port}/httpapi.asp?command={command}"
-    print(requests.get(url, timeout=10).text)
+    try:
+        response = requests.get(url, timeout=10, allow_redirects=False)
+    except requests.Timeout:
+        print("Request failed: timed out", file=sys.stderr)
+        return 1
+    except requests.RequestException:
+        print("Request failed: could not contact renderer", file=sys.stderr)
+        return 1
+    if not 200 <= response.status_code < 300:
+        # Do not print the exception, request URL or response body: a play
+        # command can contain a credential-bearing media URL in its query.
+        print(f"Request failed: HTTP {response.status_code}", file=sys.stderr)
+        return 1
+    print(response.text)
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -210,13 +224,13 @@ def main(argv: list[str] | None = None) -> int:
         asyncio.run(serve(args.config))
         return 0
     if args.cmd == "status":
-        api_get(args.host, args.port, "getStatusEx")
+        return api_get(args.host, args.port, "getStatusEx")
     elif args.cmd == "play":
-        api_get(args.host, args.port, "setPlayerCmd:play:" + quote(args.url, safe=""))
+        return api_get(args.host, args.port, "setPlayerCmd:play:" + quote(args.url, safe=""))
     elif args.cmd in {"pause", "resume", "stop"}:
-        api_get(args.host, args.port, f"setPlayerCmd:{args.cmd}")
+        return api_get(args.host, args.port, f"setPlayerCmd:{args.cmd}")
     elif args.cmd == "volume":
-        api_get(args.host, args.port, f"setPlayerCmd:vol:{args.value}")
+        return api_get(args.host, args.port, f"setPlayerCmd:vol:{args.value}")
     elif args.cmd == "print-description":
         print(description_xml(load_config(args.config)))
     elif args.cmd == "print-discovery-info":
