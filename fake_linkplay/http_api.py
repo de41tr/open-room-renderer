@@ -4098,6 +4098,15 @@ class HttpApi:
 
     async def _navigate_queue(self, delta: int) -> None:
         """Resolve native EOF before calculating relative navigation indexes."""
+        if (self.state.phase == PlaybackPhase.PAUSED or self.state.intent == "pause") and self.state.queue.count > 1:
+            # Loading currently unpauses the backend. Reject this optional
+            # transition rather than briefly playing a paused owner's target.
+            raise SoapFault(701, "Transition Not Available")
+        if self.state.phase == PlaybackPhase.STOPPED or self.state.intent == "stop":
+            # AVTransport Next/Previous preserve STOPPED; only an explicit
+            # Play (or the existing playing EOF path) may start this selection.
+            await self._play_queue_index(self.state.queue.index + delta, start_playback=False)
+            return
         if self._native_stage is not None:
             was_playing = self.state.intent == "play"
             # A confirmed pause freezes native advancement through the index
@@ -4121,7 +4130,7 @@ class HttpApi:
         self._activate_queue_item()
         self._schedule_event_notify()
 
-    async def _play_queue_index(self, index: int, queue_name: str = "") -> None:
+    async def _play_queue_index(self, index: int, queue_name: str = "", *, start_playback: bool = True) -> None:
         queue = self.state.queue
         try:
             if queue_name:
@@ -4131,14 +4140,20 @@ class HttpApi:
                 raise QueueError("Queue is empty")
         except QueueError:
             raise SoapFault(711, "Illegal Seek Target") from None
-        if self.state.backend_url or self.state.status in {"play", "pause", "transition"}:
+        if (self.state.backend_url or self.state.status in {"play", "pause", "transition"}
+                or not start_playback and (self._native_stage is not None or self._native_current_id is not None)):
             await self._transport_command("stop")
         # Stop may have yielded to a newer CreateQueue/owner command.
         if self.state.queue is not queue:
             raise BackendError("Queue command superseded")
         queue.index = index
         self._activate_queue_item()
-        await self._play_url(queue.current.url)
+        if start_playback:
+            await self._play_url(queue.current.url)
+        else:
+            self._accept_playback_command("stop")
+            self._playback_offset_sec = 0
+            self.state.mark_stop()
         self.queue_context = serialize_queue_context(queue)
         self._schedule_event_notify()
 
@@ -4246,6 +4261,10 @@ class HttpApi:
         if action in {"Pause", "Stop"}:
             await self._transport_command(action.lower())
             return
+        if action in {"Next", "Previous"} and (self.state.phase == PlaybackPhase.ERROR or self._native_output_uncertain):
+            # Both multi-item navigation and the single-item restart must
+            # leave uncertain output fenced until explicit Stop/Play recovery.
+            raise BackendError("Playback state unknown before queue navigation")
         if action == "Next":
             await self._navigate_queue(1)
             return
