@@ -1,3 +1,35 @@
+# Next-phase development plan — 13 October 2026
+
+The new user-authorized development window runs from **2026-10-12 22:12:31 UTC**
+to **2026-10-13 18:00 UTC (20:00 Europe/Berlin)**. This supersedes the older
+completed task boundaries below. Branch: `dot/renderer-next-phase-20261013`,
+created from verified remote main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`.
+No main push, merge or release is authorized.
+
+1. **ARCHITECTURE:** cohesive DSP preset-library and pure protocol-contract
+   extractions, behavior-neutral commits, unchanged state/lock/error contracts.
+   Limit this phase to approximately 3–4 hours; then pivot to user functionality.
+2. **WEB UI:** functional responsive controls on the existing aiohttp listener,
+   canonical state, explicit pending/unknown/error outcomes, same-origin mutation
+   protection, safe metadata and credential-bearing URL handling. Browser QA if
+   genuinely available; otherwise implemented with BROWSER_ACCEPTANCE_PENDING.
+3. **SPOTIFY FEASIBILITY:** after functional UI, at most one hour comparing
+   go-librespot, librespot and official Soloist evidence. Optional separately
+   installed sidecar only if justified; no account login or proprietary copies.
+4. **HIGHEST-VALUE BACKLOG:** practical DSP/playlist/diagnostic/lifecycle work.
+5. **STABILIZATION:** no new large/risky work after 16:30 UTC; stabilize from
+   17:00 UTC. Stop at 18:00 UTC even if CI remains PENDING.
+
+Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
+and independent review precede milestone publication. Full native CI follows
+cohesive milestones; unchanged older endurance evidence is not rerun without
+strong new information. Physical ARMv7/XU4/DAC and original-app checks remain
+HARDWARE_PENDING. No test budget or assertion weakening.
+
+---
+
+## Historical completed work
+
 # Bounded GENA architecture extraction
 
 Actual start: **2026-10-12 21:05:18 UTC (23:05:18 Berlin)**.

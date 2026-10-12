@@ -1,3 +1,32 @@
+# Resume the new next-phase task
+
+Current explicit authorization: **2026-10-12 22:12:31 UTC → 2026-10-13 18:00 UTC**
+(13 October, 20:00 Europe/Berlin). Stop active work at that hard deadline; report
+unfinished CI as PENDING. From 16:30 UTC start no large/risky change; stabilize
+from 17:00 UTC. Older task deadlines below are historical only.
+
+Work exclusively on `dot/renderer-next-phase-20261013`, based on remote main
+`ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Create/maintain a new Draft PR; never
+push main, merge or release. Verify actual branch, head and exact-head CI.
+
+Priority order: bounded architecture (DSP preset library and shared pure
+contracts; ~3–4 hours maximum), functional responsive local Web UI, <=1 hour
+Spotify feasibility, justified optional separate-client integration, highest-value
+backlog, stabilization. Preserve one queue/playback authority, generation/lock
+order, exact protocol/error semantics and all existing native acceptance gates.
+Keep behavior-neutral extraction commits separate from feature commits.
+
+UI must be implemented even if genuine browser QA is unavailable; label that
+BROWSER_ACCEPTANCE_PENDING. No security-warning bypass or repeated known-blocked
+browser routes. No provider-account login, credentials, OEM identity, proprietary
+redistribution or private firmware/traces. Hardware/app gaps do not block software.
+Review value/risk every 90–120 minutes, report meaningful milestones, and pivot
+away from diminishing-return tests/refactoring. See PLAN.md and STATUS.md.
+
+---
+
+## Historical completed handovers
+
 # Bounded GENA architecture extraction
 
 Actual start: **2026-10-12 21:05:18 UTC (23:05:18 Berlin)**.

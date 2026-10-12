@@ -1,3 +1,26 @@
+# Next-phase status — 13 October 2026
+
+**IN PROGRESS:** new explicit development window, 2026-10-12 22:12:31 UTC through
+2026-10-13 18:00 UTC (20:00 Berlin), on `dot/renderer-next-phase-20261013`.
+Remote main verified at `ad21bd4972d4af81dd29d1d952e38313dbe491d9`; PR #1 was
+squash-merged before this task. Its final source checkpoint passed all three
+jobs in [run 38311038205](https://github.com/de41tr/open-room-renderer/actions/runs/38311038205).
+The workflow is PR-only; there is no separate main-commit run. This baseline
+result does not certify new changes.
+
+Current work: separate DSP preset-library ownership from active backend
+transactions, and extract shared pure protocol contracts. Next priority is a
+fully functioning local browser controller. No new feature is claimed complete
+at this initial checkpoint. See PLAN.md for the current milestones/deadline.
+
+Hardware/original-app acceptance remains HARDWARE_PENDING. Spotify is not yet
+assessed or implemented in this phase; no account authorization is available.
+The historical reports below retain their own exact-source scope and failures.
+
+---
+
+## Historical completed work
+
 # Bounded GENA architecture extraction
 
 Actual start: **2026-10-12 21:05:18 UTC (23:05:18 Berlin)**.
