@@ -24,6 +24,155 @@ from fake_linkplay.state import PlaybackPhase
 from test_libmpv_formats import _command, _generate_media, _renderer
 
 
+async def _wait_for_cleanup_snapshot(backend, deadline: float) -> dict:
+    """Require one fresh coherent stopped sample before the command's deadline."""
+    loop = asyncio.get_running_loop()
+    snapshot = None
+    try:
+        async with asyncio.timeout_at(deadline):
+            while loop.time() < deadline:
+                snapshot = await backend.snapshot()
+                assert not snapshot.get("backend-error"), snapshot
+                # snapshot() reads native properties separately. Stop can leave
+                # an idle/empty-playlist sample with the previous path briefly.
+                # Do not combine fields from different samples or accept a late
+                # result, even if a native call blocked cancellation delivery.
+                if loop.time() >= deadline:
+                    break
+                if (snapshot.get("idle-active") is True
+                        and "path" in snapshot and snapshot["path"] in (None, "")
+                        and snapshot.get("playlist") == []):
+                    return snapshot
+                await asyncio.sleep(min(0.01, max(0.0, deadline - loop.time())))
+    except TimeoutError:
+        pass
+    raise AssertionError(f"No coherent cleanup snapshot before command deadline: {snapshot!r}")
+
+
+class _CleanupSnapshotBackend:
+    def __init__(self, *snapshots: dict) -> None:
+        self.snapshots = snapshots
+        self.reads = 0
+
+    async def snapshot(self) -> dict:
+        snapshot = self.snapshots[min(self.reads, len(self.snapshots) - 1)]
+        self.reads += 1
+        return snapshot
+
+
+def _cleanup_clock(monkeypatch):
+    """Advance polling deterministically without native calls or wall time."""
+    loop = asyncio.get_running_loop()
+    now = [loop.time()]
+    sleeps = []
+
+    async def sleep(delay: float) -> None:
+        assert delay > 0
+        sleeps.append(delay)
+        now[0] += delay
+
+    monkeypatch.setattr(loop, "time", lambda: now[0])
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    return now, sleeps
+
+
+async def test_cleanup_snapshot_requires_a_fresh_coherent_sample(monkeypatch) -> None:
+    now, sleeps = _cleanup_clock(monkeypatch)
+    stale = {"idle-active": True, "path": "prior-child", "playlist": [], "playback-time": 0.8}
+    clean = {"idle-active": True, "path": None, "playlist": []}
+    backend = _CleanupSnapshotBackend(stale, clean)
+    snapshot = await _wait_for_cleanup_snapshot(backend, now[0] + 0.025)
+    assert snapshot is clean and backend.reads == 2 and sleeps == [0.01]
+
+
+@pytest.mark.parametrize("snapshot", [
+    {"idle-active": False, "path": None, "playlist": []},
+    {"idle-active": True, "path": "prior-child", "playlist": []},
+    {"idle-active": True, "path": None, "playlist": [{"filename": "prior-child"}]},
+    {"idle-active": True, "playlist": []},
+    {"idle-active": True, "path": None},
+], ids=["never-idle", "stale-path", "stale-playlist", "missing-path", "missing-playlist"])
+async def test_cleanup_snapshot_rejects_incomplete_cleanup(monkeypatch, snapshot) -> None:
+    now, sleeps = _cleanup_clock(monkeypatch)
+    deadline = now[0] + 0.025
+    backend = _CleanupSnapshotBackend(snapshot)
+    with pytest.raises(AssertionError, match="No coherent cleanup snapshot"):
+        await _wait_for_cleanup_snapshot(backend, deadline)
+    assert now[0] == deadline and backend.reads == 3
+    assert sum(sleeps) == pytest.approx(0.025)
+
+
+async def test_cleanup_snapshot_rejects_backend_error_without_retry(monkeypatch) -> None:
+    now, sleeps = _cleanup_clock(monkeypatch)
+    clean = {"idle-active": True, "path": None, "playlist": []}
+    backend = _CleanupSnapshotBackend(dict(clean, **{"backend-error": True}), clean)
+    with pytest.raises(AssertionError, match="backend-error"):
+        await _wait_for_cleanup_snapshot(backend, now[0] + 0.025)
+    assert backend.reads == 1 and not sleeps
+
+
+async def test_cleanup_snapshot_never_combines_samples(monkeypatch) -> None:
+    now, _ = _cleanup_clock(monkeypatch)
+    backend = _CleanupSnapshotBackend(
+        {"idle-active": True, "path": "prior-child", "playlist": []},
+        {"idle-active": False, "path": None, "playlist": []},
+    )
+    with pytest.raises(AssertionError, match="No coherent cleanup snapshot"):
+        await _wait_for_cleanup_snapshot(backend, now[0] + 0.025)
+
+
+async def test_cleanup_snapshot_keeps_original_command_deadline(monkeypatch) -> None:
+    now, sleeps = _cleanup_clock(monkeypatch)
+    start = now[0]
+    now[0] += 4.495  # The command has already consumed almost all its budget.
+    backend = _CleanupSnapshotBackend(
+        {"idle-active": True, "path": "prior-child", "playlist": []},
+        {"idle-active": True, "path": None, "playlist": []},
+    )
+    with pytest.raises(AssertionError, match="No coherent cleanup snapshot"):
+        await _wait_for_cleanup_snapshot(backend, start + 4.5)
+    assert now[0] == start + 4.5 and backend.reads == 1
+    assert sum(sleeps) == pytest.approx(0.005)
+
+
+async def test_cleanup_snapshot_rejects_sample_finishing_after_deadline(monkeypatch) -> None:
+    now, sleeps = _cleanup_clock(monkeypatch)
+    deadline = now[0] + 0.025
+
+    class LateBackend:
+        async def snapshot(self) -> dict:
+            now[0] = deadline
+            return {"idle-active": True, "path": None, "playlist": []}
+
+    with pytest.raises(AssertionError, match="No coherent cleanup snapshot"):
+        await _wait_for_cleanup_snapshot(LateBackend(), deadline)
+    assert not sleeps
+
+
+async def test_cleanup_snapshot_does_not_start_after_deadline(monkeypatch) -> None:
+    now, sleeps = _cleanup_clock(monkeypatch)
+    backend = _CleanupSnapshotBackend({"idle-active": True, "path": None, "playlist": []})
+    with pytest.raises(AssertionError, match="No coherent cleanup snapshot"):
+        await _wait_for_cleanup_snapshot(backend, now[0])
+    assert backend.reads == 0 and not sleeps
+
+
+async def test_cleanup_snapshot_cancels_a_blocked_read_at_deadline() -> None:
+    cancelled = False
+
+    class BlockedBackend:
+        async def snapshot(self) -> dict:
+            nonlocal cancelled
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled = True
+
+    with pytest.raises(AssertionError, match="No coherent cleanup snapshot"):
+        await _wait_for_cleanup_snapshot(BlockedBackend(), asyncio.get_running_loop().time() + 0.025)
+    assert cancelled
+
+
 async def _exercise(library: str, ffmpeg: str, directory: Path) -> dict:
     media = _generate_media(ffmpeg, directory)
     evidence = {"lane": "REAL_BACKEND/null", "scenario": "nested_playlist_cleanup"}
@@ -59,10 +208,10 @@ async def _exercise(library: str, ffmpeg: str, directory: Path) -> dict:
         api._wait_for_mpv_audio_ready = short_readiness
         start = asyncio.get_running_loop().time()
         assert await _command(session, fixture.base, "setPlayerCmd:play:" + outer) == (502, "Failed")
+        snapshot = await _wait_for_cleanup_snapshot(backend, start + 4.5)
         elapsed = asyncio.get_running_loop().time() - start
         assert elapsed < 4.5
-        snapshot = await backend.snapshot()
-        assert snapshot["idle-active"] is True and not snapshot["path"], snapshot
+        assert snapshot["idle-active"] is True and not snapshot["path"] and snapshot["playlist"] == [], snapshot
         assert api.state.backend_url == api.state.backend_original_url == ""
         assert api.state.current_url == api.state.queue.current.url == outer
         assert api.state.phase == PlaybackPhase.ERROR
