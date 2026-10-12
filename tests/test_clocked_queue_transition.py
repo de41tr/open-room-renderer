@@ -18,7 +18,7 @@ import sys
 
 import pytest
 
-from queue_transition_probe import AMPLITUDE, GAP_TOLERANCE_FRAMES, RATE, measure_capture, source_frames
+from queue_transition_probe import AMPLITUDE, GAP_TOLERANCE_FRAMES, RATE, capture_diagnostics, measure_capture, source_frames
 
 
 def _float_source(sign: int, count: int) -> bytes:
@@ -82,6 +82,35 @@ def test_transition_analyser_allows_documented_mixed_rate_edge_tolerance():
     assert result["tracks"][0]["right_sequence_sign_match_fraction"] == 1
     assert result["tracks"][1]["right_sequence_sign_match_fraction"] == pytest.approx(.9854166667)
     assert result["outcome"] == "WITHIN_TOLERANCE"
+
+
+def test_capture_diagnostics_distinguish_marker_shortfall_and_drain():
+    count = RATE // 4
+    first = _float_source(1, count)[600 * 8:]
+    second = _float_source(-1, count)
+    raw = bytes(100 * 8) + first + bytes(6000 * 8) + second + bytes(250 * 8)
+    result = capture_diagnostics(raw, expected_frames=count)
+    assert [marker["signal_frames"] for marker in result["markers"]] == [11400, 12000]
+    assert [marker["frame_count_delta"] for marker in result["markers"]] == [-600, 0]
+    assert result["marker_separation_frames"] == 6000
+    assert result["leading_quiet_frames"] == 100
+    assert result["trailing_quiet_frames"] == 250
+    assert result["markers"][0]["first_frame"] == 100
+    assert result["markers"][0]["first_edge_summary"]["left_min"] == AMPLITUDE
+    assert result["markers"][0]["right_sequence_sign_match_fraction"] == 1
+    assert all(not key.endswith("samples") for marker in result["markers"] for key in marker)
+    with pytest.raises(AssertionError, match="incomplete marker"):
+        measure_capture(raw, expected_frames=count)
+    drained = capture_diagnostics(raw + bytes(24000 * 8), expected_frames=count)
+    assert drained["markers"] == result["markers"]
+    assert drained["trailing_quiet_frames"] == 24250
+
+
+def test_capture_diagnostics_survive_missing_or_partial_markers():
+    result = capture_diagnostics(_float_source(1, 100) + b"x", expected_frames=12000)
+    assert result["partial_bytes"] == 1
+    assert result["markers"][1]["signal_frames"] == 0
+    assert result["marker_separation_frames"] is None
 
 
 @pytest.mark.parametrize("rate", [44100, 48000])

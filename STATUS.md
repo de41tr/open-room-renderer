@@ -562,3 +562,15 @@ measurement. This is not a physical DAC or general gapless certification.
 Named load options are published as `622d5ca9c21c8561e6ab81a544568878d683497d`;
 [run38190695731](https://github.com/de41tr/open-room-renderer/actions/runs/38190695731)
 passed both architectures, including the new native0.37 production options case.
+
+## Clocked measurement calibration repair
+
+The first native clocked run38191121333 failed calibration on both architectures
+(first marker11400/11793 frames versus12000). Existing playback, native IPC and
+installation lanes passed. No renderer gap measurement was established.
+The fixture now isolates its HOME/cookie, disables null-sink rewinds as an
+experimental control, drains independently clocked frames to a quiet tail and
+reports bounded aggregate diagnostics. Rewinds are not a proven cause. Strict
+marker counts,125ms calibration and2ms tolerance are unchanged. The exact
+repair snapshot passed1759 default tests with17 explicit native skips. Native
+retry remains pending; do not describe this as gapless playback verification.

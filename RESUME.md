@@ -51,3 +51,9 @@
    fake-backend tests and optional libmpv/null-output validation with honest scope.
 7. Review all changed files and commit content for private data before publishing;
    verify remote commit and draft PR after publishing. Maintain these notes.
+
+Next: monitor the clocked calibration repair CI to a terminal result; then
+publish the independently reviewed failed-load cleanup and explicit-interface
+discovery/playback acceptance. The previous clocked run failed calibration,
+so no valid queue-gap measurement exists yet. Keep19:00 UTC stabilization and
+20:00 UTC stop on2026-10-12.

@@ -331,3 +331,15 @@ read GAP_OBSERVED, NON_SILENT_BOUNDARY or WITHIN_TOLERANCE plus frame counts.
 All native children are reaped; a95s parent deadline kills the owned process
 group if native code hangs. Local17 analyzer tests passed, clocked execution
 remains NOT_RUN until native CI. Full default snapshot:1757 passed,17 skips.
+
+## Clocked measurement calibration repair
+
+The first native clocked run38191121333 failed calibration on both architectures
+(first marker11400/11793 frames versus12000). Existing playback, native IPC and
+installation lanes passed. No renderer gap measurement was established.
+The fixture now isolates its HOME/cookie, disables null-sink rewinds as an
+experimental control, drains independently clocked frames to a quiet tail and
+reports bounded aggregate diagnostics. Rewinds are not a proven cause. Strict
+marker counts,125ms calibration and2ms tolerance are unchanged. The exact
+repair snapshot passed1759 default tests with17 explicit native skips. Native
+retry remains pending; do not describe this as gapless playback verification.

@@ -3,6 +3,7 @@
 The private PulseAudio daemon loads only a null sink and a local protocol socket;
 no physical device, host audio server, system service or external media is used.
 The monitor records idle zero frames continuously, unlike mpv's untimed PCM AO.
+The fixture disables null-sink rewinds to simplify its clocked capture path.
 Official clock description:
 https://www.freedesktop.org/wiki/Software/PulseAudio/Documentation/User/Modules/#module-null-sink
 
@@ -68,6 +69,42 @@ def write_source(path: Path, rate: int, sign: int, *, calibration: bool = False)
         output.writeframes(raw)
 
 
+def capture_diagnostics(raw: bytes, *, expected_frames: int) -> dict[str, Any]:
+    """Bounded, assertion-free marker evidence retained even for invalid takes."""
+    complete = len(raw) - len(raw) % 8
+    frames = list(struct.iter_unpack("<ff", raw[:complete]))
+    markers = []
+    for name, sign in (("a", 1), ("b", -1)):
+        positions = [index for index, (left, _) in enumerate(frames) if sign * left > AMPLITUDE / 2]
+        def edge_summary(indices):
+            return {"frames": len(indices),
+                "left_min": min((frames[index][0] for index in indices), default=None),
+                "left_max": max((frames[index][0] for index in indices), default=None),
+                "right_min": min((frames[index][1] for index in indices), default=None),
+                "right_max": max((frames[index][1] for index in indices), default=None)}
+        markers.append({"marker": name, "signal_frames": len(positions),
+            "frame_count_delta": len(positions) - expected_frames,
+            "first_frame": positions[0] if positions else None,
+            "last_frame": positions[-1] if positions else None,
+            "internal_nonsignal_frames": positions[-1] - positions[0] + 1 - len(positions) if positions else None,
+            # Only aggregates leave the process. Raw PCM and sample traces
+            # stay private and are discarded with the fixture.
+            "first_edge_summary": edge_summary(positions[:96]),
+            "last_edge_summary": edge_summary(positions[-96:]),
+            "right_sequence_sign_match_fraction": sum(
+                (frames[index][1] > 0) == ((ordinal // 60) % 2 == 0)
+                for ordinal, index in enumerate(positions)) / len(positions) if positions else None})
+    active = [index for index, frame in enumerate(frames) if any(abs(value) > 1 / 32768 for value in frame)]
+    return {"capture_frames": len(frames), "partial_bytes": len(raw) % 8,
+        "expected_marker_frames": expected_frames, "markers": markers,
+        "weak_positive_frames": sum(1 / 32768 < left <= AMPLITUDE / 2 for left, _ in frames),
+        "weak_negative_frames": sum(-AMPLITUDE / 2 <= left < -1 / 32768 for left, _ in frames),
+        "leading_quiet_frames": active[0] if active else len(frames),
+        "trailing_quiet_frames": len(frames) - active[-1] - 1 if active else len(frames),
+        "marker_separation_frames": markers[1]["first_frame"] - markers[0]["last_frame"] - 1
+            if markers[0]["last_frame"] is not None and markers[1]["first_frame"] is not None else None}
+
+
 def measure_capture(raw: bytes, *, expected_frames: int = RATE * DURATION) -> dict[str, Any]:
     """Measure ordered marker spans and digital silence in a clocked recording.
 
@@ -95,7 +132,8 @@ def measure_capture(raw: bytes, *, expected_frames: int = RATE * DURATION) -> di
     for marker, sign in ((a, 1), (b, -1)):
         # Permit <=2 ms at the edge for resampling/filter transients; still
         # report exact frame count and loss/extra samples rather than hide it.
-        assert abs(len(marker) - expected_frames) <= GAP_TOLERANCE_FRAMES, (len(marker), expected_frames)
+        assert abs(len(marker) - expected_frames) <= GAP_TOLERANCE_FRAMES, {"error": "incomplete marker",
+            **capture_diagnostics(raw, expected_frames=expected_frames)}
         interior = marker[96:-96]
         assert interior, "Track too short to validate"
         left_error = max(abs(frames[index][0] - sign * AMPLITUDE) for index in interior)
@@ -204,6 +242,8 @@ async def probe(directory: Path) -> dict[str, Any]:
             return process
 
         try:
+            home = directory / "home"
+            home.mkdir(mode=0o700)
             runtime = directory / "runtime"
             runtime.mkdir(mode=0o700)
             config = directory / "config" / "pulse"
@@ -215,9 +255,10 @@ async def probe(directory: Path) -> dict[str, Any]:
             # inherited PulseAudio cookie or legacy per-user server settings.
             cookie = config / "fixture-cookie"
             cookie.write_bytes(bytes(256))
+            cookie.chmod(0o600)
             (config / "client.conf").write_text(f"autospawn = no\ndefault-server = {server}\nenable-shm = no\ncookie-file = {cookie}\n", encoding="utf-8")
             clean_env = {key: value for key, value in os.environ.items() if not key.startswith("PULSE_")}
-            env = {**clean_env, "PULSE_COOKIE": str(cookie), "PULSE_SERVER": server, "PULSE_RUNTIME_PATH": str(runtime),
+            env = {**clean_env, "HOME": str(home), "PULSE_COOKIE": str(cookie), "PULSE_SERVER": server, "PULSE_RUNTIME_PATH": str(runtime),
                 "PULSE_STATE_PATH": str(directory / "pulse-state"), "XDG_CONFIG_HOME": str(config.parent),
                 "PULSE_CLIENTCONFIG": str(config / "client.conf"),
                 "PULSE_CONFIG": str(config / "daemon.conf"), "LC_ALL": "C"}
@@ -227,8 +268,14 @@ async def probe(directory: Path) -> dict[str, Any]:
             pulse = await spawn("pulse", executables["pulseaudio"], "-n", "--daemonize=no", "--use-pid-file=no",
                 "--exit-idle-time=-1", "--disable-shm=yes", "--realtime=no", "--high-priority=no",
                 "--log-target=stderr", "--log-level=warning",
-                f"--load=module-native-protocol-unix socket={runtime / 'native'} auth-anonymous=yes",
-                "--load=module-null-sink sink_name=orr_transition rate=48000 channels=2 format=float32le",
+                f"--load=module-native-protocol-unix socket={runtime / 'native'} auth-anonymous=yes auth-cookie={cookie}",
+                # PulseAudio v16.1 module-null-sink.c exposes norewinds and
+                # sets max_rewind=0. Remove rewind accounting as a variable
+                # when validating the append-only clocked capture. The native
+                # protocol also compensates rewindable sources; a count loss
+                # alone does not establish rewinds as the cause.
+                # https://github.com/pulseaudio/pulseaudio/blob/v16.1/src/modules/module-null-sink.c
+                "--load=module-null-sink sink_name=orr_transition rate=48000 channels=2 format=float32le norewinds=true",
                 env=env)
 
             async def pulse_ready():
@@ -247,7 +294,9 @@ async def probe(directory: Path) -> dict[str, Any]:
             assert len(sinks.strip().splitlines()) == 1 and "orr_transition" in sinks and "48000Hz" in sinks, sinks
             modules = await pactl("list", "short", "modules")
             assert {line.split("\t")[1] for line in modules.strip().splitlines()} == {"module-null-sink", "module-native-protocol-unix"}, modules
+            assert "norewinds=true" in modules, modules
             evidence["sink"] = sinks.strip()
+            evidence["sink_rewinds"] = False
             recorder = await spawn("recorder", executables["parec"], "--server", server,
                 "--device=orr_transition.monitor", "--raw", "--format=float32le", "--rate=48000",
                 "--channels=2", "--latency-msec=20", env=env)
@@ -282,12 +331,35 @@ async def probe(directory: Path) -> dict[str, Any]:
             evidence["gapless_audio_option"] = await prop("options/gapless-audio")
             evidence["buffer_ms"] = 50
 
-            async def finish_capture(offset, expected_frames=RATE * DURATION):
+            async def finish_capture(offset, expected_frames=RATE * DURATION, *, label="capture"):
                 async def ended():
                     return await prop("idle-active") is True
                 await eventually("native playback EOF", ended, timeout=12)
-                await capture.wait_frames(capture.frames + RATE // 4)
-                return measure_capture(bytes(capture.raw[offset * 8:]), expected_frames=expected_frames)
+                def diagnostics():
+                    return capture_diagnostics(bytes(capture.raw[offset * 8:]), expected_frames=expected_frames)
+                before = diagnostics()
+                print("CLOCKED_CAPTURE_EOF " + json.dumps({"label": label, **before}, sort_keys=True),
+                      file=sys.stderr, flush=True)
+                drain_start = time.monotonic()
+                # Wait for half a second of independently clocked monitor
+                # frames after EOF, then require a quarter second quiet tail.
+                # This is capture draining, not artificial source guard audio.
+                await capture.wait_frames(capture.frames + RATE // 2)
+                async def quiet_tail():
+                    raw = bytes(capture.raw[-(RATE // 4) * 8:])
+                    return len(raw) == (RATE // 4) * 8 and all(
+                        abs(value) <= 1 / 32768 for frame in struct.iter_unpack("<ff", raw) for value in frame)
+                await eventually("quiet recorder tail after EOF", quiet_tail, timeout=2)
+                after = diagnostics()
+                diagnostic = {"label": label, "at_native_eof": before, "after_drain": after,
+                              "drain_wall_seconds": time.monotonic() - drain_start}
+                # Emit before strict validation so CI failures retain marker
+                # shortfalls, edges, weak/ramped samples and drain data. The
+                # periodic waveform cannot locate loss of whole periods.
+                print("CLOCKED_CAPTURE " + json.dumps(diagnostic, sort_keys=True), file=sys.stderr, flush=True)
+                result = measure_capture(bytes(capture.raw[offset * 8:]), expected_frames=expected_frames)
+                result["capture_diagnostics"] = diagnostic
+                return result
 
             # Positive control: the analyser must see a known 125 ms silence.
             calibration = directory / "known-125ms-silence.wav"
@@ -297,7 +369,10 @@ async def probe(directory: Path) -> dict[str, Any]:
             async def started():
                 return await prop("idle-active") is False
             await eventually("calibration started", started)
-            measured = await finish_capture(offset, RATE // 4)
+            evidence["calibration_audio_params"] = {"source": await prop("audio-params"),
+                                                       "output": await prop("audio-out-params")}
+            print("CLOCKED_AUDIO_PARAMS " + json.dumps(evidence["calibration_audio_params"], sort_keys=True), file=sys.stderr, flush=True)
+            measured = await finish_capture(offset, RATE // 4, label="known_125ms_silence")
             assert abs(measured["gap_frames"] - 6000) <= GAP_TOLERANCE_FRAMES, measured
             assert measured["longest_silence_frames"] >= 6000 - GAP_TOLERANCE_FRAMES, measured
             evidence["known_gap_control"] = measured
@@ -311,7 +386,7 @@ async def probe(directory: Path) -> dict[str, Any]:
             await backend.loadfile(str(paths[0]))
             await backend.checked_command(["loadfile", str(paths[1]), "append"])
             await eventually("native playlist started", started)
-            measured = await finish_capture(offset)
+            measured = await finish_capture(offset, label="native_playlist_comparison")
             evidence["native_playlist_comparison"] = {"control": "direct mpv playlist; bypasses ORR queue", **measured}
 
             listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -388,7 +463,7 @@ async def probe(directory: Path) -> dict[str, Any]:
                     async def got_event():
                         return any(event.get("CurrentIndex") == "2" and event.get("TrackURI") == str(second) and event.get("TrackTitle") == "Marker 2" for event in notifications)
                     await eventually("delivered second-track GENA metadata", got_event)
-                    measured = await finish_capture(offset)
+                    measured = await finish_capture(offset, label=name)
                     if pause:
                         assert measured["tracks"][0]["internal_nonsignal_frames"] >= RATE * .4, measured
                     else:
