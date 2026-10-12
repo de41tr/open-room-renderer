@@ -30,7 +30,8 @@ from fake_linkplay.http_api import HttpApi
 from fake_linkplay.mpv_backend import BackendError
 from fake_linkplay.queue import PlaybackQueue, QueueItem, serialize_queue_context
 from fake_linkplay.state import PlaybackPhase, RendererState
-from test_libmpv_integration import _LibmpvBackend, _write_tone
+from test_libmpv_integration import _write_tone
+from test_libmpv_load_options import _NamedLoadBackend
 
 
 SERVICES = ("AVTransport", "RenderingControl", "PlayQueue")
@@ -86,7 +87,7 @@ def event_fields(body: str) -> dict[str, str]:
     return result
 
 
-class CountingBackend(_LibmpvBackend):
+class CountingBackend(_NamedLoadBackend):
     def __init__(self, library: str, tracks: tuple[Path, Path], station_url: str) -> None:
         super().__init__(library, tracks)
         self._allowed_media.add(station_url)
@@ -94,12 +95,14 @@ class CountingBackend(_LibmpvBackend):
         self.source_changes = 0
         self.last_source = ""
 
-    async def command(self, args: list[Any], timeout: float = 5.0) -> dict[str, Any]:
-        if args[0] == "loadfile":
-            assert args[1] in self._allowed_media
+    async def command(self, args: list[Any] | dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
+        operation = args.get("name") if isinstance(args, dict) else args[0]
+        if operation == "loadfile":
+            url = args["url"] if isinstance(args, dict) else args[1]
+            assert url in self._allowed_media
             self.loads += 1
-            self.source_changes += int(args[1] != self.last_source)
-            self.last_source = args[1]
+            self.source_changes += int(url != self.last_source)
+            self.last_source = url
         return await super().command(args, timeout)
 
 

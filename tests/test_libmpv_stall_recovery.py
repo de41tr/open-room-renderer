@@ -73,6 +73,8 @@ async def _exercise(library: str, directory: Path, scenario: str) -> dict[str, A
     base = f"http://127.0.0.1:{port}"
     station_url = base + "/_fixture_station.wav"
     backend = _StationBackend(library, tracks, station_url)
+    cache_defaults = {key: backend.read_property("options/" + key) for key in
+                      ("demuxer-max-bytes", "cache", "cache-secs")}
     fixture = _StalledStation(tracks[0].read_bytes(), backend)
     cfg = Config(
         uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1",
@@ -116,6 +118,8 @@ async def _exercise(library: str, directory: Path, scenario: str) -> dict[str, A
             await command("setPlayerCmd:mute:1")
             await soap("PlayQueueWithIndex", "<QueueName>Synthetic no-EOF station</QueueName><Index>2</Index>")
             selected, generation = api.state.queue.current, api.state.generation
+            expected_back_cache = 0 if scenario != "finite" else backend.read_property("option-info/demuxer-max-back-bytes/default-value")
+            assert backend.read_property("options/demuxer-max-back-bytes") == expected_back_cache
             before = backend.read_property("playback-time")
             await _eventually("initial real decoded progress", lambda: backend.read_property("playback-time") > before + .25)
             evidence["initial_decoded_progress"] = True
@@ -204,6 +208,10 @@ async def _exercise(library: str, directory: Path, scenario: str) -> dict[str, A
             assert backend.read_property("mute") is True
             if scenario not in {"exhaust", "stop"}:
                 assert backend.read_property("current-ao") == "null"
+            if api.state.phase == PlaybackPhase.PLAYING and scenario != "newsource":
+                assert backend.read_property("options/demuxer-max-back-bytes") == 0
+                assert {key: backend.read_property("options/" + key) for key in cache_defaults} == cache_defaults
+                evidence["station_history_disabled_forward_cache_unchanged"] = True
             evidence.update(renderer_loads=len(backend.loads), http_requests=fixture.requests,
                             gain_preserved={"volume": 37, "mute": True},
                             stall_grace_seconds=api._station_stall_timeout)

@@ -27,10 +27,11 @@ from fake_linkplay.config import Config
 from fake_linkplay.http_api import HttpApi
 from fake_linkplay.queue import PlaybackQueue, QueueItem, serialize_queue_context
 from fake_linkplay.state import PlaybackPhase, RendererState
-from test_libmpv_integration import _LibmpvBackend, _eventually, _write_tone
+from test_libmpv_integration import _eventually, _write_tone
+from test_libmpv_load_options import _NamedLoadBackend
 
 
-class _StationBackend(_LibmpvBackend):
+class _StationBackend(_NamedLoadBackend):
     """Count renderer load commands separately from native HTTP reconnects."""
 
     def __init__(self, library: str, tracks: tuple[Path, Path], station_url: str) -> None:
@@ -38,10 +39,12 @@ class _StationBackend(_LibmpvBackend):
         self._allowed_media.add(station_url)
         self.loads: list[str] = []
 
-    async def command(self, args: list[Any], timeout: float = 5.0) -> dict[str, Any]:
-        if args[0] == "loadfile":
-            assert args[1] in self._allowed_media
-            self.loads.append(args[1])
+    async def command(self, args: list[Any] | dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
+        operation = args.get("name") if isinstance(args, dict) else args[0]
+        if operation == "loadfile":
+            url = args["url"] if isinstance(args, dict) else args[1]
+            assert url in self._allowed_media
+            self.loads.append(url)
         return await super().command(args, timeout)
 
 
@@ -97,6 +100,8 @@ async def _exercise(library: str, directory: Path, scenario: str) -> dict[str, A
         base = f"http://127.0.0.1:{port}"
         station_url = base + "/_fixture_station.wav"
         backend = _StationBackend(library, tracks, station_url)
+        cache_defaults = {key: backend.read_property("options/" + key) for key in
+                          ("demuxer-max-bytes", "cache", "cache-secs")}
         assert backend._allowed_media == {str(path.resolve()) for path in tracks} | {station_url}
         fixture = _BrokenStation(tracks[0].read_bytes(), backend)
         cfg = Config(
@@ -141,6 +146,7 @@ async def _exercise(library: str, directory: Path, scenario: str) -> dict[str, A
             selected = api.state.queue.current
             assert selected is not None and selected.stream_type == "station" and selected.duration == 0
             assert backend.read_property("current-ao") == "null"
+            assert backend.read_property("options/demuxer-max-back-bytes") == 0
             assert backend.read_property("path") == station_url
             before = backend.read_property("playback-time")
             await _eventually("initial decoded station progress", lambda: backend.read_property("playback-time") > before + 0.25)
@@ -207,6 +213,10 @@ async def _exercise(library: str, directory: Path, scenario: str) -> dict[str, A
             assert backend.read_property("volume") == pytest.approx(37, abs=0.01)
             assert backend.read_property("mute") is True
             assert backend.loads == [station_url] * len(backend.loads)
+            if api.state.phase == PlaybackPhase.PLAYING:
+                assert backend.read_property("options/demuxer-max-back-bytes") == 0
+                assert {key: backend.read_property("options/" + key) for key in cache_defaults} == cache_defaults
+                evidence["station_history_disabled_forward_cache_unchanged"] = True
             evidence.update(renderer_loads=len(backend.loads), http_requests=fixture.requests,
                             preserved={"volume": 37, "mute": True, "index": 2},
                             client_status_polls=0)

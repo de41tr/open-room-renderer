@@ -38,6 +38,7 @@ from fake_linkplay.config import Config
 from fake_linkplay.http_api import HttpApi
 from fake_linkplay.mpv_backend import BackendError, MpvBackend
 from fake_linkplay.state import RendererState
+from fake_linkplay.queue import PlaybackQueue, QueueItem, serialize_queue_context
 
 
 pytestmark = pytest.mark.skipif(
@@ -347,6 +348,30 @@ async def test_real_unix_ipc_controls_queue_eof_and_external_ownership(native_wo
                     assert (await status("stop"))["curpos"] == "0"
                     evidence["queue"] = {"distinct_resources": True, "next_previous": True,
                                          "background_eof_advance": True, "final_eof_stop": True}
+
+                    # Prove the per-file history option also crosses real JSON
+                    # IPC, not only the separately tested libmpv node adapter.
+                    cache_keys = ("demuxer-max-back-bytes", "demuxer-max-bytes",
+                                  "demuxer-readahead-secs", "cache", "cache-secs")
+                    defaults = {key: await _property(backend, "options/" + key) for key in cache_keys}
+                    assert defaults["demuxer-max-back-bytes"] > 0
+                    station = PlaybackQueue(items=[QueueItem(str(tracks[0]), stream_type="station")], index=1)
+                    await soap("CreateQueue", f"<QueueContext>{escape(serialize_queue_context(station))}</QueueContext>", "PlayQueue")
+                    await soap("PlayQueueWithIndex", "<QueueName>CurrentQueue</QueueName><Index>1</Index>", "PlayQueue")
+                    assert await _property(backend, "path") == str(tracks[0])
+                    observed = {key: await _property(backend, "options/" + key) for key in cache_keys}
+                    assert observed == {**defaults, "demuxer-max-back-bytes": 0}
+                    assert await _property(backend, "option-info/demuxer-max-back-bytes/set-locally") is True
+                    before = await _property(backend, "playback-time")
+                    await _eventually("station policy decoded progression", progressing)
+                    assert await command(f"setPlayerCmd:play:{tracks[1]}") == "OK"
+                    assert await _property(backend, "path") == str(tracks[1])
+                    restored = {key: await _property(backend, "options/" + key) for key in cache_keys}
+                    assert restored == defaults
+                    assert await command("setPlayerCmd:stop") == "OK"
+                    assert await _property(backend, "idle-active") is True
+                    evidence["station_history"] = {"backward_bytes": observed["demuxer-max-back-bytes"],
+                                                   "forward_options_unchanged": True, "finite_defaults_restored": True}
         finally:
             try:
                 if runner is not None:

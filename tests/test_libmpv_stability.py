@@ -42,7 +42,8 @@ def source_digest(root: Path) -> str:
 
 
 def freeze_sources(source: Path, target: Path, extras: tuple[str, ...] = ()) -> str:
-    helpers = ("test_libmpv_stability.py", "libmpv_stability_support.py", "test_libmpv_integration.py")
+    helpers = ("test_libmpv_stability.py", "libmpv_stability_support.py", "test_libmpv_integration.py",
+               "test_libmpv_load_options.py")
     paths = [*sorted((source / "fake_linkplay").rglob("*.py")), *(source / "tests" / name for name in helpers), *(source / name for name in extras)]
     for path in paths:
         destination = target / path.relative_to(source)
@@ -66,7 +67,7 @@ def test_stability_snapshot_digest_detects_changed_source(tmp_path: Path) -> Non
 def test_stability_snapshot_is_independent_of_live_checkout(tmp_path: Path) -> None:
     source, frozen = tmp_path / "live", tmp_path / "frozen"
     paths = ("fake_linkplay/__init__.py", "fake_linkplay/fixture.py", "tests/test_libmpv_stability.py",
-             "tests/libmpv_stability_support.py", "tests/test_libmpv_integration.py")
+             "tests/libmpv_stability_support.py", "tests/test_libmpv_integration.py", "tests/test_libmpv_load_options.py")
     for name in paths:
         path = source / name
         path.parent.mkdir(parents=True, exist_ok=True)

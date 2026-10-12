@@ -824,3 +824,41 @@ fifteen-minute caps are unchanged. The first hosted floor result is pending.
 The playlist publication snapshot also passed the full default suite on actual
 CPython3.11.17: 2203 passed /41 gated skips in65.16s. The selected Python3.11
 real-libmpv evidence above remains tied to checkpoint9f5f529.
+
+## Per-load live-station packet history
+
+For a canonical current queue item explicitly marked `stream_type="station"`
+with zero duration, the renderer supplies `demuxer-max-back-bytes=0` in the
+existing named `loadfile` options. It does not change global mpv configuration,
+forward buffering, cache/pause settings or retry timing. Finite or untyped media
+and prospective unrelated native successors keep the native defaults. Known
+live stations already reject seeking; Pause/Resume continues buffering normally.
+
+The [mpv 0.37 option contract](https://github.com/mpv-player/mpv/blob/v0.37.0/DOCS/man/options.rst)
+defines backward packet retention separately from forward caching. Its
+[loadfile contract](https://github.com/mpv-player/mpv/blob/v0.37.0/DOCS/man/input.rst)
+restores per-file options after playback. The tested mpv 0.40 defaults retain up
+to 50 MiB of backward packets, which is expected native cache growth, not a
+Python leak. Setting the backward limit to zero avoids retaining history this
+renderer cannot seek into for explicit live stations.
+
+`test_station_cache_options.py` tests exact canonical ownership, stale live
+mirrors, finite/unknown media, resolver/header typing, address refresh, successor
+isolation and both native-fixture command shapes. The opt-in
+`test_libmpv_station_cache.py` reads actual native options, checks finite and
+unknown loads reset to their pre-station defaults, and verifies advancing audio,
+Pause/Resume without reload, owner Stop/replay, source identity and gain/DSP.
+The real EOF/stall/refresh lanes also check that successful station reloads retain
+the history policy without altering forward cache settings. These tests are
+included in the existing Ubuntu mpv/libmpv acceptance matrix, including 0.37.
+
+```bash
+ORR_TEST_LIBMPV_PATH=/path/to/libmpv.so.2 PYTHONPATH=. .venv/bin/python -m pytest -q -s \
+  tests/test_libmpv_station_cache.py tests/test_libmpv_recovery.py \
+  tests/test_libmpv_stall_recovery.py tests/test_libmpv_station_refresh.py
+```
+
+This native/null lane does not certify production Unix IPC, WAN stations, audible
+hardware or indefinite memory stability. Continuous-stream resource evidence must
+come from a separate bounded, frozen-source run with unchanged resource budgets;
+short per-file option checks alone do not establish that result.

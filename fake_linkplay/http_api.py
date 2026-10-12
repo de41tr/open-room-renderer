@@ -2750,12 +2750,16 @@ class HttpApi:
         return direct_url
 
     def _mpv_playback_options(self, original_url: str, direct_url: str) -> dict[str, str]:
-        """Return per-load mpv options for normal playback.
-
-        Args are kept because experimental branches may need to choose options
-        based on the service URL shape.
-        """
-
+        """Keep unused backward history out of explicitly live station loads."""
+        # This helper also checks prospective native successors. Only the
+        # canonical current item may supply policy; a resolved URL or stale
+        # queue-wide live flag must not classify an unrelated load as radio.
+        item = self.state.queue.current
+        if (item is not None and item.url == original_url == self.state.current_url
+                and item.stream_type == "station" and item.duration == 0):
+            # Per-file options reset on the next load. Leave forward buffering,
+            # ordinary media seeking and the user's native defaults unchanged.
+            return {"demuxer-max-back-bytes": "0"}
         return {}
 
     @staticmethod

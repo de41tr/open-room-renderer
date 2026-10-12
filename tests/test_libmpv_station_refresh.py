@@ -43,6 +43,8 @@ async def _exercise(library: str, directory: Path, selection: str, staging: bool
     first, fresh = base + "/expired.wav", base + "/fresh.wav"
     reference = "https://opml.radiotime.com/Tune.ashx?id=s12345"
     backend = _StationBackend(library, tracks, first)
+    cache_defaults = {key: backend.read_property("options/" + key) for key in
+                      ("demuxer-max-bytes", "cache", "cache-secs")}
     backend._allowed_media.add(fresh)
     fixture = _BrokenStation(tracks[0].read_bytes(), backend)
     resolutions, fresh_requests = [], []
@@ -110,6 +112,7 @@ async def _exercise(library: str, directory: Path, selection: str, staging: bool
             api.state.queue.items.append(QueueItem(str(tracks[1]), duration=2))
             await api.sync_mpv_state()
             assert api._native_stage is None and len(backend.read_property("playlist")) == 1
+            assert backend.read_property("options/demuxer-max-back-bytes") == 0
             selected, generation = api.state.queue.current, api.state.generation
             canonical = first if selection == "header" else reference
             before = backend.read_property("playback-time")
@@ -132,6 +135,10 @@ async def _exercise(library: str, directory: Path, selection: str, staging: bool
             assert api.state.volume == 37 and api.state.mute is True
             assert backend.read_property("volume") == pytest.approx(37, abs=.01)
             assert backend.read_property("mute") is True
+            if api.state.phase == PlaybackPhase.PLAYING:
+                assert backend.read_property("options/demuxer-max-back-bytes") == 0
+                assert {key: backend.read_property("options/" + key) for key in cache_defaults} == cache_defaults
+                evidence["station_history_disabled_forward_cache_unchanged"] = True
             evidence.update(refreshed_decoded_progress=True, resolver_calls=len(resolutions),
                             renderer_loads=len(backend.loads), retry_attempts=1,
                             old_url_requests=len(fixture.requests), new_url_requests=len(fresh_requests),
