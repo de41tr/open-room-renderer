@@ -8,6 +8,7 @@ those changes behind explicit config flags.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import uuid as uuidlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -78,6 +79,9 @@ class Config:
     state_dir: str = ".state"
     enable_mdns: bool = False
     enable_ssdp: bool = True
+    # Local IPv4 address for multicast membership/output; None keeps OS routing.
+    # HTTP binding and advertised URLs do not select a multicast interface.
+    discovery_interface: str | None = None
     # The WiiM Home profile intentionally changes identity, ports, and service
     # metadata to match behavior observed in app captures. Keep the normal
     # pywiim/dev path separate so the portable acceptance gate stays simple.
@@ -114,6 +118,16 @@ class Config:
 
         if type(self.default_mute) is not bool:
             raise ValueError("default_mute must be boolean")
+        if self.discovery_interface is not None:
+            try:
+                if not isinstance(self.discovery_interface, str):
+                    raise ValueError
+                address = ipaddress.IPv4Address(self.discovery_interface)
+                if address.is_unspecified or address.is_multicast or int(address) == 0xFFFFFFFF:
+                    raise ValueError
+            except ValueError as exc:
+                raise ValueError("discovery_interface must be a literal local unicast IPv4 address") from exc
+            self.discovery_interface = str(address)
         self.uuid = normalize_uuid(self.uuid) or None
         self.discovery_uuid = normalize_uuid(self.discovery_uuid).upper() or None
 

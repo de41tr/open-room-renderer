@@ -62,3 +62,7 @@ Failed/unready-load cleanup now has independently reviewed same-owner Stop/idle
 confirmation, including observer-error and shutdown. Native nested-playlist
 regression is included in the explicit libmpv CI lane. Continue discovery
 acceptance, valid clocked measurement and bounded long-run stability next.
+
+Explicit-interface discovery is independently reviewed and actual same-host
+multicast verified. Monitor the new discovered-endpoint production-IPC CI flow;
+record its actual result before claiming the combined path works.

@@ -11,6 +11,7 @@ import asyncio
 import logging
 import socket
 import struct
+import sys
 from dataclasses import dataclass
 from email.utils import formatdate
 
@@ -99,12 +100,23 @@ class SsdpServer:
             except OSError:
                 pass
             self.sock.bind(("", SSDP_PORT))
-            mreq = struct.pack("4s4s", socket.inet_aton(SSDP_ADDR), socket.inet_aton("0.0.0.0"))
+            interface = self.cfg.discovery_interface or "0.0.0.0"
+            if self.cfg.discovery_interface:
+                self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(interface))
+                if sys.platform.startswith("linux"):
+                    # Exclude memberships joined by other sockets/interfaces.
+                    self.sock.setsockopt(socket.IPPROTO_IP, getattr(socket, "IP_MULTICAST_ALL", 49), 0)
+            mreq = struct.pack("4s4s", socket.inet_aton(SSDP_ADDR), socket.inet_aton(interface))
             self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
             self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
             self.sock.setblocking(False)
         except OSError as exc:
+            if self.sock is not None:
+                self.sock.close()
+                self.sock = None
             LOG.error("SSDP multicast setup failed: %s", exc)
+            if self.cfg.discovery_interface is not None:
+                raise
             return
         loop = asyncio.get_running_loop()
         self.tasks.append(loop.create_task(self._listen()))
@@ -114,10 +126,17 @@ class SsdpServer:
     async def stop(self) -> None:
         """Cancel SSDP tasks and close the UDP socket."""
 
-        for task in self.tasks or []:
-            task.cancel()
-        if self.sock:
-            self.sock.close()
+        tasks = self.tasks or []
+        try:
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            # Cancellation of shutdown must not strand the listener socket.
+            if self.sock:
+                self.sock.close()
+                self.sock = None
 
     async def _listen(self) -> None:
         """Handle incoming M-SEARCH datagrams and send matching responses."""

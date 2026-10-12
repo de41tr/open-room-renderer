@@ -110,3 +110,10 @@ jobs:
         env:
           ORR_TEST_CLOCKED_QUEUE: "1"
         run: .venv-ci/bin/python -m pytest -q -s tests/test_clocked_queue_transition.py
+
+      - name: Verify actual multicast discovery and discovered playback
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          ORR_TEST_DISCOVERY: "1"
+          ORR_TEST_DISCOVERY_PLAYBACK: "1"
+        run: .venv-ci/bin/python -m pytest -q -s tests/test_discovery_native.py tests/test_discovery_playback_native.py

@@ -242,3 +242,27 @@ backup of its state and chosen settings. Update state/socket paths and the user
 unit for the new prefix before starting. Do not run the old and new instances
 with the same identity at the same time. Keep the old receipt and installation
 until the new version's local playback/API/discovery checks pass.
+
+## Discovery On A Chosen IPv4 Interface
+
+By default discovery uses the operating system's routing choices. On a multihomed
+host you can explicitly select a local IPv4 address in config.yaml:
+
+```yaml
+discovery_interface: "192.0.2.10" # Replace with this host's actual LAN address.
+advertise_ip: "192.0.2.10"        # Address clients can reach for HTTP/control.
+```
+
+The example address is documentation-only, not a usable default. The selected
+address must exist locally; startup fails if it cannot join/send on that interface.
+This setting selects SSDP/mDNS multicast, not the HTTP listener bind or firewall.
+Use a trusted LAN and make the advertised HTTP port reachable there. Loopback is
+useful only for same-host acceptance. IPv6 interface selection is not implemented.
+
+On Linux the explicit profile also isolates owned multicast receive sockets from
+other interface memberships. Generic mDNS validates the installed zeroconf socket
+layout and fails closed if it cannot apply that isolation; default routing remains
+unchanged. A changed DHCP address requires updating these settings and restarting;
+automatic interface migration is not implemented. Keep the same state directory
+and UUID when restarting or renaming. Real original-app/LAN acceptance remains a
+separate test from the native same-host multicast and playback CI lanes.

@@ -359,9 +359,31 @@ returns only after confirmed idle and cleared actual identity; a subsequent
 valid source plays. Nested playlist ancestry is still unsupported. Independent
 review covered observer-error, shutdown and newer-owner interleavings.
 
-Rebased exact cleanup snapshot: 1811 passed with real libmpv cases enabled;
-four explicit Unix-IPC/clocked cases skipped locally. The new nested-playlist
-cleanup case is included in the native CI libmpv lane.
+## Explicit discovery interface and real discovered-client flow
+
+Optional discovery_interface selects a literal local IPv4 address for SSDP and
+both mDNS implementations. It controls multicast membership and outbound traffic;
+on Linux, owned receive sockets disable all-interface membership widening. Generic
+zeroconf startup verifies its socket layout and fails closed if explicit isolation
+cannot be established. Default routing is unchanged. Startup/cancellation errors
+close partially acquired sockets and await tasks. No host routes/firewalls change.
+
+Actual Linux loopback multicast discovery passed locally: SSDP M-SEARCH and alive,
+custom mDNS PTR/SRV/TXT/A, two independent identities and HTTP descriptions, plus
+zeroconf receive isolation. Group-address-bound client sockets reject a deliberate
+unicast-only mutation. This establishes multicast wire behavior on one host, not
+physical LAN or Android compatibility.
+
+A separate explicit native CI flow discovers its endpoint before fetching the
+description, then uses production mpv Unix IPC with two different generated WAV
+files. It checks play/pause/resume/Next/volume/mute/unmute/Stop and consistent
+HTTP/SOAP/ordered GENA. That combined native flow remains NOT_RUN locally because
+Unix socket creation is restricted; its CI result must be recorded separately.
+
+Exact combined cleanup/discovery snapshot: 1849 passed with real libmpv and
+multicast discovery enabled; five explicit production-IPC/clocked/combined-flow
+cases skipped locally. All code is synthetic or independently implemented; no
+physical LAN/audio or original Android claim follows from these checks.
 
 Clocked retry run38192155611 passed all preexisting lanes, but the new optional
 audio-parameter diagnostic raced lazy output creation before calibration. A

@@ -12,6 +12,7 @@ import hashlib
 import logging
 import socket
 import struct
+import sys
 import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -327,18 +328,27 @@ class CustomMdnsResponder:
         """Bind UDP/5353, join the multicast group, and start serving."""
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        except OSError:
-            pass
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
-        sock.bind(("", MDNS_PORT))
-        mreq = socket.inet_aton(MDNS_GROUP) + socket.inet_aton("0.0.0.0")
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-        loop = asyncio.get_running_loop()
-        self._transport, self._protocol = await loop.create_datagram_endpoint(lambda: CustomMdnsProtocol(self.cfg), sock=sock)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except OSError:
+                pass
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+            interface = self.cfg.discovery_interface or "0.0.0.0"
+            if self.cfg.discovery_interface:
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(interface))
+                if sys.platform.startswith("linux"):
+                    sock.setsockopt(socket.IPPROTO_IP, getattr(socket, "IP_MULTICAST_ALL", 49), 0)
+            sock.bind(("", MDNS_PORT))
+            mreq = socket.inet_aton(MDNS_GROUP) + socket.inet_aton(interface)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            loop = asyncio.get_running_loop()
+            self._transport, self._protocol = await loop.create_datagram_endpoint(lambda: CustomMdnsProtocol(self.cfg), sock=sock)
+        except BaseException:
+            sock.close()
+            raise
         LOG.info(
             "custom mDNS responder started: %s -> %s:%s",
             f"{self.cfg.linkplay_instance_name}._linkplay._tcp.local.",
@@ -358,6 +368,8 @@ class CustomMdnsResponder:
         if self._transport:
             self._transport.close()
             await asyncio.sleep(0)
+            self._transport = None
+            self._protocol = None
 
 
 class MdnsAdvertiser:
@@ -379,14 +391,65 @@ class MdnsAdvertiser:
             await self._zeroconf.start()
             return
         try:
-            from zeroconf import Zeroconf
+            from zeroconf import IPVersion, Zeroconf
             from zeroconf.asyncio import AsyncZeroconf
         except Exception as exc:
             LOG.warning("mDNS disabled; zeroconf unavailable: %s", exc)
+            if self.cfg.discovery_interface is not None:
+                raise
             return
-        self._zeroconf = AsyncZeroconf(zc=Zeroconf())
-        await self._register_services()
+        options = ({"interfaces": [self.cfg.discovery_interface], "ip_version": IPVersion.V4Only}
+                   if self.cfg.discovery_interface else {})
+        self._zeroconf = AsyncZeroconf(zc=Zeroconf(**options))
+        try:
+            if self.cfg.discovery_interface:
+                await self._configure_selected_interface()
+            await self._register_services()
+        except BaseException:
+            await self.stop()
+            raise
         LOG.info("mDNS advertisements started")
+
+    async def _configure_selected_interface(self) -> None:
+        """Fail closed unless this owned Zeroconf instance has isolated sockets.
+
+        The explicit-interface adapter depends on engine.readers/senders and
+        wrapper.transport.get_extra_info('socket'), present in zeroconf 0.132
+        and 0.151.5. Probe these capabilities at runtime rather than assuming
+        future internal shapes. The default interface mode never uses them.
+        This selects multicast interfaces, not a firewall or DHCP rebinder.
+        """
+
+        assert self.cfg.discovery_interface and self._zeroconf is not None
+        try:
+            zc = self._zeroconf.zeroconf
+            await asyncio.wait_for(zc.async_wait_for_start(), 5)
+            readers = tuple(zc.engine.readers)
+            senders = tuple(zc.engine.senders)
+            if not readers or not senders:
+                raise RuntimeError("zeroconf has no active discovery interface")
+
+            def owned_socket(wrapper):
+                sock = wrapper.transport.get_extra_info("socket")
+                if sock is None or sock.family != socket.AF_INET or sock.fileno() < 0:
+                    raise RuntimeError("zeroconf discovery socket is not active IPv4")
+                return sock
+
+            address = socket.inet_aton(self.cfg.discovery_interface)
+            for sender in senders:
+                sock = owned_socket(sender)
+                if (sock.getsockname()[0] != self.cfg.discovery_interface
+                        or sock.getsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, 4) != address):
+                    raise RuntimeError("zeroconf sender does not use discovery_interface")
+            for reader in readers:
+                sock = owned_socket(reader)
+                if sys.platform.startswith("linux"):
+                    option = getattr(socket, "IP_MULTICAST_ALL", 49)
+                    sock.setsockopt(socket.IPPROTO_IP, option, 0)
+                    if sock.getsockopt(socket.IPPROTO_IP, option) != 0:
+                        raise RuntimeError("zeroconf reader does not isolate multicast membership")
+        except (AttributeError, TypeError, OSError, TimeoutError) as exc:
+            raise RuntimeError("zeroconf cannot safely select discovery_interface") from exc
 
     async def _register_services(self) -> None:
         """Register a snapshot of the current config using the existing host."""
