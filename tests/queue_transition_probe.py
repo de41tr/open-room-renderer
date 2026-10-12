@@ -184,6 +184,35 @@ async def eventually(description, check, timeout: float = 8):
     raise AssertionError(f"Timed out waiting for {description}: {last!r}")
 
 
+async def sample_audio_parameters(prop, *, timeout: float = .2) -> dict[str, Any]:
+    """Bound optional metadata reads during lazy AO creation.
+
+    idle-active=false means a file is loading, not that audio-params already
+    exists. Capture starts before load and remains authoritative; unavailable
+    diagnostic properties must never abort or replace sample validation.
+    """
+    values: dict[str, Any] = {"source": None, "output": None}
+    names = {"source": "audio-params", "output": "audio-out-params"}
+    started = time.monotonic()
+    try:
+        async with asyncio.timeout(timeout):
+            while any(value is None for value in values.values()):
+                for key, name in names.items():
+                    if values[key] is None:
+                        try:
+                            values[key] = await prop(name)
+                        except BackendError:
+                            # Retry only these optional observations. Native
+                            # sample/count/sequence checks still fail normally.
+                            pass
+                if any(value is None for value in values.values()):
+                    await asyncio.sleep(.01)
+    except TimeoutError:
+        pass
+    return {**values, "unavailable": [key for key, value in values.items() if value is None],
+            "sampling_seconds": time.monotonic() - started}
+
+
 async def reap(process: asyncio.subprocess.Process) -> None:
     if process.returncode is None:
         try:
@@ -369,8 +398,7 @@ async def probe(directory: Path) -> dict[str, Any]:
             async def started():
                 return await prop("idle-active") is False
             await eventually("calibration started", started)
-            evidence["calibration_audio_params"] = {"source": await prop("audio-params"),
-                                                       "output": await prop("audio-out-params")}
+            evidence["calibration_audio_params"] = await sample_audio_parameters(prop)
             print("CLOCKED_AUDIO_PARAMS " + json.dumps(evidence["calibration_audio_params"], sort_keys=True), file=sys.stderr, flush=True)
             measured = await finish_capture(offset, RATE // 4, label="known_125ms_silence")
             assert abs(measured["gap_frames"] - 6000) <= GAP_TOLERANCE_FRAMES, measured

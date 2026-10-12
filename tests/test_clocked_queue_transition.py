@@ -8,6 +8,7 @@ The probe uses an ephemeral, isolated, digital-only PulseAudio null sink.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -18,7 +19,9 @@ import sys
 
 import pytest
 
-from queue_transition_probe import AMPLITUDE, GAP_TOLERANCE_FRAMES, RATE, capture_diagnostics, measure_capture, source_frames
+from fake_linkplay.mpv_backend import BackendError
+
+from queue_transition_probe import AMPLITUDE, GAP_TOLERANCE_FRAMES, RATE, capture_diagnostics, measure_capture, sample_audio_parameters, source_frames
 
 
 def _float_source(sign: int, count: int) -> bytes:
@@ -119,6 +122,39 @@ def test_generated_sequence_is_nonzero_quiet_and_two_seconds(rate):
     assert len(frames) == 2 * rate
     assert {left for left, _ in frames} == {256}
     assert {right for _, right in frames} == {-128, 128}
+
+
+@pytest.mark.asyncio
+async def test_optional_audio_diagnostics_wait_for_lazy_output_readiness():
+    calls = []
+    async def prop(name):
+        calls.append(name)
+        if len(calls) <= 2:
+            raise BackendError("property unavailable")
+        return {"samplerate": RATE}
+    result = await sample_audio_parameters(prop)
+    assert result["source"] == result["output"] == {"samplerate": RATE}
+    assert result["unavailable"] == []
+    assert len(calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_optional_unavailable_audio_diagnostics_do_not_abort_capture():
+    async def prop(name):
+        raise BackendError("property unavailable")
+    result = await sample_audio_parameters(prop, timeout=.03)
+    assert result["source"] is result["output"] is None
+    assert result["unavailable"] == ["source", "output"]
+    assert result["sampling_seconds"] < .2
+
+
+@pytest.mark.asyncio
+async def test_optional_audio_diagnostics_bound_a_stalled_property():
+    async def prop(name):
+        await asyncio.Future()
+    result = await sample_audio_parameters(prop, timeout=.03)
+    assert result["unavailable"] == ["source", "output"]
+    assert result["sampling_seconds"] < .2
 
 
 @pytest.mark.skipif(os.environ.get("ORR_TEST_CLOCKED_QUEUE") != "1", reason="Clocked queue lane requires explicit ORR_TEST_CLOCKED_QUEUE=1")
