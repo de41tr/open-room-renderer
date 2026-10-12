@@ -99,15 +99,20 @@ jobs:
 
       - name: Run explicit real libmpv null and digital-PCM lanes
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 7
         run: |
           library="$(dpkg-query -L libmpv2 | grep '/libmpv\.so\.2$')"
           test -n "$library" && test -f "$library"
           export ORR_TEST_LIBMPV_PATH="$(readlink -f "$library")"
-          .venv-ci/bin/python -m pytest -q -s \
+          # Two independent explicit groups share this runner. No test is removed;
+          # failures retain both complete logs and do not skip the other group.
+          .venv-ci/bin/python scripts/run-native-groups.py \
+            --timeout 360 --log-dir "$RUNNER_TEMP/orr-libmpv" -- \
             tests/test_libmpv_integration.py tests/test_libmpv_gain.py \
             tests/test_libmpv_dsp.py tests/test_libmpv_recovery.py \
             tests/test_libmpv_dsp_restore.py tests/test_libmpv_formats.py tests/test_libmpv_live_metadata.py \
             tests/test_libmpv_live_hls.py \
+            ::: \
             tests/test_libmpv_load_options.py tests/test_libmpv_station_cache.py tests/test_libmpv_load_cleanup.py \
             tests/test_libmpv_station_playlist_cache.py \
             tests/test_libmpv_stall_recovery.py tests/test_libmpv_queue_staging.py \
