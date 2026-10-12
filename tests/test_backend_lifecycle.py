@@ -456,7 +456,7 @@ class ServiceHarness:
         self.cleanup_error = cleanup_error
         cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", http_api_port=18080, upnp_port=18081, mirror_port_80=True, enable_ssdp=True)
         self.cfg = cfg
-        monkeypatch.setattr(cli, "load_config", lambda _: cfg)
+        monkeypatch.setattr(cli, "load_startup_config", lambda _: cfg)
         monkeypatch.setattr(cli, "setup_logging", lambda _: None)
         backend = SimpleNamespace()
         async def backend_start():
@@ -916,7 +916,7 @@ def test_real_process_signals_cannot_abandon_startup_or_teardown(phase, signal_n
             asyncio.get_running_loop().call_soon(send_signal)
             await asyncio.sleep(0.03)
             print("cleanup_finished", flush=True)
-        cli.load_config = lambda _: Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", enable_ssdp=False)
+        cli.load_startup_config = lambda _: Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", enable_ssdp=False)
         cli.setup_logging = lambda _: None
         cli.MpvBackend = lambda *args, **kwargs: SimpleNamespace(start=start_backend, stop=noop, initialize_gain=noop, stop_process=stop_backend)
         cli.HttpApi = lambda *args: SimpleNamespace(app=lambda: object(), initialize_channel_balance=noop)

@@ -18,7 +18,7 @@ from urllib.parse import quote
 import requests
 from aiohttp import web
 
-from .config import load_config
+from .config import StartupConfigError, load_config, load_startup_config
 from .discovery_client import add_discovery_parser, run_discovery
 from .dsp_client import add_dsp_parser, run_dsp_command
 from .favorites_client import favorite_play_id, play_favorite
@@ -39,18 +39,20 @@ LOG = logging.getLogger(__name__)
 RESOURCE_CLEANUP_TIMEOUT = 10.0
 
 
-async def serve(config_path: str) -> None:
+async def serve(config_path: str | None = None) -> None:
     """Start HTTP, discovery, mDNS, and mpv services until interrupted.
 
     Args:
-        config_path: Path to the YAML config file.
+        config_path: Explicit YAML file path, which must be readable. None uses
+            the historical example-path default, including its missing fallback.
 
     Side Effects:
         Starts network listeners, may start an mpv subprocess, and persists
         runtime state through lower-level handlers.
     """
 
-    cfg = load_config(config_path)
+    cfg = (load_startup_config("configs/config.example.yaml", missing_ok=True)
+           if config_path is None else load_startup_config(config_path))
     setup_logging(cfg.log_level)
     state = RendererState.from_config(cfg)
     mpv = MpvBackend(
@@ -255,7 +257,7 @@ def build_parser(*, private_client_errors: bool = False) -> argparse.ArgumentPar
     parser = parser_type(prog="open-room-renderer")
     sub = parser.add_subparsers(dest="cmd", required=True)
     serve_p = sub.add_parser("serve")
-    serve_p.add_argument("--config", default="configs/config.example.yaml")
+    serve_p.add_argument("--config", help="YAML file (default: configs/config.example.yaml)")
     for name in ("status", "pause", "resume", "stop"):
         p = sub.add_parser(name)
         p.add_argument("--host", default="127.0.0.1")
@@ -336,7 +338,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "playlist":
         return run_playlist(args)
     if args.cmd == "serve":
-        asyncio.run(serve(args.config))
+        try:
+            asyncio.run(serve(args.config))
+        except StartupConfigError as exc:
+            print(f"Startup error: {exc}", file=sys.stderr)
+            return 2
         return 0
     if args.cmd == "status":
         return api_get(args.host, args.port, "getStatusEx")

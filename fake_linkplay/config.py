@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import logging
 import os
 import tempfile
 import uuid as uuidlib
@@ -225,6 +226,96 @@ class Config:
         return f"{self.friendly_name}-{suffix}"
 
 
+class StartupConfigError(ValueError):
+    """An operator-safe startup diagnostic, containing no supplied values."""
+
+
+CONFIG_YAML_ERROR = "Configuration YAML could not be parsed. Check syntax and indentation."
+CONFIG_STRUCTURE_ERROR = (
+    "Configuration structure is invalid. Compare supported settings and preset/source "
+    "entries with the example YAML."
+)
+
+
+def parse_startup_yaml(source: str) -> Any:
+    """Keep SafeLoader syntax and scalar-constructor diagnostics private."""
+
+    try:
+        return yaml.safe_load(source)
+    except (yaml.YAMLError, ValueError, TypeError, AttributeError, KeyError, IndexError,
+            OverflowError, RecursionError):
+        # Explicit !!int/!!bool/!!timestamp tags can raise ordinary Python
+        # exceptions containing raw values rather than yaml.YAMLError.
+        raise StartupConfigError(CONFIG_YAML_ERROR) from None
+
+
+def read_startup_config(path: str | Path, *, missing_ok: bool = False) -> Config:
+    """Read startup input without creating identity/state or probing resources.
+
+    Only the implicit CLI default may use the historical missing-file fallback.
+    Error text is owned here: YAML exceptions can include raw source lines,
+    unknown setting names, file paths, and credential-bearing URLs.
+
+    This checks document/construction shape and the two synchronous logging/gain
+    conversions used at startup, not a comprehensive field type/range schema.
+    """
+
+    try:
+        source = Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        if not missing_ok:
+            raise StartupConfigError(
+                "Configuration file not found. Check --config or ORR_CONFIG."
+            ) from None
+        source = ""
+    except IsADirectoryError:
+        raise StartupConfigError(
+            "Configuration path is a directory. Select a YAML file."
+        ) from None
+    except OSError:
+        raise StartupConfigError(
+            "Configuration file could not be read. Check the path and read permissions."
+        ) from None
+    except UnicodeError:
+        raise StartupConfigError(
+            "Configuration text could not be decoded. Save the YAML file as UTF-8."
+        ) from None
+    raw = parse_startup_yaml(source)
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise StartupConfigError(CONFIG_STRUCTURE_ERROR)
+    try:
+        cfg = _config_from_mapping(raw)
+        # Match setup_logging's unknown-name fallback and RendererState's int
+        # coercion, without configuring logging or reading/writing saved state.
+        level = getattr(logging, cfg.log_level.upper(), logging.INFO)
+        if not isinstance(level, int):
+            raise ValueError
+        int(cfg.default_volume)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        raise StartupConfigError(CONFIG_STRUCTURE_ERROR) from None
+    return cfg
+
+
+def load_startup_config(path: str | Path, *, missing_ok: bool = False) -> Config:
+    """Validate startup input before applying the existing persisted state path."""
+
+    return _load_config_state(read_startup_config(path, missing_ok=missing_ok))
+
+
+def _config_from_mapping(raw: dict[str, Any]) -> Config:
+    presets = [PodcastPreset(**item) for item in raw.pop("podcast_presets", [])]
+    experimental_sources = [ExperimentalSource(**item) for item in raw.pop("experimental_sources", [])]
+    return Config(**raw, podcast_presets=presets, experimental_sources=experimental_sources)
+
+
+def _load_config_state(cfg: Config) -> Config:
+    cfg.uuid = cfg.uuid or load_or_create_uuid(cfg.state_dir, wiim_home_profile=cfg.wiim_home_profile)
+    load_persistent_runtime_state(cfg)
+    return cfg
+
+
 def load_config(path: str | Path) -> Config:
     """Load YAML configuration and persisted local runtime overrides.
 
@@ -242,12 +333,7 @@ def load_config(path: str | Path) -> Config:
     p = Path(path)
     if p.exists():
         raw = yaml.safe_load(p.read_text()) or {}
-    presets = [PodcastPreset(**item) for item in raw.pop("podcast_presets", [])]
-    experimental_sources = [ExperimentalSource(**item) for item in raw.pop("experimental_sources", [])]
-    cfg = Config(**raw, podcast_presets=presets, experimental_sources=experimental_sources)
-    cfg.uuid = cfg.uuid or load_or_create_uuid(cfg.state_dir, wiim_home_profile=cfg.wiim_home_profile)
-    load_persistent_runtime_state(cfg)
-    return cfg
+    return _load_config_state(_config_from_mapping(raw))
 
 
 def normalize_uuid(value: str | None) -> str:

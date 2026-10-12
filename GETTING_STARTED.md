@@ -100,6 +100,38 @@ owned-file manifest for inspection/removal.
 ~/.local/share/open-room-renderer/venv/bin/open-room-renderer serve --config ~/.local/share/open-room-renderer/config.yaml
 ```
 
+An explicit `--config` must name a readable YAML file. A missing file, directory,
+unreadable file, invalid UTF-8, malformed YAML, or unsupported document/constructor
+structure exits with status **2** and a short diagnostic on stderr, before loading
+identity/state or constructing the backend/listeners. The diagnostic does not echo
+the path, YAML source, supplied values, URLs, or parser exception chain. Check the
+selected file locally and compare its structure with `examples/config.example.yaml`.
+
+The startup checks cover a mapping of known settings, preset/source entry
+construction, existing UUID/discovery/mute/staging constructor checks, and the
+logging-level/default-volume conversions used at startup. Unknown logging names
+still fall back to INFO; accepted numeric volume coercions and clamping are
+unchanged. Empty files, YAML null, and `{}` still mean default settings. Other
+scalars and sequences (including `false`, `0`, and `[]`) are rejected. This is not
+a complete field type/range schema or a backend, port, or saved-state health check.
+An invalid `default_volume` now fails before saved gain is read, even when a valid
+saved gain would previously have masked that malformed setting. Fix the YAML;
+do not delete the saved gain. Valid startup settings still restore saved gain as
+before, and rejection leaves the existing state untouched.
+Saved-state, backend availability, binding, and cleanup retain their existing
+behavior and diagnostics.
+
+For compatibility, bare `serve` still selects `configs/config.example.yaml`
+relative to the current directory and uses built-in defaults if that implicit
+file is missing. It can then create identity/state and start normal services.
+Use an explicit `--config` for fail-closed operator startup, even when selecting
+that same example path. The library `load_config()` and the two `print-*` config
+commands keep their existing missing-file behavior. Checkout scripts always
+select a file; `ORR_CONFIG` uses the same private-safe reader before their existing
+mpv/socket/privileged-port preflight. That preflight creates no renderer identity
+and adds no new bind probes; the actual service reads the selected file again
+after exec.
+
 Leave the terminal open. In another terminal:
 
 ```bash
