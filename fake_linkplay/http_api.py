@@ -390,7 +390,8 @@ class HttpApi:
     def _play_generation(self, value: int) -> None:
         self.state.generation = value
 
-    def _accept_playback_command(self, intent: str, *, preserve_native: bool = False) -> int:
+    def _invalidate_playback_work(self) -> None:
+        """Fence pending work without changing the owner's selection or intent."""
         self._invalidate_station_recovery()
         task = self._queue_advance_task
         if task is not None and task is not asyncio.current_task() and not task.done():
@@ -398,6 +399,9 @@ class HttpApi:
             task.cancel()
         self._pending_seek_generation += 1
         self._pending_seek_target = None
+
+    def _accept_playback_command(self, intent: str, *, preserve_native: bool = False) -> int:
+        self._invalidate_playback_work()
         self._proxy_sources.clear()
         native_ready = self._native_ready_generation == self.state.generation
         generation = self.state.accept_command(intent)
@@ -471,6 +475,12 @@ class HttpApi:
 
     def _station_stall_retry_needed(self, recovery: StationRecovery, snapshot: dict) -> bool:
         """A queued stall retry cannot outlive renewed progress or a new grace."""
+        if not self._station_recovery_is_current(recovery):
+            return False
+        if snapshot.get("backend-error"):
+            raise BackendError("Backend control failed before recovery")
+        if self._reject_foreign_source_observation(snapshot, recovery.backend_url):
+            return False
         if recovery.category != "source_stall" or snapshot.get("idle-active") is True:
             # A fully ended source or failed load still uses the finite retry loop.
             return True
@@ -739,6 +749,47 @@ class HttpApi:
         return (self._native_current_id is None
                 or active is not None and active.get("id") == self._native_current_id)
 
+    def _native_source_observation_coherent(self, snapshot: dict) -> bool:
+        """Require agreeing native properties before declaring ownership lost.
+
+        mpv snapshots read properties separately. Missing identity, transient
+        EOF/idle, and disagreement between path, active entry or parentage are
+        not evidence of a coherent replacement source.
+        """
+        active = self._native_active(snapshot)
+        path = snapshot.get("path")
+        parent = snapshot.get("playlist-path")
+        entry_parent = active.get("playlist-path") if active is not None else None
+        return (snapshot.get("idle-active") is False and snapshot.get("eof-reached") is not True
+                and isinstance(path, str) and bool(path)
+                and self._native_entries(snapshot) is not None and active is not None
+                and active.get("filename") == path
+                and (parent is None or isinstance(parent, str))
+                and (entry_parent is None or isinstance(entry_parent, str))
+                and (entry_parent or None) == (parent or None))
+
+    def _mark_source_ownership_lost(self, *, automatic_admission: bool = False) -> None:
+        """Retain selection/evidence but never act on a foreign native source."""
+        self._invalidate_playback_work()
+        self.state.generation += 1
+        if self._native_stage is not None:
+            self._native_stage.failed = True
+        self._native_ready_generation = None
+        self._native_output_uncertain = True
+        self.state.gain_confirmed = False
+        reason = ("Automatic playback source ownership unconfirmed" if automatic_admission
+                  else "Playback source ownership lost")
+        self.state.mark_error(reason + "; playback silence not confirmed")
+        self._schedule_event_notify()
+
+    def _reject_foreign_source_observation(self, snapshot: dict, expected_url: str) -> bool:
+        """Call only inside a current-generation observation/admission fence."""
+        if (not snapshot.get("backend-error") and self._native_source_observation_coherent(snapshot)
+                and not self._mpv_snapshot_matches_source(snapshot, expected_url)):
+            self._mark_source_ownership_lost(automatic_admission=not expected_url)
+            return True
+        return False
+
     def _adopt_native_successor(self, snapshot: dict) -> bool:
         stage = self._native_stage
         if (stage is None or stage.failed or self.state.phase == PlaybackPhase.ERROR
@@ -980,18 +1031,14 @@ class HttpApi:
         if self.state.phase == PlaybackPhase.ERROR:
             return
         stage = self._native_stage
-        active = self._native_active(snap)
+        coherent_source = self._native_source_observation_coherent(snap)
         if (stage is not None and stage.confirmed and self._native_stage_is_current(stage)
-                and snap.get("idle-active") is False and active is not None
-                and active.get("filename") == snap.get("path")
+                and coherent_source
                 and not self._native_predecessor_matches(stage, snap)):
             # An exact successor would already have been adopted above. An
             # unknown expansion or foreign tail must not remain false PLAYING.
             # Parentage missing from mpv snapshots is not permission to Stop it.
-            stage.failed = True
-            self._native_output_uncertain = True
-            self.state.mark_error("Native queue source ownership lost; playback silence not confirmed")
-            self._schedule_event_notify()
+            self._mark_source_ownership_lost()
             return
         observed_url = snap.get("path")
         recovery = self._station_recovery
@@ -999,10 +1046,24 @@ class HttpApi:
         expected_url = self.state.backend_url
         if not expected_url and recovery and self._station_recovery_is_current(recovery):
             expected_url = recovery.backend_url
+        advance = self._queue_advance_task
+        if (not expected_url and self.state.intent == "play" and advance is not None and not advance.done()
+                and self._reject_foreign_source_observation(snap, "")):
+            # EOF retired the loaded source. A pending automatic advance owns
+            # no newly active native entry, even if its URL happens to repeat.
+            return
+        if not expected_url and self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.PAUSED}:
+            # An unloaded selection owns no media observations, including
+            # stale path/time/title properties sampled across a native idle.
+            return
         if expected_url and observed_url and not self._mpv_snapshot_matches_source(snap, expected_url):
+            if coherent_source:
+                self._mark_source_ownership_lost()
             return
         if (self._native_current_id is not None and observed_url == expected_url
                 and self._seek_source_token(snap)[1] != self._native_current_id):
+            if coherent_source:
+                self._mark_source_ownership_lost()
             return
         if self._native_waiting_for_audio:
             if snap.get("idle-active") is True:
@@ -2629,6 +2690,20 @@ class HttpApi:
                     if not self._station_stall_retry_needed(recovery, snapshot):
                         return False
                     self.state.phase = PlaybackPhase.LOADING
+                elif self._queue_advance_task is asyncio.current_task():
+                    # EOF advance can yield during resolution too. Its earlier
+                    # idle observation is not permission to replace new audio.
+                    if self.state.phase == PlaybackPhase.ERROR:
+                        return False
+                    snapshot = await self.mpv.snapshot()
+                    if not current():
+                        raise BackendError("Playback command superseded")
+                    if self.state.phase == PlaybackPhase.ERROR:
+                        return False
+                    if snapshot.get("backend-error"):
+                        raise BackendError("Backend control failed before queue advance")
+                    if self._reject_foreign_source_observation(snapshot, ""):
+                        return False
                 if resolution_failed:
                     raise SourcePlaybackError("Source resolution failed", "source_resolution") from None
                 if station_id and selected and not selected.stream_type and selected.duration == 0:
@@ -4090,11 +4165,30 @@ class HttpApi:
 
     async def _advance_queue_after_eof(self, generation: int, queue: PlaybackQueue) -> None:
         """Auto-advance only while the original owner intent is still current."""
-        if generation != self.state.generation or self.state.intent != "play" or self.state.queue is not queue:
+        index, item = queue.index, queue.current
+        def current() -> bool:
+            return (generation == self.state.generation and self.state.intent == "play"
+                    and self.state.phase != PlaybackPhase.ERROR
+                    and self.state.queue is queue and queue.index == index and queue.current is item)
+
+        if not current():
             return
         try:
-            await self._play_queue_index(queue.index + 1, queue.name)
+            async with self._backend_lock:
+                if not current():
+                    return
+                snapshot = await self.mpv.snapshot()
+                if not current():
+                    return
+                if snapshot.get("backend-error"):
+                    self._mark_backend_failure()
+                    return
+                if self._reject_foreign_source_observation(snapshot, ""):
+                    return
+            await self._play_queue_index(index + 1, queue.name)
         except (BackendError, SoapFault, OSError, TimeoutError):
+            if current() and self.state.phase != PlaybackPhase.ERROR:
+                self._mark_backend_failure()
             # The command path already reports current-generation backend errors.
             # Superseded auto-advance must not overwrite newer owner state.
             return
