@@ -18,7 +18,7 @@ import os
 import re
 import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 from html import escape
@@ -35,13 +35,14 @@ from aiohttp import ClientTimeout, TCPConnector
 from aiohttp import web
 
 from .capabilities import capability_fields, configured_sources, service_capability
+from .eventing import EventSubscriber, EventSubscriptionManager
 from .favorites import FavoritesApi, FavoritesStore
 from .queue_playlist import QueuePlaylistApi
 from .config import Config
 from .log_safety import redact_media_urls
 from .metadata_formatting import metadata_with_art, metadata_with_duration, metadata_with_url
 from .mpv_backend import LIVE_STATION_HISTORY_OPTIONS, BackendError, MpvBackend
-from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_target, validate_callback_url
+from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_target
 from .radio import RadioResolution, RadioResolutionError, resolve_station
 from .persistence import (AtomicWriteCommittedError, atomic_write_text, encode_active_dsp,
                           load_active_dsp, save_gain, validate_eq_records)
@@ -79,20 +80,6 @@ class ParsedCommand:
 
     name: str
     args: tuple[str, ...] = ()
-
-
-@dataclass
-class EventSubscriber:
-    """UPnP event subscription tracked for NOTIFY callbacks."""
-
-    sid: str
-    callback_url: str
-    service: str
-    seq: int = 0
-    peer_ip: str = ""
-    expires_at: float = float("inf")
-    dirty: bool = False
-    task: asyncio.Task | None = field(default=None, repr=False, compare=False)
 
 
 class SourcePlaybackError(BackendError):
@@ -197,7 +184,8 @@ class HttpApi:
     """aiohttp control surface for HTTP API, UPnP stubs, and app events.
 
     The class owns app-facing queue state, EQ presets, service capability
-    experiments, and event subscribers. It delegates actual playback and DSP to
+    experiments. A dedicated manager owns event subscriptions and delivery.
+    It delegates actual playback and DSP to
     ``MpvBackend`` and serializes visible state through ``RendererState``.
     """
 
@@ -282,12 +270,7 @@ class HttpApi:
         self.eq_presets: dict[str, dict[str, list[dict[str, object]]]] = {}
         self.eq_current_preset = ""
         self._load_persisted_eq_presets()
-        self.event_subscribers: dict[str, EventSubscriber] = {}
-        self._event_clock = time.monotonic
-        self._event_retry_base = 0.5
-        self._event_semaphore = asyncio.Semaphore(8)
-        self._event_limit_total = 64
-        self._event_limit_peer = 8
+        self._eventing = EventSubscriptionManager(lambda service: self._event_body(service))
         self._pending_dsp_restore = load_active_dsp(cfg.state_dir)
         desired_balance = (self._pending_dsp_restore["balance"]
                            if self._pending_dsp_restore is not None else cfg.channel_balance)
@@ -368,12 +351,7 @@ class HttpApi:
                 if seek_tasks:
                     await asyncio.gather(*seek_tasks, return_exceptions=True)
                 recovery_task = self._station_recovery_task
-                event_tasks = [subscriber.task for subscriber in self.event_subscribers.values() if subscriber.task and not subscriber.task.done()]
-                self.event_subscribers.clear()
-                for event_task in event_tasks:
-                    event_task.cancel()
-                if event_tasks:
-                    await asyncio.gather(*event_tasks, return_exceptions=True)
+                await self._eventing.close()
                 task, self._state_monitor_task = self._state_monitor_task, None
                 task.cancel()
                 try:
@@ -4771,89 +4749,67 @@ class HttpApi:
                 return as_milliseconds
         return seconds
 
-    @staticmethod
-    def _event_service(value: str) -> str | None:
-        service = SERVICE_ALIASES.get(value.lower())
-        return service if service in {"AVTransport", "RenderingControl", "ConnectionManager", "PlayQueue"} else None
-
-    @staticmethod
-    def _event_lease(value: str) -> int:
-        value = value or "Second-1800"
-        if value.lower() == "second-infinite":
-            return 1800
-        match = re.fullmatch(r"Second-([0-9]{1,10})", value, re.IGNORECASE)
-        if not match:
-            raise ValueError("Invalid subscription timeout")
-        return max(30, min(1800, int(match[1])))
-
-    def _remove_subscriber(self, sid: str) -> None:
-        subscriber = self.event_subscribers.pop(sid, None)
-        if subscriber and subscriber.task and subscriber.task is not asyncio.current_task():
-            subscriber.task.cancel()
-
-    def _prune_expired_subscribers(self) -> None:
-        now = self._event_clock()
-        for sid, subscriber in list(self.event_subscribers.items()):
-            if subscriber.expires_at <= now:
-                self._remove_subscriber(sid)
+    _event_service = staticmethod(EventSubscriptionManager.canonical_service)
+    _event_lease = staticmethod(EventSubscriptionManager.lease_seconds)
 
     async def event_subscribe(self, request: web.Request) -> web.Response:
-        """Validate new subscriptions or renew a same-peer service lease."""
-        service = self._event_service(request.match_info.get("service", ""))
-        if service is None:
-            return web.Response(status=404)
-        self._prune_expired_subscribers()
-        peer = request.remote or ""
-        sid = request.headers.get("SID", "")
-        callback = request.headers.get("CALLBACK", "")
-        nt = request.headers.get("NT", "")
-        try:
-            lease = self._event_lease(request.headers.get("TIMEOUT", ""))
-        except ValueError:
-            return web.Response(status=400)
-        if sid:
-            if callback or nt:
-                return web.Response(status=400)
-            subscriber = self.event_subscribers.get(sid)
-            if subscriber is None or subscriber.peer_ip != peer or subscriber.service != service:
-                return web.Response(status=412)
-            subscriber.expires_at = self._event_clock() + lease
-        else:
-            if nt.lower() != "upnp:event" or not callback:
-                return web.Response(status=400)
-            try:
-                callback = validate_callback_url(callback, peer)
-            except NetworkPolicyError:
-                return web.Response(status=412)
-            subscriber = next((item for item in self.event_subscribers.values()
-                if item.peer_ip == peer and item.service == service and item.callback_url == callback), None)
-            if subscriber is None:
-                if len(self.event_subscribers) >= self._event_limit_total or sum(item.peer_ip == peer for item in self.event_subscribers.values()) >= self._event_limit_peer:
-                    return web.Response(status=503)
-                sid = f"uuid:{uuid4()}"
-                subscriber = EventSubscriber(sid=sid, callback_url=callback, service=service,
-                    peer_ip=peer, expires_at=self._event_clock() + lease)
-                self.event_subscribers[sid] = subscriber
-            else:
-                sid = subscriber.sid
-                subscriber.expires_at = self._event_clock() + lease
-            self._schedule_subscriber_notify(subscriber)
-        return web.Response(status=200, body=b"", headers={"SID": sid,
-            "TIMEOUT": f"Second-{lease}", "SERVER": "Linux UPnP/1.0 OpenRoomRenderer/0.1"})
+        """Preserve the public asynchronous HTTP handler without a new await."""
+        return self._eventing.subscribe(request)
 
     async def event_unsubscribe(self, request: web.Request) -> web.Response:
-        service = self._event_service(request.match_info.get("service", ""))
-        if service is None:
-            return web.Response(status=404)
-        self._prune_expired_subscribers()
-        sid = request.headers.get("SID", "")
-        if not sid or request.headers.get("CALLBACK") or request.headers.get("NT"):
-            return web.Response(status=400)
-        subscriber = self.event_subscribers.get(sid)
-        if subscriber is None or subscriber.peer_ip != (request.remote or "") or subscriber.service != service:
-            return web.Response(status=412)
-        self._remove_subscriber(sid)
-        return web.Response(status=200)
+        return self._eventing.unsubscribe(request)
+
+    def _prune_expired_subscribers(self) -> None:
+        self._eventing.prune_expired()
+
+    @property
+    def event_subscribers(self) -> dict[str, EventSubscriber]:
+        """Compatibility view of the manager-owned registry, never a copy."""
+        return self._eventing.subscribers
+
+    @event_subscribers.setter
+    def event_subscribers(self, value: dict[str, EventSubscriber]) -> None:
+        self._eventing.subscribers = value
+
+    @property
+    def _event_clock(self) -> Callable[[], float]:
+        return self._eventing.clock
+
+    @_event_clock.setter
+    def _event_clock(self, value: Callable[[], float]) -> None:
+        self._eventing.clock = value
+
+    @property
+    def _event_retry_base(self) -> float:
+        return self._eventing.retry_base
+
+    @_event_retry_base.setter
+    def _event_retry_base(self, value: float) -> None:
+        self._eventing.retry_base = value
+
+    @property
+    def _event_semaphore(self) -> asyncio.Semaphore:
+        return self._eventing._semaphore
+
+    @_event_semaphore.setter
+    def _event_semaphore(self, value: asyncio.Semaphore) -> None:
+        self._eventing._semaphore = value
+
+    @property
+    def _event_limit_total(self) -> int:
+        return self._eventing.limit_total
+
+    @_event_limit_total.setter
+    def _event_limit_total(self, value: int) -> None:
+        self._eventing.limit_total = value
+
+    @property
+    def _event_limit_peer(self) -> int:
+        return self._eventing.limit_peer
+
+    @_event_limit_peer.setter
+    def _event_limit_peer(self, value: int) -> None:
+        self._eventing.limit_peer = value
 
     @staticmethod
     def _callback_url(header: str) -> str:
@@ -4872,17 +4828,8 @@ class HttpApi:
         return "0.0.0.0"
 
     def _drop_duplicate_subscribers(self, callback_url: str, service: str, keep_sid: str | None = None) -> None:
-        """Remove duplicate event subscriptions for the same callback/service."""
-
-        service_key = service.lower()
-        duplicate_sids = [
-            sid
-            for sid, subscriber in self.event_subscribers.items()
-            if sid != keep_sid and subscriber.callback_url == callback_url and subscriber.service.lower() == service_key
-        ]
-        for sid in duplicate_sids:
-            self.event_subscribers.pop(sid, None)
-            LOG.info("dropped duplicate event subscriber service=%s sid=%s callback=%s", service, sid, callback_url)
+        """Compatibility entry point for the legacy duplicate filter."""
+        self._eventing.drop_duplicates(callback_url, service, keep_sid)
 
     def _current_transport_actions(self) -> str:
         """Project current control availability, not the static SCPD action list.
@@ -4933,66 +4880,8 @@ class HttpApi:
         return self.state.transport_state
 
     def _schedule_event_notify(self, services: tuple[str, ...] | None = None) -> None:
-        """Coalesce changes while keeping one ordered delivery task per SID."""
-        self._prune_expired_subscribers()
-        selected = {self._event_service(service) for service in services} if services else set()
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        for subscriber in list(self.event_subscribers.values()):
-            if selected and self._event_service(subscriber.service) not in selected:
-                continue
-            self._schedule_subscriber_notify(subscriber)
-
-    def _schedule_subscriber_notify(self, subscriber: EventSubscriber) -> None:
-        subscriber.dirty = True
-        if subscriber.task is None or subscriber.task.done():
-            subscriber.task = asyncio.create_task(self._notify_event_subscriber(subscriber))
-
-    def _subscriber_active(self, subscriber: EventSubscriber) -> bool:
-        return self.event_subscribers.get(subscriber.sid) is subscriber and subscriber.expires_at > self._event_clock()
-
-    async def _notify_event_subscriber(self, subscriber: EventSubscriber) -> None:
-        """Retry transient failures within the lease, without redirects or reordering."""
-        failures = 0
-        try:
-            while self._subscriber_active(subscriber) and (subscriber.dirty or failures):
-                if not failures:
-                    subscriber.dirty = False
-                    body = self._event_body(subscriber.service)
-                headers = {"CONTENT-TYPE": 'text/xml; charset="utf-8"', "NT": "upnp:event",
-                    "NTS": "upnp:propchange", "SID": subscriber.sid, "SEQ": str(subscriber.seq)}
-                success = False
-                try:
-                    async with self._event_semaphore:
-                        if not self._subscriber_active(subscriber):
-                            break
-                        remaining = subscriber.expires_at - self._event_clock()
-                        timeout = ClientTimeout(total=min(1.5, remaining))
-                        async with ClientSession(timeout=timeout, trust_env=False) as session:
-                            async with session.request("NOTIFY", subscriber.callback_url, data=body.encode("utf-8"), headers=headers, allow_redirects=False) as response:
-                                await response.content.read(4096)
-                                success = 200 <= response.status < 300
-                                if response.status in {410, 412}:
-                                    self._remove_subscriber(subscriber.sid)
-                                LOG.debug("GENA delivery service=%s status=%s seq=%s", subscriber.service, response.status, subscriber.seq)
-                except (ClientError, TimeoutError, OSError):
-                    pass
-                if not self._subscriber_active(subscriber):
-                    break
-                if success:
-                    subscriber.seq = 1 if subscriber.seq == 0xFFFFFFFF else subscriber.seq + 1
-                    failures = 0
-                else:
-                    failures += 1
-                    delay = min(30.0, self._event_retry_base * 2 ** min(failures - 1, 8))
-                    await asyncio.sleep(min(delay, max(0, subscriber.expires_at - self._event_clock())))
-        finally:
-            if subscriber.expires_at <= self._event_clock():
-                self.event_subscribers.pop(subscriber.sid, None)
-            if subscriber.task is asyncio.current_task():
-                subscriber.task = None
+        """Publish a renderer change to the independently owned subscriptions."""
+        self._eventing.notify(services)
 
     def _event_body(self, service: str) -> str:
         """Build the XML propertyset body for a UPnP event service."""
