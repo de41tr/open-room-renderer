@@ -16,6 +16,19 @@ CI runs. Existing long-duration evidence is retained without a redundant rerun.
 After functional UI, spend at most one hour on evidence-based optional Spotify
 sidecar feasibility, then choose implementation or a reasoned deferral.
 
+The functional Web milestone now provides the required browser controls plus
+balance/EQ bypass. Security review drove concrete fixes for signed URL fallback
+metadata, safe live titles, session-crossed favorites reads, stale queue intent,
+pending DSP values and linked top-level navigation. Native controls and packaged
+assets are tested; actual browser acceptance remains explicitly pending. No
+placeholder browser/provider buttons are being advertised as working.
+
+Next: compare the three named Spotify candidates within one hour. A second audio
+engine must have honest separate state and enforceable source ownership across
+all legacy and new controls; a UI-only switch is not sufficient arbitration.
+If legal/account/audio-contract constraints block a safe useful first stage,
+record the ADR and prioritize DSP preset/band UI, playlists and diagnostics.
+
 No new user decision is needed for these reversible steps. The active hard stop
 is 2026-10-13 18:00 UTC; no large/risky work starts after 16:30 UTC and stabilization
 starts at 17:00 UTC. All older strategic task boundaries below are historical.

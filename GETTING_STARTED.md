@@ -3,6 +3,14 @@
 The default installation runs as your normal Linux user on **port 8080**. It
 keeps its identity across restarts and never automatically invokes sudo.
 
+## Browser controls
+
+After starting the service, open `http://<renderer-ip>:8080/ui/` in a browser on
+the trusted LAN. Use your configured API port if different. No Node runtime,
+frontend build or extra listener is required. The [Web controller guide](docs/WEB_UI.md)
+explains playback/queue/favorite/DSP controls, pending/unknown outcomes, security
+limits and the outstanding real-browser acceptance checklist.
+
 ## 1. Native Prerequisites
 
 Install these using your distribution's package manager:

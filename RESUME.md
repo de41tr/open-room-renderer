@@ -30,6 +30,15 @@ behavior-neutral extractions separately, verify exact-head hosted CI, and contin
 Web UI implementation. Do not spend the remaining architecture allocation on a
 player-core rewrite. Browser, hardware and account acceptance remain distinct.
 
+Web controller is now integrated and independently reviewed. Final web_ui hash
+48291360edf8462fff2f741930b26f3afca00c0bc56f2eaa9d06008d588dacbc;
+HttpApi hash b113e07ef3d8d7ebe8093d380608b612dd5478b84631625a094e7ea1dea0f742.
+It serves the existing listener, typed same-origin controls and packaged assets.
+Short final native Web runs pass 0.37/0.40; no real-browser claim. Publish feature,
+native/CI evidence and operator documentation separately, verify exact-head CI,
+then continue the <=1-hour Spotify feasibility task. No provider account login,
+unsafe two-engine playback or proprietary distribution is authorized.
+
 ---
 
 ## Historical completed handovers

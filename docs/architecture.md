@@ -43,6 +43,9 @@ aiohttp app in fake_linkplay.http_api
 - `fake_linkplay/metadata_formatting.py`: pure metadata artwork/live-tag, resource-URI and duration edits; no state, network or backend access.
 - `fake_linkplay/state.py`: in-memory renderer state and status payload generation.
 - `fake_linkplay/queue.py` and `queue_policy.py`: canonical items/indices and pure repeat/shuffle traversal; backend admission stays in HttpApi.
+- `fake_linkplay/queue_protocol.py`: pure authored queue/URL validation and bounded request framing, shared without client transport imports.
+- `fake_linkplay/eq_presets.py`: saved preset-library ownership and pure EQ request/record utilities; active transactions stay in HttpApi.
+- `fake_linkplay/web_ui.py` and `web_assets/`: same-origin browser admission, detached safe state projection, local assets and single-shot frontend control flow; no playback authority or observer.
 - `fake_linkplay/favorites.py`: bounded renderer-owned library, atomic storage and its JSON routes; edits do not control playback.
 - `fake_linkplay/mpv_backend.py`: mpv process startup, JSON IPC commands, snapshots, volume/mute/seek, balance and PEQ filter graph.
 - `fake_linkplay/ssdp.py`: UDP multicast responder and periodic NOTIFY packets.
@@ -186,6 +189,41 @@ coupling while leaving playback generations and scheduling untouched.
 The architecture phase deliberately stops here before a player-core rewrite.
 Further work prioritizes a useful browser controller. Stateful source ownership,
 recovery and native staging still warrant a wider design before extraction.
+
+## Browser controller boundary
+
+One `WebControlApi` is constructed beside the existing favorites and eventing
+components and shared by the renderer's existing listeners. It receives narrow
+current-state/device/runtime/DSP snapshot callbacks, the existing FavoritesStore,
+a typed WebCommand dispatch callback and admitted host names. It never receives
+HttpApi or MpvBackend. Its only owned mutable values are a CSRF secret, session ID
+and monotonically increasing presentation snapshot revision.
+
+The existing backend monitor remains the sole observer. State reads are detached
+synchronous projections without an await between queue, generation and metadata.
+Renderer callbacks interpret only the fixed typed action vocabulary and reuse
+existing generation, source-identity, gain and DSP transaction machinery. No new
+playback cache, background task, lock or control transport is introduced.
+
+A displayed safe queue label is not identity: the existing generation fence is
+checked immediately before dispatch, and the raw canonical queue name is used
+only inside the renderer callback. Existing post-Stop queue object/current-item
+checks remain. State/favorite session IDs prevent cross-restart read pairing.
+DSP proposals are hidden while the existing transaction lock is held; otherwise
+validated readback gates the copied active snapshot. Unconfirmed gain values are
+null, never labeled as a known previous confirmation from startup configuration.
+
+The browser owns only local form drafts and request/read ordering. It cannot
+claim playback success from an ACK. Non-Stop mutations are serialized locally;
+Stop can supersede a pending UI request without implying that the old server
+operation was cancelled. Lost responses remain explicitly unknown and are never
+automatically retried. All metadata uses text insertion rather than HTML.
+
+Host/listener-port, exact Origin, custom-header CSRF and bounded JSON guard new
+browser commands. Only inert top-level HTML GET navigation may originate from
+another site; cross-site data/script/frame requests and mutations remain blocked.
+This does not authenticate or retrofit the existing legacy control routes.
+See [Web security and operation](WEB_UI.md) for precise boundaries.
 
 ## Startup Flow
 

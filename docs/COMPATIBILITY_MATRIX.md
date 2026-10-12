@@ -7,7 +7,11 @@ DSP library and pure queue contracts now have separate responsibility boundaries
 protocol, playback, active DSP and existing acceptance contracts are unchanged.
 Focused synthetic before/after evidence is identical; short actual libmpv
 0.37/0.40 DSP/restore replays pass. Exact-head full CI remains independently
-required. Web UI and optional Spotify work are in progress, not yet accepted.
+required. The functional local Web UI is IMPLEMENTED with software/native wiring
+checks: playback/seek, volume/mute, queue selection/modes, favorite management,
+balance and EQ bypass. BROWSER_ACCEPTANCE_PENDING is explicit; real-browser
+layout/interaction is not inferred from Node/DOM doubles. Optional Spotify is
+not yet assessed or accepted in this checkpoint.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.

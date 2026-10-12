@@ -27,6 +27,12 @@ source/dependency versions and owned files, and generates a reviewable user unit
 It does **not** install distro packages, start services, change firewall settings,
 or use sudo. The default profile uses port **8080** and a stable local identity.
 
+Once running, open `http://<renderer-ip>:8080/ui/` (or your configured API port)
+for the [local Web controller](docs/WEB_UI.md): playback, queue, repeat/shuffle,
+volume/mute, favorites, balance and EQ bypass without a control CLI. Actual
+browser acceptance remains explicitly pending; software/native control tests
+and their limits are documented.
+
 For editable development instead:
 
 ```bash
@@ -50,7 +56,7 @@ on the selected media, network, and audio device.
 Working in this alpha:
 
 - advertises itself on the local network,
-- exposes a local renderer/control API,
+- exposes a local renderer/control API and [responsive Web controller](docs/WEB_UI.md),
 - can be discovered by open-source WiiM/Linkplay-style clients,
 - has real open-source client and app-shaped HTTP/SOAP/GENA test coverage; original Android app acceptance remains untested,
 - can play TuneIn-style streams,

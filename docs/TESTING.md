@@ -1,5 +1,50 @@
 # Test evidence and limits
 
+## Functional Web controller checks
+
+The final Web boundary has focused real-loopback HTTP/MOCK tests for all typed
+controls, generation/source races, checked gain/DSP, library persistence errors,
+strict Host/Origin/CSRF and request framing, private-safe metadata and static
+routing. Dependency-free Node tests cover state ordering, single-shot mutation,
+Stop superseding, server restart/session binding, form drafts/dialog cleanup and
+lost responses using explicit DOM doubles. These are not real-browser tests.
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_web_ui.py tests/test_web_frontend.py
+node --test tests/web_frontend.test.cjs
+ORR_TEST_LIBMPV_PATH=/absolute/path/to/libmpv.so.2 PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_libmpv_web_controls.py
+```
+
+Node >=18 is a development-only optional dependency locally; native CI explicitly
+requires it before the default suite so its Web checks cannot silently skip in
+both native jobs. No browser install, new runner or widened timeout is added.
+The single new libmpv test joins the existing second native group. All earlier
+native/Unix/PCM/client/installation/discovery/Snapcast gates remain intact.
+
+The new REAL_BACKEND/null flow uses actual aiohttp Web endpoints, generated local
+media and the existing ctypes command-node adapter to libmpv. Held media proves
+BUFFERING has no optimistic acknowledgement; checked playback, pause/seek/resume,
+queue mode without reload, gain/mute, EQ/balance native graph, stable-ID favorite
+recall, stale/cross-origin rejection before backend effects and cleanup are
+verified. It does not operate a browser, production Unix socket or physical DAC,
+and does not measure PCM samples. Existing digital-PCM DSP tests retain their
+separate measured scope. Exact final-source results and hosted CI are recorded
+at the current milestone; older intermediate passes are not substituted.
+Final Web native flow passes 0.37/0.40 in 3.59s/3.56s. Final integrated defaults
+pass **4755/74** on Python 3.12 (203.45s), and **4505+250/74** on Python 3.11
+(137.65s/71.10s); 74 includes the one new explicit native opt-in skip. All old
+skip policies and time caps remain. Published-head hosted CI is separately pending.
+
+Offline wheel checks verify all four local assets, isolated package imports and
+actual loopback static/state responses. Independent security review reproduced
+and fixed known URL-tail/encoded-metadata leakage and restart-stale favorites.
+Legacy routes remain unauthenticated trusted-LAN controls.
+
+**BROWSER_ACCEPTANCE_PENDING:** real rendering, viewport/accessibility/focus and
+browser interruption checks remain unperformed. The full implementation is
+locally reproducible; follow [the manual checklist](WEB_BROWSER_ACCEPTANCE.md).
+Hardware and provider-account acceptance remain separate.
+
 ## Next-phase architecture boundary checks
 
 The saved DSP library and shared authored-queue contracts were extracted without

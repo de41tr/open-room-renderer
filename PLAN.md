@@ -24,6 +24,13 @@ No main push, merge or release is authorized.
 finish integrated verification, publish them separately, and move to Web UI.
 The architecture budget is a maximum, not a reason to add lower-value refactors.
 
+**Web milestone:** the complete required controller plus balance/EQ bypass is
+implemented and independently reviewed. Actual native Web control wiring passes;
+real-browser acceptance remains pending. Publish this cohesive checkpoint after
+final integrated checks, keep exact-head CI separate, and start the bounded
+Spotify comparison without waiting idly on CI. Do not add provider controls that
+pretend two independent audio engines share one playback/DSP authority.
+
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
 and independent review precede milestone publication. Full native CI follows
 cohesive milestones; unchanged older endurance evidence is not rerun without

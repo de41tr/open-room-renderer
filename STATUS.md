@@ -19,10 +19,27 @@ hosted CI remain separate evidence. Integrated Python 3.12 defaults pass 4598
 assertions, skips, CI workflow and caps are unchanged. Exact published-head
 native CI is PENDING until verified; earlier green runs cannot substitute.
 
-Architecture stops at these cohesive seams; the next priority is now a functional
-browser controller. Safe canonical projection, strict same-origin admission,
-frontend and actual-native Web wiring acceptance are being implemented. No Web
-or Spotify feature is claimed complete at this checkpoint.
+Architecture stopped at those cohesive seams. The local Web controller is now
+IMPLEMENTED and independently reviewed: Now Playing/position/artwork, transport
+and seek, volume/mute, queue selection and five repeat/shuffle modes, favorites
+add/save-current/play/rename/delete, balance and EQ bypass. It uses the existing
+listener and canonical renderer truth, with typed same-origin/CSRF controls,
+private-safe metadata, persistent unknown outcomes and Stop recovery.
+
+Final short Web control acceptance passes actual libmpv/null 0.37/0.40 in
+3.59s/3.56s. The existing digital-PCM DSP/restore replay also passes. Isolated
+wheel/real HTTP asset checks pass; 157 focused checks and 28 Node/DOM-double
+checks pass independently. Final integrated Python 3.12 defaults pass **4755
+/74 opt-in skips** in 203.45s; Python 3.11 complete groups pass **4505+250 /74**
+in 137.65s/71.10s under unchanged caps. Exact newly published-head hosted CI
+is PENDING until verified; earlier architecture results cannot certify the UI.
+
+BROWSER_ACCEPTANCE_PENDING: no real browser/layout/focus acceptance is claimed.
+The complete UI is locally reproducible at the renderer's existing `/ui/` path;
+see docs/WEB_UI.md and docs/WEB_BROWSER_ACCEPTANCE.md. Legacy unauthenticated
+routes remain a trusted-LAN security limitation, not fixed by Web-only guards.
+Spotify feasibility is the next bounded step; no provider adapter/account/music
+acceptance is claimed yet.
 
 Hardware/original-app acceptance remains HARDWARE_PENDING. Spotify is not yet
 assessed or implemented in this phase; no account authorization is available.
