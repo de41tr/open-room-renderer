@@ -102,3 +102,8 @@ advances the top-level queue. Entry loading reports BUFFERING and foreign-source
 controls cannot falsely succeed. Nested playlists remain unsupported because
 outer provenance is lost; an inner decoder can remain active after readiness
 failure until stopped. Owner-fenced failure cleanup is being added separately.
+
+Per-load native options now use named arguments shared by mpv0.37 and0.40,
+avoiding the positional insertion-index change in0.38. Actual0.40 start/options/
+reset and gain checks passed; the new production0.37 case awaits CI. This fixes
+option transport compatibility, not approximate byte-range timestamp accuracy.

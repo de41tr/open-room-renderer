@@ -307,3 +307,11 @@ URLs, double sanitization, access logs and exception formatting. It also checks
 that actual backend arguments and responses are untouched. Ambiguous wrappers
 are masked completely; raw resource paths remain visible. The isolated updated
 snapshot passed1742 with12 real libmpv cases, two local Unix IPC skips.
+
+Named native load options: `test_mpv_load_options.py` checks exact map framing,
+acknowledgement matching and no duplicate retry. `test_libmpv_load_options.py`
+uses the public command-node API to confirm start8 and per-file option reset;
+the appended production Unix case exercises the same real option behavior.
+This addresses the [documented0.38 positional change](https://github.com/mpv-player/mpv/blob/v0.40.0/DOCS/man/input.rst)
+using the [older named command contract](https://github.com/mpv-player/mpv/blob/v0.37.0/player/command.c).
+Snapshot: 1753 passed with13 libmpv cases, three local Unix IPC skips.

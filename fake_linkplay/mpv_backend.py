@@ -323,7 +323,7 @@ class MpvBackend:
             await asyncio.gather(self._startup_task, return_exceptions=True)
         await self._reap_owned_process()
 
-    async def command(self, args: list[Any], timeout: float = 5.0) -> dict[str, Any]:
+    async def command(self, args: list[Any] | dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
         """Send one JSON IPC command with an end-to-end deadline.
 
         Startup, connect, drain, event handling, response and close all consume
@@ -332,11 +332,11 @@ class MpvBackend:
         """
         return await self._send_command(args, timeout, wait_response=True)
 
-    async def command_no_wait(self, args: list[Any], timeout: float = 5.0) -> dict[str, Any]:
+    async def command_no_wait(self, args: list[Any] | dict[str, Any], timeout: float = 5.0) -> dict[str, Any]:
         """Bound connection/write time; success here means sent, not acknowledged."""
         return await self._send_command(args, timeout, wait_response=False)
 
-    async def _send_command(self, args: list[Any], timeout: float, *, wait_response: bool) -> dict[str, Any]:
+    async def _send_command(self, args: list[Any] | dict[str, Any], timeout: float, *, wait_response: bool) -> dict[str, Any]:
         deadline = asyncio.get_running_loop().time() + timeout
         writer: asyncio.StreamWriter | None = None
         try:
@@ -373,7 +373,8 @@ class MpvBackend:
             return {"error": "mpv IPC command timed out"}
         except (BackendError, OSError, ValueError) as exc:
             error = redact_sensitive(exc) or type(exc).__name__
-            LOG.warning("mpv IPC command %s failed: %s", args[0] if args else "(empty)", error)
+            name = args.get("name", "(empty)") if isinstance(args, dict) else (args[0] if args else "(empty)")
+            LOG.warning("mpv IPC command %s failed: %s", name, error)
             return {"error": error}
         finally:
             if writer is not None:
@@ -396,9 +397,12 @@ class MpvBackend:
         """Keep source loading serialized with gain initialization and changes."""
 
         LOG.info("mpv loadfile replace url=%s options=%s", redact_sensitive(url), redact_sensitive(options or {}))
-        command: list[Any] = ["loadfile", url, "replace"]
+        command: list[Any] | dict[str, Any] = ["loadfile", url, "replace"]
         if options:
-            command.extend([-1, options])
+            # mpv 0.38 inserted an index before positional options. Named
+            # arguments are supported by both older and newer JSON IPC APIs,
+            # so no version guess or potentially duplicate load retry is needed.
+            command = {"name": "loadfile", "url": url, "flags": "replace", "options": options}
         response = await self.command(command, timeout=3.0)
         if response.get("error") != "success":
             LOG.warning("mpv loadfile returned error url=%s response=%s", redact_sensitive(url), redact_sensitive(response))

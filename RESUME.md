@@ -39,7 +39,9 @@
    run38189242029 passed all lanes on both architectures. AP15 exact snapshot
    passed1714 with12 real libmpv cases and is published as
    `9f4a1d5e7ca4f9dd8c96c25fa2b1c722847d2cca`; native CI run38189809370
-   passed both architectures. The reviewed log-privacy snapshot passed1742.
+   passed both architectures. Log privacy is published as
+   `de8b9b03d219e50734ff95295c307d34abf7f945`, with native CI run38190231373
+   passed. Named load-option compatibility has a reviewed1753-pass snapshot.
    Preserve pending log privacy, clocked-transition, named load-option, explicit
    discovery-interface and unready-load cleanup changes. Monitor each new CI.
 6. Keep production mpv JSON IPC. AF_UNIX is denied in this cloud sandbox; use

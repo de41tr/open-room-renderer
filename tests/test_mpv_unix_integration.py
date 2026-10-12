@@ -433,3 +433,50 @@ async def test_real_unix_ipc_owned_start_shutdown_cleanup_and_restart(native_wor
         "cleanup": {"all_children_reaped": True, "owned_socket_removed": True,
                     "lifecycle_tasks_done": True, "closed_backend_did_not_respawn": True},
     }, sort_keys=True))
+
+
+@pytest.mark.asyncio
+async def test_real_unix_ipc_named_load_options_and_per_file_reset(native_workspace) -> None:
+    """Exercise the same named options on CI's older mpv through real JSON IPC."""
+    directory, executable = native_workspace
+    tracks = (directory / "options-440.wav", directory / "plain-660.wav")
+    for path, frequency in zip(tracks, (440, 660)):
+        _write_tone(path, frequency)
+    keys = ("start", "demuxer", "force-seekable", "cache")
+    options = {"start": "8", "demuxer": "lavf", "force-seekable": "yes", "cache": "no"}
+    async with _external_player(directory, executable) as (backend, process):
+        async with asyncio.timeout(15):
+            version = await _property(backend, "mpv-version")
+            defaults = {key: await _property(backend, "options/" + key) for key in keys}
+            assert (await backend.loadfile(str(tracks[0]), options))["error"] == "success"
+
+            async def started_at_offset() -> bool:
+                return (await _property(backend, "path") == str(tracks[0])
+                        and 8 <= await _property(backend, "playback-time") < 10
+                        and await _property(backend, "current-ao") == "null")
+
+            await _eventually("named-load start position", started_at_offset)
+            await backend.pause()
+            assert await _property(backend, "pause") is True
+            position = await _property(backend, "playback-time")
+            actual = {key: await _property(backend, "options/" + key) for key in keys}
+            assert actual == {"start": "8", "demuxer": "lavf", "force-seekable": True, "cache": False}, actual
+            assert await _property(backend, "volume") == pytest.approx(25)
+            assert await _property(backend, "mute") is False
+            assert (await backend.loadfile(str(tracks[1])))["error"] == "success"
+
+            async def restarted_without_offset() -> bool:
+                return (await _property(backend, "path") == str(tracks[1])
+                        and 0 <= await _property(backend, "playback-time") < 2
+                        and await _property(backend, "pause") is False)
+
+            await _eventually("plain replacement resets start", restarted_without_offset)
+            reset = {key: await _property(backend, "options/" + key) for key in keys}
+            assert reset == defaults, (reset, defaults)
+    assert process.returncode is not None
+    print(json.dumps({
+        "lane": "PRODUCTION_UNIX_IPC/null/named-load-options", "mpv_version": version,
+        "architecture": platform.machine(), "applied_options": actual,
+        "start_position": position, "per_file_options_reset": True,
+        "gain_preserved": True, "fixture_child_reaped": True,
+    }, sort_keys=True))

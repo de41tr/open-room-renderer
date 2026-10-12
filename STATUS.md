@@ -519,3 +519,22 @@ resource paths and arbitrary free text are not guaranteed secret-free.
 AP15 is published as `9f4a1d5e7ca4f9dd8c96c25fa2b1c722847d2cca`;
 [run38189809370](https://github.com/de41tr/open-room-renderer/actions/runs/38189809370)
 passed both native architectures, including the new real format/container lane.
+
+## Native mpv load-option compatibility
+
+Per-file options now use mpv's named command map instead of positional arguments.
+This avoids the insertion-index argument added in mpv0.38 without guessing a
+version or retrying a load that might already have applied. Ordinary loads stay
+unchanged; failed option loads do not unpause or issue duplicate loads.
+
+Exact isolated snapshot: 1753 passed with13 real libmpv cases enabled, three
+production Unix IPC cases skipped locally. Independent review confirmed the
+public0.37 named-map contract and reran actual0.40 option application: start8
+reached about8 seconds, demuxer/seekability/cache applied, gain persisted, and
+all per-file options reset on ordinary replacement. Both an explicit libmpv
+case and a new production IPC case now run in CI. Actual0.37 execution awaits
+this revision's result; this does not certify bitrate-derived range timing.
+
+Log privacy is published as `de8b9b03d219e50734ff95295c307d34abf7f945`;
+[run38190231373](https://github.com/de41tr/open-room-renderer/actions/runs/38190231373)
+passed both native architectures and all existing lanes.
