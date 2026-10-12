@@ -2,20 +2,26 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (07:47 UTC)
+## Current checkpoint (08:18 UTC)
 
-Draft PR remains unmerged. Last completed hosted checkpoint `2fc8296` passed all three CI jobs:
-https://github.com/de41tr/open-room-renderer/actions/runs/38213572864 .
-Both architectures passed all 44 libmpv cases and six production Unix cases,
-plus pywiim, stress, installed lifecycle, clocked transitions, discovery and
-eleven Snapcast stages. Normal timeout limits are unchanged.
+Draft PR remains unmerged. `5d64bfb` failed the existing native nested-playlist
+cleanup case on both hosted architectures: a pending admitted load's child was
+misclassified as a post-ready foreign source, revoking owned cleanup. Each native
+lane passed its other 46 cases. Python3.11 and all subsequent Unix IPC, pywiim,
+stress, lifecycle, clocked, discovery and eleven-stage Snapcast gates passed.
+https://github.com/de41tr/open-room-renderer/actions/runs/38220673742 .
+The previous fully green checkpoint remains `2fc8296`.
 
-The new combined navigation/action/ownership revision passed 2602 default tests
-/65 opt-in skips on Python3.12 and 3.13, plus 435 Python3.11 focused checks.
-Seventeen targeted real-backend cases passed on 0.37 and six on 0.40. Its hosted
-result is pending separately. Coherent observed foreign replacements and
-automatic admission conflicts now preserve ERROR without taking over that audio;
-already-admitted load/readiness replacement remains explicitly outside scope.
+The reviewed correction separates admitted readiness/cleanup from post-ready
+observation. The complete 47-case local native lane passed on both libmpv0.37/0.40 before
+the separate terminal-error delta; seven affected native cases passed on each
+version afterward. Final Python3.12 default verification passed 2682 tests /65
+opt-in skips, plus 392 focused Python3.11 checks. This checkpoint also contains atomic rename and
+strict duplicate EQ-field rejection, with their separate evidence below.
+Normal CI timeouts and acceptance thresholds are unchanged. A separate reviewed
+three-line correction preserves earlier terminal backend errors across readiness
+and owned cleanup. Causal proof of external replacement during admitted readiness
+remains a separate open correction.
 
 At `3e74b24`, expanded live-HLS/libmpv lanes failed: both architectures lost native
 playback-time during the segment-outage two-second hold; four other HLS cases
@@ -1371,7 +1377,7 @@ is absent. Empty Pause fails before backend mutation. Static SCPDs are unchanged
 Exact integrated default suites passed 2534 tests /64 opt-in skips on Python3.12
 (74.35s) and Python3.13 (73.66s); Python3.11 focused checks passed 315 in 8.49s.
 Integrated native control/navigation/uncertainty replay passed five cases on
-both actual libmpv0.37 and0.40, 19.57s each. The new navigation pair uses default
+both actual libmpv0.37 and 0.40, 19.57s each. The new navigation pair uses default
 0.5s observation cadence and takes about 8s; it joins normal hosted CI without
 changing its 15-minute cap. New hosted results remain pending publication.
 
@@ -1412,3 +1418,67 @@ Production digest: `a90982dfd51a45b8f13d949d2cf363f0b587595c31cec7b450865ff93da7
 radio evidence keep their original frozen digests. External replacement during
 an already-admitted load/readiness window still requires separate causal proof;
 this correction does not claim that window or all raw-mpv concurrency is solved.
+
+
+## Admitted readiness retains owned failed-load cleanup
+
+The 5d64bfb observer regression is retained as a failed checkpoint. Generic
+backend observations no longer interpret a still-admitted readiness/cleanup
+transaction as post-ready ownership loss. A generation-scoped marker is set only
+at native load admission, cleared on successful readiness or transaction exit,
+and cannot be cleared by an older generation. Backend-error observations remain
+visible. Same-generation station retries are covered without relying on the
+previous native-ready marker. No ancestry checks, readiness deadlines, Stop
+confirmation or post-ready foreign-source fences are weakened.
+
+Independent review passed 314 targeted cases including actual libmpv0.40 nested
+cleanup, cancellation, metadata suppression and observations during cleanup.
+Author replay also passed the actual existing cleanup case on 0.37. These checks
+confirm silence after the rejected nested source and a later successful explicit
+Play; nested playlists themselves remain unsupported. Root ACK identity and
+foreign replacement during admitted readiness are not claimed fixed here.
+
+## Atomic device rename and unambiguous EQ values
+
+Device rename previously returned OK after a synthetic partial ENOSPC write,
+leaving a full new live name but a truncated restart name. It now atomically
+saves UTF-8 before live mutation, leaves old state intact on pre-replace failure,
+and reports 502 if persistence or discovery refresh cannot be confirmed.
+Post-replace durability failure and callback cancellation retain matching new
+file/live state; a same-name retry refreshes again. Concurrent rename callbacks
+are serialized. Stable UUID and ordinary Unicode rename/reload remain unchanged.
+This is local HTTP/file evidence with synthetic faults, not power-loss, physical
+multicast reception or original Android acceptance. Exact author suites passed
+2662 /65 on Python3.12 and3.11; the new 60 cases passed on both.
+
+EQ request and preset-library JSON now reject duplicate fields before choosing
+any gain, plugin, curve or saved preset. Previously a nested -12 then +12 value
+silently selected +12 and returned HTTP200. The rejection is whole-object/library,
+including escaped duplicate keys; existing valid and legacy partial libraries
+still load without rewrite or automatic application. Gain and active-DSP parsing
+are unchanged. Eleven regressions fail on the prior code; one valid control
+passes. Independent full verification passed 2614 /65, with 336 focused checks
+on Python3.11 and all 15 shared EQ JSON command routes checked for no mutation.
+This is UNIT/MOCK configuration evidence, not an acoustic gain claim.
+
+
+## Earlier backend ERROR survives later readiness and cleanup
+
+A separate older defect allowed a later successful readiness result to revive
+PLAYING after a backend observer had already diagnosed terminal ERROR. A failed
+readiness result could instead overwrite that cause with source-unready, also
+when the backend error arrived while Stop cleanup awaited. The narrow correction
+vetoes success after ERROR and avoids replacing an earlier terminal cause, while
+still performing owned cleanup. Cleanup failure retains the stronger explicit
+silence-unconfirmed diagnosis. Three regressions fail before the correction;
+independent combined boundary/error review passed 323 tests including actual
+libmpv0.40 nested cleanup. This is separate from root-ACK causal ownership.
+
+Final combined publication verification: Python3.12 default 2682 /65 skips in
+72.65s; Python3.11 focused 392 in 2.77s. The boundary/rename/EQ snapshot passed all 47
+workflow-selected libmpv cases on 0.37 (403.17s) and 0.40 (403.06s). After the
+separate three-line terminal-error delta, seven affected native cases passed on
+each version (46.44s/46.88s). Final production digest:
+`788f30eb6f142227a083fa4a39cfb5b7ec34dd569b931df42a3289677c2ba855`.
+The next hosted run must independently verify the final revision, including
+production Unix IPC; earlier failures and frozen radio digests are unchanged.

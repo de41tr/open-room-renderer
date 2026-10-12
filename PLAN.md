@@ -66,3 +66,10 @@ full local default-suite and Python3.11 targeted verification. Limited
 ARMv7 emulated ABI/API evidence does not fill native installation/hardware gaps.
 Nested ancestry, original-app/hardware audio and two-host sync remain explicit
 limits. Do not erase the earlier unexplained Snapcast failure with later passes.
+
+Current repair: 5d64bfb exposed a native nested-load cleanup regression. Keep
+admitted readiness/cleanup distinct from post-ready observation and replay the
+complete native lane before publication. Atomic rename and duplicate EQ JSON
+have independent concrete failure proofs. The older readiness/cleanup terminal
+ERROR relabeling has a separate reviewed correction. Next evaluate narrowly
+provable root-ACK ownership without claiming unproved container/restart cases.

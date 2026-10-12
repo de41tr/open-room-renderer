@@ -1295,3 +1295,24 @@ and 3.13, 435 focused Python3.11 tests, 17 real-backend 0.37 cases including rec
 and stalls, and six 0.40 navigation/ownership/staging/uncertainty cases. Normal
 native CI limits are unchanged. Frozen long-radio evidence belongs to its own
 recorded production/source hashes rather than these later revisions.
+
+
+### Pending load observations and ambiguous EQ input
+
+`test_admitted_load_observer_boundary.py` separates admitted readiness/cleanup
+from post-ready source ownership, including same-generation station retries,
+backend errors and stale marker cleanup. The existing optional
+`test_libmpv_load_cleanup.py` is a required regression check for actual decoded
+nested descendants that cannot establish outer ancestry: failure must confirm
+native silence before returning. The earlier 5d64bfb failure remains recorded.
+
+`test_eq_duplicate_fields.py` rejects duplicate JSON fields at every nested
+object level for EQ commands and persisted libraries. It verifies unchanged
+backend/state/files and valid explicit library reload; the separate active-DSP
+and gain parsers retain their existing contracts. These parser checks are
+UNIT/MOCK, not native/audio measurements.
+
+`test_admitted_load_terminal_error.py` separately proves that a previous terminal
+backend error survives both readiness outcomes and an error observation during
+owned Stop cleanup. Owned cleanup still runs; a failed cleanup must continue
+to expose unconfirmed silence. This does not prove external-root causality.

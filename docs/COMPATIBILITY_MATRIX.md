@@ -111,7 +111,7 @@ outer provenance is lost. Owner-fenced failed-load cleanup now confirms Stop
 and actual idle before reporting a controlled readiness failure; failed cleanup
 remains explicitly uncertain. Actual nested-M3U decoding and cleanup are tested.
 
-Per-load native options now use named arguments shared by mpv0.37 and0.40,
+Per-load native options now use named arguments shared by mpv0.37 and 0.40,
 avoiding the positional insertion-index change in0.38. Actual0.40 and native CI0.37 start/options/
 reset and gain checks passed. This fixes
 option transport compatibility, not approximate byte-range timestamp accuracy.
@@ -254,3 +254,17 @@ paused/stopped selections cannot import foreign media fields. Unit/race checks
 and actual libmpv0.37/0.40 observer/recovery proof pass; scheduled native event
 serialization is separate from delivered network callbacks and Unix IPC.
 Already-admitted load/readiness replacement remains outside this guarantee.
+
+
+At 5d64bfb, both hosted architectures failed only the native nested-playlist
+cleanup case (46 other native cases passed); other runtime gates passed. The
+reviewed pending-load observation boundary restores owned cleanup without
+claiming nested playlist support or causal proof of raw external takeover during
+readiness. Atomic rename has real local HTTP/reload evidence with synthetic
+storage/discovery faults. Duplicate EQ JSON now rejects before mutation while
+valid preset loading remains supported. Neither adds hardware/provider claims.
+
+The repair snapshot passed all 47 local native cases on libmpv0.37/0.40; the
+separate terminal-error delta then passed seven affected native cases on each.
+Final combined default verification passed 2682 /65, plus 392 Python3.11 focused
+checks. Hosted final-revision Unix IPC and architecture checks remain separate.

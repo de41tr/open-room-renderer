@@ -60,7 +60,16 @@
    reviewed installer/docs floor is now >=0.37 and passed hosted checks; do
    not weaken source ownership to accept older players. Continue
    meaningful protocol/source stability work, not cosmetic test growth.
-9. Navigation/action/foreign-observation fixes are integrated and reviewed. Final
+9. Published 5d64bfb failed the native nested-cleanup case on both architectures,
+   despite 46 other native cases and all later runtime gates passing. The reviewed
+   admitted-load boundary repair restores owned cleanup; all 47 local native
+   cases passed on 0.37/0.40 before the separate terminal-error delta, followed by
+   seven affected native passes per version afterward. Final 2682 /65 default and
+   392 Python3.11 focused checks passed. Verify the next hosted result. Keep this failure visible. Atomic rename and
+   duplicate EQ-field rejection are separate reviewed changes. Ordinary-load
+   terminal-error preservation has its own reviewed correction; root-ACK causal
+   ownership remains the next bounded follow-up.
+   Navigation/action/foreign-observation fixes are integrated and reviewed. Final
    Python3.12/3.13 default suites passed 2602 /65 skips; Python3.11 focused 435.
    Native0.37 control/recovery/stall/ownership passed 17; 0.40 targeted cases passed 6.
    Check the new hosted result independently. Stop/Pause intent survives transient
