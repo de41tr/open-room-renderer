@@ -259,3 +259,15 @@ The real libmpv and Unix IPC fixtures now include paused seek to10 seconds and
 forward/backward HTTP/SOAP checks at response time. AP10 isolated default suite:
 1590 passed, nine opt-in skips; extended libmpv/null seek passed separately.
 Byte-range timing uses bitrate estimates and has no precise VBR acceptance claim.
+
+## Native installation profiles
+
+`test_native_installation.py` stages only temporary prefixes and checks source
+receipts, version/architecture preflight, neutral/explicit ports, stable identity,
+symlink/traversal/modified-file uninstall safety and static user-unit syntax.
+Actual isolated native pip installation and manifest removal also passed on
+x86_64/Python3.12/mpv0.40; no service was enabled. The CI workflow now repeats
+real isolated package installation/import/config identity/description/uninstall
+on its standard x86_64/AArch64 runners, separately from actual Unix IPC playback.
+ARMv7, systemd boot, physical ALSA/DAC and original Android remain untested.
+AP14 rebased isolated default suite: 1616 passed, nine explicit native skips.

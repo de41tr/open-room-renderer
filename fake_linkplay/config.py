@@ -65,8 +65,8 @@ class Config:
     model_number: str = "alpha-0.1"
     model_url: str = ""
     uuid: str | None = None
-    http_api_port: int = 80
-    upnp_port: int = 80
+    http_api_port: int = 8080
+    upnp_port: int = 8080
     mirror_port_80: bool = False
     bind_address: str = "0.0.0.0"
     advertise_ip: str | None = None

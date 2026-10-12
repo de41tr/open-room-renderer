@@ -11,7 +11,7 @@ def test_wiimu_response_points_to_description() -> None:
     packet = response_packet(cfg, "ssdp:wiimudevice").decode()
     assert "ST: ssdp:wiimudevice" in packet
     assert "USN: uuid:00000000-0000-4000-8000-000000000000::ssdp:wiimudevice" in packet
-    assert "LOCATION: http://127.0.0.1:80/description.xml" in packet
+    assert "LOCATION: http://127.0.0.1:8080/description.xml" in packet
 
 
 def test_wiim_home_profile_ssdp_uses_discovery_uuid() -> None:

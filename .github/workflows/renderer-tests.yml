@@ -70,3 +70,35 @@ jobs:
         env:
           ORR_TEST_UNIX_IPC: "1"
         run: .venv-ci/bin/python -m pytest -q -s tests/test_mpv_unix_integration.py
+
+      - name: Verify isolated native installation and owned uninstall
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          prefix="$RUNNER_TEMP/orr-native"
+          .venv-ci/bin/python scripts/install-native.py --prefix "$prefix"
+          "$prefix/venv/bin/python" -I - "$prefix" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          from xml.etree import ElementTree
+          import fake_linkplay
+          from fake_linkplay.config import Config, load_config
+          from fake_linkplay.upnp_description import description_xml
+          prefix = Path(sys.argv[1]).resolve()
+          assert Path(fake_linkplay.__file__).resolve().is_relative_to(prefix / "venv")
+          first = load_config(prefix / "config.yaml")
+          second = load_config(prefix / "config.yaml")
+          assert first.uuid == second.uuid and first.uuid
+          assert first.http_api_port == first.upnp_port == Config().http_api_port == 8080
+          first.advertise_ip = "127.0.0.1"
+          ElementTree.fromstring(description_xml(first))
+          receipt = json.loads((prefix / "installation-receipt.json").read_text())
+          assert receipt["mode"] == "installed"
+          assert receipt["source"]["revision"] and receipt["source"]["source_sha256"]
+          print("Installed site-packages, stable identity, neutral ports and description verified.")
+          print("Installation architecture:", receipt["environment"]["machine"])
+          print("No service enabled, no physical audio or reboot claim.")
+          PY
+          .venv-ci/bin/python "$prefix/uninstall.py" --prefix "$prefix" --uninstall
+          test -f "$prefix/state/uuid"
+          test ! -e "$prefix/venv/bin/open-room-renderer"

@@ -406,3 +406,33 @@ Configured preset checkpoint is published as
 `84d7caeda4f3c4fc823217305fc0a6529735b2a7`; its
 [CI run 38187800513](https://github.com/de41tr/open-room-renderer/actions/runs/38187800513)
 passed default, libmpv and production Unix IPC lanes on both architectures.
+
+## AP14 native installation and safe profiles
+
+Neutral core/client defaults and normal checkout runners now use port8080 with
+a stable identity. Explicit app-compatible configuration is separate; port80
+and fresh identity are individually opt-in. Launch/acceptance helpers no longer
+automatically run the entire renderer with sudo. Explicit existing YAML remains
+unchanged; migration guidance preserves old state rather than deleting it.
+
+The native installer uses a new private prefix, native Python/venv/mpv checks,
+source/dependency receipts and an owned-file manifest. It does not enable a
+service, create accounts or change security/network settings. Uninstall removes
+only unchanged owned files, preserving edited config, runtime identity and
+unknown files. Valid YAML replaces the unusable TOML example. User units and an
+optional restricted non-root port80 system template are documented separately.
+
+Independent review resolved prefix quoting/whitespace, stage-only checks and
+32-bit ARM userspace labeling. Rebased isolated default suite: 1616 passed, nine
+explicit native skips. Actual isolated x86_64 installation used Python3.12.14,
+mpv0.40 and19 resolved packages; installed-site-packages import, stable identity,
+neutral ports, explicit port80, description and static systemd verification
+passed. Actual uninstall preserved modified/unknown/runtime files. The new CI
+step repeats installation/import/identity/uninstall on each native architecture;
+its result is pending this publication. No systemd runtime/reboot, ARMv7, Pi/DAC
+or original Android acceptance is claimed.
+
+AP10 published as `349a56ccafb707e9ee2052335cdaf439e1c27c31`. Both native jobs
+in [run38188276268](https://github.com/de41tr/open-room-renderer/actions/runs/38188276268)
+passed1590 default tests, seven libmpv cases and two actual Unix IPC cases,
+including observed seek positions before HTTP/SOAP replies.

@@ -8,30 +8,40 @@ It is alpha. It is useful. It is also a little weird in places because network a
 
 ## Start Here
 
-Install the system programs with your distro's package manager:
+Use Linux with Python **3.11+**, venv support, and native **mpv 0.35+**. See
+[Getting Started](GETTING_STARTED.md) for distribution prerequisites, ARM status,
+audio checks, service setup, and uninstall instructions.
 
-```text
-python3, Python venv support, mpv, curl, jq, ip/iproute2
-optional: tcpdump
+For an isolated user installation from this checkout:
+
+```bash
+python3 scripts/install-native.py --dry-run
+python3 scripts/install-native.py
+~/.local/share/open-room-renderer/venv/bin/open-room-renderer serve --config ~/.local/share/open-room-renderer/config.yaml
 ```
 
-Then set up and start the project:
+The installer checks prerequisites, installs into a new private prefix, records
+source/dependency versions and owned files, and generates a reviewable user unit.
+It does **not** install distro packages, start services, change firewall settings,
+or use sudo. The default profile uses port **8080** and a stable local identity.
+
+For editable development instead:
 
 ```bash
 ./scripts/dev-setup.sh
 ./scripts/run.sh
 ```
 
-The setup script does not install distro packages. It only checks what it needs, prints missing tools, creates `.venv`, and installs the Python package.
-
-In a second terminal:
+In a second terminal, with the development dependencies installed:
 
 ```bash
 ./scripts/test-curl.sh
 ./scripts/acceptance-open-source-client.sh
 ```
 
-If the acceptance script passes, the basics are alive: discovery, status, play, pause, resume, and stop through an open-source client-level path.
+Curl checks HTTP endpoints. The acceptance helper also exercises a real
+open-source client and local discovery. Live playback and discovery still depend
+on the selected media, network, and audio device.
 
 ## What It Does Today
 
@@ -40,7 +50,7 @@ Working in this alpha:
 - advertises itself on the local network,
 - exposes a local renderer/control API,
 - can be discovered by open-source WiiM/Linkplay-style clients,
-- has been tested with WiiM Home-style local network control,
+- has real open-source client and app-shaped HTTP/SOAP/GENA test coverage; original Android app acceptance remains untested,
 - can play TuneIn-style streams,
 - can play direct DRM-free audio URLs,
 - uses `mpv` for actual playback,
@@ -85,90 +95,69 @@ Not goals:
 
 ## Quick Checks
 
-After `./scripts/run.sh`, try:
+After starting either default profile:
 
 ```bash
-curl "http://127.0.0.1/httpapi.asp?command=getStatusEx" | jq
-curl "http://127.0.0.1/description.xml"
+curl "http://127.0.0.1:8080/httpapi.asp?command=getStatusEx" | jq
+curl "http://127.0.0.1:8080/description.xml"
 ```
 
-Or just use:
-
-```bash
-./scripts/test-curl.sh
-```
-
-The real smoke test is still:
-
-```bash
-./scripts/acceptance-open-source-client.sh
-```
-
-Curl proves the web endpoints respond. Acceptance proves a real open-source client path can control it.
+With a development checkout, run `./scripts/test-curl.sh` for playback diagnostics
+or `./scripts/acceptance-open-source-client.sh` for the open-source client path.
+Both default to port 8080. An explicit `API_PORT` / `UPNP_PORT` overrides it.
 
 ## Running It Day To Day
 
-Normal start:
+`./scripts/run.sh` and `./scripts/run-dev.sh` select the neutral, unprivileged
+profile in `configs/config.example.yaml`. Neither invokes sudo or replaces the
+persisted UUID on restart. The native installer also generates a user-service
+unit; review [Getting Started](GETTING_STARTED.md) before enabling it.
 
-```bash
-./scripts/run.sh
-```
-
-Developer diagnostics mode:
-
-```bash
-./scripts/run-dev.sh
-```
-
-`run-dev.sh` uses the plain example config and is mostly useful when you are debugging scripts, curl output, or open-source client acceptance. For phone-app discovery, use `run.sh`.
-
-The old `fake-linkplay` command still exists as a temporary compatibility alias for older local scripts.
+Use `ORR_CONFIG=/absolute/path/config.yaml ./scripts/run.sh` to retain an explicit
+custom YAML profile. The old `fake-linkplay` command remains a compatibility alias.
 
 ## Trying The Phone App
 
-The default config now uses port 80 because some phone apps probe plain `http://device-ip/` during discovery or setup. Some phone apps also expect a more app-shaped discovery profile, especially mDNS.
-
-Use the normal runner when you want to test discovery in the app:
+App compatibility is an explicit experimental profile:
 
 ```bash
-./scripts/run.sh
+./scripts/run-app-compat.sh
 ```
 
-This enables:
+This enables app-shaped discovery, SSDP, mDNS, and only the implemented
+TuneIn-style service surface, on port **8080** by default. It keeps a stable,
+separate identity in `.state/app-compat`. A compatible response shape does not
+prove original Android app acceptance.
 
-- SSDP,
-- mDNS,
-- app-compat identity/profile fields,
-- HTTP and description XML on port `80`,
-- a fresh device identity by default,
-- only the TuneIn-style service surface that currently works.
-
-The release profile intentionally does not advertise non-functional music services. Earlier local experiments could make extra services appear in the app, but showing buttons that do not work is annoying. For this alpha, the app-facing profile stays honest: TuneIn-style playback only.
-
-Port 80 is the default. Linux requires elevated privileges for port 80, so the script explains why and then asks for `sudo`:
+Some controller apps probe plain `http://device-ip/` (port 80) even when discovery
+advertises another port. To explicitly request that endpoint:
 
 ```bash
-./scripts/run.sh
+APP_COMPAT_PORT80=1 ./scripts/run-app-compat.sh
 ```
 
-`run-app-compat.sh` is kept as a compatibility alias for older local workflows. New users should prefer `run.sh`.
+The runner checks whether it can bind the requested low port and explains a
+failure; it never elevates the whole renderer. For a dedicated appliance, the
+optional non-root system service limits its capability to `CAP_NET_BIND_SERVICE`.
+It requires administrator review and manual installation; see
+[Getting Started](GETTING_STARTED.md#optional-app-compatible-port-80-service).
+Do not give a shared Python interpreter global capabilities or run the renderer
+as root to work around the check.
 
-Why port 80 can matter: many real network audio devices expose their local HTTP control surface on plain `http://device-ip/`, which means TCP port 80. Some controller apps correctly read the advertised SSDP/mDNS port, but still probe or assume port 80 during early discovery or handshake. If nothing answers there, the app may decide the device is missing or broken.
+`APP_COMPAT_FRESH=1` deliberately creates a new testing identity. Normal starts
+no longer do so. Existing invocations of `run.sh` with explicit `APP_COMPAT_*`
+variables route to the separate app runner. To keep an old generated identity,
+use its existing YAML via `ORR_CONFIG`; see the migration notes in Getting Started.
 
-If you want the app-compat profile without sudo/port 80, run:
+Default neutral ports:
 
-```bash
-APP_COMPAT_PORT80=0 ./scripts/run.sh
-```
+- HTTP API and UPnP description: TCP `8080`
+- SSDP: UDP `1900`
+- mDNS, when enabled: UDP `5353`
+- mpv IPC: private per-install socket (checkout: `.state/mpv.sock`)
 
-Also force-stop and reopen the phone app after failed attempts. These apps can cache discovery results pretty aggressively.
-
-Default ports:
-
-- HTTP API: `80`
-- UPnP description: `80`
-- SSDP discovery: UDP `1900`
-- mpv IPC socket: `/tmp/open-room-renderer-mpv.sock`
+Use this unauthenticated control service only on a trusted LAN. Do not publish
+its ports to the internet.
 
 ## If Discovery Does Not Work
 
@@ -179,7 +168,7 @@ Most discovery problems are boring network problems:
 - Wi-Fi client isolation is enabled,
 - firewall blocks UDP multicast or local HTTP,
 - the advertised IP is wrong.
-- mDNS is off because you used a custom/dev config instead of `run.sh`.
+- mDNS is disabled in the neutral checkout config; the native install and app-compat profiles enable it.
 - the app cached an older failed attempt.
 
 Useful local helper:
@@ -246,10 +235,10 @@ plex_user_info_mode: "not_login"
 Then start that config directly:
 
 ```bash
-sudo .venv/bin/open-room-renderer serve --config .state/plex-experiment.yaml
+ORR_CONFIG=.state/plex-experiment.yaml ./scripts/run.sh
 ```
 
-`sudo` is only for binding port `80`. If you move the experiment to an unprivileged port, you can run without it, but some controller-app discovery flows may stop seeing the renderer.
+Before starting, set `http_api_port` and `upnp_port` to `8080`, set `mirror_port_80` to `false`, and choose a private writable `mpv_socket`. Some controller-app discovery flows may still require the separately reviewed port-80 service.
 
 For a manually authorized Plex token, the experimental code looks for `.state/plex_user_info.json`. Use only a token from your own Plex account and never commit or paste this file:
 
@@ -308,7 +297,7 @@ Small PRs are very welcome: docs, tests, Raspberry Pi notes, mpv robustness, con
 Good first tasks:
 
 - improve Raspberry Pi OS setup notes,
-- add mpv version detection,
+- extend native installation and systemd hardware verification,
 - improve missing-mpv error messages,
 - add firewall/discovery troubleshooting,
 - add more config validation tests,

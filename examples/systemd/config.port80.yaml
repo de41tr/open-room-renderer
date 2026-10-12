@@ -1,0 +1,31 @@
+# Optional companion to system-port80.service.example; installed manually.
+friendly_name: "Open Room Renderer"
+manufacturer: "Independent"
+model_name: "Linux Room Renderer"
+uuid: null
+discovery_uuid: null
+mdns_instance_name: null
+wiim_home_profile: true
+http_api_port: 80
+upnp_port: 80
+mirror_port_80: false
+mirror_http_on_upnp_port: true
+bind_address: "0.0.0.0"
+advertise_ip: null
+mpv_socket: "/run/open-room-renderer/mpv.sock"
+state_dir: "/var/lib/open-room-renderer"
+auto_spawn_mpv: true
+default_volume: 50
+default_mute: false
+enable_mdns: true
+enable_ssdp: true
+log_wiim_http_details: false
+source_experiment_variant: "tunein"
+tunein_streams_value: "200"
+tunein_minimal_capability: true
+enable_plex_service: false
+enable_plex_legacy_gate: false
+enable_stream_service_sentinels: false
+proxy_allowed_lan_hosts: []
+podcast_presets: []
+experimental_sources: []

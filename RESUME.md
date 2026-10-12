@@ -9,7 +9,9 @@
    and independently reviewed (1458 passed with seven real libmpv cases).
    AP10 confirmed-seek work is implemented and independently reviewed, with
    isolated default/native-null validation. Active EQ restore, native install
-   and playlist-source fixes are implemented but still in review/integration. Native IPC/ARM64 CI
+   and playlist-source fixes are implemented but still in review/integration.
+   AP14 installation is independently reviewed and has an isolated1616-pass
+   default snapshot; publication adds native installer CI acceptance. Native IPC/ARM64 CI
    passed at the preceding published checkpoint; monitor each new commit's CI.
 5. AP01 is published in draft PR #1 as `2e3068ede2b095b572f7249bc7bdaadecdd9641a`.
    The exact-state PyWiiM checkpoint is published as `a079284e14b1d5f86286b97ff0e5237ca5014bde`.
@@ -28,7 +30,9 @@
    native CI run 38187041169 also passed both architectures.
    Configured music-preset selection is published as
    `84d7caeda4f3c4fc823217305fc0a6529735b2a7`; both CI architectures passed.
-   Preserve concurrent seek, active EQ restore, native install and format fixes.
+   AP10 is published as `349a56ccafb707e9ee2052335cdaf439e1c27c31`, with
+   native CI run38188276268 passed on both architectures.
+   Preserve active EQ restore, native install, format and log privacy changes.
 6. Keep production mpv JSON IPC. AF_UNIX is denied in this cloud sandbox; use
    fake-backend tests and optional libmpv/null-output validation with honest scope.
 7. Review all changed files and commit content for private data before publishing;

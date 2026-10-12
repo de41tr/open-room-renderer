@@ -2,8 +2,8 @@
 set -euo pipefail
 
 HOST="${HOST:-127.0.0.1}"
-API_PORT="${API_PORT:-80}"
-UPNP_PORT="${UPNP_PORT:-80}"
+API_PORT="${API_PORT:-8080}"
+UPNP_PORT="${UPNP_PORT:-8080}"
 TEST_URL="${TEST_URL:-https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3}"
 BASE="http://${HOST}:${API_PORT}/httpapi.asp"
 

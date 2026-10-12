@@ -81,3 +81,10 @@ Live stations and invalid absolute bounds fault; stale or failed work cannot
 claim completion. Generated local30-second media has REAL_BACKEND/null evidence.
 Optional range reload stays off by default and its bitrate-derived global
 position is approximate; shifted-range HTTP behavior has synthetic coverage.
+
+AP14 neutral startup/client ports default to8080 and identity persists. Explicit
+app-compat/port80 is separate; no launcher automatically elevates to root.
+Temporary native installation/import/uninstall and static systemd-unit checks
+passed on x86_64. Native AArch64 installer execution is added to CI, pending its
+first result. Neither that nor existing AArch64 playback CI proves ARMv7 or a
+Pi/XU4/systemd-reboot/DAC deployment. See GETTING_STARTED.md for exact profiles.
