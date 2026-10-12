@@ -75,6 +75,14 @@ jobs:
           ORR_TEST_UNIX_IPC: "1"
         run: .venv-ci/bin/python -m pytest -q -s tests/test_mpv_unix_integration.py
 
+      - name: Exercise production Unix IPC across repeated playback lifetimes
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 6
+        env:
+          ORR_TEST_UNIX_STABILITY: "1"
+          ORR_TEST_UNIX_STABILITY_SECONDS: "180"
+        run: .venv-ci/bin/python -m pytest -q -s tests/test_mpv_unix_stability.py
+
       - name: Verify isolated native installation and owned uninstall
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: |
