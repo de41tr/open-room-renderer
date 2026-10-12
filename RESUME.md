@@ -28,18 +28,38 @@
    one load/request and 1128 KiB peak RSS growth. It predates the ICY correction;
    do not credit the finite policy with that duration. Its production hash is
    f1cb53c37437134ec76c8eac37fed47c20e6a419f4cc0cd19b081a5f0882ee61.
-   A separate finite-policy hour began 05:05:34.826684 UTC and is due around
-   06:05:35 UTC; await its actual result and cleanup. Production digest is
+   The separate finite-policy hour PASSED 3600.675s plus full cleanup at
+   06:05:35 UTC: one load/request, 362 protocol agreements, 1936 KiB peak RSS
+   growth. All 26 frozen file hashes stayed unchanged. Production digest is
    b3ae8a5c7ad01696b12be6feb52c16fe51fed9ad6128015992b6d14fd055b5ef; source digest
    ff5f255e08cc54255cff69621c7633da1c604109208d07b389201fbceb1a2735.
 8. The extended changing-ICY endurance mode is now reproducible and opt-in only.
    Its exact 240.821s replay passed 30/30 autonomous title/callback and metadata
    agreements, one source/load/request, retained-history plateau and cleanup.
    Frozen source b8c7c3828554d0d0bdd0cd04258d01537956d38a2a191b41d43879603f3fc2b4.
-   After current one-hour completion/cleanup, plan a separately frozen four-hour
-   changing-title run; confirm exact hashes and actual start before claiming it
-   active. Keep original failed/zero/current-constant results separately scoped.
-   Continue meaningful protocol/source stability work, not cosmetic test growth.
+   A separately frozen four-hour changing-title run is ACTIVE from
+   06:06:23.924497 UTC; earliest qualifying finish is 10:06:23.924497 UTC plus
+   teardown. Its source digest is the one above and production digest the one
+   in step 7. No extended-duration pass is claimed before completion. Keep
+   original failed/zero/final-constant results separately scoped.
+   Checkpoint 3e74b24 adds five real rolling-HLS cases. CI38210542104 has
+   failures in both expanded libmpv lanes: segment-return loses playback-time
+   during its two-second hold. x86 also loses time immediately after child path
+   observation in M3U/PLS tests; ARM passes those. Both fixture assumptions are
+   reproduced: native segment503 EOF and path-before-decoder readiness. Reviewed
+   tests-only corrections preserve acceptance. Integrated native replay passes:
+   eleven affected cases on both 0.37/0.40. Final publication including the
+   installer floor passed 2368 default tests /62 skips and 274 Python3.11
+   targeted tests.
+   Await new hosted results; all other preceding gates passed.
+   The reviewed duplicate saved-gain rejection is locally verified: 2336 default
+   passes /62 skips and 216 Python3.11 focused passes. It changes persistence
+   only; immutable long-run source/production hashes remain their original ones.
+   The actual mpv 0.35.1 audit found missing playlist ancestry: M3U/PLS HTTP
+   Play fails 502 under strict ownership. Upstream added it only in 0.37; the
+   reviewed installer/docs floor is now >=0.37. Verify new hosted results; do
+   not weaken source ownership to accept older players. Continue
+   meaningful protocol/source stability work, not cosmetic test growth.
 9. No vendor cloud auth/registration, OEM keys, DRM bypass, firmware execution or
    proprietary publication. No binaries, APKs, original IDs, credentials or raw
    captures. Inspect every publication and verify its remote SHA. Keep production

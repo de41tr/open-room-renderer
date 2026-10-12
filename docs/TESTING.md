@@ -246,6 +246,10 @@ DAC, ARM or Android certification follows from these local tests.
 `test_backend_gain.py`, `test_gain_api.py` and `test_gain_persistence.py` cover
 paired acknowledgement/readback, startup/load/resume, external backend resets,
 cancellation, atomic saved settings, malformed input and uncertain gain reporting.
+Saved gain rejects duplicate JSON fields (including escaped field names) without
+rewriting the file. CLI startup rejects such ambiguous state before constructing
+the backend; absent state still uses configured defaults. The 4096-byte document limit
+and valid version-1 gain format are unchanged.
 Backend confirmation failure is different from a subsequent storage failure.
 SOAP gain reads fault and GENA omits gain values while confirmation is unknown.
 
@@ -1053,6 +1057,15 @@ changing ICY metadata. This is REAL_BACKEND/null, not production Unix IPC,
 physical audio, WAN reliability or original-app acceptance.
 
 
+The separately frozen final finite-policy constant-title baseline passed
+3600.675s with one load/request, 362 protocol agreements and 1936 KiB peak RSS
+growth, followed by verified cleanup. Source digest:
+`ff5f255e08cc54255cff69621c7633da1c604109208d07b389201fbceb1a2735`;
+production digest:
+`b3ae8a5c7ad01696b12be6feb52c16fe51fed9ad6128015992b6d14fd055b5ef`.
+Its original constant-title harness is distinct from the later ICY extension;
+these hashes, rather than later branch heads, define the accepted snapshot.
+
 ### Uninterrupted changing-ICY endurance
 
 The same sustained fixture also supports an explicitly opted-in changing-ICY
@@ -1080,7 +1093,8 @@ native playlist-entry identity, one handle/load/source/HTTP connection,
 recovery-free decoded progress, resource budgets, lease renewal and complete
 cleanup checks apply. Native total/forward cache bytes are capped separately;
 a >=240-second run also requires four one-minute epochs and a retained-history
-plateau over the final minute. Shorter smoke runs report no verified plateau.
+plateau across all samples from 180 seconds onward (at least fifty late
+samples). Shorter smoke runs report no verified plateau.
 The source is frozen and hashed; the unchanged process-group supervisor caps
 native execution at requested duration+90 seconds including bounded cleanup.
 This lane is local-only and never automatically schedules an hour in routine CI.
@@ -1124,8 +1138,8 @@ publisher exposes only clock-ready entries in an advancing five-segment playlist
 without ENDLIST, encryption or alternate variants. It does not implement a player.
 
 Five cases cover a playlist 503 outage, one failed renderer reload and return;
-a transient segment 503 outage that stalls without EOF and resumes on the same
-native entry; and owner Pause, Stop or replacement during observed zero-attempt
+a real pending segment HTTP response whose body is held, then delivered without
+EOF while retaining the same native entry; and owner Pause, Stop or replacement during observed zero-attempt
 recovery backoff. Owner commands must cancel that retry and prevent stale HLS
 fetch/reload after availability returns. The 15s production stall grace and
 0.5/1/2s retries are not shortened. The transient segment case returns before that
@@ -1134,7 +1148,47 @@ grace; it is not a separate full-duration HLS stall-exhaustion claim.
 Unsolicited GENA is checked before status reads. Canonical live URI, duration 0,
 queue, native progress, HTTP/SOAP/GENA, volume/mute readback and complete cleanup
 must agree. Gain is read back, not acoustically measured. Local five-case runtime
-was 76.65s; the normal hosted lane includes them without raising the 15-minute
+was 76.65s for the original fixture; the normal hosted lane includes five cases
+without raising the 15-minute
 job cap. Each subprocess is independently bounded. Only aggregate synthetic
 request observations are printed. Scope is REAL_BACKEND/libmpv/null, not HLS
 through production Unix IPC, real WAN, original app, DRM or physical audio.
+
+
+At 3e74b24, actual Ubuntu mpv0.37/FFmpeg6.1.1 revealed that repeated segment
+503s can end the HLS demuxer about 1.5s after its initial cache stall. Native
+END_FILE/EOF, idle and disappearance of path/time proved teardown, not just a
+missing clock. The no-EOF fixture therefore now holds an actual pending HTTP
+body, with open-transport, no-EOF, stationary-time and delivery checks. Playlist
+503/reload/owner cases remain unchanged; no missing timestamp is tolerated.
+
+The same hosted run exposed a native child-readiness race: path/current/playing
+can appear before the demuxer opens and playback-time exists. A public on_load
+hook reproduced the original failure on mpv0.37/0.40 with both M3U and PLS. The
+bounded test helper now waits for a nonnegative clock while pinning exact native
+child identity and renderer ownership, then still requires >0.25s actual decoded
+progress. Only exact property-unavailable and finite negative preroll are retried;
+invalid values, changed ownership, other errors or a stalled clock fail. Actual
+invalid-child and Stop-during-readiness negative controls still fail. Production
+code, history policy, timeouts, pause/default-reset and stale guards are unchanged.
+
+
+The exact integrated correction passed 2363 default tests /62 opt-in skips.
+Private official Ubuntu mpv0.37 plus FFmpeg6.1.1 generation/decoding passed all
+five HLS cases, six child-cache cases and 27 deterministic readiness guards in
+112.46s. mpv0.40 plus FFmpeg7.1.5 passed the eleven native cases in 111.15s.
+These are actual x86_64 library replays with compatible host dependencies,
+not a full Ubuntu installation or a substitute for the native hosted gates.
+
+
+## Minimum mpv version is a playback contract
+
+An actual private official Debian mpv0.35.1/FFmpeg5.1 runtime can decode direct
+sources and perform gain/DSP controls, but lacks both playlist ancestry fields.
+Real HTTP M3U/PLS playback therefore returns 502 rather than falsely confirming
+the selected container. Upstream's 0.37 interface changes identify when the
+required properties were added. Installer boundary tests reject 0.35/0.36 and
+accept 0.37; actual 0.35 rejection also occurs before creating the install prefix.
+README and Getting Started now state >=0.37 and the Bookworm package limitation.
+This audit uses privately extracted official packages, not a native ARMv7 or
+full Bookworm installation, and does not relax the renderer's ownership proof.

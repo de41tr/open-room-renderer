@@ -2,6 +2,30 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
+## Current checkpoint (06:31 UTC)
+
+Draft PR remains unmerged. The preceding `62b089ad` passed all three CI jobs.
+At `3e74b24`, expanded live-HLS/libmpv lanes failed: both architectures lost native
+playback-time during the segment-outage two-second hold; four other HLS cases
+passed. x86 also lost playback-time immediately after a child-path observation
+in both finite playlist readiness tests; ARM passed those. Both fixture causes
+are now reproduced and corrected under unchanged playback acceptance. Integrated
+replay passed all eleven affected native cases on both 0.37/0.40, plus 2368
+default tests /62 skips after the prerequisite-floor correction. The new hosted revision remains pending; the failed
+checkpoint is not relabeled green. Every other 3e74b24 native gate and the
+Python3.11 floor passed.
+
+The independently frozen final finite-policy constant-title hour PASSED:
+3600.675s baseline, 3600.589s native progress, one load/request, 362 protocol
+agreements, 1936 KiB peak RSS growth and complete cleanup. All 26 source hashes
+remained unchanged. Its production/source digests are recorded below; this is
+loopback AAC/libmpv0.40/null evidence, separate from changing-ICY, Unix IPC or
+hardware. Earlier failed and zero-policy runs keep their original scope.
+
+A separately frozen four-hour changing-ICY run began 06:06:23.924497 UTC;
+earliest qualifying finish is 10:06:23.924497 UTC plus teardown. Its requested
+14400s duration and all gates are unchanged. It remains IN_PROGRESS.
+
 ## Baseline
 
 - Source and reference review agree on base commit `3672b9838e9c39ae8191613108f0d91a5cada97d`.
@@ -1214,3 +1238,70 @@ production-Unix HLS or hardware certification.
 The final combined harness/HLS snapshot passed 2322 default tests with 62 explicit
 opt-in skips in 66.66s. Production code remains unchanged; the current one-hour
 run and future four-hour changing-title run retain separate frozen provenance.
+
+
+## Ambiguous saved gain fails closed
+
+A duplicate JSON field in local gain.json previously selected its last value:
+for example mute true followed by false restored an unmuted desired setting,
+or volume 0 followed by 100 restored maximum UI volume. Duplicate version could
+also conceal an unsupported version. The loader now rejects all duplicate keys,
+including escaped equivalents, before CLI backend construction, without rewriting
+state. Valid version-1 files, absent-state defaults and the 4096-byte bound remain
+unchanged. This is local corrupt-state handling; no remote exploit, startup
+autoplay or acoustic output was demonstrated.
+
+Independent review approved the narrow parser change. Baseline regressions
+reproduced twelve failures; the exact patched default suite passed 2336 tests
+with 62 explicit opt-in skips in 68.33s. Python3.11 gain/lifecycle/DSP/identity
+checks passed 216 tests; independent valid-state differential and focused
+startup checks also passed. The ongoing endurance runner stays on its immutable
+pre-change production digest; do not silently credit later whole-source hashes.
+
+
+## Reproduced native fixture assumptions
+
+Both failures from 3e74b24 are now reproduced. mpv can expose a selected child
+path before decoder time exists; a public on_load hold reproduces the original
+readiness failure on both 0.37/0.40 and both playlist formats. The corrected
+bounded helper pins native and renderer ownership before/after every clock read
+and retains >0.25s genuine progress plus all original policy/reset/stale guards.
+Invalid media and an actual Stop during readiness still fail.
+
+For HLS segment 503s, native 0.37 reaches ordinary EOF after roughly 1.5s of cache
+stall. The missing timestamp follows real teardown, not a property-read quirk.
+The specifically no-EOF test now holds a real segment response body before
+release and verifies unchanged position, open transport, no EOF, delivered body,
+same native entry and resumed decoding. Other 503/reload/owner cases stay intact.
+These are tests-only corrections, not changes to production recovery behavior.
+Private official Ubuntu 0.37/FFmpeg6.1.1 packages reproduced the failure and the
+corrected case; 0.40 also passes it. No system installation or security setting
+was changed; this private library route is distinct from full hosted Ubuntu CI.
+
+
+Exact integrated replay after gain and fixture corrections: 2363 default passes
+/62 opt-in skips in 68.42s; actual private Ubuntu mpv0.37/FFmpeg6.1.1 passed the
+five HLS and six child-cache cases plus 27 readiness guards (38 total) in 112.46s.
+Actual mpv0.40/FFmpeg7.1.5 passed the eleven native cases in 111.15s. Both native
+runs verified cleanup; standard hosted Ubuntu architecture acceptance remains
+separate. Production digest after the persistence-only change is
+`0f005051620620aa68f62a7d8e99e320af442dc1c35c80be0b67d617bb14a99b`.
+The one-hour and active four-hour runs retain their original earlier digests.
+
+## Corrected native mpv minimum
+
+Actual official Debian mpv0.35.1 reproduces a supported-runtime gap: M3U/PLS
+children decode, but both real HTTP Play requests fail honestly with 502 because
+native playlist ancestry is unavailable. Other direct-source/gain/DSP and guarded
+command checks can pass; that does not satisfy the complete playback contract.
+Upstream [introduced the required playlist-path properties in mpv0.37](https://github.com/mpv-player/mpv/blob/v0.37.0/DOCS/interface-changes.rst).
+The installer and prerequisite docs now require mpv >=0.37; strict source
+ownership is unchanged. Boundary checks reject 0.35/0.36 and accept 0.37+.
+The actual official 0.35.1 executable is rejected before an installation prefix
+is created. Debian Bookworm's default package, including ARM builds, therefore
+does not meet this floor; no OS, repository or system package was changed.
+
+Final publication snapshot including the installer floor passed 2368 default
+tests /62 explicit skips in 69.12s. Python3.11 gain/lifecycle/DSP/identity,
+readiness and installer checks passed 274 tests in 4.28s. Hosted native checks
+remain required for this new revision; routine CI limits are unchanged.

@@ -47,12 +47,18 @@ CI durations are restored.
 
 Current checks: complete owned-player death/error/fresh-backend restart now
 passes both native architectures, as do the finite-history and changing-metadata
-policies. The separately frozen constant-title finite-policy hour remains active.
-A reviewed bounded changing-ICY endurance mode passes four-minute replay and
-negative sensitivity; next run it for four hours after current-hour cleanup,
-without changing production or routine CI duration. Rolling live-HLS
-playlist/segment outages and owner fences now pass locally; verify the five
-added standard native CI cases without extending normal job limits. Limited
+policies. The separately frozen constant-title finite-policy hour passed with
+complete cleanup. The bounded changing-ICY endurance mode passes four-minute
+replay and negative sensitivity; its separate four-hour run is active from
+06:06:23.924 UTC, earliest finish 10:06:23.924 UTC plus cleanup. Keep its frozen
+provenance separate from later code changes. Rolling live-HLS cases pass locally
+but the expanded hosted libmpv lanes failed at 3e74b24. Both fixture assumptions
+(segment503 native EOF and path-before-decoder readiness) are reproduced and
+corrected; integrated 0.37/0.40 replay passes. Verify the next standard CI
+without extending normal job limits. The actual mpv 0.35 playlist ancestry gap
+now has an honest >=0.37 installation floor; verify that correction in CI. A confirmed
+ambiguous persisted-gain parsing gap now has a reviewed fail-closed fix with
+full local default-suite and Python3.11 targeted verification. Limited
 ARMv7 emulated ABI/API evidence does not fill native installation/hardware gaps.
 Nested ancestry, original-app/hardware audio and two-host sync remain explicit
 limits. Do not erase the earlier unexplained Snapcast failure with later passes.

@@ -207,3 +207,26 @@ outage and return plus owner Pause/Stop/replacement during recovery backoff.
 Production timings are unchanged; no custom player is introduced. Five new
 hosted cases remain pending their own result. This is separate from production
 Unix HLS, real WAN, encryption/DRM, adaptive variants and hardware acceptance.
+
+
+The final finite-policy constant-title hour passed 3600.675s with one load/request,
+362 protocol agreements, peak RSS growth 1936 KiB and complete cleanup. This is
+separately frozen loopback AAC/libmpv0.40/null evidence, not changing-ICY endurance.
+The four-hour changing-ICY run started 06:06:23.924 UTC and remains in progress.
+
+At 3e74b24, hosted HLS playlist recovery and three owner-command cases passed;
+segment-return failed on both architectures because native playback-time became
+unavailable during the two-second stall hold. x86 also exposed unavailable time
+immediately after a native child path appeared in two playlist tests. All other
+native gates and Python3.11 passed. The transition/readiness failures remain
+reproduced: native segment503 EOF and path-before-decoder readiness. Tests-only
+corrections preserve actual playback/identity checks; integrated 0.37/0.40
+replay passed all eleven affected native cases. The new hosted result remains
+pending. The failed checkpoint is not relabeled green.
+
+
+The supported native mpv floor is >=0.37. Actual 0.35.1 decoding does not provide
+playlist ancestry: M3U/PLS HTTP Play fails honestly with 502. The installer now
+rejects that incomplete runtime before creating its prefix. Debian Bookworm's
+default 0.35.1 package, including ARM variants, is insufficient; this is a concrete
+prerequisite limitation, separate from hardware/ARMv7 installation acceptance.
