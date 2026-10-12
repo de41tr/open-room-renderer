@@ -2,40 +2,38 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (14:34 UTC)
+## Current checkpoint (14:55 UTC)
 
-Published standard-DMR head `0d11eea` passed all three standard jobs, verified
-at 14:16:09 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38259889939 .
-Both native architectures passed the unchanged standard-client flow over actual
-production Unix IPC in both profiles: distinct decoded entries, parsed LastChange
-before polling, complete subscriptions and cleanup. All 65 libmpv checks and every
-previous stage passed. x86_64/AArch64 jobs took 796.797s/856.717s under 900s.
-The floor passed in 163.34s/56.96s, motivating the measured same-runner rebalance
-below. Original-app/hardware and duplicate-service first-entry client limits remain.
+Queue-save head `3fd5df8` passed all three standard jobs, verified at 14:51:55 UTC:
+https://github.com/de41tr/open-room-renderer/actions/runs/38264218792 .
+All previous stages pass, including 65 libmpv checks, production Unix IPC, both
+real clients, stress/install/clocked/discovery/Snapcast. x86_64/AArch64 jobs took
+845.124s/865.381s under 900s. The floor rebalance is now hosted-verified:
+3665 +245 /72 skips in 135.98s/97.64s, preserving every case and time cap.
+Native-group timing remains imbalanced; assess a small same-runner redistribution
+before later features consume the remaining job margin, without reducing coverage.
 
-The next reviewed feature saves the current queue as a private URL playlist with
-one bodyless GET on existing listeners. It preserves canonical order, duplicates,
-name, selected index and mode without playback, backend-sync or resolver effects.
-Every item is checked; proven public radio becomes a stable anonymous reference,
-while stale provenance, unproven station semantics and unsupported queues reject
-as a whole. The new file is private and no-clobber. This is not a lossless backup:
-metadata, playback position/state and shuffle history are omitted. Restore remains
-an explicit separate operation, stopped by default. No bind/auth/CORS change.
+The next reviewed feature edits saved URL playlists offline: append, remove and
+move into a new private output file. Both complete source and result are validated
+before publication. Name, mode, exact URL strings and duplicate occurrences survive;
+selection follows the original occurrence's position rather than URL equality.
+Removing the selected item chooses its next surviving neighbor, or the final
+previous item; empty results fail. Move destinations are final one-based positions.
+No renderer request, playback change or file overwrite occurs during editing.
 
-The small existing radio target predicate is extracted separately with unchanged
-favorite behavior. Helper-only tests, including actual native favorite playback,
-pass 132 checks. Independent feature/native review is complete. The real queue-CLI
-flow now saves a paused three-item queue without changing native identity/position,
-restores its exact file stopped, then explicitly decodes the selected source.
-Both libmpv versions pass the unchanged 18s/20s bounds with all prior assertions.
+One new loopback/MOCK chain verifies stopped restore. The existing native CLI flow
+adds all three offline commands while playback is paused, then separately restores
+the edited order stopped and explicitly plays its selected source. All prior
+proofs remain. Exact final libmpv 0.37/0.40 probes pass in 11.879s/12.263s; the flow
+has 24 CLI children and 11 cases under unchanged 4s child/18s inner/20s outer bounds.
+Native selection is unique B around an appended duplicate A; selected-duplicate
+identity permutations are covered by pure tests, not overstated as native evidence.
 
-Final combined defaults pass 3910 /72 opt-in skips on Python 3.12 (193.07s).
-Python 3.11 groups pass 3665 +245 /72 in 121.63s/72.84s, with 32 existing warnings.
-Only the existing favorites CLI file changes groups; exact collection is
-3982 = 3737 +245, without omissions, duplicates or altered skip/xfail metadata.
-All existing watchdogs/job caps remain. Production digest:
-`5c35cfc1128bff993b3a6d405fd712212ea4e0dd65943cf8a3307e40face47ba`.
-This new checkpoint still requires complete hosted verification after publication.
+Final combined defaults pass 3973 /72 skips on Python 3.12 (187.79s), and
+3728 +245 /72 on Python 3.11 (120.26s/68.94s), with 32 existing warnings.
+Production digest:
+`e1b03a2f0dacd6fa93c54ef9f145df93a9854f4c2e4a488deed98a2563169701`.
+The new checkpoint still requires its own complete hosted verification.
 
 The requested behavior-neutral extraction began at 09:14:53 UTC after its prerequisite green gate.
 It moves exactly three stateless metadata-edit helpers into metadata_formatting.py,

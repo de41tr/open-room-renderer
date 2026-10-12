@@ -549,6 +549,27 @@ playability or valid-boundary truncation claim. An `.m3u8` suffix does not decid
 acceptance. The input, generated JSON and complete SOAP request have independent
 1 MiB limits. Existing output, including aliases of input, cannot be overwritten.
 
+`playlist append INPUT OUTPUT URL...`, `playlist remove INPUT OUTPUT --index N`
+and `playlist move INPUT OUTPUT --from-index N --to-index M` edit valid v1 JSON
+files offline. They preserve name/mode, exact URL bytes and duplicates. The
+selected occurrence is tracked by original position, never URL equality. Append
+preserves its index. Removing before selection decrements the index; removing
+after selection preserves it. Removing the selected occurrence selects the next
+surviving neighbor at the same final index, or the final previous item. Removing
+the only item fails. Move's destination is its final one-based position after
+removal; a same-position move still writes a new equivalent output. Positive
+ASCII indices reject signs, whitespace, leading zeros and out-of-range values.
+
+The complete source and result must pass schema, explicit-URL and escaped SOAP
+validation, so removing an invalid final entry cannot repair an invalid file.
+Independent 1 MiB input/output/request and 1000-item bounds remain unchanged.
+Input bytes are untouched, and output must be new, including no input aliases.
+There are no overwrite, host, port, name/mode or play flags. Editing constructs no
+HTTP session, performs no resolver/media/backend work, and changes no playback.
+Explicit restore remains separate and stopped by default. The format still omits
+metadata, playback state/position, history and provenance; private URL-bearing
+files carry no future-playability guarantee.
+
 Files require an existing parent directory, private 0600 temporary writes and
 atomic publication. Creation never clobbers an existing destination; overwrite
 requires its explicit flag. Known final symlinks/nonregular files are rejected;

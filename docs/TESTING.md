@@ -1947,3 +1947,61 @@ Final integrated queue-save defaults pass 3910 tests /72 opt-in skips on Python
 32 existing warnings. Production digest:
 `5c35cfc1128bff993b3a6d405fd712212ea4e0dd65943cf8a3307e40face47ba`.
 The new checkpoint's hosted result remains pending until actually observed.
+
+
+## Offline authored-playlist append, remove and move
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_playlist_edits.py \
+  tests/test_playlist_edits_cli.py tests/test_playlist_edits_renderer.py
+```
+
+These 63 focused checks pass in-process without adding CLI subprocess-heavy
+parameter matrices. The pure transformation tests cover all five modes, exact URL
+bytes and duplicates, detached source/result values, every small-list selection
+and move permutation, removal of the selected next/final neighbor, singleton
+rejection, strict integer indices including bool rejection, and complete-source
+validation before removal. Both source and result must satisfy the strict v1
+schema, explicit-URL contract and full escaped SOAP bound.
+
+The CLI tests forbid client/session/socket/renderer/backend construction during
+editing. They cover strict positive ASCII arguments (including no leading zeros
+and private failure of very long numeric input), unsupported flags, immutable
+source bytes, new private 0600 output, no-op moves, invalid final source items,
+input/count/JSON/full-SOAP limits before temporary creation, input alias rejection,
+and private diagnostic routing. All three commands are checked to use the same
+existing bounded reader and no-clobber writer. Unchanged `test_playlist_files.py`
+and `test_playlist_m3u_cli.py` retain the detailed real syscall coverage for
+symlinks, hardlinks, FIFO/nonregular input and output, permissions, no-clobber races,
+cleanup, and truthful pre/postcommit durability failures. Existing create/import/
+save-current/restore tests remain unchanged.
+
+One LOCAL HTTP + MOCK test chains all three edits while a renderer is actively
+playing. It checks unchanged complete renderer state, queue identity, backend
+calls, resolver calls and HTTP request count throughout the offline operations.
+A separate existing restore then consumes the final document with exact duplicate
+URLs, selection and shuffle-once mode, issuing just one ReplaceQueue and stopping
+without resolving or loading the new media. This is not native decoder, WAN,
+provider, hardware or acoustic evidence, and does not promise future playability.
+
+The existing native queue-CLI flow also retains all prior assertions and extends
+the paused save-current scenario through append/remove/move into new files. It
+checks selection preservation around an appended duplicate, unchanged paused
+native entry, position and renderer activity, exact 0600 JSON and immutable input
+bytes. The edited file then restores stopped across the existing 0.52s observation interval;
+only a separate explicit Play decodes its selected second source at native entry 7.
+The flow now has 24 real CLI children and 11 cases with unchanged 4s child, 18s
+inner and 20s outer bounds. Frozen production passed once each on real libmpv
+0.37 (11.879s probe /12.42s pytest) and 0.40 (12.263s /12.81s). This remains
+ctypes/null REAL_BACKEND evidence, not production Unix IPC, hardware audio, WAN
+or future remote-URL playability. No additional long-running native sweep was used.
+
+Final combined offline-edit defaults pass 3973 /72 opt-in skips on Python 3.12
+(187.79s), and 3728 +245 /72 on Python 3.11 (120.26s/68.94s), retaining 32 existing
+warnings. Production digest:
+`e1b03a2f0dacd6fa93c54ef9f145df93a9854f4c2e4a488deed98a2563169701`.
+The predecessor 3fd5df8 passed all three standard jobs, verified at 14:51:55 UTC:
+https://github.com/de41tr/open-room-renderer/actions/runs/38264218792 .
+Native x86_64/AArch64 job times were 845.124s/865.381s; all prior gates passed.
+Its floor partition passed 3665+245/72 in 135.98s/97.64s without changed caps.
+The new offline-edit checkpoint's hosted result remains pending until observed.

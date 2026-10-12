@@ -5,8 +5,8 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint 0d11eea passed all three jobs, verified at
-   14:16:09 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38259889939
+   Latest completed checkpoint 3fd5df8 passed all three jobs, verified at
+   14:51:55 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38264218792
    Python floor uses complete bounded groups on the same runner, preserving the
    3-minute step/8-minute job; both native jobs retain all existing gates.
    The prior 763f7f7 remains failed solely for its floor time budget.
@@ -256,3 +256,14 @@ helper, feature, native acceptance, floor rebalance and docs as separate commits
 in one checkpoint. Then require full standard CI. Next useful work is offline
 saved-playlist editing, followed by stable-ID favorite target repair, each bounded
 and independent of live queue ownership. Keep all private/hardware/deadline limits.
+
+14:55 UTC: queue-save CI is fully green, including hosted floor groups
+135.98s/97.64s. Offline append/remove/move is reviewed and final defaults pass
+3973/72 on Python 3.12 (187.79s), and 3728+245/72 on 3.11 (120.26s/68.94s).
+Both native versions pass the extended 24-command flow with unchanged bounds.
+Publish feature, native and docs separately, then monitor full CI. Next private
+package is stable-ID favorite target repair, followed by bounded SSDP-only
+candidate discovery if its safety/acceptance contract remains small. A native
+same-runner rebalance assessment is underway; do not raise caps or lose cases.
+Keep no new integration/publication before the predecessor is green. Existing
+19:00/20:00 UTC stabilization/stop times and all hardware/privacy limits remain.

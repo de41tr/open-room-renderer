@@ -4,20 +4,20 @@ Branch: `dot/renderer-autonomous-20261012`; base: `3672b9838e9c39ae8191613108f0d
 Work window ends 2026-10-12 20:00 UTC. Stabilization only after 19:00 UTC.
 No main-branch edits, merge, or release.
 
-## Current functional package (14:34 UTC)
+## Current functional package (14:55 UTC)
 
-Standard-DMR checkpoint `0d11eea` has full standard CI green, including the new
-actual production-Unix flow on both architectures. Publish the reviewed safe
-current-queue URL-playlist save next, keeping the existing canonical-target
-extraction separate from the feature, native extension and scheduling rebalance.
-Final combined defaults and both short native versions pass; require hosted CI.
-No listener/auth/CORS or playback-core change is introduced.
+Queue-save checkpoint `3fd5df8` has full standard CI green, including the floor
+rebalance. Publish independently reviewed offline saved-playlist append/remove/
+move, with its separate native CLI extension and exact final default-suite evidence.
+No live queue/player change or new file-overwrite behavior is introduced.
 
-After this gate, prioritize offline append/remove/reorder of saved playlists,
-then explicit managed-favorite target repair preserving its stable ID. These fill
-real user-facing gaps without live queue mutation. Keep each bounded and separately
-reviewed. A DSP CLI is lower-confidence and should not be started merely to fill
-time. Browser UI, per-instance DAC override and additional longruns remain deferred.
+Next: explicit managed-favorite target repair preserving stable ID/position, with
+an explicit policy for content metadata and unchanged already-admitted playback.
+Then prefer bounded SSDP-only candidate discovery for headless setup over the
+lower-confidence DSP CLI. Discovery must never fetch untrusted LOCATION URLs or
+claim authenticated ownership; retain limits and actual same-host acceptance.
+Keep each package isolated while preceding CI runs; integrate/publish only after
+its predecessor is green. Defer broad core work, browser UI and new multihour runs.
 Stabilization starts 19:00 UTC; active work ends 20:00 UTC today.
 
 ## Ordered work

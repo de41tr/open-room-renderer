@@ -423,6 +423,48 @@ already exist. Existing files are preserved unless you explicitly pass
 symlinks and nonregular files are rejected. Keep these files private: URL query
 strings can contain secrets even when usernames/passwords are rejected.
 
+To edit an existing authored JSON playlist without changing playback:
+
+```sh
+open-room-renderer playlist append evening.json extended.json "https://media.example.test/third.wav"
+open-room-renderer playlist remove extended.json shortened.json --index 1
+open-room-renderer playlist move shortened.json reordered.json --from-index 2 --to-index 1
+open-room-renderer playlist restore reordered.json
+```
+
+Each edit reads `INPUT` and writes a **new `OUTPUT`**, leaving the input bytes
+unchanged. The output must not exist or alias the input, and its parent directory
+must already exist. There are no overwrite, host, port, name, mode or play options.
+Edits never contact a renderer, resolve URLs, fetch media or change active playback.
+The separate `restore` replaces the queue **stopped by default**; playing still
+requires an explicit playback request.
+
+Name, all five modes and exact URL strings survive, including duplicates, query
+strings, Unicode and percent-escape case. Indices use one-based positive ASCII
+digits, without signs, spaces or leading zeros. Selection follows URL
+**occurrences by original position**, not URL equality:
+
+- `append` adds one or more URLs in the supplied order and preserves selection.
+- `remove --index N` removes exactly one occurrence. Removing before selection
+  shifts the selected index down by one; removing after it leaves selection alone.
+  Removing the selected item selects its next surviving neighbor at that same
+  final index, or the final previous item if there is no next neighbor. Removing
+  the only item is rejected.
+- `move --from-index N --to-index M` places that occurrence at final position M
+  after removal and preserves the selected occurrence, even for equal URLs.
+  Both indices must be within the original item count. Moving an item to its
+  current position still creates a new equivalent file.
+
+These commands edit valid files; they cannot repair malformed playlists by
+removing a bad entry. The whole source and result must pass the existing strict
+v1 schema, URL and complete escaped SOAP limits before any output temporary is
+created. The 1000-item limit and independent 1 MiB input, output and request limits
+still apply. Publication uses the same private 0600 atomic no-clobber writer.
+A crash-durability warning means the output was already saved; inspect it before
+retrying. Keep the files private: URLs can contain secrets or expire, and valid
+syntax does not guarantee future playability. Editing adds no titles, artwork,
+durations, provider metadata, playback position/state or shuffle history.
+
 To save a point-in-time URL playlist from the current queue:
 
 ```sh
