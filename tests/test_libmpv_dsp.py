@@ -3,8 +3,9 @@
 Opt in with ORR_TEST_LIBMPV_PATH=/absolute/path/to/libmpv.so.2 and run:
     PYTHONPATH=. .venv/bin/pytest -q -s tests/test_libmpv_dsp.py
 
-HTTP DSP/gain commands use production HttpApi and inherited MpvBackend controls;
-a test-only ctypes command adapter connects them to actual libmpv. Generated,
+Actual CLI DSP children and HTTP gain/EQ setup commands use production HttpApi
+and inherited MpvBackend controls; a test-only ctypes command adapter connects
+them to actual libmpv. Generated,
 finite stereo tones have peak <= 500/32768 and volume is explicitly set to 25
 (amplitude 1/64). Only negative EQ gain is used. Output is a local native-float
 PCM file; no physical device, external media, or network media is opened.
@@ -36,6 +37,7 @@ import struct
 import subprocess
 import sys
 from typing import Any
+from urllib.parse import quote
 import wave
 
 import pytest
@@ -125,14 +127,18 @@ async def _exercise_digital_dsp(
     session: ClientSession | None = None
     listener: socket.socket | None = None
     monitor: asyncio.Task | None = None
+    children: list[asyncio.subprocess.Process] = []
+    control_requests: list[dict[str, Any]] = []
+    held_requests: list[asyncio.Task] = []
+    release_request = asyncio.Event()
     evidence: dict[str, Any] = {
         "lane": "REAL_BACKEND/digital-PCM-DSP", "library": library_path,
-        "control_transport": "HTTP -> HttpApi -> MpvBackend -> test ctypes -> libmpv",
+        "control_transport": "CLI/HTTP -> HttpApi -> MpvBackend -> test ctypes -> libmpv",
         "load_transport": "direct inherited MpvBackend.loadfile; no HTTP play/readiness assertion",
         "output": "local raw native-float PCM; no hardware/DAC",
         "source_peak": _SOURCE_PEAK / 32768,
         "safe_volume": _SAFE_VOLUME, "safe_amplitude_gain": _SAFE_GAIN,
-        "captures": {},
+        "captures": {}, "cli": [],
     }
     try:
         evidence["mpv_version"] = backend.read_property("mpv-version")
@@ -151,7 +157,25 @@ async def _exercise_digital_dsp(
         )
         api = HttpApi(cfg, RendererState.from_config(cfg), backend)
         await api.initialize_channel_balance()
-        runner = web.AppRunner(api.app(), shutdown_timeout=1)
+
+        @web.middleware
+        async def record_control(request, handler):
+            control_requests.append({
+                "method": request.method, "path": request.raw_path,
+                "content_length": request.content_length,
+                "transfer_encoding": request.headers.get("Transfer-Encoding"),
+            })
+            if cancel_ready is not None and request.query.get("command") == "getChannelBalance":
+                # Cancel the fixture while its actual CLI child owns an
+                # outstanding request, after the original bypass sample proof.
+                held_requests.append(asyncio.current_task())
+                cancel_ready.set()
+                await release_request.wait()
+            return await handler(request)
+
+        app = api.app()
+        app.middlewares.append(record_control)
+        runner = web.AppRunner(app, shutdown_timeout=1)
         await runner.setup()
         await web.SockSite(runner, listener).start()
         monitor = api._state_monitor_task
@@ -163,6 +187,35 @@ async def _exercise_digital_dsp(
                     body = await response.text()
                     assert response.status == expected_status, (value, response.status, body)
                     return json.loads(body) if response.content_type == "application/json" else body
+
+            async def cli(*arguments: str, wire: str) -> Any:
+                root = Path(__file__).resolve().parents[1]
+                marker = len(control_requests)
+                child: asyncio.subprocess.Process | None = None
+                try:
+                    async with asyncio.timeout(4):
+                        child = await asyncio.create_subprocess_exec(
+                            sys.executable, "-m", "fake_linkplay.cli", "dsp", *arguments,
+                            "--host", "127.0.0.1", "--port", str(port), cwd=root,
+                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                        )
+                        children.append(child)
+                        stdout, stderr = await child.communicate()
+                finally:
+                    if child is not None and child.returncode is None:
+                        child.kill()
+                        await asyncio.wait_for(child.wait(), timeout=2)
+                assert child is not None and child.returncode == 0, (arguments, stdout, stderr)
+                assert stderr == b"", stderr
+                received = control_requests[marker:]
+                assert received == [{
+                    "method": "GET", "path": "/httpapi.asp?command=" + quote(wire, safe=""),
+                    "content_length": None, "transfer_encoding": None,
+                }], received
+                result = json.loads(stdout)
+                evidence["cli"].append({"arguments": list(arguments), "result": result,
+                                        "requests": received, "child_reaped": True})
+                return result
 
             def graph() -> Any:
                 return backend.read_property("af")
@@ -223,8 +276,8 @@ async def _exercise_digital_dsp(
             assert graph() == []
             _assert_identity(await capture("bypass"), (1, 1))
             if cancel_ready is not None:
-                cancel_ready.set()
-                await asyncio.Future()
+                await cli("balance", "get", wire="getChannelBalance")
+                raise AssertionError("Cancellation probe unexpectedly completed its CLI read")
 
             assert await command("EQChangeFX:" + _PLUGIN) == {"status": "OK"}
             await set_band(freq=1000, gain=-12, mode=1, q=1)
@@ -278,12 +331,28 @@ async def _exercise_digital_dsp(
                 "limitation": "Does not imply idle libmpv validates arbitrary lavfi graph internals",
             }
 
-            assert await command("EQOff") == {"status": "0"}
+            assert await cli("eq", "off", wire="EQOff") == {
+                "request_acknowledged": True, "command": "eq", "value": "off",
+            }
             assert graph() == []
             _assert_identity(await capture("eq_bypass_restored"), (1, 1))
+            assert await cli("eq", "on", wire="EQOn") == {
+                "request_acknowledged": True, "command": "eq", "value": "on",
+            }
+            assert graph() == cut_graph
+            restored = await capture("eq_restored_after_cli_on")
+            assert restored["channels"][0]["normalized_rms_ratio"] == pytest.approx(expected_cut, rel=0.02)
+            assert restored["channels"][1]["normalized_rms_ratio"] > 0.8
+            assert await cli("eq", "off", wire="EQOff") == {
+                "request_acknowledged": True, "command": "eq", "value": "off",
+            }
+            assert graph() == []
             for value, expected in ((-1, (1, 0)), (1, (0, 1)), (0, (1, 1))):
-                assert await command(f"setChannelBalance:{value}") == "OK"
-                assert float(await command("getChannelBalance")) == value
+                wire_value = str(value) if value else "0.0"
+                assert await cli("balance", "set", str(value), wire=f"setChannelBalance:{wire_value}") == {
+                    "request_acknowledged": True, "command": "balance set", "value": value,
+                }
+                assert await cli("balance", "get", wire="getChannelBalance") == {"balance": value}
                 _assert_identity(await capture(f"balance_{value}"), expected)
             assert graph() == []
 
@@ -304,8 +373,22 @@ async def _exercise_digital_dsp(
             evidence["captured_bytes"] = offset
     finally:
         try:
-            if runner is not None:
-                await runner.cleanup()
+            try:
+                for child in children:
+                    if child.returncode is None:
+                        child.kill()
+                        await asyncio.wait_for(child.wait(), timeout=2)
+            finally:
+                try:
+                    # A disconnected client's held request may no longer be
+                    # tracked by aiohttp's runner, so explicitly finish this
+                    # fixture-owned handler before normal server cleanup.
+                    release_request.set()
+                    if held_requests:
+                        await asyncio.wait_for(asyncio.gather(*held_requests), timeout=2)
+                finally:
+                    if runner is not None:
+                        await runner.cleanup()
         finally:
             if listener is not None:
                 listener.close()
@@ -322,7 +405,9 @@ async def _exercise_digital_dsp(
         assert runner is None or not runner.sites
         assert backend._handle is None and backend.process is None
         assert monitor is None or monitor.done(), "HttpApi monitor survived cleanup"
+        assert all(child.returncode is not None for child in children), "CLI child survived cleanup"
     evidence["cleanup"] = {"handle_closed": True, "monitor_done": True, "no_pending_tasks": True}
+    evidence["cli_children_reaped"] = len(children)
     return evidence
 
 
@@ -342,6 +427,7 @@ def test_http_api_real_libmpv_digital_dsp(tmp_path: Path) -> None:
     assert evidence["lane"] == "REAL_BACKEND/digital-PCM-DSP"
     assert evidence["cleanup"] == {"handle_closed": True, "monitor_done": True, "no_pending_tasks": True}
     assert evidence["cleanup_after_cancellation"] is True
+    assert evidence["cli_children_reaped"] == len(evidence["cli"]) == 9
     print(json.dumps(evidence, sort_keys=True))
 
 
