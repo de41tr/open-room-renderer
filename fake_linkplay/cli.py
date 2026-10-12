@@ -22,6 +22,7 @@ from .config import load_config
 from .http_api import HttpApi
 from .mdns import MdnsAdvertiser
 from .mpv_backend import BackendError, MpvBackend
+from .playlist_cli import add_playlist_parser, run_playlist
 from .queue_client import PrivateClientArgumentParser, add_queue_commands, run_queue_command
 from .ssdp import SsdpServer
 from .state import RendererState
@@ -248,6 +249,7 @@ def build_parser(*, private_client_errors: bool = False) -> argparse.ArgumentPar
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8080)
     add_queue_commands(sub)
+    add_playlist_parser(sub)
     favorites = sub.add_parser("favorites", help="manage renderer-owned local favorites")
     favorites_sub = favorites.add_subparsers(dest="favorites_cmd", required=True)
     for name in ("list", "add", "save-current", "rename", "delete"):
@@ -281,9 +283,11 @@ def main(argv: list[str] | None = None) -> int:
     """
 
     argv = sys.argv[1:] if argv is None else argv
-    args = build_parser(private_client_errors="queue" in argv).parse_args(argv)
+    args = build_parser(private_client_errors=any(arg in {"queue", "playlist"} for arg in argv)).parse_args(argv)
     if args.cmd == "queue":
         return run_queue_command(args)
+    if args.cmd == "playlist":
+        return run_playlist(args)
     if args.cmd == "serve":
         asyncio.run(serve(args.config))
         return 0
