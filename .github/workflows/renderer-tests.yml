@@ -124,13 +124,14 @@ jobs:
             tests/test_libmpv_dsp.py tests/test_libmpv_recovery.py \
             tests/test_libmpv_dsp_restore.py tests/test_libmpv_formats.py tests/test_libmpv_live_metadata.py \
             tests/test_libmpv_live_hls.py \
+            tests/test_libmpv_repeat_queue.py tests/test_libmpv_shuffle_queue.py \
             ::: \
             tests/test_libmpv_load_options.py tests/test_libmpv_station_cache.py tests/test_libmpv_load_cleanup.py \
             tests/test_libmpv_station_playlist_cache.py \
             tests/test_libmpv_stall_recovery.py tests/test_libmpv_queue_staging.py \
-            tests/test_libmpv_queue_navigation_intent.py tests/test_libmpv_repeat_queue.py \
+            tests/test_libmpv_queue_navigation_intent.py \
             tests/test_libmpv_favorites.py \
-            tests/test_libmpv_shuffle_queue.py tests/test_libmpv_queue_cli.py \
+            tests/test_libmpv_queue_cli.py \
             tests/test_libmpv_standard_dmr.py \
             tests/test_libmpv_source_ownership.py \
             tests/test_libmpv_admitted_load_root.py \
