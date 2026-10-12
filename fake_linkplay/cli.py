@@ -19,6 +19,7 @@ import requests
 from aiohttp import web
 
 from .config import load_config
+from .discovery_client import add_discovery_parser, run_discovery
 from .favorites_client import favorite_play_id, play_favorite
 from .favorites_target_client import set_favorite_url
 from .http_api import HttpApi
@@ -251,6 +252,7 @@ def build_parser(*, private_client_errors: bool = False) -> argparse.ArgumentPar
     p.add_argument("value", type=int)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8080)
+    add_discovery_parser(sub)
     add_transport_commands(sub)
     add_queue_commands(sub)
     add_playlist_parser(sub)
@@ -294,10 +296,20 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     legacy_favorite = (len(argv) > 1 and argv[0] == "favorites"
                        and argv[1] in {"list", "add", "save-current", "rename", "delete"})
-    private_errors = (any(arg in {"queue", "playlist", *COMMANDS} for arg in argv)
+    # There are no global CLI options. Preserve existing diagnostics when a
+    # legacy command uses "discover" as a name/value, while keeping malformed
+    # discovery invocations (including leading flags) private.
+    legacy_command = bool(argv) and argv[0] in {
+        "serve", "status", "pause", "resume", "stop", "play", "volume", "queue",
+        "playlist", "favorites", "print-description", "print-discovery-info", *COMMANDS,
+    }
+    private_discovery = "discover" in argv and not legacy_command
+    private_errors = (private_discovery or any(arg in {"queue", "playlist", *COMMANDS} for arg in argv)
                       or {"favorites", "play"} <= set(argv)
                       or ({"favorites", "set-url"} <= set(argv) and not legacy_favorite))
     args = build_parser(private_client_errors=private_errors).parse_args(argv)
+    if args.cmd == "discover":
+        return run_discovery(args)
     if args.cmd in COMMANDS:
         return run_transport_command(args)
     if args.cmd == "queue":
