@@ -2,26 +2,28 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (08:18 UTC)
+## Current checkpoint (08:57 UTC)
 
-Draft PR remains unmerged. `5d64bfb` failed the existing native nested-playlist
-cleanup case on both hosted architectures: a pending admitted load's child was
-misclassified as a post-ready foreign source, revoking owned cleanup. Each native
-lane passed its other 46 cases. Python3.11 and all subsequent Unix IPC, pywiim,
-stress, lifecycle, clocked, discovery and eleven-stage Snapcast gates passed.
-https://github.com/de41tr/open-room-renderer/actions/runs/38220673742 .
-The previous fully green checkpoint remains `2fc8296`.
+Draft PR remains unmerged. Published `b18b43e` passed all three standard jobs:
+https://github.com/de41tr/open-room-renderer/actions/runs/38223040208 .
+Both architectures passed the 47-test libmpv lane (46 actual native cases plus
+one node-encoding unit check), six production Unix cases, actual pywiim, stress,
+installed lifecycle, clocked transitions, discovery and eleven Snapcast stages.
+Python3.11 passed 2682 /65 skips. Separate local Python3.13 also passed 2682 /65.
 
-The reviewed correction separates admitted readiness/cleanup from post-ready
-observation. The complete 47-case local native lane passed on both libmpv0.37/0.40 before
-the separate terminal-error delta; seven affected native cases passed on each
-version afterward. Final Python3.12 default verification passed 2682 tests /65
-opt-in skips, plus 392 focused Python3.11 checks. This checkpoint also contains atomic rename and
-strict duplicate EQ-field rejection, with their separate evidence below.
-Normal CI timeouts and acceptance thresholds are unchanged. A separate reviewed
-three-line correction preserves earlier terminal backend errors across readiness
-and owned cleanup. Causal proof of external replacement during admitted readiness
-remains a separate open correction.
+The earlier `5d64bfb` failed nested-playlist cleanup on both architectures;
+its other 46 libmpv-lane cases and subsequent runtime gates passed. That failure
+is retained, and the admitted-readiness boundary/terminal-error repair is green
+at b18b43e. The next reviewed checkpoint narrows causal root replacement,
+atomically publishes initial identity, and verifies coherent stopped snapshots
+inside the existing deadline. Final combined local verification passed 2759 /66
+on Python3.11/3.12 and the full 60-test libmpv lane on 0.37/0.40. Its hosted result
+remains pending. The original parentless-root candidate was rejected on a real
+owned-EDL counterexample.
+
+The user-requested behavior-neutral extraction remains NOT_STARTED until the
+current fixes receive full green standard CI. Its separate 90-minute target and
+120-minute hard budget, scope and abort rule are recorded in PLAN/RESUME.
 
 At `3e74b24`, expanded live-HLS/libmpv lanes failed: both architectures lost native
 playback-time during the segment-outage two-second hold; four other HLS cases
@@ -575,7 +577,7 @@ production Unix IPC cases skipped locally. Independent review confirmed the
 public0.37 named-map contract and reran actual0.40 option application: start8
 reached about8 seconds, demuxer/seekability/cache applied, gain persisted, and
 all per-file options reset on ordinary replacement. Both an explicit libmpv
-case and a new production IPC case now run in CI. Actual0.37 execution awaits
+case and a new production IPC case now run in CI. Actual 0.37 execution awaits
 this revision's result; this does not certify bitrate-derived range timing.
 
 Log privacy is published as `de8b9b03d219e50734ff95295c307d34abf7f945`;
@@ -1482,3 +1484,73 @@ each version (46.44s/46.88s). Final production digest:
 `788f30eb6f142227a083fa4a39cfb5b7ec34dd569b931df42a3289677c2ba855`.
 The next hosted run must independently verify the final revision, including
 production Unix IPC; earlier failures and frozen radio digests are unchanged.
+
+
+## Causal root replacement is deliberately narrow
+
+The native load acknowledgement can provide its entry ID. A dedicated pending
+load token retains that causal ID without borrowing a later snapshot or changing
+the adopted-current/staging fields. Once the complete load wrapper returns, an
+agreeing active root entry with a different ID can veto readiness or owned
+cleanup; observed replacement reports ERROR and uncertain silence without a
+new Stop/load/gain mutation. Same-URL replacements are covered. The gain wrapper
+returns its original result while retaining all success/error/finally behavior.
+
+The first candidate was rejected before publication: native merge-files can
+create a new parentless EDL entry from our own source. The final guard excludes
+all edl:// roots from positive attribution, including genuinely external EDL
+replacements. A deterministic warmup/Stop/M3U/merge-files fixture on 0.37/0.40
+proves owned unready EDL still receives exactly one Stop and confirmed idle;
+EDL playback is not newly supported. Entry-level parentage ordering is supported
+by public mpv source, but not by a claim about arbitrary native scripts.
+
+Actual 0.37/0.40 proofs retain eight same/different-root observer, readiness and
+failed/cancelled-cleanup interleavings. They check continued foreign progress and
+gain, preserved canonical selection, uncertainty and later explicit Stop/Play
+recovery. These use direct HttpApi calls and a real libmpv command adapter/null
+sink; they do not add network-callback or production-Unix evidence by themselves.
+This is an observation-time veto, not atomic control over external writers.
+Replacement during the backend's inner unpause, failed unpause preventing ACK
+delivery, or replacement after cleanup's last snapshot but before Stop remain
+outside the guarantee. Missing/lost ACK, EDL/container attribution, range reload
+and native-core restart/reused IDs remain excluded.
+
+## First-run identity is never partially published
+
+Interrupted old UUID creation exposed an empty or seven-byte file, and another
+reader could accept the truncated nonempty value. Creation now writes/fsyncs a
+private same-directory file, atomically hard-links it without replacing a winner,
+removes only its own temporary name and syncs the directory. Competing creators
+return one fully published ID. Existing/explicit/legacy identities are neither
+rewritten nor silently regenerated; old nonempty truncated values are not repaired
+because they cannot be distinguished safely from intentional legacy IDs.
+
+Independent review found and fixed a pre-publication fdopen failure descriptor
+leak: the text stream does not own the raw descriptor, which closes in a finally
+before publication. Unsupported hard links or sync failures fail startup without
+a non-atomic fallback. Post-publication failures retain the complete identity.
+Actual local threads/eight competing subprocesses and synthetic fault paths are
+covered on Python3.11/3.12; author and independent full suites passed 2709 /65.
+These checks do not establish physical power-loss or ancestor-directory durability.
+
+## Coherent cleanup evidence uses the original deadline
+
+An intermittent idle=true/empty-playlist snapshot could retain prior path/time
+while separate mpv property reads straddled Stop. It appeared on 0.37/0.40 and
+published/candidate code; it is distinct from the prior idle=false active-audio
+regression. A test-only helper now requires one fresh idle+empty-path+empty-
+playlist sample before the original absolute command-start+4.5s deadline,
+including read time. It does not mix samples, add a time budget, ignore residue
+or change production Stop/readiness. Permanent residue, missing fields, backend
+errors, late/blocked reads and cancellation are tested. The old active-audio
+regression still fails this unchanged deadline on both native versions.
+Independent native 0.40 replay plus nine additional negative cases passed.
+
+Final exact combined verification: Python3.12 default 2759 /66 skips in 76.23s;
+Python3.11 default 2759 /66 in 77.19s. Both complete selected libmpv lanes passed
+60 cases: 47 REAL_BACKEND/null-or-PCM cases plus 13 UNIT helper checks. Actual 0.37
+completed in 408.84s; 0.40 in 411.34s. All existing thresholds/timeouts are unchanged.
+Production digest: `d1838974ffce99e18fa57bb9c470820306b4345f1cc12e4f74c37fb0385bbfea`.
+Hosted production-Unix/architecture validation for this exact revision remains
+its own gate before the requested behavior-neutral extraction begins. The
+separately frozen radio endurance source and evidence are not relabeled.

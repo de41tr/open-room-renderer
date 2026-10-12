@@ -1338,3 +1338,33 @@ UNIT/MOCK, not native/audio measurements.
 backend error survives both readiness outcomes and an error observation during
 owned Stop cleanup. Owned cleanup still runs; a failed cleanup must continue
 to expose unconfirmed silence. This does not prove external-root causality.
+
+
+### Acknowledged root identity and coherent Stop observations
+
+`test_admitted_load_root_identity.py` validates the pending load ACK token,
+invalid/missing ACKs, torn/old samples, gain confirmation and owned cleanup.
+`test_libmpv_admitted_load_root.py` exercises eight same/different-root
+interleavings using actual 0.37/0.40 decoding, unchanged 0.5s background observation,
+untouched foreign progress/gain and explicit recovery. Its owned merge-files EDL
+counterexample requires a warmup/Stop before M3U expansion for deterministic native
+preparation. EDL roots remain ambiguous, not newly supported playback.
+
+This proof applies after HttpApi receives the complete load wrapper ACK. It does
+not provide atomic protection against raw external writers during unpause or
+between final snapshot and Stop, nor attribution for missing ACKs, EDL/container
+roots, range reloads, arbitrary native scripts or restarted cores with reused IDs.
+Native child parentage is populated before playlist transfer in the public
+[0.37 load path](https://raw.githubusercontent.com/mpv-player/mpv/v0.37.0/player/loadfile.c)
+and [0.40 load path](https://raw.githubusercontent.com/mpv-player/mpv/v0.40.0/player/loadfile.c).
+The native merge transformation is distinct: see
+[0.37 merge implementation](https://raw.githubusercontent.com/mpv-player/mpv/v0.37.0/player/misc.c)
+and [0.40 merge implementation](https://raw.githubusercontent.com/mpv-player/mpv/v0.40.0/player/misc.c).
+
+The existing nested-cleanup test now samples a coherent stopped result before
+its same absolute 4.5s command deadline. It still requires actual decoded audio
+before cleanup, a fresh idle/empty-path/empty-playlist sample, retained error,
+subsequent explicit playback and full teardown. Twelve deterministic helper
+checks are UNIT; the actual libmpv case is REAL_BACKEND/null. The selected native
+lane contains 47 opt-in native cases and 13 deterministic checks, not 60 hardware
+tests. The former active-audio regression remains red with this helper.

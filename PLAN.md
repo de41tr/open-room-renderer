@@ -67,9 +67,30 @@ ARMv7 emulated ABI/API evidence does not fill native installation/hardware gaps.
 Nested ancestry, original-app/hardware audio and two-host sync remain explicit
 limits. Do not erase the earlier unexplained Snapcast failure with later passes.
 
-Current repair: 5d64bfb exposed a native nested-load cleanup regression. Keep
-admitted readiness/cleanup distinct from post-ready observation and replay the
-complete native lane before publication. Atomic rename and duplicate EQ JSON
+The 5d64bfb native nested-load cleanup regression is repaired and the complete
+b18b43e standard CI is green. The current final checkpoint adds narrowly proven
+observed root replacement, atomic first identity publication, and coherent
+cleanup sampling inside the existing deadline. Complete its native/hosted gates
+before the requested extraction. Atomic rename and duplicate EQ JSON
 have independent concrete failure proofs. The older readiness/cleanup terminal
 ERROR relabeling has a separate reviewed correction. Next evaluate narrowly
-provable root-ACK ownership without claiming unproved container/restart cases.
+provable root-ACK ownership excludes EDL/container/restart cases and raw-writer
+race windows; the original unrestricted parentless-root candidate was rejected.
+
+## Requested bounded behavior-neutral extraction
+
+User update 2026-10-12 08:35UTC: finish the already-running functional fixes and
+long tests without interruption, and require their complete standard CI to be
+green before starting any extraction. Then select one small, clearest HttpApi
+responsibility, preferably pure DIDL/XML/metadata formatting. Keep public HTTP,
+SOAP and GENA bytes/fields, errors, state, timing and interfaces unchanged.
+
+Target90 minutes, hard maximum 120 minutes including native CI verification.
+Record the actual UTC start, target finish and hard stop here and in RESUME.md
+when the green gate opens; the timer has NOT_STARTED. Use a separate refactor
+commit, existing regression coverage and only necessary extraction tests.
+No new dependencies/frameworks, large rewrite, or fundamental playback/recovery/
+queue-staging logic changes. If risky or unable to obtain native-green within
+the budget, abandon the extraction and retain a concrete next-iteration plan.
+Include a short target architecture covering protocol adapters, player core,
+queue, eventing, DSP and service adapters. Stabilization/deadline take priority.

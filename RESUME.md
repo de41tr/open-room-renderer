@@ -5,10 +5,10 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint 2fc8296 passed all three jobs, including the
+   Latest completed checkpoint b18b43e passed all three jobs, including the
    complete owned-player SIGKILL/error/fresh-backend explicit-restart tail:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38213572864
-   Both native architectures passed 44 libmpv and all six Unix cases. Normal
+   https://github.com/de41tr/open-room-renderer/actions/runs/38223040208
+   Both architectures passed 47 libmpv-lane checks (46 native/one unit) and six Unix cases. Normal
    limits stay 180s stress /6min step /15min native job /8min Python3.11 floor.
 4. Native evidence also verifies real pywiim, repeated-lifetime stress, installed
    CLI signals, discovery and all eleven same-host Snapcast stages. The earlier
@@ -68,7 +68,13 @@
    392 Python3.11 focused checks passed. Verify the next hosted result. Keep this failure visible. Atomic rename and
    duplicate EQ-field rejection are separate reviewed changes. Ordinary-load
    terminal-error preservation has its own reviewed correction; root-ACK causal
-   ownership remains the next bounded follow-up.
+   ownership now has a reviewed narrow correction. The original unrestricted
+   parentless-root guard was rejected: merge-files creates owned EDL. The revised
+   guard excludes EDL and retains owned cleanup. Final combined local suites
+   passed 2759 /66 on Python3.11/3.12 and 60 selected libmpv cases on 0.37/0.40
+   (47 actual native, 13 unit). Full standard CI must pass before extraction. Keep raw-writer/unpause/Stop
+   race, missing-ACK/container/range/restart exclusions explicit. Atomic identity
+   creation and coherent cleanup sampling are separately reviewed changes.
    Navigation/action/foreign-observation fixes are integrated and reviewed. Final
    Python3.12/3.13 default suites passed 2602 /65 skips; Python3.11 focused 435.
    Native0.37 control/recovery/stall/ownership passed 17; 0.40 targeted cases passed 6.
@@ -86,4 +92,12 @@
    captures. Inspect every publication and verify its remote SHA. Keep production
    Unix IPC despite the local socket restriction. Physical LAN, original Android,
    DAC/acoustic audio, ARMv7/Pi/XU4 and full systemd boot remain NOT_RUN.
-11. At the deadline stop owned active processes and provide the honest handover.
+11. User-requested small behavior-neutral HttpApi extraction is gated on full
+    green standard CI for the current functional fixes. Prefer pure DIDL/XML/
+    metadata formatting; no playback/recovery/staging logic refactor or new deps.
+    Timer NOT_STARTED: target 90min, hard 120min including native verification.
+    Record exact UTC start/target/hard stop in PLAN/RESUME when it begins. Keep
+    all protocol payload/error/state/timing interfaces unchanged, separate commit.
+    Abort if risky or not native-green within budget and record next-iteration
+    architecture/extraction plan. Preserve the running frozen radio test.
+12. At the deadline stop owned active processes and provide the honest handover.

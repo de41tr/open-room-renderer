@@ -268,3 +268,18 @@ The repair snapshot passed all 47 local native cases on libmpv0.37/0.40; the
 separate terminal-error delta then passed seven affected native cases on each.
 Final combined default verification passed 2682 /65, plus 392 Python3.11 focused
 checks. Hosted final-revision Unix IPC and architecture checks remain separate.
+
+
+Published b18b43e passed all standard CI gates, including both hosted architectures.
+The next causal-root guard is intentionally observation-time and excludes internal
+EDL transformation, missing ACKs, containers, range reloads and reused core IDs;
+it cannot atomically control unrelated raw mpv writers. New first-run identity
+publication prevents partial files without replacing existing IDs. Its hard-link/
+fsync requirements are Linux local-filesystem assumptions, not power-loss proof.
+The revised stopped-snapshot test keeps its original total deadline; its twelve
+helper cases are UNIT and must not be counted as actual native/hardware tests.
+
+The exact next combined source passed 2759 default cases /66 opt-in skips on
+Python3.11 and 3.12. Its selected libmpv lane passed 60 cases on 0.37/0.40, comprising
+47 actual native cases and 13 deterministic helper checks. Hosted Unix IPC and
+architecture verification remain a distinct pending gate for this revision.
