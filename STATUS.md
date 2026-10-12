@@ -2,11 +2,11 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (10:34 UTC)
+## Current checkpoint (10:56 UTC)
 
-Draft PR remains unmerged. Published `b4ad9ad` passed all three standard jobs:
-https://github.com/de41tr/open-room-renderer/actions/runs/38234541452 .
-Both architectures passed the 60-test libmpv lane (47 actual native cases plus
+Draft PR remains unmerged. Published `c780c80` passed all three standard jobs:
+https://github.com/de41tr/open-room-renderer/actions/runs/38237373324 .
+Both architectures passed the 61-test libmpv lane (48 actual native cases plus
 13 deterministic helpers), six production Unix cases, actual pywiim, stress,
 installed lifecycle, clocked transitions, discovery and eleven Snapcast stages.
 Both native runs retain the eight observed-root cases and owned-EDL cleanup.
@@ -44,8 +44,9 @@ The separately frozen four-hour changing-ICY run PASSED: baseline
 10:06:26.620761 UTC. All 1,795 autonomous title changes agreed across HTTP/SOAP/GENA,
 with one load/source/request, zero disconnects and 4,428 KiB live RSS growth.
 Full source and production digests stayed unchanged; see the scoped evidence below.
-Repeat One / All now passes full local/default/native verification; its new
-hosted checkpoint remains pending. Favorites and shuffle are isolated next packages.
+Repeat One / All passed its full hosted checkpoint. Editable favorites now passes
+complete local/default/native verification, including the reviewed bounded CI
+scheduler; its own hosted checkpoint remains pending. Shuffle is next.
 
 ## Baseline
 
@@ -1653,3 +1654,59 @@ requires expected-source readiness/progress with unchanged 3s deadlines; its
 controlled red reproduction and four-format native replay are documented in
 TESTING.md. That failed attempt remains failed. Hosted verification for this new
 feature checkpoint must still finish; no hardware/original-app claim is added.
+
+
+## Editable local favorites and truthful persistence
+
+The new ORR-owned favorites module provides list/add/save-current/rename/delete
+through a bounded JSON API and CLI. One effective view serves those routes,
+public getPresetInfo/MCUKeyShortClick recall and status preset_key. Configuration
+favorites remain an unchanged read-only prefix; managed entries have stable edit
+IDs and current dense slots. Renaming/deleting/saving does not mutate active
+playback, its queue, position, volume, generation or repeat policy.
+
+The versioned bounded file is atomically replaced. Invalid/unsupported/unreadable
+state stays untouched, managed operations report unavailable, and configured
+recall still works. Precommit failure keeps the old state; postcommit durability
+failure keeps memory consistent with the new visible file and returns an explicit
+committed warning. The separate atomic helper repair avoids unnecessary temporary
+pathname cleanup masking an already-committed result; CLI errors preserve a fixed
+read-before-retry warning without echoing arbitrary error bodies.
+
+This is not an OEM preset-write, provider-account or secure multi-user API.
+HTTP(S) references only; userinfo and local audio-proxy paths are rejected, while
+query encoding is preserved. Token-bearing queries cannot all be recognized.
+Save-current copies the canonical selected direct target/display fields, never
+backend/resolved children or account state; all resolver-backed radio is currently
+conservatively rejected. A stable public URL may be added explicitly. The public
+contract and practical CLI examples are in COMPATIBILITY_MATRIX/GETTING_STARTED.
+
+Actual pywiim selected two distinct loopback WAVs with native ID/codec/progress
+and received GENA agreement. Active library edits retained the native lifetime;
+service/backend recreation restored favorites without autoplay, then explicit
+recall decoded again. Both libmpv 0.37/0.40 passed in 3.35–3.42s with full cleanup.
+Independent CLI/HTTP, repeat interaction, corruption and atomic-failure review
+passed. Final local default suites including the scheduler passed 3155 /68 skips
+on Python 3.12 (113.37s) and Python 3.11 (114.10s). Production digest:
+`d3f9c2a02c67081942f9b8aa80bd5ce221117915e0103783ecb1dc0f04f8b7ce`.
+Complete serial native lanes passed 62 on 0.37/0.40 (49 native plus 13 unit checks).
+
+## Preserve CI coverage within the existing job budget
+
+The completed Repeat jobs took 881.168s/882.316s under the 900s cap. Added feature
+coverage would exhaust that serial margin. A separate reviewed standard-library
+runner now executes the unchanged explicit libmpv file list in two independent
+groups on the same runner, emits both complete logs, and propagates failures.
+Neither group is skipped when the other fails. Owned process groups are cleaned
+on timeout/interruption, with bounded TERM/KILL/reap handling; unrelated processes
+are preserved. Nonfinite watchdog values are rejected.
+
+All 21 existing native files remain exactly once: group A 20 checks, group B 42.
+Actual parallel 0.37 passed 20+42 in 235.386s total (group durations 193.46s/235.02s).
+Actual parallel 0.40 also passed 20+42 (197.91s/234.67s), exit 0. Twelve process/CLI
+fixtures passed on both Python minors, with independent review. The job stays
+15min, Python-floor job 8min, stress 180s/6min, and every later Unix/client/install/
+clock/discovery/Snapcast gate remains unchanged. The new native step has a 360s
+watchdog and 7min ceiling; no assertion/audio threshold is relaxed and no runner
+or dependency is added. Hosted architecture scheduling must still pass this new
+checkpoint; local success does not predeclare that result.

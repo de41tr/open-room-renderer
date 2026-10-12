@@ -4,26 +4,32 @@ Optimize useful, verified user workflows per hour, not test/commit/line counts.
 All work stays on the autonomous branch and draft PR; no merge or release.
 Stabilization starts 2026-10-12 19:00 UTC; active work ends at 20:00 UTC.
 
-## Current decision (2026-10-12 10:02 UTC)
+## Current decision (2026-10-12 10:53 UTC)
 
-- **COMPLETE:** bounded formatter extraction at 8291763 passed all three standard
-  CI jobs by 09:51:33 UTC, elapsed 36m40s. No further extraction is needed now.
-- **PIVOT / CONTINUE:** implement Repeat One / All through the existing guarded
-  EOF path, with one mode authority and a small pure queue-policy module. Public
-  pywiim and independent SOAP-client evidence use normal=4, one=1, all=0; current
-  normal=0 is incorrectly read as repeat-all. Correct this explicitly, document
-  the conflicting official HTTP write table, and retain original-app acceptance
-  pending. Manual Next/Previous remain numerical and nonwrapping. Native staging
-  stays normal-only; changing an armed mode requires a confirmed Stop first.
-- **DEFER:** more raw-backend corner-case expansion, additional multihour probes,
-  broad architecture changes and provider experiments without a viable lawful
-  path. Earlier effort is not a reason to keep extending low-value work.
+- **COMPLETE:** Repeat One / Repeat All at c780c80 passed all three standard CI
+  jobs. Actual source IDs/progress and received protocol events prove repeated
+  playback and queue wrapping. The earlier bounded formatter extraction is done.
+- **CONTINUE:** publish editable favorites and then shuffle as separate reviewed
+  checkpoints. Favorites has real public-client recall, edit continuity and
+  restart-without-autoplay evidence; shuffle has actual non-numeric progression,
+  history navigation and cycle rollover. Finish their integrated native/CI gates.
+- **CONTINUE, bounded:** preserve the existing 15-minute CI job limit by running
+  two independent native groups on the same runner. The previous ARM job took
+  874.6s before the added features; reviewed local scheduling retains every case
+  and cuts the 62-case libmpv lane from about 431s to 235s. No extra runner, reduced
+  assertion, shorter stability run or relaxed audio threshold is introduced.
+- **PIVOT next:** investigate stable public radio references for the new favorites
+  workflow. Its current conservative save-current rejection is a practical gap.
+  Proceed only if existing trusted resolver provenance establishes a persistent
+  anonymous reference; otherwise defer rather than save a temporary/account URL.
+- **DEFER:** further raw-backend corner-case expansion, multihour probes, broad
+  architecture changes and provider experiments without a viable lawful path.
 
 Priority order: critical regressions/security and green CI; useful new local
 features; targeted low-risk refactoring; special tests only with high information
 value; documentation and later hardware preparation. Existing quality gates stay.
 
-Review next around 11:32–12:02 UTC, or after the repeat package finishes earlier,
+Review next around 12:23–12:53 UTC, or after the next feature package finishes earlier,
 then about every 90–120 minutes
 and after major packages. Each review records CONTINUE/PIVOT/DEFER with concrete
 value, effort and risk. Failed evidence stays visible; a green test count alone
@@ -33,9 +39,9 @@ is not functional completion.
 
 | Proposal | Category | Value / effort / risk | Next action |
 |---|---|---|---|
-| Repeat All / Repeat One verification | A_AUTONOM | Implemented; actual three-track native flow and full local suites pass; low remaining publication risk | Publish the reviewed checkpoint and finish standard native CI before closing this proposal. |
-| Shuffle with an explicit play-order contract | A_AUTONOM | High queue value; estimate 1–2h; medium index/history/staging risk | Build on a verified queue policy. Keep canonical item/index/source consistent; test a complete multi-item cycle and manual navigation. |
-| Editable persistent local favorites | A_AUTONOM | Useful local control; estimate 1–2h; medium persistence/interface risk | Check the public control contract, then choose a bounded create/rename/delete/recall workflow using existing atomic state. No provider accounts or invented compatibility claims. |
+| Editable persistent local favorites | A_AUTONOM | Implemented and reviewed; real client/native workflow verified; remaining publication risk is low | Finish bounded parallel CI verification, publish separately, and verify standard CI. |
+| Shuffle with explicit traversal/history | A_AUTONOM | Implemented and reviewed; actual four-track flow verifies source order/history/cycle rollover; integration risk is medium | Complete combined favorites/repeat integration and full native gates; publish after the preceding checkpoint is green. |
+| Stable radio favorite references | A_AUTONOM | High practical value; estimate 30–90 min after code/public-contract check; medium provenance risk | Investigate a persistent anonymous canonical reference. Do not infer one from a temporary resolved URL or add account data; defer if evidence is insufficient. |
 | Further player-core / eventing decomposition | B_AWAITING_DECISION | Potential maintenance gain; major scope and ownership/timing risk | Defer this round. Present a concrete boundary/migration plan for explicit later decision; do other authorized work meanwhile. |
 | Merge or release | C_APPROVAL_REQUIRED | Distribution decision, not an implementation milestone | Do not act. Requires separate explicit authorization; current instruction prohibits it. Silence is not consent. |
 

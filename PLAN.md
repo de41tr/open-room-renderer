@@ -125,3 +125,13 @@ it with the separately reviewed native-format fixture correction and verify full
 standard CI. Continue isolated favorites/shuffle implementation meanwhile; do not
 restart another radio soak or wait for hardware. Keep mode/source/owner semantics
 explicit and one canonical queue authority.
+
+
+10:53 UTC review: Repeat checkpoint c780c80 has full standard CI green. The
+editable-favorites candidate passes real client/native workflows and full local
+suites; publish next with its separate atomic-helper repair and a scheduling-only
+CI change. Two explicit libmpv groups run on the same existing runner, retaining
+all cases and later gates within the unchanged 15-minute job cap. Then publish
+reviewed Shuffle after combined native/CI verification. Stable anonymous radio
+favorite references are the next bounded investigation; do not store temporary
+resolver URLs or account data. See the five-item strategic review.

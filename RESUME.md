@@ -5,10 +5,10 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint b4ad9ad passed all three jobs, including the
+   Latest completed checkpoint c780c80 passed all three jobs, including the
    complete owned-player SIGKILL/error/fresh-backend explicit-restart tail:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38234541452
-   Both architectures passed 60 libmpv-lane checks (47 native/13 unit) and six Unix cases. Normal
+   https://github.com/de41tr/open-room-renderer/actions/runs/38237373324
+   Both architectures passed 61 libmpv-lane checks (48 native/13 unit) and six Unix cases. Normal
    limits stay 180s stress /6min step /15min native job /8min Python3.11 floor.
 4. Native evidence also verifies real pywiim, repeated-lifetime stress, installed
    CLI signals, discovery and all eleven same-host Snapcast stages. The earlier
@@ -120,9 +120,20 @@ decisions. Existing branch, publication, safety and deadline limits remain.
 
 Current functional handoff (10:34 UTC): Repeat One / All is reviewed and integrated.
 Final local default suites passed 2952/67 on Python3.11/3.12; full selected native
-lanes passed 61 on 0.37/0.40. New hosted CI remains pending until verified. Default
+lanes passed 61 on 0.37/0.40. Hosted CI passed all three jobs, verified at 10:51:21 UTC. Default
 mode reports 4; explicit 0 now means Repeat All, 1 Repeat One. Keep the documented public
 client dialect and original-app limit. Native staging remains normal-only with
 confirmed Stop required before changing an armed mode. The pure policy is queue-owned;
 no second mutable state.loop field remains. Next isolated packages are editable
 ORR-owned favorites and bounded shuffle, each requiring independent verification.
+
+
+Editable favorites is the next reviewed checkpoint: stable IDs/configured prefix,
+ORR-owned API/CLI, honest atomic failure/corruption behavior, real client/native
+recall and restart without autoplay. Final local 3155/68 default checks passed on
+Python 3.11/3.12; 62 native checks passed serially and in bounded two-group runs on
+libmpv 0.37/0.40. The same-runner CI scheduler preserves every existing case and
+later gate: 360s native watchdog/7min step, unchanged 15min job and 180s stress.
+Verify the new hosted result before claiming completion. Shuffle is reviewed
+and privately integrated with favorites; publish separately after the prior CI
+is green. Stable anonymous radio favorites are under read-only investigation.

@@ -1479,3 +1479,56 @@ then requires actual same-source progress. Existing readiness/progress deadlines
 remain 3s each. Fifteen fast-clock regression checks retain wrong-source/no-progress
 failures; all four native format scenarios passed on both 0.37/0.40. The failed
 initial integrated run remains recorded; it is not relabeled as a pass.
+
+## Managed favorites acceptance
+
+Deterministic and loopback tests cover the versioned store, configuration-owned
+prefix, stable IDs/slot compaction, strict JSON/body limits, atomic pre/post-replace
+outcomes, corruption lockout, concurrent writes, canonical source selection and
+active playback preservation. Actual CLI subprocesses and pywiim list/recall are
+included; source URLs and errors are synthetic. The separately reviewed atomic
+helper fix skips cleanup of the already-renamed source pathname, preserving the
+truth of committed results without changing pre-replace cleanup.
+
+The short native acceptance is:
+
+```sh
+ORR_TEST_LIBMPV_PATH=/path/to/libmpv.so.2 PYTHONPATH=. \
+  python -m pytest -q -s tests/test_libmpv_favorites.py
+```
+
+Two loopback WAVs have distinct bytes and native source IDs. Actual pywiim recalls
+each; real PCM codec, selected output and advancing native time confirm decoding,
+with raw HTTP metadata and received GENA. Rename, delete and save-current preserve
+the same active native lifetime, queue and generation. Recreating both service and
+native backend restores the library without autoplay, followed by explicit raw
+MCU recall. All handles/listeners/subscriptions/tasks are cleaned. The final test
+passed on libmpv 0.37/0.40 in 3.35–3.42s. This is REAL_BACKEND/null with test ctypes
+command transport, not production Unix IPC, audible audio or original-app proof.
+
+The immutable favorite+repeat integration passed 3143 default checks /68 opt-in
+skips on Python 3.11 (110.78s) and 3.12 (109.00s). Complete selected serial native
+lanes passed 62 checks on 0.37 (431.45s) and 0.40 (431.33s): 49 actual native cases
+and 13 deterministic helpers. This records the local candidate, not its later
+hosted CI result. The four-hour radio evidence remains on its older frozen source.
+
+
+### Same-runner bounded native scheduling
+
+The explicit native file list in .github/workflows/renderer-tests.yml is split
+at `:::` into two independent pytest processes by scripts/run-native-groups.py.
+All 21 files/62 checks remain present exactly once; no later workflow gate changes.
+Both complete logs print even if a group fails to launch or exits unsuccessfully.
+The runner returns nonzero for failure, interruption or timeout and cleans only
+its owned process groups. The finite watchdog is 360s, native step 7min, and the
+existing job 15min; these are not relaxed playback/audio/resource thresholds.
+Twelve deterministic/process fixtures exercise overlap, both failure positions,
+launch errors, logs, timeout/signals, descendant cleanup and unrelated-process
+survival on Python 3.11/3.12.
+
+Actual libmpv 0.37 passed groups 20+42 in 235.386s total; group durations were
+193.46s/235.02s. Actual 0.40 passed 20+42 in 197.91s/234.67s group durations, exit 0.
+Final default suites including the runner passed 3155 /68 skips on Python 3.12
+(113.37s) and 3.11 (114.10s). Hosted x86_64/AArch64 completion is a separate gate.
+The reason for scheduling rather than weakened tests is measured: the preceding
+Repeat jobs already took 881.168s/882.316s under the 900s job cap.
