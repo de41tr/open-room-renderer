@@ -4,6 +4,16 @@ Branch: `dot/renderer-autonomous-20261012`; base: `3672b9838e9c39ae8191613108f0d
 Work window ends 2026-10-12 20:00 UTC. Stabilization only after 19:00 UTC.
 No main-branch edits, merge, or release.
 
+## Current functional package (11:46 UTC)
+
+Repeat, editable favorites, Shuffle and stable-radio save-current have green
+hosted checkpoints through `b69a60a`. Implement a bounded client-only CLI workflow
+for multi-track queue inspection/loading/index playback and explicitly authored
+playlist create/restore using existing SOAP actions. Restore must stop by default;
+optional playback follows only a confirmed replacement. Do not treat resolved
+BrowseQueue URLs as canonical export. Separate protocol and file responsibilities,
+review partial-failure behavior, then verify actual different native sources.
+
 ## Ordered work
 
 1. AP01: explicit SOAP contracts, faults, and acknowledged backend commands.
@@ -49,8 +59,8 @@ Current checks: complete owned-player death/error/fresh-backend restart now
 passes both native architectures, as do the finite-history and changing-metadata
 policies. The separately frozen constant-title finite-policy hour passed with
 complete cleanup. The bounded changing-ICY endurance mode passes four-minute
-replay and negative sensitivity; its separate four-hour run is active from
-06:06:23.924 UTC, earliest finish 10:06:23.924 UTC plus cleanup. Keep its frozen
+replay and negative sensitivity; its separate frozen four-hour run completed successfully including cleanup at
+10:06:26.620761 UTC. Keep its frozen
 provenance separate from later code changes. Rolling live-HLS cases pass locally
 but the expanded hosted libmpv lanes failed at 3e74b24. Both fixture assumptions
 (segment503 native EOF and path-before-decoder readiness) are reproduced and

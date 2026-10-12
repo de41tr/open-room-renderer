@@ -5,10 +5,10 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint 4ae0628 passed all three jobs, including the
+   Latest completed checkpoint b69a60a passed all three jobs, including the
    complete owned-player SIGKILL/error/fresh-backend explicit-restart tail:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38239815502
-   Both architectures passed 62 libmpv-lane checks (49 native/13 unit) and six Unix cases. Normal
+   https://github.com/de41tr/open-room-renderer/actions/runs/38243274967
+   Both architectures passed 63 libmpv-lane checks (50 native/13 unit) and six Unix cases. Normal
    limits stay 180s stress /6min step /15min native job /8min Python3.11 floor.
 4. Native evidence also verifies real pywiim, repeated-lifetime stress, installed
    CLI signals, discovery and all eleven same-host Snapcast stages. The earlier
@@ -148,3 +148,21 @@ is deferred because the isolated fixture could not be reached from the cloud
 browser or a separate shell; this is not proof of a browser policy block. Do not
 retry the policy-denied failed-tab cleanup. Assess useful CLI multi-track queue/
 saved-playlist commands using existing protocol contracts instead of waiting.
+
+11:46 UTC: b69a60a is published and all three hosted jobs passed, verified at
+11:45:54 UTC. Shuffle and stable-radio save-current are complete software
+checkpoints. Current private work: client-only queue show/load/play-index and
+explicit authored playlist files (create/restore, default stopped). Keep complete
+validation before networking, no retries after uncertain mutation, safe no-clobber
+file creation and truthful post-commit warnings. BrowseQueue is not canonical URL
+export. Integrate independent review and a short actual CLI/native flow before
+publication; no playback-core changes or new multihour probes.
+
+11:58 UTC: queue/client and authored-file patches are integrated and independently
+reviewed. Final default suites pass 3652/70 on Python 3.11/3.12, and the exact short
+native CLI flow passes on 0.37/0.40. Publish separate valid queue and authored-file
+commits plus their integrated native test/CI entry and documentation, then verify
+all standard CI. No local full native rerun is needed for unchanged renderer core.
+Read-only preinstalled browser inventory is included in the existing CI environment
+step; no browser install/start or extra runner. The cloud desktop terminal's text
+input failed before any fixture, so actual browser QA remains unestablished.

@@ -252,3 +252,10 @@ Experimental:
 5. `fake_linkplay/http_api.py`
 6. `fake_linkplay/mpv_backend.py`
 7. Relevant tests under `tests/`
+
+The renderer-owned queue and authored-playlist CLI keeps new responsibilities
+outside HttpApi: `queue_client.py` frames and validates existing SOAP operations;
+`playlist_files.py` owns the strict authored format and safe local publication;
+`playlist_cli.py` composes validation/file/client steps. No backend, recovery or
+queue-staging logic moves into these adapters. Live queue export is deliberately
+not inferred from potentially resolved BrowseQueue URLs.

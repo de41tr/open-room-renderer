@@ -1598,3 +1598,51 @@ Final combined Shuffle/radio-favorite native groups passed 20+43 on 0.37
 50 actual native cases and 13 deterministic helpers. Both default Python minors
 passed 3235/69 before publication. This extends short controlled native coverage;
 it does not transfer the older frozen four-hour result to the new source digest.
+
+
+Hosted checkpoint `b69a60a`, run 38243274967, passed all three jobs (verified
+2026-10-12 11:45:54 UTC). Default suites passed 3235/69 on Python 3.11 and both
+native architectures. Native libmpv groups passed 20+43: x86_64 197.32s/251.25s,
+AArch64 196.86s/250.19s. All later Unix IPC, pywiim, repeated-lifetime, installed
+CLI, clocked transition, discovery and eleven same-host Snapcast stages passed.
+Whole native jobs took 760.062s/766.334s under the unchanged 900s cap. Hosted
+production digest matches the final local checkpoint:
+`43d6c4da7bfdb2dd9adea44d0dda7c32101fa4c077b329cb9b1244760a1f94d3`.
+
+## Queue CLI and authored-playlist acceptance
+
+The client-only package leaves renderer core/HTTP/recovery/staging behavior
+unchanged. Independent review corrected an undeclared ReplaceQueue input,
+CR-name acknowledgement normalization and malformed-argument URL echo before
+publication. The final queue-only patch passes 215 focused checks; independent
+review passed 348 related checks. Authored-file validation/storage/CLI tests passed
+202 checks, including nonblocking FIFO rejection, symlink/special-file preservation,
+no-clobber races and truthful pre/postcommit failures.
+
+Final integrated default suites passed **3652 /70 opt-in skips** on Python 3.11
+(161.88s) and 3.12 (160.63s), with the 32 existing public-client TLS warnings.
+Production digest before/after these runs:
+`2d9e3fb73345aebf87ee1e1da20c30f839a859409e6b8dc9cdf643fb91b4d1be`.
+Earlier 3451/69 runs covered the final queue client with older authored-file
+modules; they are not substituted for this final integrated result.
+
+`tests/test_libmpv_queue_cli.py` is one short REAL_BACKEND/null case using nine
+actual CLI subprocesses and the existing ctypes command-node adapter. It loads
+three different generated WAV byte streams through loopback production HttpApi,
+checks default stopped load, URL-free canonical indices, explicit index playback,
+local-only file creation, stopped restore held through an observer interval, and
+explicit restore/play at the selected third source. Repeat/shuffle modes round-trip
+without claiming a second shuffle-traversal proof. Native entry IDs 1/2/3, selected
+PCM and increasing positions establish real source changes; HTTP/SOAP and 22
+received GENA events agree. Authored bytes stay unchanged, all nine children are
+reaped and listeners/subscriptions/monitor/native handle/tasks are cleaned.
+
+The exact final client/module hashes passed on libmpv 0.40 (5.17s child) and 0.37
+(5.10s child), under an unchanged hard 20s child bound. This test does not establish
+production Unix IPC, physical audio, original-app behavior or endurance. It adds
+one case to the existing second native CI group; no earlier case or threshold is
+removed. The final whole native suite is intentionally left to standard hosted CI:
+local renderer core is byte-identical to the prior green checkpoint, while the new
+client flow and full default suites were verified locally. Hosted results remain
+pending until checked. The existing environment-recording step also lists any
+preinstalled browser executable read-only; it installs or starts none.

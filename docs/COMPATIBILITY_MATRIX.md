@@ -449,3 +449,48 @@ without another await before the existing load path. Failed or superseded Stop
 consumes nothing; a failed load retains that selection with ERROR and never skips
 randomly to another item. Owner/source/generation fences, finite station recovery
 and normal-only native staging restrictions remain. Shuffle makes no gapless claim.
+
+## Renderer-owned queue CLI and authored files
+
+`queue show`, `queue load` and `queue play-index` are local convenience clients
+of the existing PlayQueue SOAP service, not new renderer actions. `load` sends
+one ReplaceQueue with QueueContext only; it replaces the complete queue and stops
+playback. Its selected one-based index is silent unless `--play` explicitly follows
+with PlayQueueWithIndex. That second request is sent only after an exact successful
+replacement response. `play-index` always requests playback, without rewriting
+the queue. Different-name requests fail; a name is not a revision/CAS token for
+concurrent same-name replacement.
+
+`show` projects canonical order, count, index and mode. URLs and opaque/display
+metadata are omitted by default. The explicit `--include-urls` output is labeled
+renderer-reported and potentially resolved/credential-bearing. BrowseQueue uses
+resolved URLs where present, so these bytes are not claimed as canonical export.
+
+`playlist create` authors a strict version-1 JSON file from supplied URLs only:
+`version`, `name`, `index`, `mode`, `urls`. It does not contact the renderer or
+capture runtime metadata, position, account state or shuffle history. `restore`
+validates all content and the complete escaped SOAP frame before making the same
+single replacement; no autoplay unless requested. Unknown/duplicate fields,
+nonfinite values, invalid exact types/indices/modes/XML/UTF-8 and oversized inputs
+fail before mutation. Limits are 1000 URLs and independent 1 MiB file/request
+bounds. HTTP(S) URL bytes are preserved; whitespace, userinfo and reserved renderer
+proxy targets are rejected. Raw CR queue names are rejected because they cannot
+round-trip through the existing server's SOAP acknowledgement.
+
+Files require an existing parent directory, private 0600 temporary writes and
+atomic publication. Creation never clobbers an existing destination; overwrite
+requires its explicit flag. Known final symlinks/nonregular files are rejected;
+this is not protection against an adversarial concurrent filesystem path swap.
+A post-publication durability failure reports that the new file is already saved.
+These user-authored files may contain URL query secrets and are not share-safe
+exports. They are distinct from the server's settings and favorites persistence.
+
+SOAP responses require the expected namespace/action and unique scalar fields;
+generic HTTP200 or unrelated XML is not success. Requests do not follow redirects,
+use environment proxies/netrc or retry mutations. Response reads are byte-bounded;
+the 10-second requests timeout is connect/read inactivity, not a total wall-clock
+transaction deadline. An uncertain replacement prevents Play, while a confirmed
+replacement followed by uncertain Play reports partial success without rollback.
+Acknowledgement is not an assertion of observed audio. Inspect queue/status before
+retrying. No new listener, authentication policy or playback-core behavior follows
+from these client commands.

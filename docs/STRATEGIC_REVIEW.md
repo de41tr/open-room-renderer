@@ -4,17 +4,22 @@ Optimize useful, verified user workflows per hour, not test/commit/line counts.
 All work stays on the autonomous branch and draft PR; no merge or release.
 Stabilization starts 2026-10-12 19:00 UTC; active work ends at 20:00 UTC.
 
-## Current decision (2026-10-12 11:28 UTC)
+## Current decision (2026-10-12 11:58 UTC)
 
 - **COMPLETE:** Repeat and editable favorites have full standard CI green. Real
   source/progress, edit continuity, restart and received-event evidence support
   these workflows. The scheduling-only change retains every gate on the same
   runners and brings hosted jobs to about 734–743s under the unchanged 900s cap.
-- **CONTINUE:** publish Shuffle and stable-radio save-current as separate reviewed
-  functional commits in one fully tested head. Their combined local Python and
-  full native suites pass. Finish hosted verification before closing the package.
-- **PIVOT next:** assess convenient CLI multi-track queue and saved-playlist flows
-  through existing SOAP contracts, without altering backend ownership logic.
+- **COMPLETE:** Shuffle and stable-radio save-current passed all three hosted jobs
+  at b69a60a. Their real source/progress/history/re-resolution evidence closes the
+  package; no more special tests are justified now.
+- **CONTINUE / PIVOT:** client-only CLI multi-track queue show/load/play-index and
+  explicit authored playlist create/restore. These enable useful workflows without
+  the original app, using existing SOAP contracts and no backend changes. Default
+  restore stops; uncertain mutations are not retried. BrowseQueue resolved URLs
+  are explicitly not canonical export. Reviewed in about 20 minutes, with file/partial-failure
+  fixes, final integrated defaults and a short actual nine-command native flow.
+  Publish and finish the standard hosted gate before closing this package.
 - **DEFER:** the optional local controller page until actual browser verification
   is available. The cloud browser and a separate shell could not reach the isolated
   fixture; this does not establish a browser-specific policy block. No alternative
@@ -37,9 +42,8 @@ is not functional completion.
 
 | Proposal | Category | Value / effort / risk | Next action |
 |---|---|---|---|
-| Shuffle and stable-radio favorite checkpoint | A_AUTONOM | Implemented/reviewed with real native workflows; low remaining publication risk | Publish separate functional commits in one tested head; finish hosted CI. |
-| CLI queue and saved-playlist workflows | A_AUTONOM | Useful without the original app; estimate 1–2h after contract check; medium file/partial-failure risk | Verify existing SOAP read/replace/index contracts; prefer client-side responsibility module and explicit no-autoplay restore. |
-| Optional local controller page | A_AUTONOM / DEFER | Useful but real browser verification was not established | Keep the small same-origin/no-framework boundary for a later verified environment. No exposure or permission expansion. |
+| CLI queue and saved-playlist workflows | A_AUTONOM | Useful without the original app; estimate 1–2h after contract check; medium file/partial-failure risk | Publish the reviewed client/file modules and short real native proof; verify standard hosted CI. |
+| Optional local controller page | A_AUTONOM / DEFER | Useful but real browser verification was not established | Inspect read-only preinstalled browser inventory in the next existing CI run; implement nothing until a genuine QA route is established. No install/exposure/permission expansion. |
 | Further player-core / eventing decomposition | B_AWAITING_DECISION | Potential maintenance gain; major scope and ownership/timing risk | Defer this round. Present a concrete boundary/migration plan for explicit later decision; do other authorized work meanwhile. |
 | Merge or release | C_APPROVAL_REQUIRED | Distribution decision, not an implementation milestone | Do not act. Requires separate explicit authorization; current instruction prohibits it. Silence is not consent. |
 

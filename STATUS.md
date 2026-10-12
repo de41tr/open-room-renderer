@@ -2,17 +2,27 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (11:28 UTC)
+## Current checkpoint (11:58 UTC)
 
-Draft PR remains unmerged. Published `4ae0628` passed all three standard jobs:
-https://github.com/de41tr/open-room-renderer/actions/runs/38239815502 .
-Both architectures passed 62 libmpv checks in two bounded groups (49 actual
-native cases plus 13 deterministic helpers), six production Unix cases, actual pywiim, stress,
-installed lifecycle, clocked transitions, discovery and eleven Snapcast stages.
-Both native runs retain the eight observed-root cases and owned-EDL cleanup.
-The earlier failed checkpoints remain recorded below.
+Draft PR remains unmerged. Published `b69a60a` passed all three standard jobs,
+verified at 11:45:54 UTC:
+https://github.com/de41tr/open-room-renderer/actions/runs/38243274967 .
+Shuffle Once / Shuffle Repeat All and stable public-radio save-current favorites
+are now verified hosted checkpoints. Both native architectures passed 63 libmpv
+checks (50 actual native cases plus 13 deterministic helpers), six production
+Unix cases, real pywiim, bounded stress, installed lifecycle, clocked transitions,
+discovery and eleven same-host Snapcast stages. Native jobs took 760.062s (x86_64)
+and 766.334s (AArch64), within the unchanged 900s limit. All default lanes passed
+3235 checks /69 opt-in skips. Earlier failed checkpoints remain recorded below.
 
-The requested behavior-neutral extraction began at 09:14:53 UTC after that gate.
+The next reviewed package adds client-only queue show/load/play-index and explicit
+authored playlist create/restore, with stopped-by-default replacement and no live
+queue export claim. Final integrated defaults pass 3652/70 on Python 3.11/3.12.
+Nine real CLI subprocesses select three distinct native sources with protocol/event
+agreement on libmpv 0.37/0.40 in about 5.1s. No renderer core changes are included.
+This package is ready for publication; its hosted checkpoint is not yet verified.
+
+The requested behavior-neutral extraction began at 09:14:53 UTC after its prerequisite green gate.
 It moves exactly three stateless metadata-edit helpers into metadata_formatting.py,
 with unchanged HttpApi wrappers. DIDL creation, dynamic escaping, parsing and all
 playback/recovery/staging/event lifecycle behavior stay in place. The exact patch
@@ -44,10 +54,8 @@ The separately frozen four-hour changing-ICY run PASSED: baseline
 10:06:26.620761 UTC. All 1,795 autonomous title changes agreed across HTTP/SOAP/GENA,
 with one load/source/request, zero disconnects and 4,428 KiB live RSS growth.
 Full source and production digests stayed unchanged; see the scoped evidence below.
-Repeat and editable favorites have full hosted checkpoints. Shuffle and stable
-radio save-current now pass combined local/default/native verification and are
-being published as separate functional commits in one new checkpoint. Its hosted
-result remains pending until verified.
+Repeat, editable favorites, Shuffle and stable radio save-current now have full
+hosted checkpoints. The frozen endurance result retains its earlier source scope.
 
 ## Baseline
 

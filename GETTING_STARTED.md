@@ -339,3 +339,59 @@ The API and stored library are for a trusted private control LAN. URL userinfo i
 rejected, but token-bearing queries cannot all be detected. Do not save credentials,
 signed temporary URLs or account-scoped references. See the precise
 [local-library API contract](docs/COMPATIBILITY_MATRIX.md#editable-local-favorites).
+
+## Multi-track queues and authored playlists
+
+Use existing queue controls without writing SOAP by hand:
+
+```sh
+open-room-renderer queue load --name "Evening" --start-index 2 --mode repeat-all \
+  "https://media.example.test/first.wav" "https://media.example.test/second.wav"
+open-room-renderer queue show --name "Evening"
+open-room-renderer queue play-index 2 --name "Evening"
+```
+
+Replace example URLs with your own playable HTTP(S) references. `load` replaces
+**the entire queue and stops playback**. It selects the supplied one-based index
+but starts audio only with `--play`. `play-index` always requests playback; it is
+not a silent selection operation. Existing `pause`, `resume`, `volume` and `stop`
+commands remain available. Commands contacting the renderer accept `--host` and
+`--port`, defaulting to `127.0.0.1:8080`.
+
+Modes are `normal`, `repeat-one`, `repeat-all`, `shuffle-once` and
+`shuffle-repeat-all`. `show` returns the queue name, count, current index, mode
+and canonical item positions. It omits URLs and opaque/display metadata by default.
+`--include-urls` explicitly reveals renderer-reported URLs, which may be resolved
+or credential-bearing. **This is not a canonical live-queue export.**
+
+To author a reusable file from explicit URLs:
+
+```sh
+open-room-renderer playlist create evening.json --name "Evening" \
+  --start-index 2 --mode shuffle-once \
+  "https://media.example.test/first.wav" "https://media.example.test/second.wav"
+open-room-renderer playlist restore evening.json
+open-room-renderer playlist restore evening.json --play
+```
+
+`create` is local-only and never reads the renderer. It saves your ordered URLs,
+name, index and mode; not the current playback position, metadata, shuffle history,
+resolved addresses or account state. The destination's parent directory must
+already exist. Existing files are preserved unless you explicitly pass
+`--overwrite`. Files are private (0600), with atomic publication; final-component
+symlinks and nonregular files are rejected. Keep these files private: URL query
+strings can contain secrets even when usernames/passwords are rejected.
+
+`restore` validates the complete file and escaped request before contacting the
+renderer, replaces the queue once, and leaves it stopped unless `--play` is given.
+It is not automatic startup restore. Limits are 1–1000 HTTP(S) URLs, a 1 MiB file,
+and a separate 1 MiB limit on the complete escaped SOAP request. A file within
+its own size limit can still exceed the request limit.
+
+A successful playback response acknowledges the request; use status to observe
+actual playback. An uncertain replacement is never followed by Play or an automatic
+retry. If replacement succeeds but Play is not acknowledged, the new queue stays
+selected and the CLI reports that partial outcome. Inspect `queue show` and status
+before retrying. A file durability warning similarly means the file may already
+be saved. Queue names distinguish differently named queues, but do not protect
+against another controller replacing a queue with the same name concurrently.
