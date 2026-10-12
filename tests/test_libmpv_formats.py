@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from html import escape
 import json
 import locale
+import math
 import os
 from pathlib import Path
 import shutil
@@ -224,18 +225,35 @@ async def _queue_soap(session: ClientSession, base: str, action: str, fields: st
 
 
 async def _decoder_progress(backend: _RadioBackend, path: str, codec: str) -> dict[str, Any]:
-    await _eventually("selected decoded audio", lambda: any(
-        track.get("type") == "audio" and track.get("selected") is True
-        for track in backend.read_property("track-list")))
-    assert backend.read_property("current-ao") == "null"
-    assert backend.read_property("path") == path
-    selected = [track for track in backend.read_property("track-list")
-                if track.get("type") == "audio" and track.get("selected") is True]
-    assert selected[0]["codec"] == codec, selected
-    before = backend.read_property("playback-time")
-    await _eventually("advancing decoded radio audio", lambda: backend.read_property("playback-time") > before + 0.25)
-    return {"path": path, "codec": selected[0]["codec"], "before": before,
-            "after": backend.read_property("playback-time"), "ao": "null"}
+    def sample() -> dict[str, Any] | None:
+        # A load acknowledgement can leave the previous selected track visible.
+        # Fence each sample with the expected source, including progress samples.
+        if backend.read_property("path") != path:
+            return None
+        selected = [track for track in backend.read_property("track-list")
+                    if track.get("type") == "audio" and track.get("selected") is True]
+        position = backend.read_property("playback-time")
+        ao = backend.read_property("current-ao")
+        if backend.read_property("path") != path:
+            return None
+        if not selected or selected[0].get("codec") != codec or ao != "null":
+            return None
+        if (isinstance(position, bool) or not isinstance(position, (int, float))
+                or not math.isfinite(position) or position < 0):
+            return None
+        return {"path": path, "codec": selected[0]["codec"],
+                "position": position, "ao": ao}
+
+    ready = await _eventually("selected decoded audio for expected radio source", sample)
+    before = ready["position"]
+
+    def progressed() -> dict[str, Any] | None:
+        current = sample()
+        return current if current is not None and current["position"] > before + 0.25 else None
+
+    after = await _eventually("advancing decoded radio audio for expected source", progressed)
+    return {"path": after["path"], "codec": after["codec"], "before": before,
+            "after": after["position"], "ao": after["ao"]}
 
 
 async def _exercise(library: str, ffmpeg: str, directory: Path, scenario: str) -> dict[str, Any]:
