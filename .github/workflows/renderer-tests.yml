@@ -60,7 +60,8 @@ jobs:
           python scripts/run-native-groups.py --timeout 165 \
             --log-dir "$RUNNER_TEMP/orr-default-python311" -- \
             tests -rs --ignore=tests/test_queue_cli.py --ignore=tests/test_playlist_cli.py \
-            ::: tests/test_queue_cli.py tests/test_playlist_cli.py
+            --ignore=tests/test_favorite_play_cli.py \
+            ::: tests/test_queue_cli.py tests/test_playlist_cli.py tests/test_favorite_play_cli.py
 
   renderer-tests:
     name: Renderer / ${{ matrix.runner }}

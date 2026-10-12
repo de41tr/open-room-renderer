@@ -5,7 +5,8 @@ command-node adapter proves source identity, codec and advancing decoded audio;
 this short bounded child does not certify production Unix IPC or audible output.
 Service/backend recreation checks durable favorites and absence of startup audio.
 Controlled radio JSON resolution saves a stable reference and recalls a new local
-target after restart; it makes no WAN/provider availability claim.
+target after restart; it makes no WAN/provider availability claim. One actual CLI
+stable-ID recall survives slot compaction without a list-before-play lookup.
 """
 from __future__ import annotations
 
@@ -37,7 +38,7 @@ DISPLAY = {"title": "Été <live> 日本語", "artist": "Synthetic & artist", "a
 
 
 @asynccontextmanager
-async def _renderer(library, directory, tracks, urls, receipts, cleanup):
+async def _renderer(library, directory, tracks, urls, receipts, cleanup, control_requests):
     backend = _StagingBackend(library, tracks)
     backend._allowed_media = set(urls)  # Only these exact loopback fixtures can be loaded.
     cfg = Config(uuid="00000000-0000-4000-8000-000000000000",
@@ -52,7 +53,16 @@ async def _renderer(library, directory, tracks, urls, receipts, cleanup):
         receipts.append((request.headers["SID"], properties))
         return web.Response()
 
+    @web.middleware
+    async def record_control(request, handler):
+        if request.path != "/fixture-events":
+            control_requests.append({"method": request.method, "path": request.raw_path,
+                                     "content_length": request.content_length,
+                                     "transfer_encoding": request.headers.get("Transfer-Encoding")})
+        return await handler(request)
+
     app = api.app()
+    app.middlewares.append(record_control)
     app.router.add_route("NOTIFY", "/fixture-events", callback)
     server = TestServer(app, shutdown_timeout=1)
     sockets = []
@@ -110,7 +120,7 @@ async def _exercise(library: str, directory: Path) -> dict:
     payloads = {"/a.wav": tracks[0].read_bytes(), "/b.wav": tracks[1].read_bytes()}
     hashes = [hashlib.sha256(payload).hexdigest() for payload in payloads.values()]
     assert len(set(hashes)) == 2, "Favorite targets must have different source bytes"
-    requests, receipts, cleanup = [], [], []
+    requests, receipts, cleanup, control_requests = [], [], [], []
 
     async def media(request):
         requests.append(request.raw_path)
@@ -179,7 +189,7 @@ async def _exercise(library: str, directory: Path) -> dict:
                                    ("Album", "album"), ("AlbumArtURI", "artwork")):
                     assert status[field] == metadata[key], status
 
-            async with _renderer(library, directory, tracks, urls, receipts, cleanup) as (api, backend, server):
+            async with _renderer(library, directory, tracks, urls, receipts, cleanup, control_requests) as (api, backend, server):
                 evidence["mpv_version"] = backend.read_property("mpv-version")
                 evidence["observer_interval"] = api._monitor_interval
                 added = [(await json_api(server, "POST", payload={"name": "Favorite " + str(index),
@@ -220,7 +230,7 @@ async def _exercise(library: str, directory: Path) -> dict:
                     renamed["slot"] = 1
                     assert await client.get_presets() == await listing(server, [renamed])
                     saved = (await json_api(server, "POST", "/current", {"name": "Saved current"}, 201))["favorite"]
-                    assert saved["url"] == urls[1]
+                    assert saved["url"] == urls[1] and saved["slot"] == 2
                     assert {key: saved[key] for key in metadata} == metadata
                     await listing(server, [renamed, saved])
                     # Removing the currently playing library record cannot
@@ -261,10 +271,48 @@ async def _exercise(library: str, directory: Path) -> dict:
                 assert set(stored[1]) == {"id", "name", "url", *metadata}
                 assert urls[0] not in json.dumps(stored[1]) and urls[1] not in json.dumps(stored[1])
 
+                # The saved ID moved 2 -> 1 after deletion; the now-playing
+                # radio occupies its old slot 2 and resolves to the other WAV.
+                # A stale numeric lookup would therefore select the wrong source.
+                assert saved["slot"] == 1 and radio["slot"] == 2
+                assert backend.read_property("path") == urls[0]
+                marker, event_marker = len(control_requests), len(receipts)
+                root = Path(__file__).resolve().parents[1]
+                process = await asyncio.create_subprocess_exec(
+                    sys.executable, "-m", "fake_linkplay.cli", "favorites", "play", saved["id"],
+                    "--host", "127.0.0.1", "--port", str(server.port), cwd=root,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                try:
+                    async with asyncio.timeout(4):
+                        stdout, stderr = await process.communicate()
+                finally:
+                    if process.returncode is None:
+                        process.kill()
+                        await process.wait()
+                assert process.returncode == 0 and not stderr, (process.returncode, stdout, stderr)
+                acknowledgement = json.loads(stdout)
+                assert acknowledgement == {"request_acknowledged": True, "favorite_id": saved["id"]}
+                cli_requests = control_requests[marker:]
+                assert cli_requests == [{"method": "POST", "path": BASE + "/" + saved["id"] + "/play",
+                                         "content_length": 0, "transfer_encoding": None}]
+                recalled = await _decoded(backend, urls[1])
+                assert recalled["native_id"] != radio_before["native_id"]
+                await wire(server, urls[1])
+                await _eventually("received CLI favorite source and title event", lambda: any(
+                    event_sid == sid and properties.get("TrackURI") == urls[1]
+                    and properties.get("TrackTitle") == metadata["title"]
+                    and properties.get("TrackSource") == "Preset"
+                    for event_sid, properties in receipts[event_marker:]))
+                assert (directory / "state" / "favorites.json").read_bytes() == disk
+                evidence["stable_id_cli"] = {"favorite_id": saved["id"], "original_slot": 2,
+                    "compacted_slot": 1, "stale_slot_url": urls[0], "requests": cli_requests,
+                    "acknowledgement": acknowledgement, "decoded": recalled,
+                    "received_favorite_event": True, "child_reaped": process.returncode == 0}
+
             # Recreate both the real native handle and HttpApi from the same
             # state directory, while the independent media server stays up.
             requests_before = list(requests)
-            async with _renderer(library, directory, tracks, urls, receipts, cleanup) as (api, backend, server):
+            async with _renderer(library, directory, tracks, urls, receipts, cleanup, control_requests) as (api, backend, server):
                 api._resolve_station_id = resolve
                 await listing(server, persisted)
                 await asyncio.sleep(api._monitor_interval + .05)
@@ -331,6 +379,7 @@ def test_real_favorites_client_playback_edits_and_restart(tmp_path):
     evidence = json.loads(completed.stdout)
     assert len(evidence["decoded"]) == 3 and len(evidence["cleanup"]) == 2 and evidence["no_pending_tasks"]
     assert len(evidence["radio"]["decoded"]) == 2 and evidence["radio"]["resolver_calls"] == 2
+    assert evidence["stable_id_cli"]["child_reaped"] and evidence["stable_id_cli"]["received_favorite_event"]
     print(json.dumps(evidence, sort_keys=True))
 
 
