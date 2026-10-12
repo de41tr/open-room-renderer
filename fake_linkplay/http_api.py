@@ -33,7 +33,8 @@ from aiohttp import ClientSession
 from aiohttp import ClientTimeout, TCPConnector
 from aiohttp import web
 
-from .capabilities import configured_presets, capability_fields, configured_sources, service_capability
+from .capabilities import capability_fields, configured_sources, service_capability
+from .favorites import FavoritesApi, FavoritesStore
 from .config import Config
 from .log_safety import redact_media_urls
 from .metadata_formatting import metadata_with_art, metadata_with_duration, metadata_with_url
@@ -201,6 +202,9 @@ class HttpApi:
 
         self.cfg = cfg
         self.state = state
+        self.favorites = FavoritesStore(cfg)
+        self.state.preset_view = lambda: self.favorites.effective_presets()
+        self.favorites_api = FavoritesApi(self.favorites, lambda: self.state.queue.current)
         if state.phase == PlaybackPhase.ERROR or getattr(mpv, "gain_confirmed", True) is False:
             state.gain_confirmed = False
         self.mpv = mpv
@@ -301,6 +305,7 @@ class HttpApi:
 
         app = web.Application()
         app.cleanup_ctx.append(self._state_monitor_context)
+        app.add_routes(self.favorites_api.routes())
         app.add_routes(
             [
                 web.get("/httpapi.asp", self.handle_httpapi),
@@ -1598,7 +1603,7 @@ class HttpApi:
         if name == "getMetaInfo":
             return self.state.as_meta_info()
         if name == "getPresetInfo":
-            presets = configured_presets(self.cfg)
+            presets = self.state.effective_presets()
             # Keep the legacy alias while exposing the real client's field.
             return {"preset_num": str(len(presets)), "preset_list": presets, "presets": presets}
         if name.startswith("MCUKeyShortClick:"):
@@ -1610,13 +1615,14 @@ class HttpApi:
             # multi-track provider playlist. Reject unsupported indexes honestly.
             if match.group(2) is not None and int(match.group(2)) != 1:
                 raise ValueError("Preset contains one direct target")
-            presets = configured_presets(self.cfg)
+            presets = self.state.effective_presets()
             if number > len(presets):
                 raise ValueError("Unknown preset slot")
             selected = presets[number - 1]
             queue = PlaybackQueue(items=[QueueItem(
-                url=selected["url"], title=selected["name"], source=selected["source"],
+                url=selected["url"], title=selected.get("title") or selected["name"], source=selected["source"],
                 artwork=selected.get("picurl", ""), id=f"preset:{number}",
+                artist=selected.get("artist", ""), album=selected.get("album", ""),
             )], index=1)
             queue.validate()
             self.state.queue = queue

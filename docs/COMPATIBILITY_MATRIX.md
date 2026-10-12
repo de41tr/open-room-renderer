@@ -351,3 +351,52 @@ Opt-in native successor staging remains NORMAL-only. An actual mode change with
 an armed/owned native playlist, pending cleanup or uncertain output fails unchanged.
 Use confirmed Stop → set mode → Play; an unconfirmed Stop does not release the
 fence. Repeat uses normal confirmed loading and makes no gapless-repeat promise.
+
+## Editable local favorites
+
+The renderer-owned JSON library is separate from OEM/provider preset-write APIs.
+Existing public `getPresetInfo`, `MCUKeyShortClick:N[:1]` and `preset_key` share one
+effective view: unchanged configuration-owned prefix followed by managed entries.
+Stable managed IDs identify edits; numeric slots are dense and can change after
+removal. Recall still selects one direct target, including a playlist/container
+URL; it does not resume an old multi-track position.
+
+| ORR endpoint | Request | Success |
+| --- | --- | --- |
+| GET `/orr/v1/favorites` | None | Versioned list with id, slot, editable, name, url and display fields |
+| POST `/orr/v1/favorites` | name, url; optional title/artist/album/artwork | 201 and created favorite |
+| POST `/orr/v1/favorites/current` | name | 201 and canonical selected direct target |
+| PATCH `/orr/v1/favorites/ID` | name | 200 and renamed favorite |
+| DELETE `/orr/v1/favorites/ID` | No body | 200 and deleted ID |
+
+JSON-bearing writes require UTF-8 JSON, bounded Content-Length and no compression/chunked
+transfer. Limits: 100 managed entries, 1MiB stored JSON, 32KiB request, 256 UTF-8
+bytes for name, 1024 each for title/artist/album, 8192 each for URL/artwork.
+Duplicate fields/IDs, unknown schema fields/versions, invalid types and malformed
+XML text fail. HTTP(S) URL bytes and query encoding are preserved; userinfo and
+renderer audio-proxy paths, including encoded/dot-segment equivalents, are rejected.
+No library edit fetches media or changes the active queue, generation, position,
+volume or play mode. Playback still goes through the existing selected-URL path.
+
+A corrupt/unreadable store is preserved: managed API reads/writes return 503 while
+configuration-owned recall and unrelated playback remain usable. Pre-replace
+storage failure returns 503 with committed=false and keeps previous memory/file.
+After replacement, unconfirmed directory durability returns 503 with committed=true
+and retains the new in-memory view; the CLI emits a fixed read-before-retry warning.
+The separate atomic-helper correction avoids unnecessary post-replace temp cleanup
+masking a committed result. This is one-process local persistence, not a multi-writer
+transaction system or power-loss certification.
+
+Save-current rejects unresolved selections and all resolver-backed radio because
+current provenance cannot reliably distinguish persistent public references from
+materialized temporary station URLs. Explicit stable public URL addition works.
+It never copies backend/resolved/proxy URLs, raw provider metadata or account state.
+The interface adds no authentication or CORS and is not safe for Internet exposure.
+Queries may contain secrets the validator cannot recognize; users must not save
+credential-bearing or temporary signed URLs.
+
+The [public pywiim preset API](https://github.com/mjcumming/pywiim/blob/0daa35f8e374eae818bd88795f3ef50b684adf86/pywiim/api/preset.py)
+and [official HTTP API section 2.8](https://www.wiimhome.com/pdf/HTTP%20API%20for%20WiiM%20Products.pdf)
+provide list/recall, not a complete generic direct-URL edit contract. Public
+SetKeyMapping wrappers do not establish a complete saved target, so ORR does not
+invent that OEM write behavior. Original-app/hardware acceptance remains pending.

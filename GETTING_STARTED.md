@@ -297,3 +297,42 @@ unprovable. That case returns ERROR with silence explicitly unconfirmed and
 does not stop an unproved foreign source; audio can remain active until an
 explicit owner control succeeds. Keep the option false where that boundary is
 unacceptable. No synchronized multiroom capability follows from staging.
+
+## Editable local favorites
+
+With the renderer running, manage its own local library through the CLI:
+
+```sh
+open-room-renderer favorites list
+open-room-renderer favorites add "Morning radio" "https://media.example.test/live.m3u"
+open-room-renderer favorites save-current "Selected track"
+open-room-renderer favorites rename FAVORITE_ID "New label"
+open-room-renderer favorites delete FAVORITE_ID
+```
+
+Replace the example URL with a stable public or user-owned HTTP(S) media URL.
+Each command accepts `--host` and `--port` (defaults: `127.0.0.1`, `8080`). Use the
+returned stable favorite ID for edits, not its numeric playback slot. Existing
+configuration-owned favorites stay first and read-only; new entries append.
+Deleting a managed entry compacts subsequent slots, so refresh the list before
+using `MCUKeyShortClick:N` or a public client's preset selector. Editing a favorite
+does not alter audio that is already playing.
+
+`add` optionally accepts `--title`, `--artist`, `--album` and `--artwork`.
+`save-current` saves the canonical selected direct URL and display metadata, not
+an expanded playlist child, temporary resolved URL, queue position or account
+state. Resolver-backed radio is conservatively unsupported by save-current in
+this version; add a known stable public station URL explicitly instead.
+
+This is an ORR-owned feature, not an OEM/provider preset-write implementation.
+It uses `state_dir/favorites.json`, with one running renderer as the writer.
+Do not share that state directory between processes or edit the file while serving.
+A corrupt library is preserved and managed operations return an error; configured
+favorites and unrelated playback remain usable. Repair/restore it and restart.
+After a durability warning, run `favorites list` before retrying an addition:
+the replacement may already have committed.
+
+The API and stored library are for a trusted private control LAN. URL userinfo is
+rejected, but token-bearing queries cannot all be detected. Do not save credentials,
+signed temporary URLs or account-scoped references. See the precise
+[local-library API contract](docs/COMPATIBILITY_MATRIX.md#editable-local-favorites).

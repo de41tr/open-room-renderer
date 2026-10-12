@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import re
 import signal
 import sys
 from urllib.parse import quote
@@ -183,6 +184,48 @@ def api_get(host: str, port: int, command: str) -> int:
     return 0
 
 
+def favorite_id(value: str) -> str:
+    """Accept only renderer-generated IDs, never arbitrary URL path input."""
+
+    if re.fullmatch(r"[0-9a-f]{32}", value) is None:
+        raise argparse.ArgumentTypeError("expected a 32-character lowercase hexadecimal favorite ID")
+    return value
+
+
+def favorites_request(
+    host: str, port: int, method: str, path: str = "",
+    payload: dict[str, str] | None = None,
+) -> int:
+    """Manage favorites through the renderer, keeping failed requests private."""
+
+    url = f"http://{host}:{port}/orr/v1/favorites{path}"
+    try:
+        kwargs = {"json": payload} if payload is not None else {}
+        response = requests.request(method, url, timeout=10, allow_redirects=False, **kwargs)
+    except requests.Timeout:
+        print("Request failed: timed out", file=sys.stderr)
+        return 1
+    except requests.RequestException:
+        print("Request failed: could not contact renderer", file=sys.stderr)
+        return 1
+    if not 200 <= response.status_code < 300:
+        # Inspect only a fixed, owned error discriminator. Never print server
+        # text, media URLs, names, or exceptions from an unsuccessful request.
+        try:
+            error = response.json()
+        except ValueError:
+            error = None
+        if (response.status_code == 503 and isinstance(error, dict)
+                and error.get("error") == "durability_unconfirmed" and error.get("committed") is True):
+            print("Favorites were replaced, but crash durability is unconfirmed. "
+                  "Run favorites list before retrying.", file=sys.stderr)
+        else:
+            print(f"Request failed: HTTP {response.status_code}", file=sys.stderr)
+        return 1
+    print(response.text)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser used by the console script."""
 
@@ -202,6 +245,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("value", type=int)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8080)
+    favorites = sub.add_parser("favorites", help="manage renderer-owned local favorites")
+    favorites_sub = favorites.add_subparsers(dest="favorites_cmd", required=True)
+    for name in ("list", "add", "save-current", "rename", "delete"):
+        p = favorites_sub.add_parser(name)
+        if name in {"rename", "delete"}:
+            p.add_argument("favorite_id", type=favorite_id)
+        if name in {"add", "save-current", "rename"}:
+            p.add_argument("name")
+        if name == "add":
+            p.add_argument("url")
+            for field in ("title", "artist", "album", "artwork"):
+                p.add_argument(f"--{field}")
+        p.add_argument("--host", default="127.0.0.1")
+        p.add_argument("--port", type=int, default=8080)
     p = sub.add_parser("print-description")
     p.add_argument("--config", default="configs/config.example.yaml")
     p = sub.add_parser("print-discovery-info")
@@ -232,6 +289,20 @@ def main(argv: list[str] | None = None) -> int:
         return api_get(args.host, args.port, f"setPlayerCmd:{args.cmd}")
     elif args.cmd == "volume":
         return api_get(args.host, args.port, f"setPlayerCmd:vol:{args.value}")
+    elif args.cmd == "favorites":
+        if args.favorites_cmd == "list":
+            return favorites_request(args.host, args.port, "GET")
+        if args.favorites_cmd == "add":
+            payload = {"name": args.name, "url": args.url}
+            payload.update({field: getattr(args, field) for field in ("title", "artist", "album", "artwork")
+                            if getattr(args, field) is not None})
+            return favorites_request(args.host, args.port, "POST", payload=payload)
+        if args.favorites_cmd == "save-current":
+            return favorites_request(args.host, args.port, "POST", "/current", {"name": args.name})
+        if args.favorites_cmd == "rename":
+            return favorites_request(args.host, args.port, "PATCH", f"/{args.favorite_id}", {"name": args.name})
+        if args.favorites_cmd == "delete":
+            return favorites_request(args.host, args.port, "DELETE", f"/{args.favorite_id}")
     elif args.cmd == "print-description":
         print(description_xml(load_config(args.config)))
     elif args.cmd == "print-discovery-info":

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Callable
 
 from .capabilities import capability_fields, configured_presets
 from .config import Config
@@ -56,6 +56,11 @@ class RendererState:
     curpos: int = 0
     totlen: int = 0
     queue: PlaybackQueue = field(default_factory=PlaybackQueue)
+    preset_view: Callable[[], list[dict[str, object]]] | None = field(default=None, repr=False, compare=False)
+
+    def effective_presets(self) -> list[dict[str, object]]:
+        """Use the service-owned library view, with a config-only standalone fallback."""
+        return self.preset_view() if self.preset_view is not None else configured_presets(self.cfg)
 
     @property
     def loop(self) -> str:
@@ -213,7 +218,7 @@ class RendererState:
             "VersionUpdate": "0",
             "NewVer": "0.1.0",
             "service_version": "1.4",
-            "preset_key": str(len(configured_presets(self.cfg))),
+            "preset_key": str(len(self.effective_presets())),
             "prompt_status": "0",
             "indicator_light": "0",
             "LightApiVersion": "",
