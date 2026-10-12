@@ -174,9 +174,10 @@ proxy, not automatically to every backend request.
 `test_backend_lifecycle.py` covers one shared startup, failed/missing/refused IPC,
 command deadlines, malformed replies, child reap/kill, external ownership,
 peer-PID/inode guarded socket cleanup, partial startup and late-command races.
-Most cases are UNIT/MOCK. Four child-interpreter tests deliver actual SIGINT or
-SIGTERM during startup/teardown while renderer resources are mocked. They verify
-that cleanup executes instead of the interpreter exiting early on the signal.
+Most cases are UNIT/MOCK. Nine child-interpreter tests deliver actual SIGINT,
+SIGTERM or SIGHUP during startup/teardown while renderer resources are mocked.
+They verify that cleanup executes instead of the interpreter exiting early on
+the signal, and ordinary startup errors still exit nonzero after cleanup.
 These are not production AF_UNIX or real mpv-process shutdown acceptance.
 
 ## Real CLI service and installed-entry-point lifecycle
@@ -188,7 +189,7 @@ ORR_TEST_CLI_LIFECYCLE=1 PYTHONPATH=. .venv/bin/python -m pytest -q -s \
 
 This separate REAL_BACKEND/null lane starts the actual
 `python -m fake_linkplay.cli serve` process, without importing or replacing its
-backend in the worker. Each owned/external-mpv scenario exercises two lifetimes
+backend in the worker. Each owned/external-mpv scenario exercises three lifetimes
 on the same private generated config, state, socket and high HTTP/UPnP ports.
 Real CLI HTTP commands play generated WAV audio, pause/resume, set volume and
 stop; independent native readback confirms the decoded source, advancing time,
@@ -196,11 +197,12 @@ null audio output, gain and balance graph. Restart must restore generated UUID,
 name, volume, mute and balance; the surviving external player is deliberately
 changed between lifetimes so stale native settings cannot masquerade as restore.
 
-SIGTERM after idle and SIGINT during playback must return zero and release both
-HTTP listeners. An owned native child must be reaped and its socket removed;
-an external native PID/socket must survive both renderer exits before the fixture
-reaps it. Each scenario runs under the existing signal-safe group supervisor with
-a 90-second hard deadline. HTTP binds/advertised addresses/discovery interface
+SIGTERM after idle, then SIGINT and SIGHUP during playback, must return zero
+and release both HTTP listeners. SIGHUP means graceful stop, not config reload.
+An owned native child must be reaped and its socket removed; an external native
+PID/socket must survive all three renderer exits before the fixture reaps it.
+Each scenario runs under the existing signal-safe group supervisor with a
+90-second hard deadline. HTTP binds/advertised addresses/discovery interface
 are explicit loopback; discovery is disabled because its broad protocol coverage
 belongs to the separate discovery lane. No host service, account or security
 setting is changed.
@@ -214,9 +216,10 @@ PID-preserving exec wrapper; production defaults and IPC stay unchanged.
 
 Without the exact opt-in these tests skip. With it, missing mpv or forbidden
 AF_UNIX is a failure, never a skip or alternate transport. The current sandbox
-rejects AF_UNIX at preflight, so this new lane is a native CI candidate until its
-own run passes. Its helper/isolation tests run in the default suite. Null output proves neither audible audio nor hardware,
-physical LAN, original app or systemd/reboot behavior.
+rejects AF_UNIX at preflight. SIGTERM/SIGINT owned and external cycles have
+passed production-IPC CI; the added SIGHUP cycle remains pending its own CI. Its
+helper/isolation tests run in the default suite. Null output proves neither
+audible audio nor hardware, physical LAN, original app or systemd/reboot behavior.
 
 ## Established-station source recovery
 
@@ -901,3 +904,22 @@ stress on the same two standard public runners. The stress step is capped at
 8 minutes. Permissions, assertions and resource budgets are unchanged. After
 recording its terminal result, restore normal 180-second stress, 6-minute step
 and 15-minute native-job caps. This is not a permanent CI-duration increase.
+
+
+### Extended production-IPC checkpoint
+
+Checkpoint 4ef68e4 passed the explicit 900-second request on both native CI
+architectures in [run 38203316362](https://github.com/de41tr/open-room-renderer/actions/runs/38203316362).
+Actual elapsed time was 905.076s (x86_64) and 906.365s (AArch64), with 684/706 loads
+and 1681/1736 protocol agreements across three separately owned mpv lifetimes.
+Every lifetime passed listener/subscription/task/socket cleanup and child reap;
+post-cleanup counts were 7 FDs, 1 task, 1 thread, 0 children. The production digest
+was `f1cb53c37437134ec76c8eac37fed47c20e6a419f4cc0cd19b081a5f0882ee61`.
+This result covers that exact snapshot, not later policy or shutdown
+changes. The routine CI request is again 180s, with 6-minute stress and 15-minute
+whole-native-job bounds; no resource or state assertion was relaxed.
+
+`test_mdns_teardown.py` injects failure/cancellation during withdrawal and close.
+The opt-in discovery lane additionally starts real explicit-loopback Zeroconf,
+injects only unregister failure/cancellation, and verifies every owned socket
+and selector reader is removed. No physical-LAN/app acceptance is implied.

@@ -65,8 +65,7 @@ jobs:
         # Standard public-repository runners; ARM64 is not ARMv7 or Pi hardware.
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
-    # One extended native stability checkpoint; restore the normal 15m cap afterward.
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
       PYTHONPATH: .
       PYTHONUNBUFFERED: "1"
@@ -126,10 +125,10 @@ jobs:
 
       - name: Exercise production Unix IPC across repeated playback lifetimes
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        timeout-minutes: 18
+        timeout-minutes: 6
         env:
           ORR_TEST_UNIX_STABILITY: "1"
-          ORR_TEST_UNIX_STABILITY_SECONDS: "900"
+          ORR_TEST_UNIX_STABILITY_SECONDS: "180"
         run: .venv-ci/bin/python -m pytest -q -s tests/test_mpv_unix_stability.py
 
       - name: Verify isolated native installation and owned uninstall

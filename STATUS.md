@@ -982,3 +982,45 @@ stress on the same two standard public runners. The stress step is capped at
 8 minutes. Permissions, assertions and resource budgets are unchanged. After
 recording its terminal result, restore normal 180-second stress, 6-minute step
 and 15-minute native-job caps. This is not a permanent CI-duration increase.
+
+## Extended production IPC and cleanup checkpoint
+
+[4ef68e4 completed all three jobs](https://github.com/de41tr/open-room-renderer/actions/runs/38203316362).
+Production Unix-IPC stress passed 905.076s on x86_64 and 906.365s on AArch64,
+with 684/706 loads, 676/698 source changes and 1681/1736 protocol agreements.
+Each architecture exercised three real mpv lifetimes. Every teardown returned to
+zero children, seven file descriptors, one task and one thread. Separate native
+child resource budgets passed. This is bounded repeated-lifetime evidence, not
+an uninterrupted-station hour or indefinite leak freedom.
+
+Actual native readback confirms zero backward history for the direct station,
+unchanged forward options and restored finite defaults. Genuine pywiim,
+installed CLI SIGINT/SIGTERM persistence, discovery-to-distinct-source playback,
+clocked digital staging and private same-host Snapcast also passed. Equal-rate
+staging again measured 0ms; mixed-rate staged gaps were 8.875ms on x86_64 and
+5.9375ms on AArch64. No physical-audio or two-host synchronization claim follows.
+Normal CI is restored to 180-second stress, six-minute stress step and fifteen-
+minute native jobs; the Python3.11 floor remains eight minutes.
+
+A reproduced mDNS unregister exception previously left two actual owned sockets
+and selector readers open. Bounded finally-close now removes them on unregister
+error or cancellation; failed close retains the handle for a later retry.
+Local real Zeroconf resources with only unregister failure injected pass both
+cases. Independently, direct SIGHUP could terminate the actual CLI while leaving
+its synthetic startup child alive. SIGHUP now takes the existing graceful-stop
+path, reaps owned startup children and closes active HTTP ports. Ordinary startup
+errors still exit nonzero. These signal reproductions are MOCK playback; the
+added real-mpv owned/external SIGHUP cycle awaits this revision's native CI.
+
+A new paced ICY diagnostic found that native title updates can disappear with
+zero station backward history while the same stream with native defaults exposes
+all changing titles through HTTP/SOAP/GENA. This interaction is under investigation,
+not accepted as a memory/metadata tradeoff. The prepared first-level playlist-child
+extension is held until this is resolved. Existing M3U/PLS children retain native
+defaults because mpv resets the parent load option. The separately frozen direct
+hour does not test changing ICY metadata or establish playlist endurance.
+
+Combined cleanup regression: 2233 default tests passed /44 gated skips; Python3.11
+focused lifecycle/CLI checks passed 142 with 2 native-only skips. Separately, 28
+focused mDNS/actual-loopback tests passed on Python3.11. Native SIGHUP remains
+pending its own hosted result.

@@ -39,24 +39,19 @@ options, explicit multicast discovery and same-owner unready-load cleanup are
 implemented. Native discovery-to-playback passed on both CI architectures.
 Sustained no-EOF station stalls now have reviewed owner-fenced bounded recovery.
 Equal-rate native staging now measures 0ms on both CI architectures, with mixed-rate limits.
-Public-station address refresh is implemented and independently reviewed. Next:
-verify repeated-lifetime production IPC and the clocked Snapcast ingress repair;
-complete the separately frozen continuous-station soak. Nested playlist ancestry
-and real hardware/app acceptance remain open. The
-least-privilege public CI lane passed real Unix IPC on x86_64 and ARM64.
-This records progress, not full hardware/app acceptance.
+Public-station address refresh, uncertain-owner transport fences and exact
+public-client resource parsing are implemented. Installed CLI persistence,
+genuine pywiim controls and the Python3.11 floor pass CI. The extended native
+Unix-IPC checkpoint passed over fifteen minutes on both architectures; routine
+CI durations are restored.
 
-Lost-acknowledgement owner controls and retired-native-output races now have a
-reviewed fence. Actual-client HTTP navigation and encoded-media URI preservation
-are fixed. Next verify the installed CLI process boundary and genuine pywiim
-production IPC in native CI, then complete the frozen continuous-station run.
-
-Installed CLI and genuine pywiim production-IPC gates now pass both architectures.
-The Python3.11 runtime floor is locally verified; a separate bounded CI floor job is added. A reproduced wrong-resource playlist parse is corrected. Next: evaluate
-unused backward history for explicit non-seekable live stations and complete
-continuous-stream endurance without changing the existing run or its budgets.
-
-Explicit non-seekable stations now avoid unused backward packet history with
-reviewed per-file native options. Complete the separately frozen hour and the
-one-time 900-second production IPC checkpoint, then restore normal CI duration.
-A reproduced mDNS unregister-failure resource leak is being fixed independently.
+Current checks: independently verified mDNS/SIGHUP cleanup fixes await their
+added native CI gates. Hold the prepared playlist-child history extension while
+a changing-ICY probe investigates whether zero history suppresses native title
+updates. Preserve metadata as well as bounded memory. Complete the
+separately frozen uninterrupted direct-station hour with unchanged assertions
+and publish its reproducible harness; its earlier baseline failed the RSS gate.
+Investigate actual owned-player death propagation and changing ICY metadata
+without sacrificing canonical metadata. Nested playlist ancestry and physical
+hardware/app acceptance remain explicit gaps. These are implementation and
+bounded evidence checkpoints, not a full WiiM compatibility certification.

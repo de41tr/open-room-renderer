@@ -5,34 +5,34 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint 60d6b0a passed native x86_64/AArch64 plus Python3.11:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38201708621
-   Genuine pywiim controls/encoded resources, installed CLI restart/signals,
-   owned/external cleanup, public playlists and private Snapcast delivery pass.
-4. Default-off finite staging measured equal-rate 0ms with exact frame counts;
-   mixed-rate gaps and ambiguous nested/foreign ancestry remain explicit limits.
-   Station address refresh and owner-fenced recovery are implemented. Uncertain
-   Stop/Pause acknowledgements cannot auto-start another track.
-5. The new per-file policy avoids backward history only for exact explicit live
-   stations. Local native/reset/forward-buffer tests and a frozen 300s run pass.
-   Verify the new mpv0.37 and production Unix readback/extended-stress CI result.
-6. IMPORTANT: this is one extended 900-second native IPC checkpoint. After its
-   terminal result, restore ORR_TEST_UNIX_STABILITY_SECONDS=180, stress step6min
-   and native job15min (currently900/18/30). Keep the floor job8min unchanged.
-   Do not cancel the first extended checkpoint with another push before result.
-7. Original frozen b011557 hour attempt FAILED the unchanged RSS budget before
-   an hour; do not call it successful or a Python leak. Paired diagnostics show
-   native backward-cache retention. The separately reviewed policy hour began
-   04:03:22 UTC and is due no earlier than05:03:23; await its actual result,
-   unchanged budgets, cleanup and source hashes. It uses real libmpv/null, not
-   production Unix IPC. Preserve both runs and their separate provenance.
-8. Independent mDNS teardown work fixes a reproduced unregister-failure leak;
-   review/integrate it after the extended checkpoint. Continue meaningful backlog
-   and actual stability work, not cosmetic changes or test-count inflation.
+   Completed checkpoint 4ef68e4 passed native x86_64/AArch64 plus Python3.11:
+   https://github.com/de41tr/open-room-renderer/actions/runs/38203316362
+   Its one-time extended production Unix-IPC stress passed 905/906 seconds across
+   three owned mpv lifetimes per architecture. All children/listeners/tasks were
+   cleaned up. Direct station cache readback and finite default reset passed.
+4. Normal CI duration is restored: 180-second stress, six-minute stress step,
+   fifteen-minute native jobs; the separate Python3.11 job remains eight minutes.
+5. New fixes close mDNS sockets even after unregister failure/cancellation and
+   treat Linux SIGHUP as graceful stop, not reload. The real-resource loopback
+   discovery checks pass locally; the added actual-mpv SIGHUP cycle awaits CI.
+6. Hold the prepared playlist-child cache extension for now. A paced ICY probe
+   suggests the existing zero-history direct-station policy can suppress native
+   title changes. Narrow this metadata/cache interaction and preserve both
+   metadata and bounded history before extending the policy. M3U/PLS children
+   currently retain native defaults; direct endurance is not playlist evidence.
+7. The original frozen b011557 hour attempt FAILED the unchanged RSS budget
+   before an hour. Paired diagnostics attribute growth to native backward-cache
+   retention, not accumulating Python objects. The separately frozen direct-policy
+   hour began 04:03:22 UTC and is due no earlier than05:03:23; await its actual
+   result, unchanged gates, cleanup and hashes. It uses real libmpv/null, not
+   production Unix IPC, and predates the new playlist-child policy.
+8. Continue concrete stability work: verify owned-player death propagation,
+   evaluate changing ICY metadata without overwriting canonical station metadata,
+   and publish the reproducible hour harness/evidence after review and completion.
+   Do not treat green tests or this checkpoint as the end of the assignment.
 9. No vendor cloud auth/registration, OEM keys, DRM bypass, firmware execution or
    proprietary publication. No binaries, APKs, original IDs, credentials or raw
    captures. Inspect every publication and verify its remote SHA. Keep production
    Unix IPC despite the local socket restriction. Physical LAN, original Android,
    DAC/acoustic audio, ARMv7/Pi/XU4 and full systemd boot remain NOT_RUN.
-10. Do not stop merely because a checkpoint is green. At the deadline stop owned
-    active processes and provide the final honest handover.
+10. At the deadline stop owned active processes and provide the honest handover.

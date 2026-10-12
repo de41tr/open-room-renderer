@@ -163,3 +163,14 @@ mpv 0.40 property/reset and 300-second continuous-stream checks passed. The
 original default-cache hour attempt failed its RSS gate before completion; the
 new policy hour and extended production Unix checkpoint remain pending. No
 indefinite-memory, WAN, physical-audio or hardware claim is implied.
+
+
+Checkpoint 4ef68e4: production Unix-IPC repeated-lifetime stress passed over 900s
+on native x86_64 and AArch64, with all owned processes/resources cleaned up.
+Direct-station history reduction/reset is native-verified, but a new changing-ICY
+probe suggests zero history can suppress native title updates; this tradeoff is
+under investigation. M3U/PLS children currently retain native defaults; the
+prepared extension is held pending that investigation. The added real-mpv SIGHUP
+cycle remains pending its own CI. Explicit-loopback
+Zeroconf unregister-failure cleanup is verified with real resources and injected
+failure. Uninterrupted-hour evidence remains separately scoped and pending.
