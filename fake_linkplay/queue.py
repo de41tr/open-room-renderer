@@ -13,7 +13,7 @@ import math
 import re
 from xml.etree import ElementTree as ET
 
-from .queue_policy import NORMAL, SUPPORTED_MODES
+from .queue_policy import NORMAL, SUPPORTED_MODES, ShuffleTraversal
 
 
 MAX_QUEUE_BYTES = 1024 * 1024
@@ -79,6 +79,9 @@ class PlaybackQueue:
     show_name: str = ""
     stream_type: str = ""
     content_type: str = ""
+
+    # Controller-local history; never parsed from or included in queue XML.
+    _shuffle: ShuffleTraversal | None = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.validate()

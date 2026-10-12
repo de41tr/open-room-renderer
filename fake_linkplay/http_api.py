@@ -16,6 +16,7 @@ import math
 from copy import deepcopy
 import os
 import re
+import random
 import time
 from dataclasses import dataclass, field
 from datetime import UTC
@@ -44,7 +45,9 @@ from .radio import RadioResolution, RadioResolutionError, resolve_station
 from .persistence import (AtomicWriteCommittedError, atomic_write_text, encode_active_dsp,
                           load_active_dsp, save_gain, validate_eq_records)
 from .queue import PlaybackQueue, QueueError, QueueItem, parse_didl_metadata, parse_queue_context, serialize_queue_context
-from .queue_policy import NORMAL, natural_successor, parse_loop_mode, parse_play_mode, play_mode_name
+from .queue_policy import (NORMAL, ShuffleRandom, is_shuffle, natural_successor, parse_loop_mode,
+                           parse_play_mode, play_mode_name, shuffle_available, shuffle_cycle,
+                           shuffle_exhausted, shuffle_step)
 from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
 from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
@@ -197,7 +200,8 @@ class HttpApi:
     ``MpvBackend`` and serializes visible state through ``RendererState``.
     """
 
-    def __init__(self, cfg: Config, state: RendererState, mpv: MpvBackend, *, on_rename: Callable[[], Awaitable[None]] | None = None) -> None:
+    def __init__(self, cfg: Config, state: RendererState, mpv: MpvBackend, *, on_rename: Callable[[], Awaitable[None]] | None = None,
+                 shuffle_rng: ShuffleRandom | None = None) -> None:
         """Create an API handler bound to config, renderer state, and mpv."""
 
         self.cfg = cfg
@@ -205,6 +209,9 @@ class HttpApi:
         self.favorites = FavoritesStore(cfg)
         self.state.preset_view = lambda: self.favorites.effective_presets()
         self.favorites_api = FavoritesApi(self.favorites, lambda: self.state.queue.current)
+        self._shuffle_rng = shuffle_rng if shuffle_rng is not None else random.Random()
+        if is_shuffle(state.queue.loop) and state.queue._shuffle is None:
+            state.queue._shuffle = shuffle_cycle(state.queue.index, state.queue.count, self._shuffle_rng)
         if state.phase == PlaybackPhase.ERROR or getattr(mpv, "gain_confirmed", True) is False:
             state.gain_confirmed = False
         self.mpv = mpv
@@ -1143,10 +1150,13 @@ class HttpApi:
                     if station and old_phase in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING} and self.state.intent == "play":
                         self._recover_station_after_end("source_eof" if snap.get("eof-reached") is True else "unexpected_idle")
                     elif (not station and old_phase in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING}
-                          and self.state.intent == "play"
-                          and natural_successor(self.state.queue.index, self.state.queue.count, self.state.queue.loop) is not None):
-                        if self._queue_advance_task is None or self._queue_advance_task.done():
-                            self._queue_advance_task = asyncio.create_task(self._advance_queue_after_eof(self.state.generation, self.state.queue))
+                          and self.state.intent == "play"):
+                        queue = self.state.queue
+                        if self._queue_selection_available(queue, "natural"):
+                            if self._queue_advance_task is None or self._queue_advance_task.done():
+                                self._queue_advance_task = asyncio.create_task(self._advance_queue_after_eof(self.state.generation, queue))
+                        elif is_shuffle(queue.loop) and queue._shuffle is not None:
+                            queue._shuffle = shuffle_exhausted(queue._shuffle, queue.loop)
             elif self.state.intent == "stop":
                 # A late active backend snapshot cannot undo an owner stop.
                 pass
@@ -1806,9 +1816,10 @@ class HttpApi:
                 await self._transport_command(command)
             return "OK"
         if name in {"next", "prev"}:
-            # Real HTTP clients use next/prev; retain exactly the same queue,
-            # owner, native-staging and single-track restart semantics as SOAP.
-            await self._execute_soap_side_effect("Next" if name == "next" else "Previous", "")
+            if name == "prev" and self.state.queue.count <= 1 and not is_shuffle(self.state.queue.loop):
+                await self._execute_soap_side_effect("Previous", "")
+            else:
+                await self._navigate_queue(1 if name == "next" else -1, http=True)
             return "OK"
         if name == "seek":
             if not parsed.args or not re.fullmatch(r"-?[0-9]+", parsed.args[0]):
@@ -2659,6 +2670,9 @@ class HttpApi:
             self.state.queue = PlaybackQueue(items=[QueueItem(url=url,
                 source=self.queue_source or self.state.track_source, metadata=self.state.track_metadata,
                 artwork=self.state.album_art_uri)], index=1)
+        queue = self.state.queue
+        if is_shuffle(queue.loop) and (queue._shuffle is None or queue._shuffle.exhausted):
+            queue._shuffle = shuffle_cycle(queue.index, queue.count, self._shuffle_rng)
         generation = self._accept_playback_command("play")
         self.state.phase = PlaybackPhase.COMMAND_ACCEPTED
         self.state.current_url = url
@@ -4240,6 +4254,7 @@ class HttpApi:
         """Change policy synchronously, without touching playback ownership."""
         if queue_name and queue_name != self.state.queue.name:
             raise SoapFault(402, "Invalid Args")
+        play_mode_name(mode)
         if mode == self.state.queue.loop:
             return
         if (self._native_stage is not None or self._native_current_id is not None
@@ -4248,7 +4263,13 @@ class HttpApi:
             # Forgetting staging is not backend cleanup. Require confirmed
             # Stop before changing policy for an already-native playlist.
             raise SoapFault(701, "Transition Not Available")
-        self.state.queue.loop = mode
+        queue = self.state.queue
+        if is_shuffle(mode):
+            if not is_shuffle(queue.loop) or queue._shuffle is None:
+                queue._shuffle = shuffle_cycle(queue.index, queue.count, self._shuffle_rng)
+        else:
+            queue._shuffle = None
+        queue.loop = mode
         self._schedule_event_notify(("AVTransport", "PlayQueue"))
 
     async def _advance_queue_after_eof(self, generation: int, queue: PlaybackQueue) -> None:
@@ -4275,9 +4296,7 @@ class HttpApi:
                     return
             # A mode change does not invalidate the owner. Re-read it after
             # the asynchronous ownership preflight, just before selection.
-            successor = natural_successor(index, queue.count, queue.loop)
-            if successor is not None:
-                await self._play_queue_index(successor, queue.name)
+            await self._play_queue_index(queue_name=queue.name, selection="natural")
         except (BackendError, SoapFault, OSError, TimeoutError):
             if current() and self.state.phase != PlaybackPhase.ERROR:
                 self._mark_backend_failure()
@@ -4285,16 +4304,20 @@ class HttpApi:
             # Superseded auto-advance must not overwrite newer owner state.
             return
 
-    async def _navigate_queue(self, delta: int) -> None:
-        """Resolve native EOF before calculating relative navigation indexes."""
-        if (self.state.phase == PlaybackPhase.PAUSED or self.state.intent == "pause") and self.state.queue.count > 1:
+    async def _navigate_queue(self, delta: int, *, http: bool = False) -> None:
+        """HTTP shuffle follows history; SOAP always uses canonical positions."""
+        if self.state.phase == PlaybackPhase.ERROR or self._native_output_uncertain:
+            raise BackendError("Playback state unknown before queue navigation")
+        selection = ("next" if delta == 1 else "previous") if http else "index"
+        if ((self.state.phase == PlaybackPhase.PAUSED or self.state.intent == "pause")
+                and (self.state.queue.count > 1 or http and is_shuffle(self.state.queue.loop))):
             # Loading currently unpauses the backend. Reject this optional
             # transition rather than briefly playing a paused owner's target.
             raise SoapFault(701, "Transition Not Available")
         if self.state.phase == PlaybackPhase.STOPPED or self.state.intent == "stop":
             # AVTransport Next/Previous preserve STOPPED; only an explicit
             # Play (or the existing playing EOF path) may start this selection.
-            await self._play_queue_index(self.state.queue.index + delta, start_playback=False)
+            await self._play_queue_index(self.state.queue.index + delta, start_playback=False, selection=selection)
             return
         if self._native_stage is not None:
             was_playing = self.state.intent == "play"
@@ -4307,7 +4330,7 @@ class HttpApi:
                 if was_playing:
                     await self._transport_command("resume")
                 raise SoapFault(711, "Illegal Seek Target") from None
-        await self._play_queue_index(self.state.queue.index + delta)
+        await self._play_queue_index(self.state.queue.index + delta, selection=selection)
 
     async def _replace_queue(self, queue: PlaybackQueue) -> None:
         queue.validate()
@@ -4316,26 +4339,68 @@ class HttpApi:
         self._accept_playback_command("stop")
         self.state.mark_stop()
         self.state.queue = queue
+        queue._shuffle = shuffle_cycle(queue.index, queue.count, self._shuffle_rng) if is_shuffle(queue.loop) else None
         self._activate_queue_item()
         self._schedule_event_notify()
 
-    async def _play_queue_index(self, index: int, queue_name: str = "", *, start_playback: bool = True) -> None:
+    def _queue_selection_available(self, queue: PlaybackQueue, selection: str) -> bool:
+        """Peek only: EOF scheduling and pre-Stop validation cannot draw RNG."""
+        if is_shuffle(queue.loop):
+            return (queue._shuffle is not None
+                    and shuffle_available(queue._shuffle, queue.loop, -1 if selection == "previous" else 1))
+        if selection == "natural":
+            return natural_successor(queue.index, queue.count, queue.loop) is not None
+        target = queue.index + (-1 if selection == "previous" else 1)
+        return 1 <= target <= queue.count
+
+    async def _play_queue_index(self, index: int | None = None, queue_name: str = "", *,
+                                start_playback: bool = True, selection: str = "index") -> None:
         queue = self.state.queue
+        previous_index, previous_item = queue.index, queue.current
         try:
             if queue_name:
                 queue.require_name(queue_name)
-            queue.validate_index(index)
             if not queue.items:
                 raise QueueError("Queue is empty")
+            if selection == "index":
+                queue.validate_index(index)
+            elif not self._queue_selection_available(queue, selection):
+                if selection == "natural":
+                    if is_shuffle(queue.loop) and queue._shuffle is not None:
+                        queue._shuffle = shuffle_exhausted(queue._shuffle, queue.loop)
+                    return
+                raise QueueError("Queue traversal boundary")
         except QueueError:
             raise SoapFault(711, "Illegal Seek Target") from None
         if (self.state.backend_url or self.state.status in {"play", "pause", "transition"}
-                or not start_playback and (self._native_stage is not None or self._native_current_id is not None)):
+                or self._native_stage is not None or self._native_current_id is not None
+                or self._native_output_uncertain):
             await self._transport_command("stop")
-        # Stop may have yielded to a newer CreateQueue/owner command.
-        if self.state.queue is not queue:
+        # Stop checks its generation. Also retain object/item identity here;
+        # a same-name replacement or duplicate URL is never owner authority.
+        if (self.state.queue is not queue or queue.index != previous_index
+                or queue.current is not previous_item):
             raise BackendError("Queue command superseded")
-        queue.index = index
+        # The mode can change while Stop waits. Choose under the latest policy,
+        # with no further await between RNG/history admission and selection.
+        traversal = queue._shuffle
+        if selection != "index":
+            if not self._queue_selection_available(queue, selection):
+                if selection == "natural":
+                    if is_shuffle(queue.loop) and traversal is not None:
+                        queue._shuffle = shuffle_exhausted(traversal, queue.loop)
+                    return
+                raise SoapFault(711, "Illegal Seek Target")
+            if is_shuffle(queue.loop):
+                traversal = shuffle_step(traversal, queue.loop, -1 if selection == "previous" else 1, self._shuffle_rng)
+                index = traversal.index
+            elif selection == "natural":
+                index = natural_successor(queue.index, queue.count, queue.loop)
+            else:
+                index = queue.index + (-1 if selection == "previous" else 1)
+        elif is_shuffle(queue.loop):
+            traversal = shuffle_cycle(index, queue.count, self._shuffle_rng)
+        queue.index, queue._shuffle = index, traversal
         self._activate_queue_item()
         if start_playback:
             await self._play_url(queue.current.url)

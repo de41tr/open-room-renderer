@@ -93,7 +93,7 @@ async def test_http_soap_status_queue_and_events_agree(api, value, name):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("raw", ["", "2", "3", "-1", "01", "4.0", "NORMAL", "SHUFFLE", "4:0", " 4", "4 "])
+@pytest.mark.parametrize("raw", ["", "5", "-1", "01", "4.0", "NORMAL", "SHUFFLE", "4:0", " 4", "4 "])
 async def test_invalid_http_modes_fail_without_state_or_backend_change(api, raw):
     await create(api)
     before, calls = asdict(api.state), list(api.mpv.calls)
@@ -111,8 +111,7 @@ async def test_invalid_http_modes_fail_without_state_or_backend_change(api, raw)
     ("SetPlayMode", "<NewPlayMode>REPEAT_TRACK</NewPlayMode>", "AVTransport"),
     ("SetPlayMode", "<PlayMode>REPEAT_ONE</PlayMode>", "AVTransport"),
     ("SetPlayMode", "", "AVTransport"),
-    ("SetQueueLoopMode", "<LoopMode>2</LoopMode>", "PlayQueue"),
-    ("SetQueueLoopMode", "<LoopMode>3</LoopMode>", "PlayQueue"),
+    ("SetQueueLoopMode", "<LoopMode>5</LoopMode>", "PlayQueue"),
     ("SetQueueLoopMode", "<QueueLoopMode>1</QueueLoopMode>", "PlayQueue"),
     ("SetQueueLoopMode", "", "PlayQueue"),
 ])
@@ -253,7 +252,7 @@ async def test_native_state_blocks_mode_change_but_allows_same_mode(api, field, 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("value", [0, 1])
+@pytest.mark.parametrize("value", [0, 1, 2, 3])
 async def test_native_repeat_requires_confirmed_stop_and_never_stages(tmp_path, value):
     api = make_native_api(tmp_path)
     await start_native(api)

@@ -188,13 +188,13 @@ def test_schema_driven_android_volume_request_passes_soap_framing(channel):
 
 def test_only_implemented_play_modes_are_advertised():
     play_mode = variable_for("AVTransport", "SetPlayMode", "NewPlayMode", "in")
-    assert allowed_values(play_mode) == ["NORMAL", "REPEAT_ONE", "REPEAT_ALL"]
+    assert allowed_values(play_mode) == ["NORMAL", "REPEAT_ONE", "REPEAT_ALL", "SHUFFLE"]
     seek_mode = variable_for("AVTransport", "Seek", "Unit", "in")
     assert allowed_values(seek_mode) == ["REL_TIME"]
     speed = variable_for("AVTransport", "Play", "Speed", "in")
     assert allowed_values(speed) == ["1"]
     for action, direction in [("SetQueueLoopMode", "in"), ("GetQueueLoopMode", "out")]:
-        assert allowed_values(variable_for("PlayQueue", action, "LoopMode", direction)) == ["4", "1", "0"]
+        assert allowed_values(variable_for("PlayQueue", action, "LoopMode", direction)) == ["4", "1", "0", "3", "2"]
     _, actions, _ = contract("PlayQueue")
     assert arguments(actions["SetQueueLoopMode"]) == [("LoopMode", "in", "LoopMode")]
     assert arguments(actions["GetQueueLoopMode"]) == [("LoopMode", "out", "LoopMode")]
@@ -206,7 +206,7 @@ def test_only_implemented_play_modes_are_advertised():
     ]
     assert allowed_values(variable_for("AVTransport", "GetTransportSettings", "RecQualityMode", "out")) == ["NOT_IMPLEMENTED"]
     all_xml = "".join(scpd_xml(service) for service in SERVICES).upper()
-    assert "SHUFFLE" not in all_xml and "RANDOM" not in all_xml
+    assert "SHUFFLE" in all_xml and "RANDOM" not in all_xml
 
 
 def test_extended_info_declares_all_implemented_outputs_and_client_fields():

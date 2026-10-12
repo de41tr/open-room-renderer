@@ -32,7 +32,7 @@ async def test_mode_changes_during_station_backoff_keep_exact_finite_budget(api,
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("value", [0, 1])
+@pytest.mark.parametrize("value", [0, 1, 2, 3])
 async def test_unready_station_exhausts_recovery_instead_of_repeat_advance(api, value):
     await play_station(api)
     await mode(api, value)
@@ -44,3 +44,22 @@ async def test_unready_station_exhausts_recovery_instead_of_repeat_advance(api, 
     assert api.state.phase == PlaybackPhase.ERROR
     assert loads(api) == [STATION] * 4 and api.state.queue.index == 1
     assert api._queue_advance_task is None and api._station_recovery.attempts == 3
+
+
+@pytest.mark.asyncio
+async def test_shuffle_mode_switches_preserve_station_history_and_finite_budget(api):
+    await play_station(api)
+    await mode(api, 3)
+    recovery, generation, traversal = api._station_recovery, api.state.generation, api.state.queue._shuffle
+    for attempt in range(1, 4):
+        task = await eof(api)
+        assert task is not None
+        await mode(api, 2 if attempt % 2 else 3)
+        assert api._station_recovery is recovery and api._station_recovery_task is task
+        assert api.state.generation == generation and api.state.queue._shuffle is traversal
+        await finish(task)
+        assert recovery.attempts == attempt and api.state.phase == PlaybackPhase.PLAYING
+        assert api._queue_advance_task is None and not traversal.exhausted
+    assert await eof(api) is None
+    assert api.state.phase == PlaybackPhase.ERROR and loads(api) == [STATION] * 4
+    assert api.state.queue._shuffle is traversal and recovery.attempts == 3

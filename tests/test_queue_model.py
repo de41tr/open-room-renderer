@@ -295,7 +295,7 @@ def test_invalid_parser_limits_are_rejected(kwargs):
         parse_queue_context("<PlayList/>", **kwargs)
 
 
-@pytest.mark.parametrize("value", ["2", "3", "-1", "bad"])
+@pytest.mark.parametrize("value", ["5", "-1", "bad"])
 def test_unsupported_loop_modes_are_rejected(value):
     with pytest.raises(QueueError, match="loop mode"):
         parse_queue_context(playlist(fields=f"<LoopMode>{value}</LoopMode>"))
@@ -313,7 +313,7 @@ def test_invalid_mutable_model_cannot_be_serialized():
     with pytest.raises(QueueError, match="index"):
         serialize_queue_context(queue)
     queue.index = 1
-    queue.loop = 2
+    queue.loop = 5
     with pytest.raises(QueueError, match="loop"):
         serialize_queue_context(queue)
     queue.loop = 4

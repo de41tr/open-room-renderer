@@ -195,7 +195,7 @@ async def test_normal_loop_and_queue_event_values(api):
     await create(api)
     await play(api, 2)
     await api._execute_soap_side_effect("SetQueueLoopMode", "<SetQueueLoopMode><LoopMode>4</LoopMode></SetQueueLoopMode>")
-    for value in ["2", "3", "shuffle", ""]:
+    for value in ["5", "shuffle", ""]:
         with pytest.raises(SoapFault):
             await api._execute_soap_side_effect("SetQueueLoopMode", f"<SetQueueLoopMode><LoopMode>{value}</LoopMode></SetQueueLoopMode>")
     xml = ET.fromstring(api._event_body("PlayQueue"))

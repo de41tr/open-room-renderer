@@ -118,6 +118,7 @@ jobs:
             tests/test_libmpv_stall_recovery.py tests/test_libmpv_queue_staging.py \
             tests/test_libmpv_queue_navigation_intent.py tests/test_libmpv_repeat_queue.py \
             tests/test_libmpv_favorites.py \
+            tests/test_libmpv_shuffle_queue.py \
             tests/test_libmpv_source_ownership.py \
             tests/test_libmpv_admitted_load_root.py \
             tests/test_libmpv_station_refresh.py tests/test_libmpv_transport_uncertainty.py

@@ -31,19 +31,19 @@ def test_missing_mode_preserves_sequential_default():
     assert PlaybackQueue().loop == parse_queue_context("<PlayList/>").loop == 4
 
 
-@pytest.mark.parametrize("value", [2, 3, True, False, None, "", "2", "3", "01", "00", "4.0", "-1", " 4", "4 ", "4:0", "NORMAL", "SHUFFLE", "RANDOM", [], {}])
-def test_numeric_adapter_rejects_aliases_coercions_and_shuffle(value):
+@pytest.mark.parametrize("value", [2, 3, True, False, None, "", "5", "01", "00", "4.0", "-1", " 4", "4 ", "4:0", "NORMAL", "SHUFFLE", "RANDOM", [], {}])
+def test_numeric_adapter_rejects_aliases_coercions_and_unsupported_modes(value):
     with pytest.raises(ValueError):
         parse_loop_mode(value)
 
 
-@pytest.mark.parametrize("value", [0, 1, 4, True, None, "", "0", "4", "normal", "REPEAT", "REPEAT_TRACK", "SHUFFLE", "RANDOM", " NORMAL", [], {}])
+@pytest.mark.parametrize("value", [0, 1, 4, True, None, "", "0", "4", "normal", "REPEAT", "REPEAT_TRACK", "RANDOM", " NORMAL", [], {}])
 def test_standard_adapter_is_separate_and_strict(value):
     with pytest.raises(ValueError):
         parse_play_mode(value)
 
 
-@pytest.mark.parametrize("value", [True, False, 0.0, 1.0, 4.0, "4", 2, 3, -1, None])
+@pytest.mark.parametrize("value", [True, False, 0.0, 1.0, 4.0, "4", 5, -1, None])
 def test_mutable_queue_rejects_unsupported_or_noninteger_mode(value):
     with pytest.raises(QueueError, match="loop mode"):
         PlaybackQueue(loop=value)
