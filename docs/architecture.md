@@ -268,3 +268,11 @@ The detached record is consumed before the first playback await; it is never
 converted back into a mutable numeric slot. `favorites_client.py` owns the strict
 single-request acknowledgement. Existing recovery/staging/ownership paths stay
 in place, and numeric public-client recall remains an independent legacy surface.
+
+
+The standard-DMR compatibility correction stays at protocol boundaries:
+`upnp_description` owns canonical/legacy service presentation and pure static
+ConnectionManager properties; `upnp_schema` selects canonical versus preserved
+legacy input contracts. HttpApi routes those schemas, serializes the same CM
+properties for reads/events, and accepts bounded unpadded seek syntax. Playback,
+recovery, queue staging and event-delivery lifecycle implementations are unchanged.

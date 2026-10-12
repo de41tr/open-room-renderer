@@ -4,40 +4,38 @@ Optimize useful, verified user workflows per hour, not test/commit/line counts.
 All work stays on the autonomous branch and draft PR; no merge or release.
 Stabilization starts 2026-10-12 19:00 UTC; active work ends at 20:00 UTC.
 
-## Current decision (2026-10-12 13:38 UTC)
+## Current decision (2026-10-12 13:59 UTC)
 
-- **COMPLETE:** stable-ID favorite recall and common transport controls now have
-  full standard CI green at d91140d. Branch/PR synchronization is restored. Earlier
-  failed/missing checkpoints retain their original evidence.
-- **CONTINUE:** reviewed strict offline M3U URL-list import, with final integrated
-  defaults passing on both supported Python minors. It avoids manual URL transcription with a small pure parser and
-  unchanged safe file publication/restore. No playback changes or native sweep.
-- **PIVOT next:** reproduce standard DmrDevice interoperability using the installed
-  client. The bounded diagnostic reproduced description, required-argument and
-  event-endpoint failures on the unchanged baseline in both profiles. These
-  block actual standard-client controls/subscriptions. Correct only those
-  confirmed gaps through bounded protocol adapters and unchanged core logic.
-- **DEFER:** per-instance audio-device override. Owned mpv already honors its normal
-  service-account mpv.conf, documented in getting started. A new YAML override
-  mainly helps multiple instances, while attached external mpv needs explicit
-  semantics. This is not a missing basic DAC-selection capability.
-- **DEFER:** browser controller without established acceptance, additional multihour
-  runs, major core decomposition and provider-account experiments. Hardware remains
-  unavailable; useful software work continues.
+- **COMPLETE:** offline M3U import has full standard CI green at 369feeb, following
+  stable-ID favorites and local transport controls. Actual user workflows improve
+  without backend changes; earlier failed/missing checkpoints keep their history.
+- **CONTINUE:** publish the reviewed standard-DMR adapter correction and require
+  its new production-Unix client lane to pass hosted CI. Four actual-client
+  mismatches are reproduced and fixed, with short real libmpv and parsed-event
+  proof on both profiles. Existing core logic and all quality bounds remain.
+- **ASSESS next, not yet implement:** safe current-queue export to the existing
+  private authored format. BrowseQueue exposes resolved media and cannot serve
+  as canonical export. Trusted live-radio provenance needs special handling;
+  assess a bounded read-only snapshot first and defer if semantics are ambiguous.
+- **DEFER:** per-instance audio-device override. Owned mpv already honors its
+  service-account mpv.conf. The incremental multi-instance convenience currently
+  ranks below actual client compatibility and reusable playlists.
+- **DEFER:** browser controller without established acceptance, additional
+  multihour runs, broad core decomposition and provider-account experiments.
 
 Priority order: critical regressions/security and green CI; useful new local
 features; targeted low-risk refactoring; special tests only with high information
 value; documentation and later hardware preparation. Existing quality gates stay.
 
-Review next after the next major package, or around 15:08–15:38 UTC. Record
-value, effort, risk and CONTINUE/PIVOT/DEFER; green counts alone are not completion.
+Review after the next major package, or around 15:29–15:59 UTC. Record value,
+effort, risk and CONTINUE/PIVOT/DEFER; green counts alone are not completion.
 
 ## Open proposals (maximum five)
 
 | Proposal | Category | Value / effort / risk | Next action |
 |---|---|---|---|
-| Standard UPnP client interoperability | A_AUTONOM | Three reproduced real-client blockers; 45–60min bounded adapter correction | Preserve red evidence and aliases; review exact typed-control/event acceptance before publication. |
-| Offline M3U URL-list import | A_AUTONOM | Avoid manual transcription; reviewed small parser, bounded file risk | Finish integrated validation, publish and require full standard CI. |
+| Standard UPnP client interoperability | A_AUTONOM | Four reproduced blockers fixed; independent and native review passed | Publish and establish the new shared production-Unix flow on both CI architectures. |
+| Safe current-queue export assessment | A_AUTONOM | Potential playlist reuse; canonical/radio provenance requires care | Read-only bounded assessment; implement only if small, explicit and loss-safe. |
 | Optional local controller page | A_AUTONOM / DEFER | Useful, but installed browsers alone do not establish supported QA | Keep deferred until a supported interaction route is genuinely verified. |
 | Further player-core / eventing decomposition | B_AWAITING_DECISION | Potential maintenance gain; major scope and ownership/timing risk | Defer this round. Present a concrete boundary/migration plan for explicit later decision; do other authorized work meanwhile. |
 | Merge or release | C_APPROVAL_REQUIRED | Distribution decision, not an implementation milestone | Do not act. Requires separate explicit authorization; current instruction prohibits it. Silence is not consent. |

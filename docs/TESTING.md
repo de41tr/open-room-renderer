@@ -62,6 +62,86 @@ before changing playback. A literal URI ending in `:3` remains that exact URI.
 The optional libmpv format lane also exercises actual pywiim M3U/PLS playback,
 native child source/decoder progression and rejection preserving paused audio.
 
+## Standard DMR description, controls and parsed events
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_standard_dmr.py \
+  tests/test_upnp_schema.py tests/test_soap_faults.py tests/test_gena_lifecycle.py
+```
+
+`test_standard_dmr.py` uses unchanged `async-upnp-client` 0.49.0 `UpnpFactory`
+(strict defaults), `DmrDevice` and `AiohttpNotifyServer` over real loopback HTTP,
+with a deterministic fake audio backend. The client is available through the
+existing optional pywiim development dependency; its absence skips this module.
+Both neutral and compatibility profiles must pass canonical service recognition,
+URI/play/pause/resume/seek/stop, volume/mute, play mode and queue navigation.
+Queue creation uses the existing public PlayQueue service only as setup.
+
+The complete profile subscribes AVTransport, RenderingControl and
+ConnectionManager without filtering or client/schema rewriting. Initial state,
+transport changes, current URI/title, position, gain and queue index are read
+from the library's parsed GENA/LastChange before any polling. The test then checks
+ordinary polling, renewal of all three leases, unsubscribe and task cleanup.
+
+Four reproduced adapter mismatches are covered: duplicate service-type aliases
+formerly obscured canonical service IDs; standard SCPDs required the optional
+vendor `ControlSource`; ConnectionManager had no usable event URL; and the
+standard client's `0:0:5` seek time was rejected despite denoting five seconds.
+SOAP now accepts one- or two-ASCII-digit minute/second fields within 0–59;
+existing seek bounds, source ownership and confirmation behavior are unchanged.
+
+Compatibility alias entries/routes remain advertised in both profiles. Canonical
+AVTransport, RenderingControl and ConnectionManager entries follow their aliases
+for this client's last-entry-wins service-type lookup. Duplicate types remain an
+explicit compatibility limitation: other parsers may choose a different entry.
+Canonical AVTransport/RenderingControl SCPDs omit `ControlSource`; legacy alias
+SCPDs preserve their exact prior contracts. SOAP still accepts that extension on
+either route and does not require it. ConnectionManager events use the same
+static values as its existing reads: empty SourceProtocolInfo, SinkProtocolInfo
+`http-get:*:audio/*:*`, and empty CurrentConnectionIDs. They do not claim an
+allocated connection, invent LastChange or add unsupported connection actions.
+
+This is INTEGRATION + MOCK audio evidence, not decoder, production Unix IPC,
+SSDP discovery, physical LAN, Android app, DAC or audible-output acceptance.
+The unchanged frozen diagnostic has narrower fake-backend capabilities and
+invalid-state navigation/seek calls; passing its schema/subscription checks alone
+does not establish successful playback. Legacy/canonical SCPD byte equality is
+intentionally no longer an expected positive control.
+
+## Standard DMR native acceptance
+
+`tests/test_libmpv_standard_dmr.py` opts in with `ORR_TEST_LIBMPV_PATH`.
+`tests/test_standard_dmr_unix_integration.py` opts in with `ORR_TEST_DMR_UNIX=1`.
+Both execute one shared unchanged-client flow for neutral and compatibility
+profiles: strict description/SCPD binding, all three subscriptions, two different
+owned HTTP WAV sources, typed Play/Pause/resume/Seek/volume/mute/Stop, then renew
+and unsubscribe. Eleven typed commands are sent without vendor argument injection.
+Library-expanded LastChange values, including a post-seek position within the
+whole-second wire precision, must be received before any ordinary state polling.
+Native source paths/entry IDs, selected PCM/progress, pause stability and gain
+properties independently verify actual effects. Both source filenames/frequencies
+and native IDs differ; a successful acknowledgement alone cannot pass.
+
+The libmpv lane uses the existing test ctypes command transport, null output and
+owned native-handle cleanup. Exact final acceptance passed both profiles on 0.40
+in 5.41s and 0.37 in 5.37s; independent 0.40 replay passed in 5.84s. Final integrated
+0.40 replay passed in 5.55s. These are short REAL_BACKEND checks, not audible audio.
+
+The Unix wrapper runs the same flow against the production `MpvBackend` and two
+fixture-owned external mpv processes. It requires real IPC/client/mpv after opt-in,
+preserves the external process during renderer shutdown, and reaps fixture-owned
+children afterward. Local IPC preflight is NOT_RUN due to AF_UNIX denial; the new
+hosted Unix result must be recorded separately when observed. Both lanes retain
+20s async and 25s outer bounds. Existing hosted jobs/caps and all prior stages stay;
+one libmpv case joins group two, and the Unix wrapper joins the existing real-client
+step. No multicast discovery, physical LAN, app, ALSA/DAC or hardware claim follows.
+
+The original unchanged baseline failed profile recognition, argument binding and
+full subscription. A first adapter candidate then reached native playback but
+failed the real client's unpadded Seek with402; the final narrow input correction
+resolves that reproduced mismatch without changing seek execution. These red
+results remain distinct from the final passing native evidence.
+
 ## Real client with production Unix IPC
 
 ```sh
@@ -1774,3 +1854,17 @@ The preceding d91140d checkpoint passed all three standard jobs, verified at
 That includes the earlier transport changes and resolves the recorded PR/branch
 synchronization lag; 0b6defa still has no observed standalone CI result. This
 new offline-import checkpoint is hosted-verification-pending until observed.
+
+
+Final combined standard-DMR candidate defaults pass 3777 /72 opt-in skips on
+Python 3.12 (187.30s) and 3634 +143 /72 on Python 3.11 (145.54s/41.68s), retaining
+32 existing warnings. The two additional skips are explicit new native opt-ins.
+No default case or prior native stage is removed; all workflow bounds remain.
+Production digest:
+`a9fc6a3d3e860c0d9385c366a1397fa2d1d32d8708aa55660d491d669151bcd8`.
+
+The preceding offline-import checkpoint 369feeb passed all three standard jobs,
+verified 13:58:28 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38257679612 .
+Native x86_64/AArch64 durations were 838.805s/830.491s, with 3729/70 default checks,
+20+44 libmpv checks and all later gates passing. The floor passed 3586+143/70
+in 151.26s/51.19s. This does not predeclare the new DMR hosted lane successful.

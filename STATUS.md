@@ -2,42 +2,41 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (13:42 UTC)
+## Current checkpoint (13:58 UTC)
 
-Draft PR remains unmerged. Stable-ID favorites and local transport controls are
-published at `d91140d`; all three standard jobs passed, verified at 13:19:16 UTC:
-https://github.com/de41tr/open-room-renderer/actions/runs/38252634049 .
-Both x86_64 and AArch64 passed default suites, all 64 libmpv checks (51 actual
-native cases plus 13 deterministic helpers), six production Unix-IPC cases and
-every later client/stress/install/clocked/discovery/Snapcast gate. Their complete
-job times were 840.979s /815.991s under the unchanged 900s limit. Python 3.11's
-complete two-group collection passed 3552 +143 /70 skips in 152.77s/54.04s,
-retaining the 165s watchdog, 180s step and eight-minute job.
+Strict offline M3U import is published at `369feeb`; all three standard jobs
+passed, verified at 13:58:28 UTC:
+https://github.com/de41tr/open-room-renderer/actions/runs/38257679612 .
+Native x86_64/AArch64 jobs passed every gate in 838.805s/830.491s under 900s.
+Python 3.11 groups passed 3586 +143 /70 in 151.26s/51.19s under unchanged caps.
+Earlier PR synchronization and Python-floor timeout records retain their original
+outcomes; no missing or failed checkpoint is relabeled.
 
-This closes the observed branch/PR synchronization delay: `0b6defa` had no
-observed standalone workflow, but its transport changes are included in the
-now-green `d91140d`. No earlier missing or failed checkpoint is relabeled green.
-In particular, `763f7f7` remains failed for the Python-floor time budget despite
-all assertions and both native jobs passing.
+The next reviewed checkpoint fixes four reproduced standard-client adapter gaps:
+canonical AVTransport/RenderingControl/ConnectionManager binding, optional vendor
+ControlSource incorrectly required by canonical SCPDs, the missing CM event URL,
+and the real client's unpadded seek time. Compatibility aliases and their AVT/RC
+schemas are preserved byte-for-byte; standard entries follow aliases for the
+tested client's last-entry-wins lookup. Other selection strategies remain limited.
+CM events reuse honest static read values; no connections or unsupported actions
+are invented. Existing playback/recovery/staging and event-delivery lifecycle
+implementations are unchanged.
 
-The next candidate imports a strict offline UTF-8 M3U URL-list subset into the
-existing private authored JSON format. It preserves ordered duplicate URLs and
-creates a new no-clobber file; EXTINF titles/durations are explicitly discarded.
-It never contacts a renderer or fetches media. Existing separate restore defaults
-to stopped. HLS/player directives and relative/local paths are rejected. Review
-and final integrated defaults pass: 3729/70 on Python 3.12 (180.38s), and
-3586 +143/70 on Python 3.11 (140.84s/42.23s), with the existing 32 warnings.
-The isolated reader-only extraction passes all 202 existing file/CLI checks.
-The new import checkpoint still requires its own hosted CI.
-The tiny safe-byte-reader extraction is separate from the feature commit.
+The unchanged installed standard DmrDevice now performs typed controls and parses
+all three subscriptions in both profiles. Actual libmpv 0.37/0.40 workflows select
+two distinct native WAV entries with PCM progress, verify pause/seek/resume and
+gain/stop, receive library-expanded LastChange before polling, then clean up.
+Exact final probes pass in 5.37s/5.41s; independent 0.40 replay passes in 5.84s and
+final combined replay in 5.55s. A shared production-Unix wrapper is included for
+the existing hosted client step; local AF_UNIX preflight is NOT_RUN, and its new
+hosted result is still pending. No hardware/original-app/discovery claim is added.
 
-A bounded installed standard UPnP-client diagnostic is investigating description,
-SCPD argument and ConnectionManager subscription interoperability. All three fail
-on the unchanged published baseline in both profiles: recognition false, ten
-standard mutators rejected before HTTP for missing ControlSource, and full
-subscription rolled back after an empty ConnectionManager event URL returns405.
-A separate bounded protocol fix is in progress; it is not included here.
-Browser acceptance, original-app and hardware acceptance remain pending.
+Final combined defaults pass 3777 /72 opt-in skips on Python 3.12 (187.30s), and
+3634 +143 /72 on Python 3.11 (145.54s/41.68s), with 32 existing warnings. All existing
+watchdogs/job caps remain. Independent review approved exact adapter and native
+patches. Production digest:
+`a9fc6a3d3e860c0d9385c366a1397fa2d1d32d8708aa55660d491d669151bcd8`.
+This candidate still requires its own complete standard CI after publication.
 
 The requested behavior-neutral extraction began at 09:14:53 UTC after its prerequisite green gate.
 It moves exactly three stateless metadata-edit helpers into metadata_formatting.py,

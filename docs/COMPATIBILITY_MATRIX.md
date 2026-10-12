@@ -4,7 +4,7 @@ This is scoped evidence, not a product certification. Updated 2026-10-12 UTC.
 
 | Area | Evidence | Remaining limit |
 | --- | --- | --- |
-| SOAP action validation/faults | UNIT/MOCK regression coverage | Actual client/app execution pending |
+| SOAP action validation/faults | UNIT/MOCK; real typed standard DMR client and libmpv/null controls | Original app and new standard-client production-IPC lane pending |
 | Volume/mute/control | Real Unix IPC on x86_64/AArch64; measured digital PCM; local PyWiiM integration | Physical mixer/DAC/acoustic effects pending |
 | Selected-URI playback/control | Real production Unix IPC + libmpv/null HTTP flows on x86_64/AArch64 | Physical audio and Android pending |
 | Playback generations/EOF | UNIT/MOCK races + actual Unix IPC observer/queue EOF | Target hardware and WAN conditions pending |
@@ -536,3 +536,23 @@ replacement followed by uncertain Play reports partial success without rollback.
 Acknowledgement is not an assertion of observed audio. Inspect queue/status before
 retrying. No new listener, authentication policy or playback-core behavior follows
 from these client commands.
+
+
+## Standard UPnP client adapter scope
+
+Strict `async-upnp-client` 0.49.0 `UpnpFactory`/`DmrDevice` now recognizes both
+profiles and exercises typed controls plus all three service subscriptions.
+Actual library-parsed LastChange precedes polling in fake-audio integration and
+short real libmpv 0.37/0.40 two-source workflows. The existing pywiim acceptance
+primarily exercises its HTTP path; it did not establish this standard-DMR path.
+The new shared production-Unix flow is configured for hosted CI, not yet verified.
+
+Canonical AVTransport/RenderingControl SCPDs omit optional vendor ControlSource;
+legacy alias SCPDs remain byte-identical. SOAP accepts the extension on either
+route. Canonical service entries follow preserved aliases for the tested client's
+last-entry-wins lookup. Duplicate types remain: a first-entry-wins client may
+select the legacy schema, so this is not universal client or UPnP certification.
+ConnectionManager now has a usable event endpoint and honest static values matching
+its read actions, without invented connections or unsupported connection actions.
+The standard client's unpadded time form is accepted only with ASCII numeric fields
+and minute/second values 0–59; seek execution and ownership are unchanged.

@@ -5,8 +5,8 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint d91140d passed all three jobs, verified at
-   13:19:16 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38252634049
+   Latest completed checkpoint 369feeb passed all three jobs, verified at
+   13:58:28 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38257679612
    Python floor uses complete bounded groups on the same runner, preserving the
    3-minute step/8-minute job; both native jobs retain all existing gates.
    The prior 763f7f7 remains failed solely for its floor time budget.
@@ -217,3 +217,15 @@ feature/tests and docs separately in one checkpoint, then verify hosted CI.
 The standard-client diagnostic confirmed all three gaps on the unchanged baseline
 in both profiles. A separate private protocol-adapter correction is underway;
 do not fold unreviewed compatibility changes into this offline-file checkpoint.
+
+13:58 UTC: final standard-DMR candidate is independently approved and passes
+3777/72 defaults on 3.12 (187.30s), grouped 3.11 (145.54s/41.68s), and short actual
+libmpv 0.37/0.40 workflows. Publish adapter/tests separately from native/shared-Unix
+acceptance and docs, after the current M3U workflow finishes. The new Unix lane
+remains locally NOT_RUN, requiring hosted evidence. Preserve four reproduced red
+mismatches, alias schemas, duplicate-type limits and all existing lifecycle guards.
+No core redesign; stabilization 19:00 UTC and active-work end 20:00 UTC remain.
+
+13:58:28 UTC: M3U checkpoint 369feeb is fully green. Both native architectures
+passed every stage in 838.805s/830.491s, floor groups 151.26s/51.19s. Publish the
+already-reviewed DMR package now; keep its new hosted-IPC result pending until seen.

@@ -4,16 +4,19 @@ Branch: `dot/renderer-autonomous-20261012`; base: `3672b9838e9c39ae8191613108f0d
 Work window ends 2026-10-12 20:00 UTC. Stabilization only after 19:00 UTC.
 No main-branch edits, merge, or release.
 
-## Current functional package (12:53 UTC)
+## Current functional package (13:46 UTC)
 
-Transport controls are published at `0b6defa`; PR synchronization/CI is still
-pending while the branch itself is verified. Last fully green checkpoint remains
-`3e2455f`. Do not re-push or change PR state just to force a refresh. Publish the
-naturally completed, reviewed stable-ID favorite recall checkpoint with its exact
-local/default/native evidence and an explicit hosted-verification limit. Keep the
-13-line preset helper extraction separate, without changing playback internals.
-Assess a strict offline M3U-to-authored-playlist convenience next; no fetch or
-backend change. Browser UI and additional multihour probes remain deferred.
+Strict offline M3U import is published and hash-verified at `369feeb`; standard CI
+run 38257679612 passed all three jobs, verified 13:58:28 UTC. This includes
+stable-ID favorite recall and transport controls. The prior PR/branch lag resolved
+on that natural checkpoint; `0b6defa` has no observed standalone hosted result.
+
+Publish the reviewed correction for four reproduced standard-UPnP-client blockers through a small
+protocol-adapter patch: canonical service binding, standard action arguments,
+honest ConnectionManager event subscription and bounded unpadded seek syntax. Preserve legacy aliases and
+existing playback/recovery/staging behavior. Require independent review, unchanged
+client-parsed events and a bounded two-source actual-backend acceptance. No new
+browser controller, dependency, provider authentication or multihour test.
 
 ## Ordered work
 
