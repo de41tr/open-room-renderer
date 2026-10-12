@@ -1,9 +1,48 @@
 # Development status
 
-Final handover for the autonomous work window ending 2026-10-12 20:00 UTC.
+The earlier autonomous window completed at 2026-10-12 20:00 UTC.
+A separate user-authorized DSP CLI hour began at 20:35:04 UTC and ends at
+21:35:04 UTC (23:35:04 Berlin), with no automatic continuation. Its current
+verification record will be kept separately from the older evidence below.
 This is scoped software evidence, not a compatibility certification.
 
-## Final stabilization handover
+## Bounded DSP CLI checkpoint
+
+The new client-only increment adds `dsp balance get`, `dsp balance set VALUE`
+and `dsp eq on|off`, using only the existing HTTP API. Balance is normalized
+-1..1 at the server's three-decimal resolution. EQ enable/bypass preserves the
+existing active context and saved curve. The successful output acknowledges a
+request; it does not claim ongoing state or audible sound.
+
+Validation happens before networking. Every request is single-shot, bounded,
+private on failure and isolated from environment proxy/netrc credentials. Exact
+HTTP 400 rejection is distinct from UNKNOWN. HTTP 502 stays UNKNOWN because
+real transaction tests prove it can occur after DSP applies but saving fails.
+Lost acknowledgement or unconfirmed rollback never becomes success or an
+automatic mutation retry. There is no new endpoint, audio backend or core refactor.
+
+Independent review approved the exact production, tests and operator docs.
+The new focused suites pass 171 cases. The full Python 3.12 default suite passes
+**4583 /73 opt-in skips** in 196.65s, with the same 32 upstream warnings.
+The complete Python 3.11 groups pass 4333 +250 /73 in 132.25s/64.69s,
+inside the unchanged 165-second group watchdog. No case or gate was removed.
+
+The existing real DSP PCM lane passes on libmpv 0.37/0.40 in 3.91s/3.77s. Nine
+actual CLI children each send one bodyless GET. EQ off restores sample identity;
+on restores the same native graph and measured -12.0387 dB cut. Balance -1/+1/0
+retains exact silent-channel/identity checks. All 13 prior captures remain, plus
+one restored-EQ capture. In-flight CLI cancellation reaps the child and closes
+native/server resources. Final DSP + restore replay passes both versions
+(2 cases, 5.58s/5.34s); the 35s/45s lane caps and all earlier gates remain unchanged.
+
+This is loopback/test-ctypes digital PCM, not production Unix DSP CLI, physical
+DAC/acoustic audio, original-app or hardware acceptance. Existing production
+Unix coverage remains in full hosted CI; the local AF_UNIX restriction persists.
+After publication, verify the exact new head's full CI in Draft PR #1. The earlier
+02cb93d run remains a separate green baseline, not evidence for this new code.
+No further feature is scheduled; stop no later than 21:35:04 UTC.
+
+## Previous completed stabilization handover
 
 Application/test checkpoint **1d054809a836eb844fd67fa833c24cccba3dc505** passed
 all three standard jobs, verified at 17:16 UTC on 2026-10-12:

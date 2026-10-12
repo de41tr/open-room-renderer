@@ -1,4 +1,30 @@
-# Handover and resume boundaries
+# Current bounded DSP CLI task
+
+A new explicit user task began 2026-10-12 20:35:04 UTC, after the earlier
+completed window. Its hard stop is **2026-10-12 21:35:04 UTC (23:35:04 Berlin)**.
+The last 15 minutes, from 21:20:04 UTC, are reserved for tests, publication and
+handover. Do not continue automatically after this new deadline.
+
+Scope: a small local client-only DSP CLI using the existing HTTP contracts:
+`dsp balance get`, `dsp balance set VALUE`, and `dsp eq on|off`.
+No new server endpoints, audio backends, broad refactors, browser/provider work,
+device authentication, firmware, merge or release. Keep the same branch and
+Draft PR #1. Code, focused tests, docs, commits and branch publication are allowed.
+Confirmed rejection and unknown mutation outcomes must remain distinct; no
+automatic mutation retry or unknown-state success. Actual native checks now pass on libmpv 0.37/0.40, including nine real DSP CLI
+requests and digital sample effects. Full Python 3.12 defaults pass 4583/73;
+full Python 3.11 groups pass 4333+250/73. Exact published-head CI must still be
+verified after publication. See STATUS.md
+for exact scope. Do not extend the deadline to await CI.
+
+Starting checkpoint: clean local/remote `02cb93d19e7e5a5b2c6c1f8773c884a1ba0c4952`,
+all three jobs green in run 38294774900; main stays at
+`3672b9838e9c39ae8191613108f0d91a5cada97d`. Reverified at 20:36 UTC.
+
+The previous handover below is historical. Its earlier work authority ended;
+this narrow new task does not reopen that broader plan.
+
+# Previous completed handover and resume boundaries
 
 1. This autonomous work window ends 2026-10-12 20:00 UTC. Formal stabilization
    starts at 19:00 UTC. After 20:00 UTC, do not resume or continue automatically.

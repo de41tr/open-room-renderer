@@ -1,6 +1,46 @@
 # Test evidence and limits
 
-## Automated suite
+## Local DSP CLI acceptance
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_dsp_client.py tests/test_dsp_client_renderer.py
+ORR_TEST_LIBMPV_PATH=/absolute/path/to/libmpv.so.2 PYTHONPATH=. .venv/bin/python -m pytest -q -s tests/test_libmpv_dsp.py
+```
+
+The client unit/transport tests cover normalized finite balance validation,
+three-decimal request canonicalization, exact balance/EQ acknowledgements,
+bounded response framing, duplicate JSON fields, fixed private failures and
+single-shot session isolation. A valid HTTP 400 rejection is separate from an
+unknown mutation outcome; HTTP 502 is never treated as proof of unchanged DSP.
+
+The loopback suite runs real HttpApi, persistence and MpvBackend transactions
+against a deterministic synthetic IPC peer. Actual CLI processes demonstrate
+balance read/set and EQ bypass while retaining the companion settings. The same
+502 response is tested both after a rejected backend candidate and after a
+successfully applied graph whose persistence fails. Lost acknowledgement with
+failed rollback blocks reads; only explicit subsequent recovery can reestablish
+confirmed state. These are INTEGRATION + MOCK cases, not native decoding.
+
+The existing opt-in digital PCM lane additionally invokes nine actual DSP CLI
+children through loopback HTTP and its test ctypes adapter into libmpv. It
+checks exactly one bodyless request per command, EQ bypass/reapplication of the
+same negative cut, and -1/0/+1 balance with the existing measured channel-silence
+and identity thresholds. All previous captures remain; one extra capture proves
+EQ reapplication. Cancellation occurs with a real balance-read child outstanding
+and verifies child reaping plus the existing renderer/native cleanup. The
+35-second inner/45-second outer caps and four-second child deadline remain
+bounded. This is REAL_BACKEND/digital-PCM evidence, not production Unix IPC,
+physical DAC/acoustic sound, original-app behavior or arbitrary EQ compatibility.
+
+The exact local DSP lane passes on libmpv 0.37 and 0.40 (3.91s/3.77s); the
+combined DSP + persistence-restore replay passes on both (5.58s/5.34s). The
+independently rerun client suites pass 171 checks. Python 3.12 full defaults pass
+4583 cases /73 opt-in skips in 196.65s. Full Python 3.11 groups pass 4333 +250
+/73 in 132.25s/64.69s under the unchanged 165-second watchdog.
+Check the exact published head's full hosted CI in the draft PR;
+the previous checkpoint below does not certify new code.
+
+## Earlier automated suite checkpoint
 
 ```sh
 .venv/bin/python -m pytest -q

@@ -2,7 +2,8 @@
 
 Optimize useful, verified user workflows per hour, not test/commit/line counts.
 All work stays on the autonomous branch and draft PR; no merge or release.
-Stabilization starts 2026-10-12 19:00 UTC; active work ends at 20:00 UTC.
+The previous window completed at 2026-10-12 20:00 UTC. A separately authorized
+DSP CLI task runs 20:35:04–21:35:04 UTC; it does not reopen the broader plan.
 
 ## Final stabilization decision (2026-10-12)
 
@@ -101,8 +102,9 @@ for protocol, player, queue, eventing, DSP and service-adapter boundaries.
 
 1. A small local browser controller for playback, queue, favorites and truthful
    pending/error states, with an established real-browser acceptance path.
-2. Convenient headless DSP controls over the already implemented transactional
-   balance, bypass and preset engine. Choose its context semantics explicitly.
+2. Headless preset/band editing and explicit DSP source-context selection. The
+   separate bounded DSP CLI increment covers balance and active EQ bypass only;
+   it preserves the existing active context rather than inventing a new one.
 3. Richer explicit queue bookmarks: selected metadata and playback position/
    history beyond the current ordered URL-list format, with versioned validation
    and stopped-by-default restore semantics. Current URL playlists already
@@ -113,8 +115,8 @@ for protocol, player, queue, eventing, DSP and service-adapter boundaries.
 - Choose the first real OS/mpv/DAC target and foreground/service profile when
   hardware becomes available. Start with neutral foreground playback, then the
   explicit original-app compatibility profile.
-- Choose the next usability increment: browser controls when genuine QA is
-  available, otherwise the smaller headless DSP interface.
+- The selected one-hour increment is the smaller balance/active-EQ CLI. Any
+  later preset editor or browser controller needs its own scope and acceptance.
 - Approve one architecture boundary and acceptance budget at a time. Prefer
   shared pure contracts first; core/eventing movement needs its own scope.
 - Prioritize richer bookmarks, broader controller compatibility or per-instance

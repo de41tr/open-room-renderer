@@ -451,6 +451,50 @@ Only the renderer's exact `OK` response is accepted. The client never redirects
 or retries a command, and ignores environment proxies and netrc credentials.
 An uncertain result may already have taken effect; inspect status before retrying.
 
+## Local DSP controls
+
+Use the existing renderer's channel balance and EQ bypass controls directly:
+
+```sh
+open-room-renderer dsp balance get
+open-room-renderer dsp balance set -0.25
+open-room-renderer dsp balance set 0
+open-room-renderer dsp eq off
+open-room-renderer dsp eq on
+open-room-renderer dsp balance get --host 192.0.2.10 --port 8080
+```
+
+Balance uses one normalized scale: **-1 is left only, 0 is centered, +1 is
+right only**. Positive values attenuate the left channel; negative values
+attenuate the right. Values outside -1..1, percentages and non-finite values
+are rejected before networking. Values are rounded to the existing renderer's
+three-decimal resolution. `get` returns JSON with the renderer-confirmed
+`balance` value; it is a point-in-time read, not a physical audio measurement.
+
+`eq off` bypasses the existing active EQ while retaining its configured bands;
+`eq on` reapplies that same active EQ, including its existing source context.
+Neither command selects a preset, changes bands, changes volume, or starts
+playback. Enabling EQ can restore previously configured positive gain: keep the
+volume low when testing an unfamiliar configuration. Preset/band editing and
+source-context selection are not part of this small CLI.
+
+All four forms accept `--host` and `--port` after their final subcommand/value,
+defaulting to `127.0.0.1:8080`. Use a trusted private renderer endpoint; the
+existing HTTP API is unauthenticated. The client makes one request, follows no
+redirect, ignores environment proxies/netrc credentials, and never retries a
+mutation automatically. Its ten-second connect/read inactivity timeout is not
+a total elapsed-time deadline.
+
+A successful mutation prints `request_acknowledged: true`, not a promise that
+its state is still current or that sound was heard. A rejected request and an
+**UNKNOWN** outcome are different. In particular, HTTP 502 can mean the DSP was
+already applied but saving it failed, so it does not prove the old state remains.
+A missing/malformed acknowledgement also leaves the outcome unknown. Inspect
+`dsp balance get` and the existing status/DSP interface before explicitly
+retrying; generic playback status alone does not report active EQ. Failure
+returns nonzero, prints a fixed private-safe diagnostic, and prints no success
+JSON. A read failure never substitutes an assumed balance value.
+
 ## Legacy direct controls and endpoint syntax
 
 The legacy `status`, `play`, `pause`, `resume`, `stop`, `volume`, and

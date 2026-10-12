@@ -1,10 +1,24 @@
 # Development plan
 
 Branch: `dot/renderer-autonomous-20261012`; base: `3672b9838e9c39ae8191613108f0d91a5cada97d`.
-Work window ends 2026-10-12 20:00 UTC. Stabilization only after 19:00 UTC.
+The previous work window completed at 2026-10-12 20:00 UTC.
+A separate explicit DSP CLI task runs 20:35:04–21:35:04 UTC, with its last
+15 minutes reserved for validation/publication/handover. No automatic continuation.
+Scope: client-only balance get/set and EQ on/off over existing HTTP contracts,
+focused unit/loopback/native checks and operator docs. No server/backend expansion.
 No main-branch edits, merge, or release.
 
-## Final stabilization plan
+## Bounded DSP CLI delivery
+
+The narrow implementation and independent review are complete. Focused local
+client/HTTP and actual libmpv 0.37/0.40 PCM checks pass. Full default suites
+pass on Python 3.11/3.12; exact-head hosted CI must be verified before a final
+success report. Publish client/tests,
+native evidence and docs on the existing branch; leave the PR draft. No later
+feature or architecture work is part of this hour. If CI is unfinished at the
+hard stop, report it as pending and end active work without extending the task.
+
+## Previous completed stabilization plan
 
 Application/test checkpoint `1d05480` has full standard CI green, including the
 reviewed malformed-format failure/explicit-recovery case on both native

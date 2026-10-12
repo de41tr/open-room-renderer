@@ -129,6 +129,11 @@ and connection failures exit nonzero with a short error on stderr. Redirects are
 not followed; use the renderer's direct host and port. Error messages omit the
 request URL and response body because media URLs may contain credentials.
 
+Local DSP commands expose existing balance and EQ bypass controls:
+`open-room-renderer dsp balance get`, `dsp balance set -0.25`, and `dsp eq on|off`.
+Balance is normalized -1..1. See [DSP controls and unknown-outcome handling](GETTING_STARTED.md#local-dsp-controls)
+before enabling an unfamiliar EQ configuration.
+
 ## Trying The Phone App
 
 App compatibility is an explicit experimental profile:
