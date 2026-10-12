@@ -13,7 +13,8 @@ from aiohttp import ClientConnectionError, DummyCookieJar
 
 import fake_linkplay.radio as module
 from fake_linkplay.network_policy import NetworkPolicyError, PinnedResolver, ProxyTarget
-from fake_linkplay.radio import RadioResolution, RadioResolutionError, resolve_station
+from fake_linkplay.radio import (RadioResolution, RadioResolutionError,
+                                 public_station_reference, resolve_station)
 
 
 STATION = "s12345"
@@ -57,6 +58,12 @@ async def test_resolves_canonical_station_to_immutable_audio_without_metadata_ch
         result.url = "https://other.example.test/audio"
 
 
+@pytest.mark.parametrize("station", [STATION, "s0", "s01", "s" + "9" * 32])
+def test_public_reference_is_exact_and_does_not_fetch(station):
+    assert public_station_reference(station) == (
+        f"https://opml.radiotime.com/Tune.ashx?id={station}&formats=mp3,aac&render=json")
+
+
 @pytest.mark.parametrize("station", [
     "", "S12345", "t12345", "s", "s１２３", "s1\n", " s1", "s1 ", "s-1", "s+1",
     "s1&partnerId=synthetic", "s1?id=2", "https://search.example.test/?id=s1", None, 12345,
@@ -67,6 +74,8 @@ async def test_invalid_or_unsupported_station_ids_never_fetch(station):
         pytest.fail("invalid station IDs must not trigger any fetch or validation")
     with pytest.raises(RadioResolutionError, match="station ID"):
         await resolve_station(station, fetcher=never, validator=never)
+    with pytest.raises(RadioResolutionError, match="station ID"):
+        public_station_reference(station)
 
 
 @pytest.mark.parametrize("raw", [

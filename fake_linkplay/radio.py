@@ -121,6 +121,13 @@ def _supported_media_url(url: str) -> bool:
         return False
 
 
+def public_station_reference(station_id: str) -> str:
+    """Return the stable public reference for a supported station, without I/O."""
+    if not isinstance(station_id, str) or not _STATION_ID.fullmatch(station_id):
+        raise RadioResolutionError("Unsupported radio station ID")
+    return f"{_ENDPOINT}?id={station_id}&formats=mp3,aac&render=json"
+
+
 async def resolve_station(
     station_id: str, *, fetcher: Fetcher | None = None, validator: Validator | None = None,
 ) -> RadioResolution:
@@ -133,9 +140,7 @@ async def resolve_station(
     Both hooks remain bounded by the same deadline as production resolution.
     Neither hook receives queue metadata, source search URLs, or credentials.
     """
-    if not isinstance(station_id, str) or not _STATION_ID.fullmatch(station_id):
-        raise RadioResolutionError("Unsupported radio station ID")
-    endpoint = f"{_ENDPOINT}?id={station_id}&formats=mp3,aac&render=json"
+    endpoint = public_station_reference(station_id)
     fetch = fetcher if fetcher is not None else _fetch_json
     validate = validator if validator is not None else resolve_proxy_target
     try:
