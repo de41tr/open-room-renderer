@@ -191,3 +191,19 @@ A separate INTEGRATION/EMULATED_ARMV7 probe passed real 32-bit ARM Python/C-exte
 imports, persisted identity and loopback HTTP/SOAP with MOCK/unavailable audio.
 Native ARMv7 installation, subprocess chain, mpv/ALSA and hardware stay NOT_RUN;
 no successful emulator import is presented as installation or audio proof.
+
+
+Checkpoint 62b089ad completed all native x86_64/AArch64 CI gates, including the
+actual owned-player-death/fresh-restart tail. The new optional changing-ICY
+endurance mode passed 240.821s and 30 independently observed title epochs locally,
+with one connection/load, bounded history/resources and verified cleanup. This
+is REAL_BACKEND/null, not a completed four-hour or production-Unix endurance run.
+EQStat remains configured-graph status: tested FFmpeg 7.1 above-Nyquist filters
+bypass at low source rates, as documented; no universal acoustic effect is claimed.
+
+
+Rolling live HLS now has local libmpv 0.40/null coverage for playlist/segment
+outage and return plus owner Pause/Stop/replacement during recovery backoff.
+Production timings are unchanged; no custom player is introduced. Five new
+hosted cases remain pending their own result. This is separate from production
+Unix HLS, real WAN, encryption/DRM, adaptive variants and hardware acceptance.

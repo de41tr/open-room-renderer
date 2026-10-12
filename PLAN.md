@@ -45,14 +45,14 @@ genuine pywiim controls and the Python3.11 floor pass CI. The extended native
 Unix-IPC checkpoint passed over fifteen minutes on both architectures; routine
 CI durations are restored.
 
-Current checks: finite history and changing metadata, guarded first-level
-playlist children, cleanup and normal native integration pass both architectures.
-Correct the new death-test HTTP status expectation to the existing 502 contract,
-then verify its full actual restart tail. A separately frozen finite-policy
-hour is active; preserve its exact source, unchanged gates and cleanup evidence.
-Develop a bounded longer changing-ICY endurance mode to exercise repeated
-metadata events without fixture-side growth. Limited emulated ARMv7 ABI and
-loopback protocol probes pass, while native install/hardware remain open.
-The earlier optional Snapcast window failure remains unexplained despite later
-strict passes. Nested ancestry, two-host sync and physical app/audio acceptance
-remain explicit gaps, not inferred successes.
+Current checks: complete owned-player death/error/fresh-backend restart now
+passes both native architectures, as do the finite-history and changing-metadata
+policies. The separately frozen constant-title finite-policy hour remains active.
+A reviewed bounded changing-ICY endurance mode passes four-minute replay and
+negative sensitivity; next run it for four hours after current-hour cleanup,
+without changing production or routine CI duration. Rolling live-HLS
+playlist/segment outages and owner fences now pass locally; verify the five
+added standard native CI cases without extending normal job limits. Limited
+ARMv7 emulated ABI/API evidence does not fill native installation/hardware gaps.
+Nested ancestry, original-app/hardware audio and two-host sync remain explicit
+limits. Do not erase the earlier unexplained Snapcast failure with later passes.

@@ -1053,6 +1053,43 @@ changing ICY metadata. This is REAL_BACKEND/null, not production Unix IPC,
 physical audio, WAN reliability or original-app acceptance.
 
 
+### Uninterrupted changing-ICY endurance
+
+The same sustained fixture also supports an explicitly opted-in changing-ICY
+mode. FFmpeg generates a bounded 64 kb/s AAC seed at runtime; complete ADTS
+frames are paced continuously and ICY blocks are inserted at exact 1024-byte
+audio boundaries. No external station or custom player is involved.
+
+```bash
+ORR_TEST_LIBMPV_SUSTAINED=1 ORR_TEST_LIBMPV_SUSTAINED_ICY=1 \
+ORR_TEST_LIBMPV_SUSTAINED_SECONDS=240 \
+ORR_TEST_LIBMPV_PATH=/path/to/libmpv.so.2 PYTHONPATH=. .venv/bin/python -m pytest -q -s \
+  tests/test_libmpv_sustained_station.py --basetemp=/tmp/orr-changing-icy
+```
+
+The default is 240 seconds; local requested baselines may be 20..14400 seconds.
+A new unique synthetic title is requested roughly every eight seconds. Each
+must reach native/renderer state and fresh acknowledged AVTransport/PlayQueue
+callbacks within six seconds, before client status/SOAP reads can synchronize
+state. Every title is then checked across HTTP, SOAP, generated DIDL, queue XML
+and GENA. One pending title, aggregate counters/hash and bounded 32-entry event
+histories prevent the evidence collector from growing or concealing a miss.
+
+The original observation-versus-integer-position model, canonical queue and
+native playlist-entry identity, one handle/load/source/HTTP connection,
+recovery-free decoded progress, resource budgets, lease renewal and complete
+cleanup checks apply. Native total/forward cache bytes are capped separately;
+a >=240-second run also requires four one-minute epochs and a retained-history
+plateau over the final minute. Shorter smoke runs report no verified plateau.
+The source is frozen and hashed; the unchanged process-group supervisor caps
+native execution at requested duration+90 seconds including bounded cleanup.
+This lane is local-only and never automatically schedules an hour in routine CI.
+
+Evidence scope remains REAL_BACKEND/null with loopback HTTP; it establishes
+neither production Unix IPC nor physical audio, WAN reliability, device/app
+compatibility, or indefinite leak freedom.
+
+
 The Snapcast failure diagnostic retains all four channel summaries for valid
 captures before any signal-gate assertion. It freezes both PCM file endpoints
 before analysis and emits bounded fitted-window statistics and fixed log-marker
@@ -1077,3 +1114,27 @@ route failed at ptrace, and direct QEMU's ordinary ARM child exec failed; no
 security workaround or subprocess shim was introduced. Thus the unmodified
 installer's venv/pip/entry-point/receipt/uninstall chain remains NOT_RUN on ARMv7.
 The successful native AArch64 installation lane does not fill that separate gap.
+
+
+## Rolling live HLS and recovery
+
+`test_libmpv_live_hls.py` uses the existing `ORR_TEST_LIBMPV_PATH` opt-in and
+standard FFmpeg/libmpv, with a bounded generated AAC/MPEG-TS seed. An HTTP
+publisher exposes only clock-ready entries in an advancing five-segment playlist,
+without ENDLIST, encryption or alternate variants. It does not implement a player.
+
+Five cases cover a playlist 503 outage, one failed renderer reload and return;
+a transient segment 503 outage that stalls without EOF and resumes on the same
+native entry; and owner Pause, Stop or replacement during observed zero-attempt
+recovery backoff. Owner commands must cancel that retry and prevent stale HLS
+fetch/reload after availability returns. The 15s production stall grace and
+0.5/1/2s retries are not shortened. The transient segment case returns before that
+grace; it is not a separate full-duration HLS stall-exhaustion claim.
+
+Unsolicited GENA is checked before status reads. Canonical live URI, duration 0,
+queue, native progress, HTTP/SOAP/GENA, volume/mute readback and complete cleanup
+must agree. Gain is read back, not acoustically measured. Local five-case runtime
+was 76.65s; the normal hosted lane includes them without raising the 15-minute
+job cap. Each subprocess is independently bounded. Only aggregate synthetic
+request observations are printed. Scope is REAL_BACKEND/libmpv/null, not HLS
+through production Unix IPC, real WAN, original app, DRM or physical audio.

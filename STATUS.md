@@ -481,7 +481,7 @@ Native entry loading reports BUFFERING even when old time/duration remain.
 Pause/resume verify actual source identity and boolean state before claiming
 completion; seek additionally freezes the actual child/entry identity.
 
-Generated local fixtures passed real libmpv0.40 decoding for MP3, ADTS AAC,
+Generated local fixtures passed real libmpv 0.40 decoding for MP3, ADTS AAC,
 application/octet-stream media, unencrypted HLS segment crossing, first-level
 M3U/PLS, redirects/loop failure and ICY metadata. Two-entry container transitions,
 HTTP/SOAP state and final top-level queue advance passed. Exact isolated snapshot:
@@ -908,7 +908,7 @@ These two scenarios took 7.97s / 10.23s, leaving the complete jobs below eleven
 minutes. This is actual installed process acceptance, not systemd boot or hardware.
 
 The exact 9f5f529 source also passed an isolated CPython3.11.17/x86_64 run:
-2190 default tests /41 gated skips, plus six actual libmpv0.40/null or digital-PCM
+2190 default tests /41 gated skips, plus six actual libmpv 0.40/null or digital-PCM
 cases and one supporting encoding unit test. Controls, seek/queue, gain/mute,
 load options, native staging and uncertain owner controls were exercised.
 Official-PyPI dependencies passed a 35-package compatibility check. The runtime
@@ -1154,3 +1154,63 @@ The exact test correction plus current documentation passed 2318 default tests
 with 57 explicit native-only skips locally. Production digest remains
 `b3ae8a5c7ad01696b12be6feb52c16fe51fed9ad6128015992b6d14fd055b5ef`; the active
 frozen hour is unaffected. Full native death-to-restart acceptance is pending.
+
+## Complete native death-to-restart checkpoint
+
+[62b089ad passed all three CI jobs](https://github.com/de41tr/open-room-renderer/actions/runs/38208267462).
+Both x86_64 and AArch64 passed 39 actual libmpv cases and all six production Unix
+cases. The corrected owned-player-death gate now completes its whole sequence:
+verified owned decoder SIGKILL, background HTTP/SOAP/GENA failure and unconfirmed
+gain, no automatic retry/respawn, fresh backend starting idle, then explicit
+playback of a different source with actual progress. Two owned children, socket
+and monitor tasks were cleaned up per architecture. The earlier test failure
+was retained and corrected to the existing 502 contract, not hidden by a status
+change. All remaining discovery, installed-CLI and Snapcast stages also passed.
+
+## Bounded changing-title endurance mode
+
+The existing opt-in sustained harness now supports paced AAC+ICY and a bounded
+per-title callback/metadata audit. There is no production behavior change.
+Each unique title must reach native state and fresh acknowledged callbacks
+before status polls, then agree across HTTP/SOAP, generated DIDL and queue XML.
+Backward retention is measured separately from forward bytes; evidence storage
+stays bounded. The ordinary constant-title mode and its original budgets remain.
+
+Independent review and exact publication replay passed 240.821s with 30/30 title
+epochs, one load/source/HTTP connection, 240.768s native progress and clean teardown.
+Retained history stayed 1,047,520–1,048,496 bytes over 61 late samples; live RSS rose
+1152 KiB, with FDs/tasks/threads/children flat at 12/5/10/0. Production digest remains
+`b3ae8a5c7ad01696b12be6feb52c16fe51fed9ad6128015992b6d14fd055b5ef`; frozen source is
+`b8c7c3828554d0d0bdd0cd04258d01537956d38a2a191b41d43879603f3fc2b4`.
+Changing only the history allowance to zero fails the first title deadline in
+about 6s. A four-hour run is planned separately after the current hour; no longer
+duration is credited here. Default replay: 2322 passes /57 explicit skips.
+
+A separate quiet-PCM DSP audit found stable above-Nyquist bypass through
+16/44.1/48kHz changes, with balance isolation and saved-curve restoration. EQStat
+confirms configuration, not every band's effective attenuation at every source
+rate. This matches the existing documented sample-rate limit; no production
+resampling or warning policy was invented. The audit does not certify broadband
+music, positive boosts, arbitrary Q or other FFmpeg versions.
+
+## Rolling live-HLS outage coverage
+
+A new synthetic live-HLS publisher exposes a rolling five-segment window and
+advancing media sequence without ENDLIST. Actual libmpv 0.40/null passed all five
+cases in 76.65s in the publication snapshot: playlist outage/failed reload/return,
+transient segment-only no-EOF stall/native return, and Pause/Stop/replacement
+while explicitly observed retry backoff is pending. Canonical station identity,
+HTTP/SOAP/GENA, selected native gain and cleanup agree. The default 15s stall grace
+and 0.5/1/2s retry delays are unchanged. Segment return before the grace does not
+cause a renderer reload. Owner cases do not claim every possible outage phase.
+
+No production fix was needed; this validates existing standard-backend behavior.
+The five cases join the existing native CI lane with its unchanged 15-minute
+whole-job limit. Older-runtime hosted results remain pending separately. Public
+output contains aggregate synthetic request counts/sequences rather than the
+request trace. There is no WAN, DRM, adaptive-variant, measured acoustic-gain,
+production-Unix HLS or hardware certification.
+
+The final combined harness/HLS snapshot passed 2322 default tests with 62 explicit
+opt-in skips in 66.66s. Production code remains unchanged; the current one-hour
+run and future four-hour changing-title run retain separate frozen provenance.
