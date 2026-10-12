@@ -191,7 +191,9 @@ def get_control_device_info_response_fields(cfg: Config, ip: str, state: Any | N
     )
 
 
-def avtransport_response_fields(action: str, state: Any | None = None) -> str | None:
+def avtransport_response_fields(
+    action: str, state: Any | None = None, *, current_transport_actions: str = "",
+) -> str | None:
     """Return SOAP fields for supported AVTransport read actions."""
 
     volume = getattr(state, "volume", 30)
@@ -274,7 +276,7 @@ def avtransport_response_fields(action: str, state: Any | None = None) -> str | 
             ]
         )
     if action == "GetCurrentTransportActions":
-        return "<Actions>Play,Pause,Stop,Seek,Next,Previous</Actions>"
+        return f"<Actions>{escape(current_transport_actions)}</Actions>"
     return None
 
 

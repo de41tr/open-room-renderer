@@ -1097,6 +1097,8 @@ class HttpApi:
 
     async def _transport_command(self, command: str) -> None:
         """Serialize mutations and verify the actual backend acknowledgement."""
+        if command == "pause" and not (self.queue_url or self.state.current_url):
+            raise SoapFault(701, "Transition Not Available")
         if command == "resume" and self._native_output_uncertain:
             # A newer Pause can supersede failed Stop without recovering the
             # retired native entry IDs. Reestablish the selected source first.
@@ -3735,9 +3737,10 @@ class HttpApi:
             elif service == "RenderingControl":
                 result = self._rendering_response_fields(action)
             elif service == "AVTransport":
-                if action in {"GetInfoEx", "GetPositionInfo", "GetMediaInfo", "GetTransportInfo"}:
+                if action in {"GetInfoEx", "GetPositionInfo", "GetMediaInfo", "GetTransportInfo", "GetCurrentTransportActions"}:
                     await self.sync_mpv_state()
-                result = avtransport_response_fields(action, self.state)
+                result = avtransport_response_fields(
+                    action, self.state, current_transport_actions=self._current_transport_actions())
             elif service == "PlayQueue":
                 queue_name = self._xml_text(action_body, "QueueName")
                 if queue_name and queue_name != self.state.queue.name:
@@ -4635,6 +4638,49 @@ class HttpApi:
             self.event_subscribers.pop(sid, None)
             LOG.info("dropped duplicate event subscriber service=%s sid=%s callback=%s", service, sid, callback_url)
 
+    def _current_transport_actions(self) -> str:
+        """Project current control availability, not the static SCPD action list.
+
+        Use the canonical selection and last confirmed backend identity. Unknown
+        duration does not make a finite file live, and an unloaded PAUSED
+        selection cannot seek. Runtime uncertainty is never cached in state.
+        """
+        state, queue = self.state, self.state.queue
+        selected = bool(self.queue_url or state.current_url)
+        healthy = (state.phase != PlaybackPhase.ERROR and not self._native_output_uncertain
+                   and not (self._native_stage is not None and self._native_stage.failed))
+        loaded = (selected and bool(state.backend_url)
+                  and state.backend_original_url == state.current_url
+                  and not self._native_waiting_for_audio)
+        item = queue.current
+        station = bool(item and item.stream_type == "station") or self.queue_stream_type == "station"
+        # A transient observation can disagree with retained owner intent;
+        # seek confirmation requires the matching play/pause state.
+        seek_phase = (state.phase == PlaybackPhase.PLAYING and state.intent == "play"
+                      or state.phase == PlaybackPhase.PAUSED and state.intent == "pause"
+                      or state.phase == PlaybackPhase.BUFFERING and self._pending_seek_target is not None
+                      and state.intent in {"play", "pause"})
+        seek = healthy and loaded and not station and not self._seek_closed and seek_phase
+        # Navigation owns a fresh load or a silent selection, so it also
+        # works while loading/buffering and does not require an existing
+        # loaded identity. A retained pause owner takes precedence over a
+        # transient PLAYING snapshot; a pending Stop stays selection-only.
+        navigate = healthy and state.phase != PlaybackPhase.PAUSED and state.intent != "pause"
+        actions = []
+        if selected:
+            actions.append("Play")  # Explicit Play can retry a failed source.
+        actions.append("Stop")
+        if selected and healthy:
+            actions.append("Pause")  # Includes the existing unloaded-selection policy.
+        if seek:
+            actions.append("Seek")
+        if navigate and 0 < queue.index < queue.count:
+            actions.append("Next")
+        if (queue.count > 1 and navigate and queue.index > 1
+                or queue.count <= 1 and seek and state.phase in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}):
+            actions.append("Previous")
+        return ",".join(actions)
+
     def _transport_state(self) -> str:
         """Map internal transport state to UPnP AVTransport state names."""
 
@@ -4772,7 +4818,7 @@ class HttpApi:
             f'<CurrentTrackMetaData val="{self._event_attribute(metadata)}"/>'
             f'<RelativeTimePosition val="{self._event_attribute(rel_time)}"/>'
             f'<A_ARG_TYPE_SeekTarget val="{self._event_attribute(rel_time)}"/>'
-            '<CurrentTransportActions val="Play,Stop,Pause,Seek,Next,Previous"/>'
+            f'<CurrentTransportActions val="{self._event_attribute(self._current_transport_actions())}"/>'
             f'<PlaybackStorageMedium val="{escape(self.state.play_medium or "NETWORK")}"/>'
             "</InstanceID></Event>"
         )
