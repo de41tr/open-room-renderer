@@ -2774,6 +2774,8 @@ class HttpApi:
             ready = await self._wait_for_mpv_audio_ready(generation, playback_url)
             if not current():
                 raise BackendError("Playback command superseded")
+            if self.state.phase == PlaybackPhase.ERROR:
+                raise BackendError("Playback failed before confirmation")
             if not ready:
                 raise SourcePlaybackError("Source did not confirm playback")
             self._admitted_load_generation = None
@@ -2806,7 +2808,7 @@ class HttpApi:
             if owns_selection():
                 if isinstance(exc, SourcePlaybackError):
                     LOG.warning("playback failure category=%s generation=%s", exc.category, generation)
-                    if recovery is None:
+                    if recovery is None and self.state.phase != PlaybackPhase.ERROR:
                         self.state.mark_error(str(exc))
                         self._schedule_event_notify()
                 elif isinstance(exc, asyncio.CancelledError) or not current():
