@@ -17,6 +17,11 @@ aiohttp app in fake_linkplay.http_api
         |
         +--> fake_linkplay.upnp_description
         |
+        +--> fake_linkplay.eventing.EventSubscriptionManager
+        |       |
+        |       +--> validated GENA callbacks (NOTIFY)
+        |       +<-- synchronous immutable XML snapshot provider
+        |
         +--> fake_linkplay.state.RendererState
         |
         +--> fake_linkplay.mpv_backend.MpvBackend
@@ -33,7 +38,8 @@ aiohttp app in fake_linkplay.http_api
 
 - `fake_linkplay/cli.py`: command-line entry point, config loading, startup/shutdown orchestration.
 - `fake_linkplay/config.py`: YAML config model, generated UUID, persisted device name, persisted channel balance.
-- `fake_linkplay/http_api.py`: HTTP/SOAP endpoints and current playback, queue, eventing, settings and DSP orchestration.
+- `fake_linkplay/http_api.py`: HTTP/SOAP endpoints and current playback, queue, event payload projection, settings and DSP orchestration.
+- `fake_linkplay/eventing.py`: GENA admission/leases, registry, sequence numbers, coalescing, bounded delivery/retry tasks and cancellation/drain; consumes only a synchronous XML snapshot provider.
 - `fake_linkplay/metadata_formatting.py`: pure metadata artwork/live-tag, resource-URI and duration edits; no state, network or backend access.
 - `fake_linkplay/state.py`: in-memory renderer state and status payload generation.
 - `fake_linkplay/queue.py` and `queue_policy.py`: canonical items/indices and pure repeat/shuffle traversal; backend admission stays in HttpApi.
@@ -47,44 +53,96 @@ aiohttp app in fake_linkplay.http_api
 - `fake_linkplay/utils.py`: logging setup, LAN IP detection, filesystem helpers.
 
 
-## Bounded extraction and target responsibilities
+## GENA lifecycle boundary
 
-The completed behavior-neutral refactor extracted only three pure metadata-edit functions. HttpApi keeps
-its existing helper signatures as delegation wrappers; DIDL construction and its
-dynamic attribute-escaping call remain in place. Existing string/regex behavior,
-including awkward legacy cases, is preserved rather than repaired in the move.
-No await, I/O, state transition, callback scheduling or timing policy is added.
+`EventSubscriptionManager` now owns the complete subscription/delivery lifecycle.
+HttpApi constructs one manager and shares it across its existing listeners. It
+provides one callable, `service -> str`, which returns the existing complete XML
+body. The manager receives no `HttpApi`, `RendererState`, queue, backend, config
+or DSP object. The provider remains dynamically bound to `_event_body`, preserving
+its existing replacement/override behavior. It performs no I/O or await.
 
-The target below is a map for later incremental work, not a claim that a new
-player-core framework or all these module boundaries already exist:
+- **Manager-owned:** subscriber records and registry; SID generation; canonical
+  service admission; lease parsing/renewal/expiration; same-peer callback
+  validation; total/per-peer limits; dirty coalescing; semaphore; one delivery
+  task per SID; sequence advancement/wrap; immutable retry body; cancellation.
+- **Renderer-owned:** authoritative playback/queue/DSP state; generations and
+  intent; backend observations; event payload projection including transport
+  action availability; notification trigger points; shared-listener accounting
+  and placement of final cleanup within the overall shutdown sequence.
+- **External support:** `network_policy.validate_callback_url` still enforces the
+  exact destination policy; `soap.SERVICE_ALIASES` still supplies the shared
+  service names; aiohttp still performs the same bounded HTTP operations.
 
-- **Protocol adapters:** HTTP/SOAP dispatch currently remains in HttpApi, with
-  `soap.py`, `upnp_description.py` and discovery modules alongside it. Adapters
-  validate requests and format results; they must not invent successful state.
-- **Player core:** guarded commands, owner intent/generations, readiness, failure
-  cleanup and recovery remain in HttpApi with `RendererState` and `MpvBackend`.
-  A later extraction would preserve that single ownership contract and its
-  locking/order tests. None of this logic moves in the current refactor.
-- **Queue:** `queue.py` owns item/index validation and queue parsing/serialization.
-  The later functional package adds pure repeat/shuffle policy and bounded history
-  in `queue_policy.py`; HttpApi commits selection with existing ownership checks.
-  Native sequencing/staging orchestration stays where it is; queue data must not
-  independently claim that a decoder changed source.
-- **Eventing:** leases, coalescing, delivery order and retries remain in HttpApi.
-  A future event publisher should consume authoritative snapshots, including
-  pending/error phases, rather than control playback. Pure XML formatting is separate from subscription lifecycle.
-- **DSP:** existing validation/persistence helpers and MpvBackend retain the
-  confirmed gain/filter transactions and startup restore ordering. A future
-  service boundary must keep configuration distinct from effective output.
-- **Service adapters:** `radio.py` resolves bounded anonymous public-station
-  selections into concrete resources/provenance. Additional providers would
-  require their own lawful lifecycle; a source label is not an implementation.
+Subscription handlers execute synchronously inside the preserved asynchronous
+`HttpApi.event_subscribe` / `event_unsubscribe` handlers. Those wrappers contain
+no await. A new event captures its XML only when delivery starts, before waiting
+for the existing eight-slot semaphore. Failed attempts keep the identical body
+and SEQ; acknowledgement advances SEQ and the next dirty event captures current
+renderer state. There is no second playback cache or observer.
 
-Dependency direction should stay simple: protocol adapters issue commands to
-the player/queue contract; the player owns backend effects; eventing consumes
-observed state. Pure representation helpers accept values and return strings.
-Further extraction should be one tested seam at a time, on a separate commit,
-without changing supported payloads, faults or owner timing.
+The monitor still prunes immediately after its existing sleep. Final-listener
+cleanup still drains native cleanup and seeks, then clears/cancels/drains GENA,
+then cancels the backend monitor and drains recovery/queue work. `close()` adds
+one coroutine call, not a new scheduling boundary: it runs without suspension
+when no event tasks exist, and otherwise awaits the same captured tasks at the
+same point. No new locks, semaphores, observer tasks or delivery tasks were added.
+There is no new terminal closed/reopen state or altered admission policy.
+
+Compatibility keeps `EventSubscriber` importable from `http_api`, the live
+`event_subscribers` dictionary and tuning properties (including assignment), and
+renderer notification/pruning/legacy duplicate helpers. The dictionary is not a
+copy. The legacy duplicate filter deliberately keeps its old raw service-name
+comparison and pop-only semantics; changing that policy is outside this refactor.
+Private delivery internals now live in the manager; delivery logs use the
+`fake_linkplay.eventing` logger. The mutable compatibility registry and tuning
+properties remain an intentional coupling for existing Python callers/tests,
+rather than being silently replaced with a read-only or copied view. Event XML builders remain in
+HttpApi because their projection depends on renderer-owned readiness/intent,
+metadata, queue and device identity.
+
+### Dependency and side-effect overview
+
+| Component | Authority / state | Effects and synchronization | Dependencies |
+| --- | --- | --- | --- |
+| HttpApi + RendererState | Playback phase, generation, intent, canonical queue, confirmed state and renderer orchestration | Existing backend/gain/DSP/rename locks; monitor, seek, stage cleanup, queue advance and recovery tasks | mpv, queue/policy, persistence, protocol serializers, event manager |
+| EventSubscriptionManager | SID records, lease/SEQ, dirty flag and delivery task per SID | Existing 8-slot semaphore; bounded NOTIFY/retry; explicit prune and close, no lock or observer | synchronous XML provider, network_policy, SOAP aliases, aiohttp |
+| MpvBackend | Backend/process ownership and confirmed backend operations | Unix IPC, owned process lifecycle; existing gain/DSP locks | stdlib asyncio/process/IPC, log_safety; caller-supplied settings |
+| queue / queue_policy | Canonical item/index data / pure traversal | No backend or notification authority | Pure parsing and policy |
+| soap / upnp_schema / upnp_description | Framing/action contracts / declarations / representations | Pure validation and XML, no playback effects | Shared aliases/actions, queue mode constants, capabilities/config |
+| persistence | Durable settings format | Bounded validation, atomic file replacement | Filesystem; no GENA or playback authority |
+
+The new import direction is `http_api -> eventing -> network_policy / soap`.
+There is no reverse import into HttpApi. Existing pure metadata helpers remain
+separate and unchanged.
+
+### Why this seam, and what it does not solve
+
+| Candidate | Cohesion and coupling benefit | Risk / interface / effort | Decision |
+| --- | --- | --- | --- |
+| GENA lifecycle/delivery | High: one protocol lifecycle and its own state; removes delivery/admission policy from renderer | Low-to-moderate: one synchronous string provider plus notify/prune/close; rich existing real-loopback and native coverage | Implemented |
+| Pure protocol contracts | Clear but mostly already separated into soap/schema/description; smaller ownership improvement | Low; chiefly representation work, little controller state removed | Useful later if duplication grows |
+| DSP preset library | Cohesive storage, but active vs desired state and committed-write failures cross restore/transaction logic | Moderate: carefully distinguish library edits from active DSP commits | Best next bounded candidate after explicit contract analysis |
+| Playback/recovery/native staging | Large potential benefit but tightly coupled generations, backend identity and cancellation | High: would require wider ownership/lock-order design | Not changed in this task |
+
+The structural gain is real but deliberately limited: subscription policy can
+now be read, instantiated and tested without constructing a renderer, and event
+transport cannot call playback or inspect mutable queue/DSP state. HttpApi no
+longer implements SID admission, delivery retries or lease/task bookkeeping.
+The costs are one small component, a provider contract and explicit compatibility
+forwarders. Total code grows slightly; line-count reduction is not the measure
+of success. Keeping aiohttp request/response types in the manager is intentional
+protocol cohesion, rather than adding a second request/result abstraction.
+
+HttpApi remains a large orchestrator for HTTP/SOAP, playback, native staging,
+stream recovery, DSP transactions, metadata and service adapters. This extraction
+does not make it a finished player-core architecture. Next investigate a DSP
+preset-library boundary with pure validation/storage and a detached result;
+keep active backend transactions and restore ordering in the renderer initially.
+Moving playback ownership, generations, queue/backend control, asynchronous
+lock order, or introducing a broader service framework requires a separate user
+decision and a wider design/test plan. New providers/authentication or changes to
+supported protocols likewise remain outside this refactor.
 
 ## Startup Flow
 

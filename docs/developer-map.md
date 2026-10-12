@@ -10,7 +10,8 @@ Read these files first:
 - `pyproject.toml`: dependencies, console scripts, pytest config.
 - `configs/config.example.yaml`: main development config.
 - `fake_linkplay/cli.py`: startup flow.
-- `fake_linkplay/http_api.py`: most behavior lives here.
+- `fake_linkplay/http_api.py`: playback/DSP orchestration and HTTP/SOAP/event payload projection.
+- `fake_linkplay/eventing.py`: independent GENA subscriber/lease/delivery owner; one synchronous XML provider.
 - `tests/test_status_json.py`: many behavior examples in synthetic form.
 
 ## Playback Work

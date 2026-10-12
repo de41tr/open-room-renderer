@@ -1,3 +1,75 @@
+# Bounded GENA architecture extraction
+
+Actual start: **2026-10-12 21:05:18 UTC (23:05:18 Berlin)**.
+Hard stop: **2026-10-13 01:05:18 UTC (03:05:18 Berlin)**, without extension.
+Midpoint fallback deadline: 23:05:18 UTC. A safe implementation was already
+independently reviewed and passing by 21:10 UTC.
+Final validation/publication/handover was reserved from **00:35:18 UTC** at the
+latest and began early. This is a maximum budget, not an instruction to fill it.
+
+Baseline: clean `1478864ac3351cd253dca32c56726723b3605f60`; all three jobs
+passed in https://github.com/de41tr/open-room-renderer/actions/runs/38306668149 .
+The preceding DSP CLI task was complete before this separate authorization.
+Branch: `dot/renderer-autonomous-20261012`, open Draft PR #1. Main remains
+`3672b9838e9c39ae8191613108f0d91a5cada97d`; no merge or release.
+
+## Verified architecture checkpoint
+
+Production extraction: `9acb44bc83319c053d9995e6c9b7f56e10677a7a`.
+Independent boundary tests: `aafa6649d5141123cfa644a7c30150f99fba9325`.
+[Exact application/test CI 38309188954](https://github.com/de41tr/open-room-renderer/actions/runs/38309188954)
+passed **all three jobs**, verified 2026-10-12 **21:27 UTC**.
+Python 3.11 and native x86_64/AArch64 retain every default case, native lane,
+assertion, skip and time cap. Hosted defaults pass **4588 /73 opt-in skips**;
+Python 3.11 groups pass 4338+250 in 150.23s/88.54s. Both native architectures
+pass all 66 libmpv checks and every production Unix/client/stress/install/
+clocked/discovery/Snapcast stage. No workflow or existing test was modified.
+
+`EventSubscriptionManager` now owns subscription admission/renewal, SID/leases,
+limits, SEQ, dirty coalescing, retry/delivery tasks, expiry and cancellation/drain.
+Its sole renderer dependency is a synchronous service-to-XML snapshot provider.
+HttpApi remains the only playback/queue/DSP authority and owns payload projection,
+trigger points and overall listener/shutdown order. No new lock, task, backend
+command or scheduling boundary was introduced. The added close coroutine wraps
+the same conditional gather; empty-close and final-listener tests verify it.
+
+All 4583 unchanged defaults separately pass locally on Python 3.11/3.12;
+five new manager/compatibility tests pass both minors. A real-loopback comparison
+with the exact baseline yields **113 identical ordered observations**, including
+byte-identical payloads and normalized protocol headers. Local full libmpv 0.37
+passes 23+43 cases; focused 0.40 integration/DMR/DSP/invalid-media passes four.
+These results preserve the distinction between mock, real-native ctypes/null/PCM,
+hosted production Unix IPC and unavailable physical/app acceptance.
+
+- [Actual boundary, dependency map, tradeoffs and next seam](docs/architecture.md#gena-lifecycle-boundary)
+- [Reproduction and evidence scope](docs/TESTING.md#gena-ownership-extraction-verification)
+
+This documentation-only handover leaves application/test/workflow bytes identical
+to the green `aafa664` checkpoint. Verify the documentation head's own full CI
+in [Draft PR #1](https://github.com/de41tr/open-room-renderer/pull/1) before final
+completion; the earlier green run must not be substituted for its check status.
+No further extraction is scheduled. Once that verification completes, stop
+active work. This handover is not continuing authorization for another task.
+
+**HARDWARE_ACCEPTANCE_PENDING:** XU4/ARMv7, physical DAC/ALSA/audio, original
+WiiM Home app and two-host acceptance remain outstanding, not blockers here.
+
+## Critical assessment
+
+The gain is an independent owner for a coherent lifecycle, not just wrappers:
+admission and delivery no longer inspect renderer internals. The cost is a small
+component, one provider contract and explicit compatibility forwarding. The live
+mutable registry/tuning views remain deliberate coupling. Payload serialization
+and the large playback/recovery/DSP controller remain; this is not a completed
+whole-system decomposition. Next consider DSP preset-library validation/storage,
+keeping active backend transactions separate. Playback ownership, generation or
+lock-order redesign needs a separate user decision and wider plan.
+
+The sections below are historical completed work; their earlier deadlines
+do not govern this separate task.
+
+---
+
 # Development status
 
 The earlier autonomous window completed at 2026-10-12 20:00 UTC.

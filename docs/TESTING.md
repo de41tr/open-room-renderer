@@ -2280,3 +2280,66 @@ Exact final malformed-media test SHA256:
 `bd1526370fae9b7f6ce9101592a3528da31cdca47e4f4893af9e2325aaeeeb1f`.
 The complete checkpoint passed all three standard jobs in run 38281381125,
 verified at17:16 UTC. Every old gate and all 66 selected libmpv checks passed.
+
+
+## GENA ownership extraction verification
+
+Baseline `1478864` has complete green CI in
+[run 38306668149](https://github.com/de41tr/open-room-renderer/actions/runs/38306668149).
+The behavior-neutral production extraction is `9acb44b`; five focused boundary
+tests are separate in `aafa664`. Existing tests, assertions, skips, native cases,
+workflow stages and time caps were not changed.
+
+Standalone manager lifecycle tests do not construct a renderer; integration
+tests cover compatibility and shared listeners. Together they prove
+lazy provider invocation, byte/SEQ retention through failed delivery, next-state
+capture only after acknowledgement, semaphore-wait cancellation without network
+creation, registry identity, empty-close non-suspension, compatibility properties
+and final-only cleanup for two shared listeners.
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_eventing_manager.py tests/test_gena_lifecycle.py
+```
+
+This combined focused run passes 46 cases. The new five tests separately pass on
+Python 3.11 and 3.12. The unchanged baseline-selected default suite passes all
+4583 cases /73 explicit opt-in skips on Python 3.12 (197.75s), and Python 3.11
+full groups 4333+250 (132.21s/71.04s) under the unchanged 165s group watchdog.
+The five added manager cases are separate from those unchanged-suite counts;
+complete hosted CI confirms 4588 defaults. The same 32 upstream warnings remain.
+
+A one-time isolated BEFORE/AFTER experiment used the exact baseline git archive
+and candidate imports in separate bounded processes, each with real loopback
+HTTP listeners and a deterministic idle backend. All 113 ordered observations
+were identical, including exact UTF-8 callback/response bytes (base64 captured),
+status and protocol headers. It covers all four service aliases, admission,
+duplicates, renewals, lease limits/expiration, callback-policy rejection, retained
+retry payload and SEQ, gated coalescing, SEQ wrap, redirects, 410/412 removal,
+limits, unsubscribe and shutdown during retries and blocked delivery. Baseline
+replay was also deterministic. SIDs were normalized in first-observed order;
+Date/ephemeral Host and aiohttp client-default headers were omitted. Both trace
+files have SHA-256 `f94e9d50a7597fbdb61beb25d647062d3090ea6d39f9cf3743b9645e3e81666e`.
+This is bounded observed equivalence, not proof over all network timings.
+
+Independent normalized AST review additionally found all eleven transferred
+lifecycle bodies unchanged apart from member names and the intentional
+non-suspending handler move. Renderer XML and transport/queue projections,
+monitor code, generation/lock logic and callback policy are unchanged. The
+`close()` coroutine wraps the exact previous clear/cancel/conditional-gather
+sequence; empty-close and shared-listener tests cover its scheduling boundary.
+
+The complete existing local libmpv 0.37 two-group lane passes all 66 selected
+cases: 23 in 243.81s and 43 in 240.35s under the unchanged 360s watchdog.
+Focused libmpv 0.40 integration, standard-DMR, DSP and invalid-media replay passes
+4 cases in 33.01s. Source/test/workflow hashes remain unchanged across native runs.
+
+[Application/test CI 38309188954](https://github.com/de41tr/open-room-renderer/actions/runs/38309188954)
+passes all three jobs on `aafa664`, verified 2026-10-12 21:27 UTC. Hosted Python
+3.11 groups pass 4338+250 /73 in 150.23s/88.54s. Native x86_64/AArch64 each pass
+4588 defaults /73 skips, all 66 libmpv cases, production Unix lifecycle, real
+pywiim/standard-DMR, repeated-lifetime cleanup, installed CLI, clocked queue,
+discovery and Snapcast gates. Native groups take 235.66s/230.77s on x86_64 and
+246.84s/239.69s on AArch64, with unchanged caps. The subsequent documentation
+revision still requires its own exact-head CI verification in the draft PR.
+Native ctypes/null/PCM and production Unix-IPC evidence remain distinct. This
+refactor does not claim physical XU4/DAC/ALSA, original-app or two-host acceptance. Those remain **HARDWARE_ACCEPTANCE_PENDING**.
