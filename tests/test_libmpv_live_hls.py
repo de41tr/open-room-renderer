@@ -64,13 +64,16 @@ class RollingHLS:
         self.requests: list[dict[str, Any]] = []
         self.loads = lambda: 0
         self.names = {name for _, name in entries}
+        self.segment_release = asyncio.Event()
+        self.active_holds = self.released_holds = 0
+        self.held_transports = []
 
-    async def handle(self, request: web.Request) -> web.Response:
+    async def handle(self, request: web.Request) -> web.StreamResponse:
         assert request.remote == '127.0.0.1'
         elapsed = asyncio.get_running_loop().time() - self.started
         name = request.match_info['name']
         playlist = name == 'live.m3u8'
-        status = 503 if self.outage in {'all', 'playlist' if playlist else 'segment'} else 200
+        status = 503 if self.outage == 'all' or self.outage == 'playlist' and playlist else 200
         entry: dict[str, Any] = {'at': round(elapsed, 3), 'name': name, 'status': status,
                                  'loads': self.loads()}
         self.requests.append(entry)
@@ -92,13 +95,36 @@ class RollingHLS:
                                 headers={'Cache-Control': 'no-store'})
         if name not in self.names:
             raise web.HTTPNotFound()
-        return web.Response(body=(self.directory / name).read_bytes(), content_type='video/mp2t')
+        data = (self.directory / name).read_bytes()
+        if self.outage == 'segment':
+            # Repeated segment 503s can end FFmpeg6's HLS demuxer. This case
+            # deliberately tests a real pending response with no EOF instead.
+            response = web.StreamResponse(headers={'Content-Type': 'video/mp2t',
+                                                    'Content-Length': str(len(data))})
+            await response.prepare(request)
+            assert request.transport is not None
+            entry['held'] = True
+            self.held_transports.append(request.transport)
+            self.active_holds += 1
+            try:
+                await self.segment_release.wait()
+                await response.write(data)
+                await response.write_eof()
+                self.released_holds += 1
+            except ConnectionError:
+                # A failing test or owner cleanup can close the native reader.
+                # Successful return must independently prove delivered bytes.
+                pass
+            finally:
+                self.active_holds -= 1
+            return response
+        return web.Response(body=data, content_type='video/mp2t')
 
 
 @asynccontextmanager
 async def renderer(library: str, directory: Path, wav: Path, entries):
     baseline = asyncio.all_tasks()
-    listener = backend = runner = client = monitor = api = None
+    listener = backend = runner = client = monitor = api = fixture = None
     try:
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(('127.0.0.1', 0))
@@ -133,6 +159,8 @@ async def renderer(library: str, directory: Path, wav: Path, entries):
                     assert response.status == 200
             yield env, fixture, events, url
     finally:
+        if fixture is not None:
+            fixture.segment_release.set()
         try:
             if runner is not None:
                 await runner.cleanup()
@@ -156,6 +184,7 @@ async def renderer(library: str, directory: Path, wav: Path, entries):
             assert client is None or client.closed
             assert monitor is None or monitor.done()
             assert api is None or api._station_recovery_task is None
+            assert fixture is None or fixture.active_holds == 0
 
 
 async def exercise(library: str, ffmpeg: str, directory: Path, scenario: str) -> dict:
@@ -236,7 +265,9 @@ async def exercise(library: str, ffmpeg: str, directory: Path, scenario: str) ->
         fixture.outage = 'segment' if scenario == 'segment-return' else 'all'
         await _eventually('actual HLS outage reached decoder', lambda: api.state.phase == PlaybackPhase.BUFFERING,
                           timeout=12)
-        await _eventually('actual outage request', lambda: any(r['status'] == 503 for r in fixture.requests[before:]))
+        await _eventually('actual outage request', lambda: any(
+            r.get('held') if scenario == 'segment-return' else r['status'] == 503
+            for r in fixture.requests[before:]))
         assert api.state.queue is selected_queue and api.state.queue.current is selected
         assert api.state.generation == generation and api.state.current_url == url and api.state.totlen == 0
         await surface('transition')
@@ -245,11 +276,18 @@ async def exercise(library: str, ffmpeg: str, directory: Path, scenario: str) ->
             native = evidence['outage_snapshot']
             assert native['idle-active'] is False and native['eof-reached'] is False
             assert native['paused-for-cache'] is True and native['core-idle'] is True
-            assert any(r['status'] == 503 and r['name'].endswith('.ts') for r in fixture.requests[before:])
+            assert fixture.active_holds > 0 and fixture.released_holds == 0
+            assert all(not transport.is_closing() for transport in fixture.held_transports)
             stalled_position = backend.read_property('playback-time')
             await asyncio.sleep(2)
             assert backend.read_property('playback-time') == pytest.approx(stalled_position, abs=.001)
+            assert backend.read_property('idle-active') is False and backend.read_property('eof-reached') is False
+            assert backend.read_property('paused-for-cache') is True and backend.read_property('core-idle') is True
+            assert fixture.active_holds > 0 and fixture.released_holds == 0
+            assert all(not transport.is_closing() for transport in fixture.held_transports)
+            evidence['segment_hold'] = {'active_before_release': fixture.active_holds, 'no_eof_seconds': 2}
             fixture.outage = ''
+            fixture.segment_release.set()
         else:
             await _eventually('renderer recovery backoff', lambda: api._station_recovery_task is not None,
                               timeout=20)
@@ -303,6 +341,8 @@ async def exercise(library: str, ffmpeg: str, directory: Path, scenario: str) ->
                 assert backend.loads == [url]
                 assert backend.read_property('playlist')[0]['id'] == native_entry
                 assert api._station_recovery.attempts == 0
+                assert fixture.active_holds == 0 and fixture.released_holds > 0
+                evidence['segment_hold']['delivered_after_release'] = fixture.released_holds
             else:
                 assert backend.loads == [url] * 3 and api._station_recovery.attempts == 2
             assert api.state.queue is selected_queue and api.state.queue.current is selected
