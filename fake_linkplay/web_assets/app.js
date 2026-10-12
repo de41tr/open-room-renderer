@@ -1,11 +1,13 @@
 /* Same-origin UI. Canonical snapshots are the only source of displayed state. */
 (function () {
   "use strict";
-  const {Controller, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
+  const {Controller, DspDraft, DSP_KEYS, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
   const $ = id => document.getElementById(id);
   const drafts = {seek: false, volume: false, mode: false, balance: false};
   let snapshot = null, queueSignature = "", favoritesSignature = "", artworkURL = null;
   let dialogContext = null, dialogSerial = 0, pollTimer = null, pollRun = 0;
+  const soundDraft = new DspDraft();
+  let presetSignature = "", presetContext = null, presetSerial = 0, soundSubmission = null;
   const text = (id, value) => { const element = $(id); if (element.textContent !== value) element.textContent = value; };
   const balanceLabel = value => value === 0 ? "Center" : `${Math.round(Math.abs(value) * 100)}% ${value < 0 ? "left" : "right"}`;
   const working = key => drafts[key] || document.activeElement === $(key);
@@ -103,13 +105,72 @@
     text("eq", !dspKnown || dsp.eq_enabled === null ? "EQ unavailable" : dsp.eq_enabled ? "Bypass EQ" : "Enable EQ");
     $("eq").setAttribute("aria-pressed", dspKnown && dsp.eq_enabled === true ? "true" : "false");
     $("eq").disabled = !ready || !dspKnown || dsp.eq_enabled === null;
-    renderQueue(ready); renderFavorites(ready);
+    renderSoundEditor(); renderQueue(ready); renderFavorites(ready);
     text("freshness", control.lastReadAt ? `${control.fresh ? "State received" : "Last state received"} ${new Date(control.lastReadAt).toLocaleTimeString()}. Playback status comes from the renderer.` : "No state received yet.");
     $("add-favorite").disabled = !ready || !control.favoritesFresh;
     $("save-current").disabled = !ready || !control.favoritesFresh || !snapshot.actions.save_current;
     if (dialogContext) $("favorite-submit").disabled = !ready || !control.favoritesFresh;
   }
   function element(tag, className, value) { const item = document.createElement(tag); if (className) item.className = className; if (value !== undefined) item.textContent = value; return item; }
+  function currentEditor() { return control.fresh && snapshot?.dsp.status === "CONFIRMED" ? snapshot.dsp.editor : null; }
+  function matchingBands(left, right) { return left.length === right.length && left.every((band, index) => band.param_name === right[index].param_name && band.value === right[index].value); }
+  function renderSoundEditor() {
+    const editor = currentEditor();
+    if (soundSubmission?.outcome === "acknowledged" && editor && soundSubmission.session === snapshot.session_id && matchingBands(editor.bands, soundSubmission.bands)) {
+      soundDraft.load(snapshot); soundSubmission = null;
+    }
+    soundDraft.observe(snapshot, control.fresh);
+    const local = soundDraft.engaged || soundDraft.pending || soundDraft.review;
+    const available = control.canMutate("dsp_bands");
+    const editable = available && !soundDraft.stale && !soundDraft.pending && !soundDraft.review;
+    text("dsp-current", editor ? `${editor.source === "wifi" ? "Wi-Fi" : "Global"} · ${editor.channel_mode}` : control.fresh ? snapshot.dsp.status === "CONFIRMED" ? "Bands unavailable" : snapshot.dsp.status : "UNKNOWN · STALE");
+    let message = editor ? "The values below were confirmed by the renderer. Changes stay local until you apply them." : "Current bands are unavailable until the renderer confirms its sound state.";
+    if (soundDraft.pending) message = "PENDING · Applying your local draft. Current bands have not been confirmed yet.";
+    else if (soundDraft.review) message = "This request needs review. Read the request status above, then discard and reload confirmed bands before editing or submitting again. No retry was sent.";
+    else if (soundDraft.stale) message = "Sound settings or presets changed, or the renderer restarted. Your local draft is preserved. Discard and reload the latest state before applying.";
+    else if (local && !editor) message = "Your local draft is preserved. Current bands are unavailable; wait for confirmed readback before applying.";
+    else if (soundDraft.dirty) message = soundDraft.bands ? "Unsaved local draft. Apply bands to send it, or discard your changes." : "Unsaved local draft. Fill every field within its allowed range before applying.";
+    text("dsp-editor-message", message);
+    text("dsp-draft-label", local ? soundDraft.pending ? "Submitted draft" : "Local draft" : "Confirmed values");
+    $("dsp-band-form").hidden = !editor && !local;
+    DSP_KEYS.forEach(key => {
+      const input = $("dsp-" + key);
+      if (soundDraft.values && input.value !== soundDraft.values[key]) input.value = soundDraft.values[key];
+      input.disabled = !editable;
+    });
+    $("dsp-apply").disabled = !available || !soundDraft.canApply(snapshot, control.fresh);
+    $("dsp-discard").disabled = !editor || control.busy || !local;
+    text("dsp-discard", soundDraft.stale || soundDraft.review ? "Discard & reload" : "Discard changes");
+    const signature = JSON.stringify([snapshot.session_id, editor?.presets || []]);
+    if (signature !== presetSignature) {
+      presetSignature = signature;
+      const selected = $("dsp-preset").value;
+      const fragment = document.createDocumentFragment();
+      const prompt = element("option", "", "Choose a preset…"); prompt.value = ""; fragment.append(prompt);
+      (editor?.presets || []).forEach(preset => {
+        const option = element("option", "", `${preset.name}${preset.kind === "builtin" ? " · built-in" : preset.shared ? " · shared" : ""}`);
+        option.value = preset.id; fragment.append(option);
+      });
+      $("dsp-preset").replaceChildren(fragment);
+      $("dsp-preset").value = editor?.presets.some(preset => preset.id === selected) ? selected : "";
+    }
+    const selected = editor?.presets.find(preset => preset.id === $("dsp-preset").value);
+    const clean = !soundDraft.dirty && !soundDraft.stale && !soundDraft.pending && !soundDraft.review;
+    $("dsp-preset").disabled = !available || !clean;
+    $("dsp-load").disabled = !available || !clean || !selected;
+    $("dsp-save").disabled = !available || !clean;
+    $("dsp-rename").disabled = !available || !clean || selected?.kind !== "saved";
+    $("dsp-delete").disabled = !available || !clean || selected?.kind !== "saved";
+    text("dsp-save-hint", !clean ? "Apply or discard your draft before saving or changing presets. Save active curve never saves unsent edits." : "Saves only the confirmed active curve. Loading a preset enables EQ.");
+    if (presetContext) {
+      if (!presetContext.sent && (presetContext.session !== snapshot.session_id || (editor && presetContext.revision !== editor.revision))) presetContext.stale = true;
+      const stale = presetContext.stale || !editor;
+      $("dsp-preset-submit").disabled = !available || !clean || stale || presetContext.sent;
+      $("dsp-name").disabled = presetContext.sent || stale;
+      $("dsp-shared-confirm").disabled = presetContext.mode === "save" || !presetContext.preset?.shared || presetContext.sent || stale;
+      if (stale && !presetContext.sent) text("dsp-dialog-status", "Sound settings or presets changed, or readback is unavailable. Close this dialog and review the latest state before continuing.");
+    }
+  }
   function renderQueue(ready) {
     const {queue, generation} = snapshot;
     text("queue-count", String(queue.count)); text("queue-name", queue.name || "Current queue");
@@ -218,7 +279,8 @@
   function closeFavorite() { $("favorite-dialog").close(); clearFavoriteForm(); }
   // Closing the dialog clears local input only. An in-flight command continues
   // independently and its acknowledgement/unknown outcome stays in the notice.
-  $("favorite-dialog").addEventListener("close", clearFavoriteForm);
+  // A queued close event from an older dialog must not clear its reopened draft.
+  $("favorite-dialog").addEventListener("close", () => { if (!$("favorite-dialog").open) clearFavoriteForm(); });
   ["favorite-close", "favorite-cancel"].forEach(id => $(id).addEventListener("click", closeFavorite));
   $("add-favorite").addEventListener("click", () => openFavorite("add"));
   $("save-current").addEventListener("click", () => openFavorite("current"));
@@ -243,6 +305,84 @@
     const verified = control.favoritesFresh && result.kind === "acknowledged" && (context.mode === "delete" ? !favorites.some(item => item.id === context.favorite.id) : context.mode === "rename" ? favorites.some(item => item.id === context.favorite.id && item.name === name) : result.favoriteId && favorites.some(item => item.id === result.favoriteId && item.name === name));
     if (verified) closeFavorite();
     else text("favorite-dialog-status", result.kind === "acknowledged" ? "Request acknowledged. The saved change has not yet been verified in the favorites list. Check the list before submitting again." : `${result.kind.toUpperCase()} · ${result.text}`);
+  });
+  DSP_KEYS.forEach(key => $("dsp-" + key).addEventListener("input", () => {
+    if (!currentEditor() || !control.canMutate("dsp_bands") || soundDraft.stale) return;
+    soundDraft.edit(key, $("dsp-" + key).value); renderSoundEditor();
+  }));
+  $("dsp-discard").addEventListener("click", () => {
+    if (!currentEditor() || control.busy) return;
+    soundSubmission = null; soundDraft.load(snapshot); renderSoundEditor();
+  });
+  $("dsp-band-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!control.canMutate("dsp_bands") || !soundDraft.canApply(snapshot, control.fresh)) return;
+    const bands = soundDraft.bands, session = soundDraft.session, revision = soundDraft.revision;
+    soundDraft.pending = true;
+    const submission = {bands, session, outcome: "pending"}; soundSubmission = submission;
+    const result = await run({action: "dsp_bands", expected_dsp: revision, bands}, "Apply EQ bands");
+    if (soundSubmission !== submission) return;
+    soundDraft.pending = false; submission.outcome = result.kind;
+    if (result.code === "stale_dsp") soundDraft.stale = true;
+    if (result.kind === "acknowledged" || result.kind === "unknown") soundDraft.review = true;
+    else soundSubmission = null;
+    renderSoundEditor();
+  });
+  $("dsp-preset").addEventListener("change", renderSoundEditor);
+  $("dsp-load").addEventListener("click", async () => {
+    const editor = currentEditor(), preset = editor?.presets.find(item => item.id === $("dsp-preset").value);
+    if (!preset || !control.canMutate("dsp_preset_load") || soundDraft.dirty || soundDraft.stale || soundDraft.pending || soundDraft.review) return;
+    soundDraft.load(snapshot);
+    await run({action: "dsp_preset_load", expected_dsp: editor.revision, preset_id: preset.id}, "Load EQ preset");
+  });
+  function openPreset(mode) {
+    const editor = currentEditor(), preset = editor?.presets.find(item => item.id === $("dsp-preset").value);
+    if (!editor || !control.canMutate("dsp_preset_" + mode) || soundDraft.dirty || soundDraft.stale || soundDraft.pending || soundDraft.review || (mode !== "save" && preset?.kind !== "saved")) return;
+    presetContext = {mode, preset, session: snapshot.session_id, revision: editor.revision, serial: ++presetSerial, sent: false, stale: false};
+    $("dsp-name").value = mode === "rename" ? preset.name : ""; $("dsp-shared-confirm").checked = false;
+    text("dsp-dialog-status", "");
+    text("dsp-dialog-heading", {save: "Save active curve", rename: "Rename saved preset", delete: "Delete saved preset"}[mode]);
+    text("dsp-preset-submit", {save: "Save preset", rename: "Save name", delete: "Delete preset"}[mode]);
+    text("dsp-dialog-hint", {save: "Save the renderer’s confirmed active EQ curve as a new preset. Unsent band edits are never included.", rename: "Change this saved preset’s name. Existing names cannot be overwritten.", delete: "Remove this saved preset? The renderer’s active curve will remain unchanged."}[mode]);
+    $("dsp-name-field").hidden = mode === "delete"; $("dsp-name").required = mode !== "delete";
+    $("dsp-preset-name").hidden = mode === "save"; text("dsp-preset-name", preset?.name || "");
+    const shared = mode !== "save" && preset.shared;
+    $("dsp-shared-field").hidden = !shared; $("dsp-shared-confirm").disabled = !shared; $("dsp-shared-confirm").required = shared;
+    text("dsp-shared-warning", `This preset is shared. ${mode === "delete" ? "Deleting" : "Renaming"} it affects ALL stored contexts that use it, including other source or channel settings.`);
+    $("dsp-preset-submit").classList.toggle("destructive", mode === "delete");
+    renderSoundEditor(); $("dsp-dialog").showModal(); (mode === "delete" ? $("dsp-cancel") : $("dsp-name")).focus();
+  }
+  function clearPresetForm() { presetContext = null; $("dsp-name").value = ""; $("dsp-shared-confirm").checked = false; text("dsp-dialog-status", ""); }
+  function closePreset() { $("dsp-dialog").close(); clearPresetForm(); }
+  ["save", "rename", "delete"].forEach(mode => $("dsp-" + mode).addEventListener("click", () => openPreset(mode)));
+  ["dsp-close", "dsp-cancel"].forEach(id => $(id).addEventListener("click", closePreset));
+  $("dsp-dialog").addEventListener("close", () => { if (!$("dsp-dialog").open) clearPresetForm(); });
+  $("dsp-preset-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const context = presetContext, editor = currentEditor();
+    if (!context || context.sent || !editor || !control.canMutate("dsp_preset_" + context.mode)) return;
+    if (context.stale || context.session !== snapshot.session_id || context.revision !== editor.revision) { context.stale = true; text("dsp-dialog-status", "Sound settings or presets changed, or the renderer restarted. Close this dialog and review the latest state before continuing."); renderSoundEditor(); return; }
+    if (soundDraft.dirty || soundDraft.stale || soundDraft.pending || soundDraft.review) { text("dsp-dialog-status", "Apply or discard your local band draft first."); return; }
+    const name = $("dsp-name").value.trim();
+    if (context.mode !== "delete" && (!name || new TextEncoder().encode(name).length > 256)) { text("dsp-dialog-status", "Enter a plain preset name of 1–256 UTF-8 bytes."); $("dsp-name").focus(); return; }
+    if (context.mode !== "save" && context.preset.shared && !$("dsp-shared-confirm").checked) { text("dsp-dialog-status", "Confirm that this change affects all stored contexts using this preset."); $("dsp-shared-confirm").focus(); return; }
+    const body = {action: "dsp_preset_" + context.mode, expected_dsp: context.revision};
+    if (context.mode !== "delete") body.name = name;
+    if (context.mode !== "save") body.preset_id = context.preset.id;
+    context.sent = true; text("dsp-dialog-status", "PENDING · Waiting for the renderer…");
+    const result = await run(body, {save: "Save EQ preset", rename: "Rename EQ preset", delete: "Delete EQ preset"}[context.mode]);
+    if (!presetContext || presetContext.serial !== context.serial) return;
+    const current = currentEditor();
+    const oldRemoved = current && !current.presets.some(item => item.kind === "saved" && item.id === context.preset?.id);
+    const named = current?.presets.some(item => item.kind === "saved" && item.name === name);
+    const verified = result.kind === "acknowledged" && context.session === snapshot.session_id && current && (context.mode === "delete" ? oldRemoved : context.mode === "rename" ? named && (name === context.preset.name || oldRemoved) : named);
+    if (verified) closePreset();
+    else {
+      context.sent = result.kind !== "error" && result.kind !== "blocked";
+      if (result.code === "stale_dsp") context.stale = true;
+      renderSoundEditor();
+      text("dsp-dialog-status", result.kind === "acknowledged" ? "Request acknowledged, but the saved change has not been verified. Close this dialog and review the preset list before another request." : `${result.kind.toUpperCase()} · ${result.text}`);
+    }
   });
   $("artwork").addEventListener("load", () => { if ($("artwork").getAttribute("src") === artworkURL) { $("artwork").hidden = false; $("artwork-fallback").hidden = true; } });
   $("artwork").addEventListener("error", () => { $("artwork").hidden = true; $("artwork-fallback").hidden = false; });

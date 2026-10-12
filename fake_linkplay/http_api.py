@@ -40,7 +40,8 @@ from .capabilities import capability_fields, configured_sources, service_capabil
 from .eventing import EventSubscriber, EventSubscriptionManager
 from .favorites import FavoritesApi, FavoritesStore
 from .queue_playlist import QueuePlaylistApi
-from .web_ui import WebCommand, WebControlApi, WebRuntime
+from .web_ui import (WebAdmissionError, WebCommand, WebControlApi, WebDspCommandError,
+                     WebRuntime)
 from .config import Config
 from .log_safety import redact_media_urls
 from .metadata_formatting import metadata_with_art, metadata_with_duration, metadata_with_url
@@ -359,7 +360,8 @@ class HttpApi:
 
     def _web_dsp_snapshot(self) -> dict[str, object]:
         """Hide mutable DSP proposals; detach validated confirmed state atomically."""
-        unknown = {"status": "UNKNOWN", "balance": None, "eq_enabled": None, "name": ""}
+        unknown = {"status": "UNKNOWN", "balance": None, "eq_enabled": None, "name": "",
+                   "editor": None}
         if self._dsp_command_lock.locked():
             return {**unknown, "status": "PENDING"}
         try:
@@ -369,7 +371,8 @@ class HttpApi:
             snapshot = self._active_dsp_snapshot()
             encode_active_dsp(snapshot)
             return {"status": "CONFIRMED", "balance": snapshot["balance"],
-                    "eq_enabled": snapshot["enabled"], "name": snapshot["name"]}
+                    "eq_enabled": snapshot["enabled"], "name": snapshot["name"],
+                    "editor": self.web_api.dsp_editor(snapshot, self._eq_library)}
         except (BackendError, ValueError, TypeError, UnicodeError):
             return unknown
 
@@ -394,6 +397,8 @@ class HttpApi:
             await self._run_dsp_command("setChannelBalance:" + format(command.value, ".3f"))
         elif action == "eq":
             await self._run_dsp_command("EQOn" if command.enabled else "EQOff")
+        elif action.startswith("dsp_"):
+            await self._run_dsp_command("", web_command=command)
         elif action == "favorite_play":
             await self._play_preset_snapshot(self.favorites.playback_snapshot(command.id))
         elif action == "favorite_add":
@@ -2014,10 +2019,61 @@ class HttpApi:
             self._require_dsp_readback()
             atomic_write_text(Path(self.cfg.state_dir) / "active_dsp.json", encode_active_dsp(self._active_dsp_snapshot()))
 
-    async def _run_dsp_command(self, name: str) -> dict[str, object] | str:
+    def _prepare_web_dsp_command(self, command: WebCommand) -> str:
+        """Locked compare-and-translate; no browser-controlled source or plugin.
+
+        Waiting for the existing lock can make a previously observed curve or
+        library stale. Check after that wait, before creating any proposal or
+        transaction task. Legacy callers never enter this admission path.
+        """
+        if self._pending_dsp_restore is not None or not self._dsp_active_confirmed:
+            raise WebAdmissionError("unavailable", 409)
+        try:
+            self._require_dsp_readback()
+            active = self._active_dsp_snapshot()
+            encode_active_dsp(active)
+        except (BackendError, ValueError, TypeError, UnicodeError):
+            raise WebAdmissionError("unavailable", 409) from None
+        if command.expected_dsp != self.web_api.dsp_revision(active, self._eq_library):
+            raise WebAdmissionError("stale_dsp", 409)
+        plugin, source = active["plugin"], active["source"]
+        payload = {"pluginURI": plugin}
+        if source:
+            payload["source_name"] = source
+        if command.action == "dsp_bands":
+            prefix = "EQSetLV2SourceBand:" if source else "EQSetLV2Band:"
+            payload["EQBand"] = command.bands
+        elif command.action == "dsp_preset_save":
+            if command.name in self.eq_presets:
+                raise WebAdmissionError("preset_conflict", 409)
+            return "EQSave:" + quote(command.name, safe="")
+        else:
+            name = self.web_api.dsp_preset_name(command.preset_id, plugin, self._eq_library)
+            payload["Name"] = name
+            if command.action == "dsp_preset_load":
+                prefix = "EQv2SourceLoad:" if source else "EQv2Load:"
+            elif command.action in {"dsp_preset_delete", "dsp_preset_rename"}:
+                if plugin not in self.eq_presets.get(name, {}):
+                    raise WebAdmissionError("unavailable", 409)
+                if command.action == "dsp_preset_rename":
+                    if command.name != name and command.name in self.eq_presets:
+                        raise WebAdmissionError("preset_conflict", 409)
+                    payload["newName"] = command.name
+                    prefix = "EQv2Rename:"
+                else:
+                    prefix = "EQv2Delete:"
+            else:
+                raise WebAdmissionError()
+        # The existing legacy parser unquotes once. Quote the complete JSON so
+        # literal percent sequences in saved names/plugin IDs are not re-read.
+        return prefix + quote(json.dumps(payload, separators=(",", ":")), safe="")
+
+    async def _run_dsp_command(self, name: str, *, web_command: WebCommand | None = None) -> dict[str, object] | str:
         """Serialize DSP reads/writes and hide unconfirmed proposals from clients."""
         async with self._dsp_command_lock:
             self._refresh_restored_dsp()
+            if web_command is not None:
+                name = self._prepare_web_dsp_command(web_command)
             fields = (
                 "eq_bands_by_plugin", "eq_source_bands_by_plugin", "eq_names_by_plugin",
                 "eq_channel_by_plugin", "eq_active_plugin_uri", "eq_active_source_name",
@@ -2043,6 +2099,22 @@ class HttpApi:
                         for field, value in before.items():
                             setattr(self, field, value)
                         self.cfg.channel_balance = old_balance
+                    if web_command is not None and isinstance(exc, Exception):
+                        if self._dsp_backend_confirmed:
+                            # In the fixed Web band/load paths, owned persistence
+                            # is the only post-confirmation OSError source. Revisit
+                            # this classification if those paths gain other I/O.
+                            effect = ("BACKEND_APPLIED_PERSISTENCE_FAILED" if isinstance(exc, OSError)
+                                      else "BACKEND_APPLIED_FOLLOWUP_UNKNOWN")
+                        elif (web_command.action in {"dsp_preset_save", "dsp_preset_rename", "dsp_preset_delete"}
+                              and self._dsp_library_committed):
+                            effect = "LIBRARY_COMMITTED_ACTIVE_PERSISTENCE_FAILED"
+                        elif (web_command.action in {"dsp_preset_save", "dsp_preset_rename", "dsp_preset_delete"}
+                              and isinstance(exc, AtomicWriteCommittedError)):
+                            effect = "LIBRARY_COMMITTED_DURABILITY_UNKNOWN"
+                        else:
+                            effect = "UNKNOWN"
+                        raise WebDspCommandError(effect) from None
                     raise
 
             task = asyncio.create_task(transaction())

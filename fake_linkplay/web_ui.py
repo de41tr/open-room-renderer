@@ -11,6 +11,8 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import ipaddress
+import hashlib
+import hmac
 from importlib.resources import files
 import json
 import math
@@ -22,9 +24,10 @@ from aiohttp import web
 
 from .canonical_target import canonical_target_url
 from .favorites import FavoriteError, FavoritesStore, validate_target_edit
+from .eq_presets import EqPresetLibrary, normalize_eq_preset_name
 from .log_safety import redact_media_urls
 from .mpv_backend import BackendError
-from .persistence import AtomicWriteCommittedError
+from .persistence import AtomicWriteCommittedError, validate_eq_records
 from .queue_protocol import MODES, validate_url
 from .radio import RadioResolutionError
 from .state import PlaybackPhase, RendererState
@@ -58,7 +61,14 @@ _SCHEMAS = {
     "favorite_add": {"name", "url"}, "favorite_current": {"name", "expected_generation"},
     "favorite_rename": {"id", "name"}, "favorite_target": {"id", "url", "metadata"},
     "favorite_delete": {"id"}, "favorite_play": {"id"},
+    "dsp_bands": {"expected_dsp", "bands"},
+    "dsp_preset_load": {"expected_dsp", "preset_id"},
+    "dsp_preset_save": {"expected_dsp", "name"},
+    "dsp_preset_rename": {"expected_dsp", "preset_id", "name"},
+    "dsp_preset_delete": {"expected_dsp", "preset_id"},
 }
+_DSP_TOKEN = re.compile(r"[0-9a-f]{64}\Z")
+_BUILTIN_PRESETS = ("Flat", "Bass Boost", "Treble Boost")
 _ID = re.compile(r"(?:[0-9a-f]{32}|configured:[1-9][0-9]{0,5})\Z")
 _INVALID_TEXT = re.compile(r"[\x00-\x1f\x7f\ud800-\udfff\ufffe\uffff]")
 
@@ -78,6 +88,9 @@ class WebCommand:
     url: str = ""
     id: str = ""
     metadata: str = ""
+    expected_dsp: str = ""
+    preset_id: str = ""
+    bands: list[dict[str, object]] | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +109,12 @@ class WebAdmissionError(ValueError):
         self.code, self.status = code, status
 
 
+class WebDspCommandError(RuntimeError):
+    """Private-safe classification captured before the DSP lock is released."""
+    def __init__(self, effect: str) -> None:
+        self.effect = effect
+
+
 def _text(value: object, limit: int = MAX_TEXT_BYTES, *, required: bool = False) -> str:
     if (not isinstance(value, str) or _INVALID_TEXT.search(value)
             or len(value.encode("utf-8")) > limit or required and not value.strip()):
@@ -111,6 +130,22 @@ def _display(value: object, default: str = "") -> str:
             r"(?i)(?:https?|file|ftp)://|[?][^ ]*=|(?:access_token|auth_token|api_key|password|token|signature)=", value)):
         return default
     return value[:MAX_TEXT_BYTES]
+
+
+def _dsp_name(value: object, default: str = "") -> str:
+    """Keep literal percent names, but hide encoded URL/token metadata too."""
+    visible = _display(value, default)
+    if visible == default:
+        return default
+    decoded = visible
+    try:
+        for _ in range(2):
+            decoded = unquote(decoded, errors="strict")
+            if _display(decoded) != decoded:
+                return default
+    except UnicodeError:
+        return default
+    return visible
 
 
 def _title(value: object, urls: tuple[str, ...], fallback: str) -> str:
@@ -218,6 +253,23 @@ def decode_command(encoded: bytes) -> WebCommand:
             _integer(payload["index"], 1, 1000)
         if action == "queue_mode" and (not isinstance(payload["mode"], str) or payload["mode"] not in MODES):
             raise ValueError
+        if action.startswith("dsp_"):
+            if not isinstance(payload["expected_dsp"], str) or not _DSP_TOKEN.fullmatch(payload["expected_dsp"]):
+                raise ValueError
+            if "preset_id" in payload and (not isinstance(payload["preset_id"], str)
+                    or not _DSP_TOKEN.fullmatch(payload["preset_id"])):
+                raise ValueError
+            if action == "dsp_bands":
+                bands = validate_eq_records(payload["bands"], require_complete=True)
+                if any(type(item["value"]) not in {int, float} for item in payload["bands"]):
+                    raise ValueError
+                payload["bands"] = bands
+            if "name" in payload:
+                name = _text(payload["name"], 256, required=True).strip()
+                if (_dsp_name(name) != name or normalize_eq_preset_name(name) != name
+                        or name in _BUILTIN_PRESETS):
+                    raise ValueError
+                payload["name"] = name
         if "name" in payload:
             _text(payload["name"], 256, required=True)
         if "id" in payload and (not isinstance(payload["id"], str) or not _ID.fullmatch(payload["id"])):
@@ -255,6 +307,40 @@ class WebControlApi:
         self._csrf_token = secrets.token_urlsafe(32)
         self._session_id = secrets.token_urlsafe(24)
         self._revision = 0
+        # Keyed presentation tokens conceal raw plugin/name identifiers; they
+        # are derived views, not a second revision counter or state authority.
+        self._dsp_key = secrets.token_bytes(32)
+
+    def _dsp_digest(self, kind: str, value: object) -> str:
+        encoded = json.dumps([kind, value], sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        return hmac.new(self._dsp_key, encoded, hashlib.sha256).hexdigest()
+
+    def dsp_revision(self, active: dict[str, object], library: EqPresetLibrary) -> str:
+        """Include the entire library because rename/delete operate by name."""
+        return self._dsp_digest("revision", [active, library.presets])
+
+    def dsp_preset_id(self, plugin: str, name: str) -> str:
+        return self._dsp_digest("preset", [plugin, name])
+
+    def dsp_editor(self, active: dict[str, object], library: EqPresetLibrary) -> dict[str, object]:
+        plugin = active["plugin"]
+        saved = set(library.names(plugin))
+        names = list(_BUILTIN_PRESETS) + sorted(saved.difference(_BUILTIN_PRESETS))
+        return {"revision": self.dsp_revision(active, library),
+                "source": "wifi" if active["source"] else "global", "channel_mode": "Stereo",
+                "bands": [dict(record) for record in active["bands"]],
+                "presets": [{"id": self.dsp_preset_id(plugin, name),
+                             "name": _dsp_name(name, "Saved preset"),
+                             "kind": "saved" if name in saved else "builtin",
+                             "shared": name in saved and len(library.presets[name]) > 1}
+                            for name in names]}
+
+    def dsp_preset_name(self, preset_id: str, plugin: str, library: EqPresetLibrary) -> str:
+        """Resolve only a current-context opaque ID; never accept a raw URI."""
+        for name in (*_BUILTIN_PRESETS, *library.names(plugin)):
+            if secrets.compare_digest(preset_id, self.dsp_preset_id(plugin, name)):
+                return name
+        raise WebAdmissionError("stale_dsp", 409)
 
     def routes(self) -> list[web.RouteDef]:
         return [web.route("*", path, self.handle) for path in _ASSETS] + [
@@ -262,9 +348,12 @@ class WebControlApi:
             web.route("*", "/ui/{tail:.*}", self.handle)]
 
     @staticmethod
-    def _error(code: str, status: int, outcome: str = "REJECTED", *, committed: bool = False) -> web.Response:
+    def _error(code: str, status: int, outcome: str = "REJECTED", *, committed: bool = False,
+               effect: str | None = None) -> web.Response:
         messages = {
             "stale_generation": "Selection changed. Refresh before choosing again.",
+            "stale_dsp": "DSP settings or saved presets changed. Refresh and review before choosing again.",
+            "preset_conflict": "That preset name already exists. Choose another name.",
             "forbidden": "Browser request was not admitted.",
             "unavailable": "Requested operation is currently unavailable.",
             "read_failed": "Renderer state could not be read.",
@@ -274,6 +363,14 @@ class WebControlApi:
                    "outcome": outcome}
         if committed:
             payload["committed"] = True
+        if effect:
+            payload["effect"] = effect
+            payload["message"] = {
+                "BACKEND_APPLIED_PERSISTENCE_FAILED": "DSP was applied, but saving restart state failed. Refresh before choosing again.",
+                "BACKEND_APPLIED_FOLLOWUP_UNKNOWN": "DSP was applied, but the remaining command outcome is unconfirmed. Refresh before choosing again.",
+                "LIBRARY_COMMITTED_DURABILITY_UNKNOWN": "The preset library was replaced, but disk durability is unconfirmed. Refresh before choosing again.",
+                "LIBRARY_COMMITTED_ACTIVE_PERSISTENCE_FAILED": "The preset library was saved, but saving active DSP metadata failed. Refresh before choosing again.",
+            }.get(effect, payload["message"])
         return web.json_response(payload, status=status, headers=_HEADERS)
 
     def _origin(self, request: web.Request) -> str:
@@ -388,7 +485,7 @@ class WebControlApi:
         actions.update(queue_select=bool(queue.items), queue_mode=not runtime.queue_mode_locked,
                        save_current=can_save)
         dsp = self._dsp_snapshot()
-        dsp = {**dsp, "name": _display(dsp.get("name", ""))}
+        dsp = {**dsp, "name": _dsp_name(dsp.get("name", ""))}
         self._revision += 1
         return {
             "version": 1, "session_id": self._session_id, "revision": self._revision,
@@ -478,6 +575,8 @@ class WebControlApi:
             return web.json_response({"request_acknowledged": True, **(result or {})}, headers=_HEADERS)
         except WebAdmissionError as exc:
             return self._error(exc.code, exc.status)
+        except WebDspCommandError as exc:
+            return self._error("command_failed", 502, "UNKNOWN", effect=exc.effect)
         except AtomicWriteCommittedError:
             return self._error("command_failed", 502, "UNKNOWN", committed=True)
         except Exception:

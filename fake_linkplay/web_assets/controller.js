@@ -13,6 +13,56 @@
   const optionalNumber = value => value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0);
   const string = value => typeof value === "string";
   const optionalBoolean = value => value === null || typeof value === "boolean";
+  const DSP_MODES = Object.freeze({"-1": "Bypass band", "0": "Low shelf", "1": "Peak", "2": "High shelf", "3": "Low pass", "5": "High pass"});
+  const DSP_FIELDS = Object.freeze({freq: {label: "Frequency (Hz)", min: 10, max: 24000}, gain: {label: "Gain (dB)", min: -24, max: 24}, q: {label: "Q", min: 0.1, max: 30}, mode: {label: "Filter"}});
+  const DSP_KEYS = Object.freeze(Array.from("abcdefghij", band => Object.keys(DSP_FIELDS).map(field => `${band}_${field}`)).flat());
+  const opaqueID = value => string(value) && /^[a-f0-9]{64}$/.test(value);
+  function validBandValue(key, value) {
+    if (typeof value !== "number" || !Number.isFinite(value)) return false;
+    const field = key.split("_")[1];
+    return field === "mode" ? Object.hasOwn(DSP_MODES, String(value)) : value >= DSP_FIELDS[field].min && value <= DSP_FIELDS[field].max;
+  }
+  function validateEditor(editor) {
+    if (!isObject(editor) || !opaqueID(editor.revision) || !["global", "wifi"].includes(editor.source) || editor.channel_mode !== "Stereo" || !Array.isArray(editor.bands) || editor.bands.length !== DSP_KEYS.length || !Array.isArray(editor.presets)) throw new Error("Invalid sound editor snapshot");
+    editor.bands.forEach((band, index) => { if (!isObject(band) || band.param_name !== DSP_KEYS[index] || !validBandValue(band.param_name, band.value)) throw new Error("Invalid sound band"); });
+    const ids = new Set();
+    editor.presets.forEach(preset => {
+      if (!isObject(preset) || !opaqueID(preset.id) || ids.has(preset.id) || !string(preset.name) || !preset.name.trim() || !["builtin", "saved"].includes(preset.kind) || typeof preset.shared !== "boolean") throw new Error("Invalid sound preset");
+      ids.add(preset.id);
+    });
+    return editor;
+  }
+  // Local input is never renderer state. A changed revision stays stale until
+  // the user explicitly discards/reloads it, including across process restarts.
+  class DspDraft {
+    constructor() { this.reset(); }
+    reset() { this.session = null; this.revision = null; this.values = null; this.original = null; this.engaged = false; this.stale = false; this.pending = false; this.review = false; }
+    observe(state, fresh) {
+      const editor = fresh && state?.dsp.status === "CONFIRMED" ? state.dsp.editor : null;
+      if (!editor) return;
+      if (this.engaged || this.pending || this.review) {
+        if (this.session !== state.session_id || this.revision !== editor.revision) this.stale = true;
+      } else if (this.session !== state.session_id || this.revision !== editor.revision) this.load(state);
+    }
+    load(state) {
+      this.reset();
+      const editor = state?.dsp.status === "CONFIRMED" ? state.dsp.editor : null;
+      if (!editor) return;
+      this.session = state.session_id; this.revision = editor.revision;
+      this.values = Object.fromEntries(editor.bands.map(band => [band.param_name, String(band.value)]));
+      this.original = {...this.values};
+    }
+    edit(key, value) {
+      if (!this.values || !DSP_KEYS.includes(key) || this.pending || this.review) return;
+      this.engaged = true; this.values[key] = value;
+    }
+    get dirty() { return Boolean(this.values && DSP_KEYS.some(key => this.values[key].trim() === "" || Number(this.values[key]) !== Number(this.original[key]))); }
+    get bands() {
+      if (!this.values || DSP_KEYS.some(key => !string(this.values[key]) || !this.values[key].trim() || !validBandValue(key, Number(this.values[key])))) return null;
+      return DSP_KEYS.map(param_name => ({param_name, value: Number(this.values[param_name])}));
+    }
+    canApply(state, fresh) { return Boolean(fresh && state?.dsp.status === "CONFIRMED" && state.dsp.editor && this.session === state.session_id && this.revision === state.dsp.editor.revision && this.dirty && this.bands && !this.stale && !this.pending && !this.review); }
+  }
   function validateState(state) {
     if (!isObject(state) || state.version !== 1 || !string(state.session_id) || !state.session_id || !integer(state.revision) || !integer(state.generation) || !string(state.csrf_token) || !state.csrf_token || !isObject(state.device) || !string(state.device.name)) throw new Error("Invalid renderer snapshot");
     const {transport, media, gain, queue, dsp, actions} = state;
@@ -22,6 +72,7 @@
     if (!isObject(queue) || !string(queue.name) || !integer(queue.count) || queue.count > 1000 || !integer(queue.index) || !Object.hasOwn(MODES, queue.mode) || !Array.isArray(queue.items) || queue.items.length !== queue.count || (queue.count === 0 ? queue.index !== 0 : queue.index < 1 || queue.index > queue.count)) throw new Error("Invalid queue snapshot");
     queue.items.forEach((item, offset) => { if (!isObject(item) || item.index !== offset + 1 || ![item.title, item.artist, item.album].every(string) || !optionalNumber(item.duration_seconds)) throw new Error("Invalid queue item"); });
     if (!isObject(dsp) || !["CONFIRMED", "PENDING", "UNKNOWN"].includes(dsp.status) || !(dsp.balance === null || (typeof dsp.balance === "number" && Number.isFinite(dsp.balance) && Math.abs(dsp.balance) <= 1)) || !optionalBoolean(dsp.eq_enabled) || !string(dsp.name)) throw new Error("Invalid sound snapshot");
+    if (dsp.editor !== null) { if (dsp.status !== "CONFIRMED") throw new Error("Unconfirmed sound editor"); validateEditor(dsp.editor); }
     if (!isObject(actions) || !["play", "pause", "stop", "next", "previous", "seek", "queue_select", "queue_mode", "save_current"].every(key => typeof actions[key] === "boolean")) throw new Error("Invalid actions snapshot");
     return state;
   }
@@ -54,6 +105,7 @@
     const body = {action, ...values};
     if (["play", "pause", "next", "previous", "seek", "queue_select", "queue_mode", "favorite_current"].includes(action)) body.expected_generation = state.generation;
     if (["queue_select", "queue_mode"].includes(action)) body.queue_name = state.queue.name;
+    if (action.startsWith("dsp_")) { if (state.dsp.status !== "CONFIRMED" || !state.dsp.editor) throw new Error("Read confirmed sound state first"); body.expected_dsp = state.dsp.editor.revision; }
     return body;
   }
   function commandError(response) {
@@ -61,7 +113,7 @@
     if (isObject(body) && string(body.message) && ["REJECTED", "UNKNOWN", "ERROR"].includes(body.outcome)) {
       // Only explicit pre-application rejection means it did not take effect.
       const kind = body.outcome === "REJECTED" ? "error" : "unknown";
-      return {kind, text: body.message, committed: body.committed === true};
+      return {kind, text: body.message, committed: body.committed === true, code: string(body.error) ? body.error : null};
     }
     return {kind: "unknown", text: "The request outcome could not be confirmed. Check the current state before trying again.", committed: false};
   }
@@ -85,7 +137,7 @@
     changed() { this.onChange(this); }
     get busy() { return this.active.size > 0; }
     get stopBusy() { return Array.from(this.active.values()).some(item => item.action === "stop"); }
-    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (!action.startsWith("favorite_") || this.favoritesFresh)); }
+    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (!action.startsWith("favorite_") || this.favoritesFresh) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor))); }
     refresh() {
       this.readAgain = true;
       if (!this.readPromise) {
@@ -158,5 +210,5 @@
       return result;
     }
   }
-  return {Controller, MODES, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
+  return {Controller, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
 });

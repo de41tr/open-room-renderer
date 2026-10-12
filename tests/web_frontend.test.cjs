@@ -1,8 +1,17 @@
 /* Dependency-free control-flow tests; these are not browser/layout tests. */
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {Controller, MODES, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError} = require('../fake_linkplay/web_assets/controller.js');
+const {Controller, DspDraft, DSP_KEYS, DSP_MODES, validateEditor, MODES, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError} = require('../fake_linkplay/web_assets/controller.js');
 const clone = value => JSON.parse(JSON.stringify(value));
+const revisionID = letter => letter.repeat(64);
+function editor(overrides = {}) {
+  return {revision: revisionID('a'), source: 'global', channel_mode: 'Stereo', bands: DSP_KEYS.map(param_name => ({param_name, value: param_name.endsWith('_freq') ? 1000 : param_name.endsWith('_q') ? 1 : param_name.endsWith('_mode') ? 1 : 0})), presets: [
+    {id: revisionID('b'), name: 'Flat', kind: 'builtin', shared: false},
+    {id: revisionID('c'), name: 'My curve', kind: 'saved', shared: false},
+    {id: revisionID('d'), name: 'Shared curve', kind: 'saved', shared: true}
+  ], ...overrides};
+}
+const soundState = (value = editor(), changes = {}) => state({dsp: {...state().dsp, editor: value, ...changes}});
 function state(overrides = {}) {
   return {
     version: 1, session_id: 'session-one', revision: 1, generation: 7, csrf_token: 'test-csrf-token', device: {name: 'Living room'},
@@ -10,7 +19,7 @@ function state(overrides = {}) {
     media: {title: 'Track <script>bad()</script>', artist: 'Artist', album: '', artwork: null, is_live: false, position_seconds: 0, duration_seconds: 120},
     gain: {status: 'CONFIRMED', volume: 20, mute: false, last_confirmed: {volume: 20, mute: false}},
     queue: {name: 'My queue', count: 2, index: 1, mode: 'normal', items: [{index: 1, title: 'One', artist: '', album: '', duration_seconds: 120}, {index: 2, title: 'Two', artist: '', album: '', duration_seconds: null}]},
-    dsp: {status: 'CONFIRMED', balance: 0, eq_enabled: false, name: 'Default'},
+    dsp: {status: 'CONFIRMED', balance: 0, eq_enabled: false, name: 'Default', editor: editor()},
     actions: {play: true, pause: false, stop: true, next: true, previous: false, seek: true, queue_select: true, queue_mode: true, save_current: true}, ...overrides
   };
 }
@@ -127,7 +136,7 @@ test('explicit pre-application rejection differs from unknown or error-after-app
   assert.equal(commandError({status: 200, body: {ok: true}}).kind, 'unknown');
 });
 test('pending gain and DSP never become fabricated confirmed values', async () => {
-  const h = harness(); const next = state(); next.gain = {...next.gain, status: 'UNKNOWN', volume: null, mute: null}; next.dsp = {...next.dsp, status: 'PENDING', balance: null, eq_enabled: null}; h.setState(next); await h.controller.refresh();
+  const h = harness(); const next = state(); next.gain = {...next.gain, status: 'UNKNOWN', volume: null, mute: null}; next.dsp = {...next.dsp, status: 'PENDING', editor: null, balance: null, eq_enabled: null}; h.setState(next); await h.controller.refresh();
   assert.equal(h.controller.state.gain.volume, null); assert.equal(h.controller.state.dsp.balance, null); assert.equal(h.controller.state.dsp.status, 'PENDING');
 });
 test('configured favorites do not consume the managed-only 100 item limit', () => {
@@ -172,9 +181,10 @@ async function appHarness() {
     if (options.method === 'POST') payload = postHook ? await postHook(JSON.parse(options.body)) : {request_acknowledged: true};
     else if (url.endsWith('/favorites')) payload = library;
     else payload = {...clone(current), revision: ++revision};
-    return new Response(JSON.stringify(payload), {status: 200, headers: {'Content-Type': 'application/json'}});
+    const status = payload.__status || 200; delete payload.__status;
+    return new Response(JSON.stringify(payload), {status, headers: {'Content-Type': 'application/json'}});
   };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/app.js'), 'utf8'), {window, document, fetch, AbortController, TextDecoder, Uint8Array, URL, Date, console});
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/app.js'), 'utf8'), {window, document, fetch, AbortController, TextEncoder, TextDecoder, Uint8Array, URL, Date, console});
   async function settle() {for (let i = 0; i < 10; i += 1) await tick();}
   await settle();
   return {ids, timers, requests, setState: value => {current = value;}, setFavorites: value => {library = value;}, setPost: fn => {postHook = fn;}, settle, refresh: async () => {await ids.get('refresh').fire('click'); await settle();}, posts: () => requests.filter(item => item.options.method === 'POST').map(item => JSON.parse(item.options.body))};
@@ -204,7 +214,7 @@ test('app rejects seek, mode and save-current drafts after same-generation resta
   }
 });
 test('app hides unconfirmed gain and DSP values instead of presenting old settings', async () => {
-  const h = await appHarness(); const next = state(); next.gain = {...next.gain, status: 'UNKNOWN', volume: null, mute: null}; next.dsp = {...next.dsp, status: 'PENDING', balance: null, eq_enabled: null, name: 'Old preset'}; h.setState(next); await h.refresh();
+  const h = await appHarness(); const next = state(); next.gain = {...next.gain, status: 'UNKNOWN', volume: null, mute: null}; next.dsp = {...next.dsp, status: 'PENDING', editor: null, balance: null, eq_enabled: null, name: 'Old preset'}; h.setState(next); await h.refresh();
   assert.equal(h.ids.get('volume-current').textContent, 'UNKNOWN'); assert.equal(h.ids.get('volume').hidden, true);
   assert.equal(h.ids.get('balance-current').textContent, 'PENDING'); assert.equal(h.ids.get('balance').hidden, true); assert.equal(h.ids.get('eq-current').textContent, 'PENDING');
   assert.equal(h.ids.get('eq').disabled, true); assert.equal(h.ids.get('stop').disabled, false);
@@ -259,5 +269,179 @@ test('closing favorite dialog clears URL input without cancelling or hiding unkn
 });
 test('native Escape close event clears favorite fields', async () => {
   const h = await appHarness(); await h.ids.get('add-favorite').fire('click'); h.ids.get('favorite-url').value = 'https://example.com/live?secret=token';
+  h.ids.get('favorite-dialog').open = false; // Native dismissal removes open before queuing close.
   await h.ids.get('favorite-dialog').fire('close'); assert.equal(h.ids.get('favorite-url').value, '');
+});
+
+test('sound editor validates exact canonical bands, bounded numbers, modes and opaque preset IDs', () => {
+  assert.equal(validateEditor(editor()).bands.length, 40);
+  assert.equal(Object.keys(DSP_MODES).length, 6);
+  for (const changes of [{revision: 'raw-secret-name'}, {source: 'file:///tmp/plugin'}, {channel_mode: 'Mono'}, {bands: []}, {presets: [{...editor().presets[0], id: 'Flat'}]}, {presets: [editor().presets[0], editor().presets[0]]}]) assert.throws(() => validateEditor(editor(changes)));
+  for (const [key, values] of [['a_freq', [9, 24001, '100', true, NaN, Infinity]], ['a_gain', [-25, 25]], ['a_q', [0, 0.09, 31]], ['a_mode', [-2, 4, 1.5, 6]]]) {
+    for (const value of values) {const next = editor(); next.bands.find(band => band.param_name === key).value = value; assert.throws(() => validateEditor(next), `${key}: ${value}`);}
+  }
+  const swapped = editor(); [swapped.bands[0], swapped.bands[1]] = [swapped.bands[1], swapped.bands[0]]; assert.throws(() => validateEditor(swapped));
+  assert.throws(() => validateState(soundState(editor(), {status: 'PENDING'})));
+  assert.equal(validateState(soundState(null, {status: 'UNKNOWN', balance: null, eq_enabled: null})).dsp.editor, null);
+});
+test('sound drafts preserve input, never mutate canonical state, and require explicit reload after any stale revision', () => {
+  const draft = new DspDraft(), original = state(); draft.observe(original, true); draft.edit('a_gain', '3.0');
+  draft.observe(state({generation: 22}), true); assert.equal(draft.values.a_gain, '3.0'); assert.equal(draft.dirty, true); assert.equal(draft.canApply(original, true), true); assert.equal(original.dsp.editor.bands[1].value, 0);
+  draft.observe(soundState(editor({revision: revisionID('e')})), true); assert.equal(draft.stale, true); assert.equal(draft.canApply(original, true), false);
+  draft.observe(original, true); assert.equal(draft.stale, true); // No silent revalidation after a revision changed and reverted.
+  draft.load(original); assert.equal(draft.stale, false); assert.equal(draft.dirty, false); assert.equal(draft.values.a_gain, '0');
+  draft.edit('a_gain', ''); assert.equal(draft.bands, null); assert.equal(draft.canApply(original, true), false);
+  draft.edit('a_gain', '0.0'); assert.equal(draft.dirty, false); draft.edit('a_gain', '2');
+  draft.observe(state({session_id: 'restarted'}), true); assert.equal(draft.stale, true);
+});
+test('sound guard and controller block unconfirmed editing without blocking Stop', async () => {
+  const current = state(); assert.deepEqual(guardedAction(current, 'dsp_preset_load', {preset_id: revisionID('b')}), {action: 'dsp_preset_load', preset_id: revisionID('b'), expected_dsp: revisionID('a')});
+  const h = harness(); h.setState(soundState(null, {status: 'PENDING', balance: null, eq_enabled: null})); await h.controller.refresh();
+  assert.equal(h.controller.canMutate('dsp_bands'), false); assert.equal(h.controller.canMutate('stop'), true);
+  assert.equal((await h.controller.mutate({action: 'dsp_bands', bands: editor().bands, expected_dsp: revisionID('a')}, 'Apply')).kind, 'blocked'); assert.equal(h.posts().length, 0);
+});
+async function editBand(h, key, value) {h.ids.get('dsp-' + key).value = value; await h.ids.get('dsp-' + key).fire('input');}
+async function selectPreset(h, id) {h.ids.get('dsp-preset').value = id; await h.ids.get('dsp-preset').fire('change');}
+test('app shows 40 confirmed fields, preserves local draft during polls and discards without sending', async () => {
+  const h = await appHarness(); assert.equal(DSP_KEYS.filter(key => h.ids.has('dsp-' + key)).length, 40); assert.equal(h.ids.get('dsp-a_freq').value, '1000');
+  await editBand(h, 'a_gain', '3.25'); await h.refresh(); assert.equal(h.ids.get('dsp-a_gain').value, '3.25'); assert.equal(h.ids.get('dsp-apply').disabled, false); assert.equal(h.ids.get('dsp-save').disabled, true); assert.match(h.ids.get('dsp-save-hint').textContent, /never saves unsent/);
+  await h.ids.get('dsp-save').fire('click'); assert.equal(h.ids.get('dsp-dialog').open, false);
+  await h.ids.get('dsp-discard').fire('click'); assert.equal(h.ids.get('dsp-a_gain').value, '0'); assert.equal(h.ids.get('dsp-apply').disabled, true); assert.equal(h.ids.get('dsp-save').disabled, false); assert.equal(h.posts().length, 0);
+});
+test('app refuses incomplete and out-of-range bands even if submit is invoked directly', async () => {
+  const h = await appHarness();
+  for (const [key, value] of [['a_gain', ''], ['a_freq', '9'], ['a_q', '31'], ['a_mode', '4']]) {
+    await editBand(h, key, value); assert.equal(h.ids.get('dsp-apply').disabled, true); await h.ids.get('dsp-band-form').fire('submit'); assert.equal(h.posts().length, 0); await h.ids.get('dsp-discard').fire('click');
+  }
+});
+test('app submits all forty numeric bands once, preserves bypass, and uses readback before clearing draft', async () => {
+  const h = await appHarness(), pending = deferred(); let sent;
+  h.setPost(body => {sent = body; return pending.promise;}); await editBand(h, 'a_gain', '3.25'); await editBand(h, 'j_mode', '-1');
+  const saving = h.ids.get('dsp-band-form').fire('submit'); await h.settle();
+  assert.equal(h.ids.get('dsp-a_gain').disabled, true); assert.equal(h.ids.get('dsp-apply').disabled, true); assert.equal(h.ids.get('stop').disabled, false); assert.match(h.ids.get('dsp-draft-label').textContent, /Submitted draft/);
+  await h.ids.get('dsp-band-form').fire('submit'); assert.equal(h.posts().length, 1);
+  assert.equal(sent.expected_dsp, revisionID('a')); assert.equal(sent.bands.length, 40); assert.equal(sent.bands[1].value, 3.25); assert.equal(sent.bands[39].value, -1); assert.ok(sent.bands.every(band => typeof band.value === 'number')); assert.deepEqual(Object.keys(sent).sort(), ['action', 'bands', 'expected_dsp']);
+  h.setState(soundState(editor({revision: revisionID('e'), bands: sent.bands}))); pending.resolve({request_acknowledged: true}); await saving;
+  assert.equal(h.ids.get('dsp-a_gain').value, '3.25'); assert.equal(h.ids.get('dsp-draft-label').textContent, 'Confirmed values'); assert.equal(h.ids.get('dsp-save').disabled, false); assert.match(h.ids.get('eq-current').textContent, /Bypassed/);
+});
+test('Stop remains recoverable during an in-flight DSP edit without enabling duplicate edits', async () => {
+  const h = await appHarness(), pending = deferred(); h.setPost(body => body.action === 'dsp_bands' ? pending.promise : {request_acknowledged: true});
+  await editBand(h, 'a_gain', '2'); const saving = h.ids.get('dsp-band-form').fire('submit'); await h.settle(); await h.ids.get('stop').fire('click');
+  assert.deepEqual(h.posts().map(body => body.action), ['dsp_bands', 'stop']); assert.equal(h.ids.get('dsp-apply').disabled, true);
+  pending.resolve({request_acknowledged: true}); await saving; assert.match(h.ids.get('notice-text').textContent, /^Stop:/); assert.equal(h.ids.get('dsp-apply').disabled, true);
+});
+test('ACK with pending readback retains submitted draft without claiming current bands, then resolves on confirmed readback', async () => {
+  const h = await appHarness(); let submitted;
+  h.setPost(body => {submitted = body.bands; h.setState(soundState(null, {status: 'PENDING', balance: null, eq_enabled: null})); return {request_acknowledged: true};});
+  await editBand(h, 'b_gain', '-2'); await h.ids.get('dsp-band-form').fire('submit');
+  assert.equal(h.ids.get('dsp-current').textContent, 'PENDING'); assert.equal(h.ids.get('dsp-draft-label').textContent, 'Local draft'); assert.equal(h.ids.get('dsp-apply').disabled, true); assert.equal(h.ids.get('dsp-save').disabled, true); assert.equal(h.ids.get('stop').disabled, false);
+  h.setState(soundState(editor({revision: revisionID('e'), bands: submitted}))); await h.refresh(); assert.equal(h.ids.get('dsp-draft-label').textContent, 'Confirmed values'); assert.equal(h.ids.get('dsp-save').disabled, false); assert.equal(h.posts().length, 1);
+});
+test('unconfirmed sound hides clean band fields and never presents remembered values as current', async () => {
+  const h = await appHarness(); h.setState(soundState(null, {status: 'UNKNOWN', balance: null, eq_enabled: null})); await h.refresh();
+  assert.equal(h.ids.get('dsp-band-form').hidden, true); assert.equal(h.ids.get('dsp-current').textContent, 'UNKNOWN'); assert.equal(h.ids.get('dsp-save').disabled, true);
+});
+test('external DSP changes and restart preserve draft but require discard/reload before another apply', async () => {
+  for (const restart of [false, true]) {
+    const h = await appHarness(); await editBand(h, 'a_gain', '4');
+    const next = soundState(editor({revision: restart ? revisionID('a') : revisionID('e')})); if (restart) {next.session_id = 'restarted'; h.setFavorites(favorites([], 'restarted'));}
+    h.setState(next); await h.refresh(); assert.equal(h.ids.get('dsp-a_gain').value, '4'); assert.equal(h.ids.get('dsp-apply').disabled, true); assert.match(h.ids.get('dsp-editor-message').textContent, /restarted/);
+    await h.ids.get('dsp-band-form').fire('submit'); assert.equal(h.posts().length, 0); await h.ids.get('dsp-discard').fire('click'); assert.equal(h.ids.get('dsp-a_gain').value, '0');
+    await editBand(h, 'a_gain', '1'); assert.equal(h.ids.get('dsp-apply').disabled, false);
+  }
+});
+test('stale DSP rejection sends no retry and keeps the draft blocked until explicit reload', async () => {
+  const h = await appHarness(); h.setPost(() => ({__status: 409, outcome: 'REJECTED', error: 'stale_dsp', message: 'Sound state changed. Review it first.'}));
+  await editBand(h, 'a_gain', '2'); await h.ids.get('dsp-band-form').fire('submit'); await h.refresh();
+  assert.equal(h.posts().length, 1); assert.equal(h.ids.get('dsp-apply').disabled, true); assert.equal(h.ids.get('dsp-a_gain').value, '2'); assert.equal(h.ids.get('dsp-discard').textContent, 'Discard & reload');
+});
+test('lost DSP response preserves unknown outcome and requires review even when matching bands appear', async () => {
+  const h = await appHarness(); h.setPost(body => {h.setState(soundState(editor({revision: revisionID('e'), bands: body.bands}))); throw new Error('lost response');});
+  await editBand(h, 'a_gain', '2'); await h.ids.get('dsp-band-form').fire('submit'); await h.refresh();
+  assert.equal(h.posts().length, 1); assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN'); assert.equal(h.ids.get('dsp-apply').disabled, true); assert.equal(h.ids.get('dsp-save').disabled, true); assert.match(h.ids.get('dsp-editor-message').textContent, /No retry/);
+  await h.ids.get('dsp-discard').fire('click'); assert.equal(h.ids.get('dsp-a_gain').value, '2'); assert.equal(h.ids.get('dsp-draft-label').textContent, 'Confirmed values');
+});
+test('built-in presets load with opaque identity and offer no rename or delete', async () => {
+  const h = await appHarness(); await selectPreset(h, revisionID('b')); assert.equal(h.ids.get('dsp-load').disabled, false); assert.equal(h.ids.get('dsp-rename').disabled, true); assert.equal(h.ids.get('dsp-delete').disabled, true);
+  await h.ids.get('dsp-rename').fire('click'); await h.ids.get('dsp-delete').fire('click'); assert.equal(h.ids.get('dsp-dialog').open, false);
+  await h.ids.get('dsp-load').fire('click'); assert.deepEqual(h.posts(), [{action: 'dsp_preset_load', expected_dsp: revisionID('a'), preset_id: revisionID('b')}]);
+});
+test('preset save uses only confirmed active curve, trims name and verifies fresh saved record', async () => {
+  const h = await appHarness(); h.setPost(body => {h.setState(soundState(editor({revision: revisionID('e'), presets: [...editor().presets, {id: revisionID('f'), name: body.name, kind: 'saved', shared: false}]}))); return {request_acknowledged: true};});
+  await h.ids.get('dsp-save').fire('click'); h.ids.get('dsp-name').value = '  New curve  '; await h.refresh(); assert.equal(h.ids.get('dsp-name').value, '  New curve  ');
+  await h.ids.get('dsp-preset-form').fire('submit'); assert.deepEqual(h.posts(), [{action: 'dsp_preset_save', expected_dsp: revisionID('a'), name: 'New curve'}]); assert.equal(h.ids.get('dsp-dialog').open, false); assert.equal(h.ids.get('dsp-name').value, '');
+});
+test('preset names enforce UTF-8 byte limit locally', async () => {
+  const h = await appHarness(); await h.ids.get('dsp-save').fire('click'); h.ids.get('dsp-name').value = '🎵'.repeat(65); await h.ids.get('dsp-preset-form').fire('submit');
+  assert.equal(h.posts().length, 0); assert.match(h.ids.get('dsp-dialog-status').textContent, /UTF-8 bytes/);
+});
+test('preset dialog freezes revision and rejects changes or restarts instead of silently retargeting', async () => {
+  for (const restart of [false, true]) {
+    const h = await appHarness(); await selectPreset(h, revisionID('c')); await h.ids.get('dsp-rename').fire('click'); h.ids.get('dsp-name').value = 'Changed';
+    const next = soundState(editor({revision: restart ? revisionID('a') : revisionID('e')})); if (restart) {next.session_id = 'restarted'; h.setFavorites(favorites([], 'restarted'));} h.setState(next); await h.refresh();
+    assert.equal(h.ids.get('dsp-name').value, 'Changed'); assert.equal(h.ids.get('dsp-preset-submit').disabled, true); await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.posts().length, 0);
+  }
+});
+test('shared preset rename and delete require explicit all-context confirmation and preserve it across polls', async () => {
+  for (const mode of ['rename', 'delete']) {
+    const h = await appHarness(); await selectPreset(h, revisionID('d')); await h.ids.get('dsp-' + mode).fire('click'); h.ids.get('dsp-name').value = 'Renamed';
+    assert.equal(h.ids.get('dsp-shared-field').hidden, false); assert.match(h.ids.get('dsp-shared-warning').textContent, /ALL stored contexts/);
+    await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.posts().length, 0); h.ids.get('dsp-shared-confirm').checked = true; await h.refresh(); assert.equal(h.ids.get('dsp-shared-confirm').checked, true);
+    h.setPost(() => {const presets = editor().presets.filter(item => item.id !== revisionID('d')); if (mode === 'rename') presets.push({id: revisionID('f'), name: 'Renamed', kind: 'saved', shared: true}); h.setState(soundState(editor({revision: revisionID('e'), presets}))); return {request_acknowledged: true};});
+    await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.posts().length, 1); assert.equal(h.posts()[0].preset_id, revisionID('d')); assert.equal(h.ids.get('dsp-dialog').open, false); assert.equal(h.ids.get('dsp-shared-confirm').checked, false);
+  }
+});
+test('deleting a saved builtin-name shadow verifies saved absence even when builtin with same ID remains', async () => {
+  const h = await appHarness(); const presets = [{id: revisionID('b'), name: 'Flat', kind: 'saved', shared: false}]; h.setState(soundState(editor({presets}))); await h.refresh(); await selectPreset(h, revisionID('b')); await h.ids.get('dsp-delete').fire('click');
+  h.setPost(() => {h.setState(soundState(editor({revision: revisionID('e'), presets: [{...presets[0], kind: 'builtin'}]}))); return {request_acknowledged: true};}); await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.ids.get('dsp-dialog').open, false);
+});
+test('preset request is single-shot and closing or Escape clears form without hiding a lost response', async () => {
+  const h = await appHarness(), pending = deferred(); h.setPost(() => pending.promise); await h.ids.get('dsp-save').fire('click'); h.ids.get('dsp-name').value = 'New';
+  const saving = h.ids.get('dsp-preset-form').fire('submit'); await h.settle(); await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.posts().length, 1); assert.equal(h.ids.get('stop').disabled, false); assert.equal(h.ids.get('dsp-name').disabled, true);
+  await h.ids.get('dsp-close').fire('click'); assert.equal(h.ids.get('dsp-name').value, ''); pending.reject(new Error('lost')); await saving; assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN'); assert.equal(h.ids.get('dsp-dialog').open, false);
+  await h.ids.get('dsp-save').fire('click'); h.ids.get('dsp-name').value = 'Clear me'; h.ids.get('dsp-dialog').open = false; await h.ids.get('dsp-dialog').fire('close'); assert.equal(h.ids.get('dsp-name').value, '');
+});
+test('preset conflict permits explicit name correction while unknown save blocks duplicate submission', async () => {
+  for (const unknown of [false, true]) {
+    const h = await appHarness(); h.setPost(() => unknown ? {__status: 502, outcome: 'UNKNOWN', error: 'command_failed', effect: 'LIBRARY_COMMITTED_DURABILITY_UNKNOWN', message: 'Save durability is unknown.'} : {__status: 409, outcome: 'REJECTED', error: 'preset_conflict', message: 'Name already exists.'});
+    await h.ids.get('dsp-save').fire('click'); h.ids.get('dsp-name').value = 'Already there'; await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.ids.get('dsp-dialog').open, true); assert.equal(h.ids.get('dsp-preset-submit').disabled, unknown);
+    if (unknown) {await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.posts().length, 1);} else {h.ids.get('dsp-name').value = 'Different'; await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.posts().length, 2);}
+  }
+});
+
+test('a delayed favorite close event cannot clear a reopened favorite draft', async () => {
+  const h = await appHarness(), dialog = h.ids.get('favorite-dialog');
+  dialog.close = () => {dialog.open = false;};
+  await h.ids.get('add-favorite').fire('click');
+  h.ids.get('favorite-name').value = 'Old';
+  h.ids.get('favorite-url').value = 'https://example.test/old';
+  await h.ids.get('favorite-close').fire('click');
+  assert.equal(h.ids.get('favorite-url').value, '');
+  await h.ids.get('add-favorite').fire('click');
+  h.ids.get('favorite-name').value = 'New';
+  h.ids.get('favorite-url').value = 'https://example.test/new';
+  await dialog.fire('close');
+  assert.equal(dialog.open, true);
+  assert.equal(h.ids.get('favorite-name').value, 'New');
+  assert.equal(h.ids.get('favorite-url').value, 'https://example.test/new');
+  await h.ids.get('favorite-form').fire('submit');
+  assert.equal(h.posts().length, 1);
+  assert.equal(h.posts()[0].name, 'New');
+});
+
+test('a delayed preset close event cannot clear a reopened preset draft', async () => {
+  const h = await appHarness(), dialog = h.ids.get('dsp-dialog');
+  dialog.close = () => {dialog.open = false;};
+  await h.ids.get('dsp-save').fire('click');
+  h.ids.get('dsp-name').value = 'Old';
+  await h.ids.get('dsp-close').fire('click');
+  assert.equal(h.ids.get('dsp-name').value, '');
+  await h.ids.get('dsp-save').fire('click');
+  h.ids.get('dsp-name').value = 'New';
+  await dialog.fire('close');
+  assert.equal(dialog.open, true);
+  assert.equal(h.ids.get('dsp-name').value, 'New');
+  await h.ids.get('dsp-preset-form').fire('submit');
+  assert.equal(h.posts().length, 1);
+  assert.equal(h.posts()[0].name, 'New');
 });

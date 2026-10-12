@@ -124,7 +124,7 @@ async def test_real_http_bootstrap_is_detached_private_and_no_new_backend_work(a
         assert one["generation"] == api.state.generation
         assert one["media"]["title"] == one["queue"]["items"][0]["title"] == "Track 1"
         assert one["media"]["artwork"] is None
-        assert one["dsp"] == {"status": "UNKNOWN", "balance": None, "eq_enabled": None, "name": ""}
+        assert one["dsp"] == {"status": "UNKNOWN", "balance": None, "eq_enabled": None, "name": "", "editor": None}
         assert "SECRET" not in json.dumps(one)
         assert not api.mpv.calls
         api.state.queue.current.title = "Changed"
@@ -305,7 +305,7 @@ async def test_dsp_pending_proposal_hidden_then_confirmed_and_failure_is_unknown
         await entered.wait()
         assert api.channel_balance == "-0.375"  # Proposed cache must stay hidden.
         pending = await state(session, base)
-        assert pending["dsp"] == {"status": "PENDING", "balance": None, "eq_enabled": None, "name": ""}
+        assert pending["dsp"] == {"status": "PENDING", "balance": None, "eq_enabled": None, "name": "", "editor": None}
         release.set()
         assert (await task)[0] == 200
         assert (await state(session, base))["dsp"]["balance"] == -.375
