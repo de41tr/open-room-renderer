@@ -4,12 +4,15 @@ Actual CLI subprocesses reach the production loopback HttpApi, then the existing
 real libmpv ctypes command-node test adapter. Three distinct generated WAVs prove
 native identity and advancing decoded PCM, with HTTP/SOAP/received GENA agreement.
 Client-only mode, navigation, mute and paused seek commands use the same path.
+Saving that paused queue is a single read-only GET; its private authored file
+restores stopped until an explicit play request selects the saved source.
 This optional lane does not certify production Unix IPC, physical audio, shuffle
 traversal or endurance; those have separate tests. No external media is fetched.
 """
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import hashlib
 import json
 import locale
@@ -25,6 +28,7 @@ import pytest
 
 from fake_linkplay.config import Config
 from fake_linkplay.http_api import HttpApi
+from fake_linkplay.playlist_files import decode_playlist
 from fake_linkplay.queue import parse_queue_context
 from fake_linkplay.state import PlaybackPhase, RendererState
 from test_libmpv_integration import _eventually, _write_tone
@@ -48,7 +52,7 @@ async def _exercise(library: str, directory: Path) -> dict:
                  bind_address="127.0.0.1", native_queue_staging=False,
                  auto_spawn_mpv=False, enable_ssdp=False, enable_mdns=False)
     api = HttpApi(cfg, RendererState.from_config(cfg), backend)
-    receipts, requests, children = [], [], []
+    receipts, requests, children, control_requests = [], [], [], []
     evidence = {"lane": "REAL_BACKEND/null + real CLI/loopback HTTP/SOAP/received GENA",
                 "command_transport": "test ctypes command-node adapter, not Unix IPC",
                 "mpv_version": backend.read_property("mpv-version"),
@@ -65,7 +69,16 @@ async def _exercise(library: str, directory: Path) -> dict:
         receipts.append((request.headers["SID"], properties))
         return web.Response()
 
+    @web.middleware
+    async def record_control(request, handler):
+        if request.path != "/fixture-events":
+            control_requests.append({"method": request.method, "path": request.raw_path,
+                                     "content_length": request.content_length,
+                                     "transfer_encoding": request.headers.get("Transfer-Encoding")})
+        return await handler(request)
+
     app = api.app()
+    app.middlewares.append(record_control)
     app.router.add_get("/fixture-media/{name}", media)
     app.router.add_route("NOTIFY", "/fixture-events", callback)
     server = TestServer(app, shutdown_timeout=1)
@@ -308,6 +321,50 @@ async def _exercise(library: str, directory: Path) -> dict:
                 "gena_position": event["RelativeTimePosition"], "gena_phase": event["TransportState"],
                 "native_id": native_playlist[0]["id"], "path": backend.read_property("path"), "native_loads": 0}
 
+            # The actual save-current CLI must only read the queue. In
+            # particular, it cannot resolve, stop, reload or seek the source.
+            saved = directory / "saved-current.json"
+            request_marker, commands = len(control_requests), len(backend.commands)
+            generation, queue = api.state.generation, api.state.queue
+            queue_before = deepcopy(vars(queue))
+            media_requests, saved_position = len(requests), backend.read_property("playback-time")
+            original_resolver, resolutions = api._resolve_playback_url, []
+
+            async def record_resolution(url):
+                resolutions.append(url)
+                return await original_resolver(url)
+
+            api._resolve_playback_url = record_resolution
+            try:
+                await cli("playlist", "save-current", saved)
+            finally:
+                api._resolve_playback_url = original_resolver
+            save_requests = control_requests[request_marker:]
+            assert save_requests == [{"method": "GET", "path": "/orr/v1/queue/playlist",
+                                      "content_length": None, "transfer_encoding": None}]
+            assert not resolutions and len(requests) == media_requests
+            assert backend.commands[commands:] == []
+            assert api.state.generation == generation and api.state.queue is queue
+            assert vars(api.state.queue) == queue_before
+            assert api.state.intent == "pause" and api.state.phase == PlaybackPhase.PAUSED
+            assert backend.read_property("playlist") == native_playlist
+            assert backend.read_property("path") == urls[1] and backend.read_property("pause") is True
+            saved_after_position = backend.read_property("playback-time")
+            assert abs(saved_after_position - saved_position) < .03
+            saved_bytes = saved.read_bytes()
+            saved_document = {"version": 1, "name": "Explicit queue", "index": 2,
+                              "mode": "normal", "urls": urls}
+            assert decode_playlist(saved_bytes) == saved_document
+            assert saved_bytes == (json.dumps(saved_document, ensure_ascii=False,
+                allow_nan=False, indent=2) + "\n").encode("utf-8")
+            assert saved.stat().st_mode & 0o777 == 0o600
+            evidence["cases"]["save_current_paused"] = {"requests": save_requests,
+                "index": 2, "mode": "normal", "native_id": native_playlist[0]["id"],
+                "generation": generation, "before_position": saved_position,
+                "after_position": saved_after_position, "canonical_url_bytes_unchanged": True,
+                "file_mode": "0600", "pause_preserved": True, "queue_unchanged": True,
+                "native_mutations": 0, "resolver_calls": 0, "media_requests": 0, "soap_requests": 0}
+
             playlist = directory / "authored.json"
             await cli("playlist", "create", playlist, "--name", "Authored queue", "--start-index", "3",
                       "--mode", "shuffle-repeat-all", *urls, remote=False)
@@ -339,6 +396,30 @@ async def _exercise(library: str, directory: Path) -> dict:
             assert len(_loads(backend.commands)) == 5, "Each requested selection loads exactly once"
             assert playlist.read_bytes() == authored_bytes, "Restoring must not rewrite the authored file"
             evidence["cases"]["restore_play"] = {"selected_native_source": 3, "authored_bytes_unchanged": True}
+
+            # Use the unchanged restore client on the newly saved file. The
+            # saved selection is retained without loading until explicit play.
+            marker, loads = len(receipts), len(_loads(backend.commands))
+            await cli("playlist", "restore", saved)
+            assert len(_loads(backend.commands)) == loads
+            assert backend.read_property("idle-active") is True and backend.read_property("playlist") == []
+            await wire("Explicit queue", 2, "STOPPED", "NORMAL", 4, marker)
+            await asyncio.sleep(quiet_seconds)
+            assert len(_loads(backend.commands)) == loads
+            assert backend.read_property("idle-active") is True and backend.read_property("playlist") == []
+            assert api.state.phase == PlaybackPhase.STOPPED
+            assert saved.read_bytes() == saved_bytes
+            marker = len(receipts)
+            await cli("playlist", "restore", saved, "--play")
+            restored = await decoded(2)
+            await wire("Explicit queue", 2, "PLAYING", "NORMAL", 4, marker)
+            assert len(_loads(backend.commands)) == loads + 1
+            assert restored["native_id"] != native_playlist[0]["id"]
+            assert saved.read_bytes() == saved_bytes
+            evidence["cases"]["restore_saved_queue"] = {"index": 2, "mode": "normal",
+                "observed_stopped_seconds": quiet_seconds, "extra_loads_before_play": 0,
+                "explicit_play_loads": 1, "native_id": restored["native_id"],
+                "saved_bytes_unchanged": True}
             # A real CLI Stop also leaves no native playlist that can advance.
             assert await cli("stop") == "OK"
             assert backend.read_property("idle-active") is True and backend.read_property("playlist") == []
@@ -377,8 +458,8 @@ def test_real_queue_cli_and_authored_playlist(tmp_path):
         cwd=root, env=env, text=True, capture_output=True, timeout=20, check=False)
     assert completed.returncode == 0, f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
     evidence = json.loads(completed.stdout)
-    assert evidence["cleanup"]["no_pending_tasks"] and len(evidence["cases"]) == 8
-    assert evidence["cleanup"]["cli_children_reaped"] == 16
+    assert evidence["cleanup"]["no_pending_tasks"] and len(evidence["cases"]) == 10
+    assert evidence["cleanup"]["cli_children_reaped"] == 19
     print(json.dumps(evidence, sort_keys=True))
 
 
