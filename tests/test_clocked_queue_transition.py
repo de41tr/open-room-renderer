@@ -12,7 +12,6 @@ import asyncio
 import json
 import os
 from pathlib import Path
-import signal
 import struct
 import subprocess
 import sys
@@ -20,6 +19,7 @@ import sys
 import pytest
 
 from fake_linkplay.mpv_backend import BackendError
+from tools.native_probe_supervisor import run_probe
 
 from queue_transition_probe import AMPLITUDE, GAP_TOLERANCE_FRAMES, RATE, capture_diagnostics, measure_capture, sample_audio_parameters, source_frames
 
@@ -162,21 +162,13 @@ def test_real_clocked_queue_transition():
     assert sys.platform == "linux", "Explicit clocked native lane requires Linux"
     root = Path(__file__).resolve().parents[1]
     env = {**os.environ, "PYTHONPATH": str(root) + os.pathsep + os.environ.get("PYTHONPATH", "")}
-    # All fixture children inherit this new process group. Kill the entire
-    # group on timeout so even a native deadlock cannot orphan audio services.
-    process = subprocess.Popen([sys.executable, str(Path(__file__).with_name("queue_transition_probe.py"))],
-        cwd=root, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
     try:
-        stdout, stderr = process.communicate(timeout=95)
+        result = run_probe(
+            [sys.executable, str(Path(__file__).with_name("queue_transition_probe.py"))], cwd=root, env=env, timeout=95)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGTERM)
-        try:
-            stdout, stderr = process.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            stdout, stderr = process.communicate(timeout=5)
-        pytest.fail(f"Clocked queue probe exceeded hard deadline\n{stdout}\n{stderr}")
-    assert process.returncode == 0, f"Clocked queue measurement failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
+        pytest.fail("Clocked queue probe exceeded hard deadline; owned process group killed")
+    stdout, stderr = result.stdout, result.stderr
+    assert result.returncode == 0, f"Clocked queue measurement failed\nstdout:\n{stdout}\nstderr:\n{stderr}"
     evidence = json.loads(stdout)
     assert set(evidence["cases"]) == {"equal_rate", "mixed_rate", "pause_near_transition"}
     assert evidence["cleanup"] == {"children_reaped": True, "http_monitor_done": True, "no_pending_tasks": True}
