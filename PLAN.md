@@ -54,9 +54,13 @@ replay and negative sensitivity; its separate four-hour run is active from
 provenance separate from later code changes. Rolling live-HLS cases pass locally
 but the expanded hosted libmpv lanes failed at 3e74b24. Both fixture assumptions
 (segment503 native EOF and path-before-decoder readiness) are reproduced and
-corrected; integrated 0.37/0.40 replay passes. Verify the next standard CI
-without extending normal job limits. The actual mpv 0.35 playlist ancestry gap
-now has an honest >=0.37 installation floor; verify that correction in CI. A confirmed
+corrected; integrated and hosted 0.37/0.40 checks pass at 2fc8296, including
+the honest >=0.37 installation floor. Current concrete gaps: stopped/paused
+queue navigation and the shared canonical SOAP/GENA action projection are now
+reviewed and integrated together with foreign-source observation and automatic
+admission fences. Verify the next hosted checkpoint; preserve explicit Play
+and terminal errors. Separately investigate causal ownership during an already
+admitted load/readiness window without weakening existing source checks. A confirmed
 ambiguous persisted-gain parsing gap now has a reviewed fail-closed fix with
 full local default-suite and Python3.11 targeted verification. Limited
 ARMv7 emulated ABI/API evidence does not fill native installation/hardware gaps.

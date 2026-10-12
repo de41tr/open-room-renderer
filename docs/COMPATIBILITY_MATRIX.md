@@ -230,3 +230,27 @@ playlist ancestry: M3U/PLS HTTP Play fails honestly with 502. The installer now
 rejects that incomplete runtime before creating its prefix. Debian Bookworm's
 default 0.35.1 package, including ARM variants, is insufficient; this is a concrete
 prerequisite limitation, separate from hardware/ARMv7 installation acceptance.
+
+
+Queue navigation now preserves stopped/paused owner intent, including pending
+Stop and paused-seek transitions. Stopped neighbor selection is silent; paused
+multi-item navigation rejects without resuming. Explicit Play and playing
+navigation remain functional. Canonical SOAP/GENA action availability matches
+these states, finite seek readiness and queue boundaries. Native0.37/0.40 and
+real pywiim/loopback evidence are distinct from original Android acceptance.
+
+Python3.13 application/default tests also pass on the exact navigation/action
+snapshot after isolating a unit fixture's optional-host prerequisite. The real
+installer correctly remains blocked by missing ensurepip; a private test venv
+is not successful native installation. Foreign-source observation/admission
+correction remains a separate open checkpoint, so canonical actions do not yet
+certify every externally replaced native source.
+
+
+Coherent post-ready native replacement and observed conflicts at automatic
+retry/EOF admission now report silence-unconfirmed ERROR without overwriting
+unrelated audio. Terminal errors stay terminal across those waits. Unloaded
+paused/stopped selections cannot import foreign media fields. Unit/race checks
+and actual libmpv0.37/0.40 observer/recovery proof pass; scheduled native event
+serialization is separate from delivered network callbacks and Unix IPC.
+Already-admitted load/readiness replacement remains outside this guarantee.

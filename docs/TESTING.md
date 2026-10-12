@@ -1192,3 +1192,93 @@ accept 0.37; actual 0.35 rejection also occurs before creating the install prefi
 README and Getting Started now state >=0.37 and the Bookworm package limitation.
 This audit uses privately extracted official packages, not a native ARMv7 or
 full Bookworm installation, and does not relax the renderer's ownership proof.
+
+## Queue navigation preserves stopped and paused intent
+
+AVTransport `Next` and `Previous` now select a valid neighboring item without
+starting playback when stopped. The selection, metadata and position update;
+only an explicit `Play`/HTTP `resume` or `PlayQueueWithIndex` starts it. Because
+backend loading currently unpauses, multi-item navigation while paused returns
+SOAP 701 (HTTP 400) before mutation. Loaded finite single-item `Previous` retains
+its existing pause-preserving restart behavior. Navigation does not clear a
+backend error or uncertain native ownership; explicit Stop/Play recovery remains
+required. A pending Stop retains silent-selection intent, and a paused seek
+waiting for readback retains paused intent despite its temporary transition
+phase. Play-intent buffering can still navigate. The shared legacy HTTP commands
+use this same documented policy.
+
+The normative reference is the [UPnP AVTransport:1 specification](https://upnp.org/specs/av/UPnP-av-AVTransport-v1-Service.pdf),
+sections 2.4.13.2–3 and 2.4.14.2–3, printed pages 31–32: successful navigation
+restores the prior transport state, and paused navigation may reject 701. This
+is a bounded navigation correction, not a claim of full UPnP conformance or
+proprietary-device behavior.
+
+`test_queue_navigation_intent.py` covers silent selection, paused rejection,
+error/uncertainty preservation, native EOF, cancelled station retry, and newer
+owners during checked Stop. `test_local_client_navigation_intent.py` exercises
+real pywiim with a loopback renderer and deterministic mock audio. The optional
+`test_libmpv_queue_navigation_intent.py` uses generated local WAVs, null output,
+real HTTP/SOAP/GENA and command traces to confirm no load/unpause during silent
+selection, plus positive playback and lost-Stop-ack controls. It passed with
+libmpv 0.37.0 and 0.40.0, each with native staging off and on. Native adapters
+replace only command transport; this does not establish production Unix IPC,
+physical audio, hardware, proprietary apps, or network-media interoperability.
+
+
+## Current transport actions and runtime compatibility
+
+SOAP GetCurrentTransportActions and all AVTransport LastChange aliases now share
+one live calculation from canonical state, owner intent and the last confirmed
+backend identity. Static SCPDs still list implemented operations. Explicit station
+Seek, invalid neighbors, unloaded paused Seek and inconsistent seek intent are
+not offered. Unknown-duration finite sources remain seekable. Paused multi-item
+navigation is absent, including while a paused seek is awaiting confirmation;
+play-intent loading/buffering can still skip a track and pending Stop can select
+silently. Empty Pause rejects before changing generation or issuing a command.
+This is not a full UPnP or fresh external-native-ownership certification.
+
+The Python3.13 runtime check used official-PyPI dependencies in a private pip-less
+venv. Its initial full suite had twelve fixture failures because optional host
+ensurepip was absent; isolating that unit-test prerequisite preserves explicit
+missing-venv and missing-ensurepip negatives. The real installer still rejects
+the environment before creating a prefix. No system package or production
+preflight was bypassed, and native installation is not claimed by this run.
+
+The exact combined navigation/action snapshot passed 2534 default tests /64 skips
+on Python3.12 and 3.13; Python3.11 focused checks passed 315. Five targeted actual
+libmpv control/navigation/uncertainty cases passed on each of 0.37 and 0.40 in
+19.57s, with default-cadence navigation and complete cleanup. New hosted results
+remain separate; normal native job and stress limits are unchanged.
+
+
+## Post-ready source ownership and automatic admission
+
+A coherent active current-generation path, unique current/playing entry and
+matching parentage can establish that the confirmed source was replaced. Missing
+or torn properties, old generations and transient EOF/idle cannot. The canonical
+selection/metadata/intent and last native evidence remain; ERROR explicitly says
+silence is unconfirmed and gain is no longer certified. Notifications alone are
+scheduled: no automatic Stop/load/seek/gain correction touches the foreign source.
+Unloaded STOPPED/PAUSED selections cannot import unrelated media fields.
+
+Station retry wake and locked post-resolution admission use the same source
+check. Queued EOF advancement rechecks native state before selecting/loading;
+new coherent active audio blocks the automatic step, even at a repeated URL.
+An intervening terminal ERROR also vetoes the step before and across resolver
+or snapshot waits. Existing checked explicit Stop/Play recovery and genuine
+idle/EOF advancement remain. Independent negative controls reproduced both
+foreign takeover and ERROR revival before these fences were added.
+
+`test_source_ownership_observations.py` covers these state/generation/cancellation
+boundaries. `test_libmpv_source_ownership.py` uses actual native replacement and
+the unchanged 0.5s observer, capturing scheduled error content before status reads
+while the foreign decoder continues unchanged. That native case does not claim
+network callback delivery, production Unix IPC or hardware. An external
+replacement during an already-admitted load/readiness interval remains excluded;
+separate causal entry/load evidence is needed before changing cleanup there.
+
+The final integrated snapshot passed 2602 default tests /65 skips on Python3.12
+and 3.13, 435 focused Python3.11 tests, 17 real-backend 0.37 cases including recovery
+and stalls, and six 0.40 navigation/ownership/staging/uncertainty cases. Normal
+native CI limits are unchanged. Frozen long-radio evidence belongs to its own
+recorded production/source hashes rather than these later revisions.

@@ -2,17 +2,29 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (06:31 UTC)
+## Current checkpoint (07:47 UTC)
 
-Draft PR remains unmerged. The preceding `62b089ad` passed all three CI jobs.
+Draft PR remains unmerged. Last completed hosted checkpoint `2fc8296` passed all three CI jobs:
+https://github.com/de41tr/open-room-renderer/actions/runs/38213572864 .
+Both architectures passed all 44 libmpv cases and six production Unix cases,
+plus pywiim, stress, installed lifecycle, clocked transitions, discovery and
+eleven Snapcast stages. Normal timeout limits are unchanged.
+
+The new combined navigation/action/ownership revision passed 2602 default tests
+/65 opt-in skips on Python3.12 and 3.13, plus 435 Python3.11 focused checks.
+Seventeen targeted real-backend cases passed on 0.37 and six on 0.40. Its hosted
+result is pending separately. Coherent observed foreign replacements and
+automatic admission conflicts now preserve ERROR without taking over that audio;
+already-admitted load/readiness replacement remains explicitly outside scope.
+
 At `3e74b24`, expanded live-HLS/libmpv lanes failed: both architectures lost native
 playback-time during the segment-outage two-second hold; four other HLS cases
 passed. x86 also lost playback-time immediately after a child-path observation
 in both finite playlist readiness tests; ARM passed those. Both fixture causes
 are now reproduced and corrected under unchanged playback acceptance. Integrated
 replay passed all eleven affected native cases on both 0.37/0.40, plus 2368
-default tests /62 skips after the prerequisite-floor correction. The new hosted revision remains pending; the failed
-checkpoint is not relabeled green. Every other 3e74b24 native gate and the
+default tests /62 skips after the prerequisite-floor correction. The corrected
+hosted revision passed; the earlier failed checkpoint is not relabeled green. Every other 3e74b24 native gate and the
 Python3.11 floor passed.
 
 The independently frozen final finite-policy constant-title hour PASSED:
@@ -597,7 +609,7 @@ The fixture now isolates its HOME/cookie, disables null-sink rewinds as an
 experimental control, drains independently clocked frames to a quiet tail and
 reports bounded aggregate diagnostics. Rewinds are not a proven cause. Strict
 marker counts,125ms calibration and2ms tolerance are unchanged. The exact
-repair snapshot passed1759 default tests with17 explicit native skips. Native
+repair snapshot passed 1759 default tests with17 explicit native skips. Native
 retry remains pending; do not describe this as gapless playback verification.
 
 ## Failed source loads stop only their own active decoder
@@ -1305,3 +1317,98 @@ Final publication snapshot including the installer floor passed 2368 default
 tests /62 explicit skips in 69.12s. Python3.11 gain/lifecycle/DSP/identity,
 readiness and installer checks passed 274 tests in 4.28s. Hosted native checks
 remain required for this new revision; routine CI limits are unchanged.
+
+
+## Current compatibility work
+
+Official Debian Python3.13.5 plus official-PyPI dependencies passed the application
+suite. Its unmodified full suite exposed twelve installer-unit fixture failures
+because the host lacks ensurepip; a minimal test-only fixture isolation preserves
+explicit missing-venv/ensurepip negatives and yields 2369 default passes /62
+opt-in skips. The real installer still rejects missing ensurepip before writing
+its prefix. This is runtime/application evidence, not native installation or
+audio acceptance. Python3.11 also passes all 32 corrected installer unit cases.
+
+A separate actual-state audit reproduced unintended playback: valid SOAP/HTTP
+Next or Previous always uses the play path even from stopped/paused queues.
+The AVTransport contract requires successful navigation to preserve its prior
+state. A narrow correction is in development: healthy stopped selection without
+load, paused multi-item 701 with no mutation, existing playing/explicit Play
+paths retained, and unchanged uncertainty/owner fences. The dynamic action list
+also incorrectly advertises known-unusable Seek/navigation; a single shared
+SOAP/LastChange projection is being developed. Neither change is claimed tested
+or published yet. Static supported-action SCPDs will remain distinct.
+
+
+The navigation review reproduced two transient-state gaps before integration:
+paused seek confirmation reports BUFFERING, and an in-flight Stop reports
+COMMAND_ACCEPTED. Phase-only navigation still resumed playback in both cases.
+The reviewed candidate now honors retained pause/stop intent as well as phase;
+independent red/green races prove the correction. The dynamic action list is
+being matched to these same preconditions, including useful play-intent skips
+while buffering/loading. No new checkpoint is published from these candidates.
+
+A separate existing observation defect was reproduced: a coherent external
+mpv replacement could leave stale PLAYING/source fields, and an unloaded paused
+selection could import foreign time/title/play state. A bounded post-ready fix
+is under review. It retains canonical selection and owner intent, invalidates
+stale work, and reports silence-unconfirmed ERROR without automatically stopping
+or reloading the foreign source. Loading-window causal ownership is explicitly
+outside this correction; no whole-external-control guarantee is claimed.
+
+
+## Navigation and dynamic-action publication checkpoint
+
+Reviewed navigation now preserves stopped/paused owner intent, including delayed
+Stop acknowledgement and paused seek confirmation. Stopped Next/Previous selects
+a neighbor without resolving/loading; paused multi-item movement rejects 701
+without mutation. Explicit Play and playing navigation keep their existing
+behavior and native ownership fences. The canonical SOAP/LastChange action list
+uses one live calculation, respects queue boundaries and explicit stations,
+keeps finite unknown-duration Seek, and omits seek when source/intent readiness
+is absent. Empty Pause fails before backend mutation. Static SCPDs are unchanged.
+
+Exact integrated default suites passed 2534 tests /64 opt-in skips on Python3.12
+(74.35s) and Python3.13 (73.66s); Python3.11 focused checks passed 315 in 8.49s.
+Integrated native control/navigation/uncertainty replay passed five cases on
+both actual libmpv0.37 and0.40, 19.57s each. The new navigation pair uses default
+0.5s observation cadence and takes about 8s; it joins normal hosted CI without
+changing its 15-minute cap. New hosted results remain pending publication.
+
+The action list reflects canonical state and last confirmed backend identity.
+The separately reproduced external-source observation and automatic-admission
+gaps remain under review; this checkpoint does not claim they are repaired.
+The frozen four-hour changing-ICY run has crossed one hour with all title epochs
+agreeing, but its full-duration result and teardown remain pending after 10:06 UTC.
+
+
+## Observed foreign sources and automatic admission are fenced
+
+Coherent current native path/entry/parent observations now detect replacement of
+an already confirmed source, including changed adopted entry IDs at the same URL.
+The renderer preserves canonical selection/intent/evidence, reports ERROR with
+silence unconfirmed, invalidates stale EOF/recovery/seek work and stops certifying
+old gain. It does not automatically Stop, load, seek or reconcile foreign gain.
+Unloaded stopped/paused selections ignore unrelated decoder media fields.
+
+Review exposed and fixed automatic takeover at retry wake, resolver yields and
+queued EOF admission. A coherent active non-EOF source after a recorded terminal
+state blocks automatic advancement even when its URL repeats. Genuine idle/EOF
+still advances. Terminal backend ERROR is also retained before and across these
+admission waits; it cannot be cleared by an automatic restart. Old-generation,
+partial/torn observations and valid first-level container children keep their
+existing fences. Explicit checked Stop/Play recovery remains functional.
+
+The exact combined snapshot passed 2602 default tests /65 skips on Python3.12
+in 74.82s and Python3.13 in 73.94s; Python3.11 focused checks passed 435 in 5.35s.
+Actual libmpv0.37 control/navigation/ownership/recovery/stall cases passed 17 in
+163.80s; 0.40 navigation/ownership/staging/uncertainty passed 6 in 40.30s. The new
+ownership proof uses the unchanged 0.5s observer, records scheduled event content
+before status reads and proves continued untouched foreign playback. This is
+not actual callback-delivery or production-Unix ownership proof. The three new
+native cases join existing CI with no timeout increase.
+
+Production digest: `a90982dfd51a45b8f13d949d2cf363f0b587595c31cec7b450865ff93da758e9`. Earlier constant-hour and ongoing four-hour
+radio evidence keep their original frozen digests. External replacement during
+an already-admitted load/readiness window still requires separate causal proof;
+this correction does not claim that window or all raw-mpv concurrency is solved.

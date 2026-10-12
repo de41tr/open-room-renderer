@@ -5,10 +5,10 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint 62b089ad passed all three jobs, including the
+   Latest completed checkpoint 2fc8296 passed all three jobs, including the
    complete owned-player SIGKILL/error/fresh-backend explicit-restart tail:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38208267462
-   Both native architectures passed 39 libmpv and all six Unix cases. Normal
+   https://github.com/de41tr/open-room-renderer/actions/runs/38213572864
+   Both native architectures passed 44 libmpv and all six Unix cases. Normal
    limits stay 180s stress /6min step /15min native job /8min Python3.11 floor.
 4. Native evidence also verifies real pywiim, repeated-lifetime stress, installed
    CLI signals, discovery and all eleven same-host Snapcast stages. The earlier
@@ -51,18 +51,30 @@
    eleven affected cases on both 0.37/0.40. Final publication including the
    installer floor passed 2368 default tests /62 skips and 274 Python3.11
    targeted tests.
-   Await new hosted results; all other preceding gates passed.
+   The new 2fc8296 hosted result passed all gates.
    The reviewed duplicate saved-gain rejection is locally verified: 2336 default
    passes /62 skips and 216 Python3.11 focused passes. It changes persistence
    only; immutable long-run source/production hashes remain their original ones.
    The actual mpv 0.35.1 audit found missing playlist ancestry: M3U/PLS HTTP
    Play fails 502 under strict ownership. Upstream added it only in 0.37; the
-   reviewed installer/docs floor is now >=0.37. Verify new hosted results; do
+   reviewed installer/docs floor is now >=0.37 and passed hosted checks; do
    not weaken source ownership to accept older players. Continue
    meaningful protocol/source stability work, not cosmetic test growth.
-9. No vendor cloud auth/registration, OEM keys, DRM bypass, firmware execution or
+9. Navigation/action/foreign-observation fixes are integrated and reviewed. Final
+   Python3.12/3.13 default suites passed 2602 /65 skips; Python3.11 focused 435.
+   Native0.37 control/recovery/stall/ownership passed 17; 0.40 targeted cases passed 6.
+   Check the new hosted result independently. Stop/Pause intent survives transient
+   phases; empty Pause rejects without mutation; action lists remain shared.
+   Foreign observations and automatic retry/EOF preflights now invalidate stale
+   work without taking over observed unrelated audio. Terminal ERROR cannot be
+   revived automatically. Partial/old observations remain fenced. The native
+   ownership proof records scheduled events, not actual callback delivery.
+   Already-admitted load/readiness replacement remains outside scope and needs
+   separate causal evidence. The Python3.13 installer-fixture correction is
+   included; real native installation still needs its missing ensurepip package.
+10. No vendor cloud auth/registration, OEM keys, DRM bypass, firmware execution or
    proprietary publication. No binaries, APKs, original IDs, credentials or raw
    captures. Inspect every publication and verify its remote SHA. Keep production
    Unix IPC despite the local socket restriction. Physical LAN, original Android,
    DAC/acoustic audio, ARMv7/Pi/XU4 and full systemd boot remain NOT_RUN.
-10. At the deadline stop owned active processes and provide the honest handover.
+11. At the deadline stop owned active processes and provide the honest handover.
