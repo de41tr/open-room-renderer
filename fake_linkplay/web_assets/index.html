@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light">
+  <title>Open Room Renderer</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/ui/style.css">
+  <script src="/ui/controller.js" defer></script>
+  <script src="/ui/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to controls</a>
+  <header class="site-header shell">
+    <a class="brand" href="/ui/" aria-label="Open Room Renderer home"><span class="brand-mark" aria-hidden="true">or</span><span>open room<span class="brand-subtitle">NETWORK AUDIO RENDERER</span></span></a>
+    <div class="connection"><span id="connection-dot" class="connection-dot" aria-hidden="true"></span><span id="connection-label">Connecting</span><button id="refresh" class="button subtle small" type="button">Refresh</button></div>
+  </header>
+  <main id="main" class="shell" tabindex="-1">
+    <div class="page-intro"><div><p class="eyebrow">YOUR ROOM. YOUR MUSIC.</p><h1 id="device-name">Listening room</h1></div><p class="intro-note">A little closer to the music.</p></div>
+    <section class="notice" id="notice" data-kind="pending" aria-label="Control status" aria-live="polite" aria-atomic="true"><strong id="notice-kind">PENDING</strong><span id="notice-text">Connecting to your renderer…</span></section>
+    <noscript><p class="notice">JavaScript is required for these controls. Playback remains available through the renderer’s other local controls.</p></noscript>
+    <div class="dashboard">
+      <div class="player-column">
+        <section class="card player-card" aria-labelledby="now-playing-heading">
+          <div class="section-heading"><h2 id="now-playing-heading">Now playing</h2><span id="playback-state" class="state-pill">UNKNOWN</span></div>
+          <div class="now-playing">
+            <div class="artwork"><div id="artwork-fallback" class="artwork-fallback" aria-hidden="true"><span class="record"><span class="record-center"></span></span></div><img id="artwork" hidden alt="" referrerpolicy="no-referrer" decoding="async"></div>
+            <div class="track-info"><p class="eyebrow" id="source-label">OPEN ROOM</p><h3 id="track-title">Ready when you are</h3><p id="track-artist" class="artist">Choose something from your favorites.</p><p id="track-album" class="album"></p></div>
+          </div>
+          <form id="seek-form" class="seek-form">
+            <div class="range-heading"><label for="seek">Track position</label><span id="seek-hint">Position unavailable</span></div>
+            <input id="seek" type="range" min="0" max="1" step="1" value="0" disabled aria-describedby="seek-hint">
+            <div class="timeline"><span id="position">0:00</span><span id="duration">—</span></div>
+            <div id="seek-draft" class="draft-line" hidden><span>Seek to <output id="seek-target" for="seek">0:00</output></span><button id="seek-submit" class="button small" type="submit" disabled>Seek</button><button id="seek-cancel" class="button subtle small" type="button">Cancel</button></div>
+          </form>
+          <div class="transport" role="group" aria-label="Playback controls">
+            <button id="previous" class="button transport-secondary" type="button" disabled><span class="transport-symbol" aria-hidden="true">&#x23EE;</span><span>Previous</span></button>
+            <button id="play" class="button primary play-button" type="button" disabled><span aria-hidden="true">▶</span><span>Play</span></button>
+            <button id="pause" class="button transport-secondary" type="button" disabled><span class="transport-symbol" aria-hidden="true">Ⅱ</span><span>Pause</span></button>
+            <button id="next" class="button transport-secondary" type="button" disabled><span class="transport-symbol" aria-hidden="true">&#x23ED;</span><span>Next</span></button>
+            <button id="stop" class="button transport-secondary stop-button" type="button" disabled><span class="transport-symbol" aria-hidden="true">■</span><span>Stop</span></button>
+          </div>
+          <div class="player-settings">
+            <form id="volume-form" class="volume-form"><div class="range-heading"><label for="volume">Volume</label><span id="volume-current">UNKNOWN</span></div><div class="volume-line"><input id="volume" type="range" min="0" max="100" step="1" value="0" disabled aria-describedby="volume-current"><button id="mute" class="button small" type="button" disabled aria-pressed="false">Mute</button></div><div id="volume-draft" class="draft-line" hidden><span>Set to <output id="volume-target" for="volume">0</output>%</span><button id="volume-submit" class="button small" type="submit" disabled>Set volume</button><button id="volume-cancel" class="button subtle small" type="button">Cancel</button></div></form>
+            <form id="mode-form" class="mode-form"><label for="mode">Repeat &amp; shuffle</label><select id="mode" disabled><option value="normal">In order</option><option value="repeat-one">Repeat one</option><option value="repeat-all">Repeat all</option><option value="shuffle-once">Shuffle</option><option value="shuffle-repeat-all">Shuffle + repeat all</option></select><p id="mode-current" class="field-hint">Waiting for renderer</p><div id="mode-draft" class="draft-line" hidden><button id="mode-submit" class="button small" type="submit" disabled>Apply mode</button><button id="mode-cancel" class="button subtle small" type="button">Cancel</button></div></form>
+          </div>
+        </section>
+        <section id="sound-panel" class="card sound-card" hidden aria-labelledby="sound-heading"><div class="section-heading"><h2 id="sound-heading">Sound</h2><span class="muted">Active output</span></div><form id="balance-form"><div class="range-heading"><label for="balance">Channel balance</label><span id="balance-current">UNKNOWN</span></div><input id="balance" type="range" min="-1" max="1" step="0.01" value="0" disabled><div id="balance-scale" class="timeline"><span>Left</span><span>Center</span><span>Right</span></div><div id="balance-draft" class="draft-line" hidden><output id="balance-target" for="balance">Center</output><button id="balance-submit" class="button small" type="submit" disabled>Set balance</button><button id="balance-cancel" class="button subtle small" type="button">Cancel</button></div></form><div class="eq-line"><div><span class="label">Equalizer</span><p class="field-hint" id="eq-current">State unavailable</p></div><button id="eq" class="button small" type="button" disabled aria-pressed="false">Enable EQ</button></div></section>
+      </div>
+      <div class="library-column">
+        <section class="card queue-card" aria-labelledby="queue-heading"><div class="section-heading"><h2 id="queue-heading">Up next <span id="queue-count" class="count">0</span></h2><span class="muted" id="queue-name">Current queue</span></div><p id="queue-empty" class="empty-state">Your queue will appear here.</p><ol id="queue-list" class="queue-list"></ol><p class="field-hint queue-hint">Select a track to play it.</p></section>
+        <section class="card favorites-card" aria-labelledby="favorites-heading"><div class="section-heading"><h2 id="favorites-heading">Favorites <span id="favorites-count" class="count">0</span></h2><button id="add-favorite" class="button small" type="button" disabled>+ Add</button></div><p id="favorites-empty" class="empty-state">Keep a few good things within reach.<br>Add a stream or save what’s playing.</p><ul id="favorites-list" class="favorites-list"></ul><button id="save-current" class="button save-current" type="button" disabled>+ Save current as favorite</button><p id="favorites-note" class="field-hint"></p></section>
+      </div>
+    </div>
+    <footer class="footer"><span class="footer-brand">open room renderer <span class="alpha">ALPHA</span></span><p>Trusted LAN only. Anyone on your network with access to this renderer can control playback. Do not expose this service to the internet.</p><p id="freshness" class="freshness">No state received yet.</p></footer>
+  </main>
+  <dialog id="favorite-dialog" aria-labelledby="favorite-dialog-heading" aria-describedby="favorite-dialog-hint"><form id="favorite-form"><div class="section-heading"><h2 id="favorite-dialog-heading">Add favorite</h2><button id="favorite-close" class="button subtle small" type="button" aria-label="Close favorite dialog">Close</button></div><p id="favorite-dialog-hint" class="field-hint">Save a direct HTTP or HTTPS audio URL.</p><div id="favorite-name-field" class="form-field"><label for="favorite-name">Name</label><input id="favorite-name" name="name" type="text" maxlength="256" autocomplete="off" required></div><div id="favorite-url-field" class="form-field"><label for="favorite-url">Audio URL</label><input id="favorite-url" name="url" type="url" maxlength="8192" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://example.com/stream" required><p class="field-hint">Use a direct URL without a username or password.</p></div><p id="favorite-delete-name" class="delete-name" hidden></p><p id="favorite-dialog-status" class="dialog-status" role="status" aria-live="polite"></p><div class="dialog-actions"><button id="favorite-cancel" class="button" type="button">Cancel</button><button id="favorite-submit" class="button primary" type="submit">Add favorite</button></div></form></dialog>
+</body>
+</html>

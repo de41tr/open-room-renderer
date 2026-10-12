@@ -40,6 +40,7 @@ from .capabilities import capability_fields, configured_sources, service_capabil
 from .eventing import EventSubscriber, EventSubscriptionManager
 from .favorites import FavoritesApi, FavoritesStore
 from .queue_playlist import QueuePlaylistApi
+from .web_ui import WebCommand, WebControlApi, WebRuntime
 from .config import Config
 from .log_safety import redact_media_urls
 from .metadata_formatting import metadata_with_art, metadata_with_duration, metadata_with_url
@@ -281,6 +282,14 @@ class HttpApi:
         self.device_name_override = ""
         self.plex_client_id = self._load_or_create_plex_client_id()
         self.plex_user_info = self._load_plex_user_info()
+        self.web_api = WebControlApi(
+            current_state=lambda: self.state,
+            device_name=lambda: self.device_name_override or self.cfg.friendly_name,
+            runtime=self._web_runtime, dsp_snapshot=self._web_dsp_snapshot,
+            favorites=self.favorites, dispatch=self._web_dispatch,
+            allowed_hosts=(self.cfg.advertise_ip or "", self.cfg.bind_address,
+                           self.cfg.mdns_hostname.rstrip(".") if self.cfg.enable_mdns else ""),
+        )
 
     @property
     def eq_presets(self) -> dict[str, dict[str, list[dict[str, object]]]]:
@@ -296,6 +305,7 @@ class HttpApi:
 
         app = web.Application()
         app.cleanup_ctx.append(self._state_monitor_context)
+        app.add_routes(self.web_api.routes())
         app.add_routes(self.favorites_api.routes())
         app.add_routes(QueuePlaylistApi(lambda: self.state.queue).routes())
         app.add_routes(
@@ -323,6 +333,84 @@ class HttpApi:
             ]
         )
         return app
+
+    def _web_runtime(self) -> WebRuntime:
+        """Read the existing authority/locks; do not cache a browser owner."""
+        names = {"Play": "play", "Pause": "pause", "Stop": "stop", "Seek": "seek"}
+        actions = {names[name] for name in self._current_transport_actions().split(",") if name in names}
+        unknown = (self._native_output_uncertain
+                   or bool(self._native_stage is not None and self._native_stage.failed))
+        healthy = self.state.phase != PlaybackPhase.ERROR and not unknown
+        if healthy and self.state.phase != PlaybackPhase.PAUSED and self.state.intent != "pause":
+            for action, selection in (("next", "next"), ("previous", "previous")):
+                if self._queue_selection_available(self.state.queue, selection):
+                    actions.add(action)
+        if (self.state.queue.count <= 1 and not is_shuffle(self.state.queue.loop)
+                and "Previous" in self._current_transport_actions().split(",")):
+            actions.add("previous")
+        return WebRuntime(
+            actions=frozenset(actions), transport_unknown=unknown,
+            transport_pending=self._native_waiting_for_audio or self._pending_seek_target is not None,
+            gain_pending=self._gain_operations > 0 or self._gain_command_lock.locked(),
+            backend_gain_confirmed=getattr(self.mpv, "gain_confirmed", True) is True,
+            queue_mode_locked=bool(self._native_stage is not None or self._native_current_id is not None
+                or self._native_owned_entries or self._native_cleanup_tasks or self._native_output_uncertain),
+        )
+
+    def _web_dsp_snapshot(self) -> dict[str, object]:
+        """Hide mutable DSP proposals; detach validated confirmed state atomically."""
+        unknown = {"status": "UNKNOWN", "balance": None, "eq_enabled": None, "name": ""}
+        if self._dsp_command_lock.locked():
+            return {**unknown, "status": "PENDING"}
+        try:
+            self._require_dsp_readback()
+            if self._pending_dsp_restore is not None or not self._dsp_active_confirmed:
+                return unknown
+            snapshot = self._active_dsp_snapshot()
+            encode_active_dsp(snapshot)
+            return {"status": "CONFIRMED", "balance": snapshot["balance"],
+                    "eq_enabled": snapshot["enabled"], "name": snapshot["name"]}
+        except (BackendError, ValueError, TypeError, UnicodeError):
+            return unknown
+
+    async def _web_dispatch(self, command: WebCommand) -> dict[str, object] | None:
+        """Translate only the browser's fixed typed vocabulary to existing owners."""
+        action = command.action
+        transport = {"play": "resume", "pause": "pause", "stop": "stop", "next": "next", "previous": "prev"}
+        if action in transport:
+            await self.execute(ParsedCommand(transport[action]), "")
+        elif action == "seek":
+            await self._seek_command(command.seconds)
+        elif action == "volume":
+            await self._set_confirmed_gain(volume=command.value)
+        elif action == "mute":
+            await self._set_confirmed_gain(mute=command.value)
+        elif action == "queue_select":
+            await self._play_queue_index(command.index, self.state.queue.name)
+        elif action == "queue_mode":
+            from .queue_protocol import MODES
+            self._set_queue_loop_mode(MODES[command.mode], self.state.queue.name)
+        elif action == "balance":
+            await self._run_dsp_command("setChannelBalance:" + format(command.value, ".3f"))
+        elif action == "eq":
+            await self._run_dsp_command("EQOn" if command.enabled else "EQOff")
+        elif action == "favorite_play":
+            await self._play_preset_snapshot(self.favorites.playback_snapshot(command.id))
+        elif action == "favorite_add":
+            record = self.favorites.add({"name": command.name, "url": command.url})
+            return {"favorite_id": record["id"]}
+        elif action == "favorite_current":
+            record = self.favorites.add_current(command.name, self.state.queue.current)
+            return {"favorite_id": record["id"]}
+        elif action == "favorite_rename":
+            self.favorites.rename(command.id, command.name)
+        elif action == "favorite_target":
+            self.favorites.set_url(command.id, command.url, command.metadata)
+        elif action == "favorite_delete":
+            self.favorites.delete(command.id)
+        else:
+            raise ValueError("Unsupported browser action")
+        return None
 
     async def _state_monitor_context(self, app):
         """Share one backend observer between all configured HTTP listeners."""
