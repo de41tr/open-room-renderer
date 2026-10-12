@@ -2,12 +2,12 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (10:56 UTC)
+## Current checkpoint (11:28 UTC)
 
-Draft PR remains unmerged. Published `c780c80` passed all three standard jobs:
-https://github.com/de41tr/open-room-renderer/actions/runs/38237373324 .
-Both architectures passed the 61-test libmpv lane (48 actual native cases plus
-13 deterministic helpers), six production Unix cases, actual pywiim, stress,
+Draft PR remains unmerged. Published `4ae0628` passed all three standard jobs:
+https://github.com/de41tr/open-room-renderer/actions/runs/38239815502 .
+Both architectures passed 62 libmpv checks in two bounded groups (49 actual
+native cases plus 13 deterministic helpers), six production Unix cases, actual pywiim, stress,
 installed lifecycle, clocked transitions, discovery and eleven Snapcast stages.
 Both native runs retain the eight observed-root cases and owned-EDL cleanup.
 The earlier failed checkpoints remain recorded below.
@@ -44,9 +44,10 @@ The separately frozen four-hour changing-ICY run PASSED: baseline
 10:06:26.620761 UTC. All 1,795 autonomous title changes agreed across HTTP/SOAP/GENA,
 with one load/source/request, zero disconnects and 4,428 KiB live RSS growth.
 Full source and production digests stayed unchanged; see the scoped evidence below.
-Repeat One / All passed its full hosted checkpoint. Editable favorites now passes
-complete local/default/native verification, including the reviewed bounded CI
-scheduler; its own hosted checkpoint remains pending. Shuffle is next.
+Repeat and editable favorites have full hosted checkpoints. Shuffle and stable
+radio save-current now pass combined local/default/native verification and are
+being published as separate functional commits in one new checkpoint. Its hosted
+result remains pending until verified.
 
 ## Baseline
 
@@ -1710,3 +1711,42 @@ clock/discovery/Snapcast gate remains unchanged. The new native step has a 360s
 watchdog and 7min ceiling; no assertion/audio threshold is relaxed and no runner
 or dependency is added. Hosted architecture scheduling must still pass this new
 checkpoint; local success does not predeclare that result.
+
+
+## Shuffle and stable radio favorites
+
+The reviewed shuffle module keeps canonical items/indices unchanged and stores
+only two cycles of private traversal. HTTP next/prev follows that history;
+multi-item SOAP navigation remains numerical/nonwrapping, with the existing
+singleton Previous seek exception. Mode 3 plays once; mode 2 repeats shuffled
+cycles without immediate boundary repetition. Both project to AVTransport SHUFFLE;
+its setter deliberately chooses 3, and RANDOM stays unsupported. Failed Stop never
+consumes traversal; failed load retains the selected item in ERROR. Station recovery
+and normal-only staging fences are unchanged. The real four-track acceptance proves
+actual order/history, cycle end/wrap, received events and owner Stop on both native
+versions. Queue XML remains canonical; no gapless or original-app claim is added.
+
+The separate small radio-favorite fix reuses the existing fixed anonymous public
+station reference. Save-current converts only matching trusted successful-resolver
+provenance on a live zero-duration station, rejecting stale/malformed/finite data
+without temporary-URL fallback. It does not fetch or alter playback. Explicit recall
+resolves afresh through existing station semantics and recovery. Public XML, JSON
+and source labels cannot create private provenance; no account/provenance fields
+are persisted. Existing authoritative title/artist/album/artwork behavior stays,
+including a captured live-song title that may remain fixed on later recall.
+
+A controlled resolver and real pywiim/libmpv flow proves stable save, persistence,
+restart without autoplay/resolution, then a different decoded target with a fresh
+native entry ID. Both 0.37/0.40 pass; independent 0.40 replay also passed. Fresh WAN
+provider availability remains unverified; blocked cloud endpoint access was not
+retried through another route. This adds no partner account or cloud authentication.
+
+Final combined default suites passed 3235 /69 opt-in skips on Python 3.11 (114.86s)
+and 3.12 (113.53s). Complete native groups passed 20+43 on 0.37 (195.37s/249.51s)
+and 0.40 (195.68s/250.68s), both exit 0: 50 native cases plus 13 deterministic helpers.
+All source files match the reviewed immutable snapshot. Production digest:
+`43d6c4da7bfdb2dd9adea44d0dda7c32101fa4c077b329cb9b1244760a1f94d3`.
+The preceding favorites CI passed every gate in 733.509s/743.046s on x86_64/AArch64,
+restoring margin within the unchanged 900s job limit. New checkpoint CI is still
+required; no hosted result is predeclared. The older four-hour radio source digest
+and all hardware/original-app/WAN limitations remain separate.

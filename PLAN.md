@@ -135,3 +135,12 @@ all cases and later gates within the unchanged 15-minute job cap. Then publish
 reviewed Shuffle after combined native/CI verification. Stable anonymous radio
 favorite references are the next bounded investigation; do not store temporary
 resolver URLs or account data. See the five-item strategic review.
+
+
+11:28 UTC: favorites has full standard CI green. Publish reviewed Shuffle and the
+small stable-radio save-current improvement as independent functional commits in
+one fully tested checkpoint, avoiding duplicate hosted runs. Combined local native
+and both Python-minor suites pass. Next bounded investigation: easier CLI queue
+load/show/play and explicit saved-playlist restore through existing SOAP actions.
+Defer the controller page until genuine browser verification is available; no
+network exposure, aliases/tunnels, dependency installation or policy bypass.

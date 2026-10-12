@@ -9,7 +9,7 @@ This is scoped evidence, not a product certification. Updated 2026-10-12 UTC.
 | Selected-URI playback/control | Real production Unix IPC + libmpv/null HTTP flows on x86_64/AArch64 | Physical audio and Android pending |
 | Playback generations/EOF | UNIT/MOCK races + actual Unix IPC observer/queue EOF | Target hardware and WAN conditions pending |
 | Concrete multi-item queue | UNIT/MOCK + REAL_BACKEND/null indexed/Next/Previous/EOF selection | Unsupported provider headers fail explicitly |
-| Queue navigation and repeat | REAL_BACKEND/null + HTTP/SOAP/received GENA: sequential, Repeat One, Repeat All | Shuffle pending; original app/hardware acceptance pending |
+| Queue navigation, repeat and shuffle | REAL_BACKEND/null + HTTP/SOAP/received GENA: sequential, repeat, bounded shuffle/history | Original app/hardware acceptance pending; explicit HTTP/SOAP navigation distinction |
 | Discovery/identity and app-shaped handshake | Actual same-host multicast discovery/independent identities + local HTTP handshake; truthful typed SCPDs | Physical LAN and actual Android app pending |
 | GENA lifecycle/callback safety | Real local subscribe/renew/notify/expiry tests; actual callbacks in REAL_BACKEND/null workflow | Actual Android parser/client pending |
 | Synthetic WAV/MP3/FLAC decode | REAL_BACKEND, mpv null output | No audible/DAC assertion |
@@ -309,7 +309,7 @@ is attributed to that extraction. XU4/original app: HARDWARE_ACCEPTANCE_PENDING.
 
 ## Local queue repeat contract
 
-The queue package implements these explicit public-client modes:
+The repeat controls use these explicit public-client modes:
 
 | Behavior | HTTP `loop` / PlayQueue `LoopMode` | AVTransport `NewPlayMode` |
 | --- | --- | --- |
@@ -323,7 +323,7 @@ nonempty `QueueName` only when it matches the current queue; the getter needs no
 arguments. `GetTransportSettings` returns `PlayMode` and
 `RecQualityMode=NOT_IMPLEMENTED`. HTTP status, queue XML, SOAP and GENA derive
 from the same queue policy; AVTransport LastChange includes `CurrentPlayMode`.
-Unsupported shuffle/random modes and informal aliases fail without mutation.
+Repeat controls and the shuffle extension below share that authority; RANDOM and informal aliases fail without mutation.
 
 The mapping is evidenced by [pywiim's public loop-mode adapter](https://github.com/mjcumming/pywiim/blob/main/pywiim/api/loop_mode.py)
 and independently by [wiimplay's PlayQueue values](https://github.com/shumatech/wiimplay/blob/ca9507803266b454b9072faa8556ba70f5931817/wiimdev/types.go#L47-L55)
@@ -339,7 +339,7 @@ Omitted queue mode defaults to `4`; explicitly supplied `0`, including externall
 saved old queue XML, now means Repeat All. Change such old documents to `4` for
 sequential playback. ORR has no persisted queue-state migration in this package.
 
-Repeat applies to observed finite-media end. Multi-item explicit Next/Previous remain
+Repeat applies to observed finite-media end. In these repeat modes, multi-item Next/Previous remain
 numerical and nonwrapping (singleton Previous retains seek-to-zero), following the [AVTransport:1 contract](https://upnp.org/specs/av/UPnP-av-AVTransport-v1-Service.pdf);
 Repeat One does not trap manual Next. Mode changes alone do not restart playback,
 bump owner generation, resume paused media or clear errors. Live-station recovery
@@ -387,10 +387,21 @@ The separate atomic-helper correction avoids unnecessary post-replace temp clean
 masking a committed result. This is one-process local persistence, not a multi-writer
 transaction system or power-loss certification.
 
-Save-current rejects unresolved selections and all resolver-backed radio because
-current provenance cannot reliably distinguish persistent public references from
-materialized temporary station URLs. Explicit stable public URL addition works.
-It never copies backend/resolved/proxy URLs, raw provider metadata or account state.
+Save-current rejects unresolved selections and malformed or mismatched resolver
+provenance. For a proven live station it saves the fixed anonymous reference
+`https://opml.radiotime.com/Tune.ashx?id=s12345&formats=mp3,aac&render=json`, using only
+the strict public station ID from trusted successful-resolution provenance. The
+original selection URL must still match that provenance, type must be station,
+and duration must be a valid numeric zero. Public labels/XML/JSON cannot establish
+that private tuple. Saving never resolves; explicit recall resolves afresh and
+uses existing station recovery. Direct nonresolver URLs stay byte-for-byte.
+It never copies temporary/backend/proxy URLs, separate provenance/account fields
+or raw provider metadata. Existing display authority is retained: a captured
+live-song title may remain fixed on recall. The [official station-ID guide](https://broadcaster-help.tunein.com/en/support/solutions/articles/151000172143-what-is-my-station-id-)
+identifies public s-prefixed station IDs. This reuses the resolver endpoint already
+observed anonymously on October 11; no new provider contract, account or partner
+API is introduced. Fresh WAN availability remains unverified; controlled resolver
+and real local backend evidence do not establish provider uptime.
 The interface adds no authentication or CORS and is not safe for Internet exposure.
 Queries may contain secrets the validator cannot recognize; users must not save
 credential-bearing or temporary signed URLs.
@@ -400,3 +411,41 @@ and [official HTTP API section 2.8](https://www.wiimhome.com/pdf/HTTP%20API%20fo
 provide list/recall, not a complete generic direct-URL edit contract. Public
 SetKeyMapping wrappers do not establish a complete saved target, so ORR does not
 invent that OEM write behavior. Original-app/hardware acceptance remains pending.
+
+## Shuffle traversal and navigation
+
+Public HTTP/PlayQueue mode `3` means shuffle once; `2` means shuffle with Repeat All.
+Both report standard AVTransport `SHUFFLE`, which cannot express the combined
+repeat flag. Explicit `SetPlayMode(SHUFFLE)` chooses mode 3. This is an intentionally
+lossy projection; numeric LoopMode retains the distinction. `RANDOM` remains
+unsupported, rather than being guessed as an alias. The AVTransport specification
+lists those values without defining an exact random/repeat distinction; pywiim's
+normal shuffle toggle preserves Repeat All and therefore needs numeric mode 2.
+
+Canonical queue items stay in their original order and public indices remain
+one-based. Entering shuffle anchors a cycle at the current selection and permutes
+all remaining indices. Mode 3 finishes that cycle and stops; mode 2 generates a new
+complete permutation, avoiding immediate repetition across the boundary when
+there is more than one item. Duplicate URLs still occupy distinct positions.
+
+- HTTP `next`/`prev` follows shuffle history. Previous can return through the current
+  and one preceding cycle; Next retraces that path without drawing again.
+- Multi-item SOAP Next/Previous stays canonical numerical and nonwrapping, following
+  the standard contract. Singleton SOAP Previous retains its existing seek-to-zero
+  behavior. Explicit indexed selection and SOAP navigation start a fresh cycle.
+- Same-mode requests are true no-ops, including RNG state. Switching 2↔3 preserves
+  order/cursor; leaving shuffle discards history. New/replaced queues get fresh
+  traversal and their supplied/default mode. Preset recall creates a fresh queue;
+  editing the favorite library alone never changes the active queue or mode.
+- Pause/Resume/Seek and ordinary Stop preserve traversal. Play after ordinary Stop
+  retries the selected item and continues the remainder. Play after natural
+  shuffle-once exhaustion starts a fresh cycle anchored at the last selected item.
+- History is private, nonserialized and bounded to two cycles, at most 2000 indices.
+  Metadata updates and station URL refreshes do not reset it.
+
+Successor checks do not consume randomness or history. After required Stop/source
+checks succeed, current policy is re-read and canonical index/history commit
+without another await before the existing load path. Failed or superseded Stop
+consumes nothing; a failed load retains that selection with ERROR and never skips
+randomly to another item. Owner/source/generation fences, finite station recovery
+and normal-only native staging restrictions remain. Shuffle makes no gapless claim.

@@ -5,10 +5,10 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint c780c80 passed all three jobs, including the
+   Latest completed checkpoint 4ae0628 passed all three jobs, including the
    complete owned-player SIGKILL/error/fresh-backend explicit-restart tail:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38237373324
-   Both architectures passed 61 libmpv-lane checks (48 native/13 unit) and six Unix cases. Normal
+   https://github.com/de41tr/open-room-renderer/actions/runs/38239815502
+   Both architectures passed 62 libmpv-lane checks (49 native/13 unit) and six Unix cases. Normal
    limits stay 180s stress /6min step /15min native job /8min Python3.11 floor.
 4. Native evidence also verifies real pywiim, repeated-lifetime stress, installed
    CLI signals, discovery and all eleven same-host Snapcast stages. The earlier
@@ -137,3 +137,14 @@ later gate: 360s native watchdog/7min step, unchanged 15min job and 180s stress.
 Verify the new hosted result before claiming completion. Shuffle is reviewed
 and privately integrated with favorites; publish separately after the prior CI
 is green. Stable anonymous radio favorites are under read-only investigation.
+
+
+11:28 UTC: favorites checkpoint 4ae0628 passed all three hosted jobs. The next
+combined checkpoint contains separate Shuffle and stable-radio save-current commits.
+Both are independently reviewed; final local 3235/69 default checks pass on both
+Python minors, and full native groups 20+43 pass on 0.37/0.40. Verify their hosted
+result after publication. No long runs are active or planned. A browser controller
+is deferred because the isolated fixture could not be reached from the cloud
+browser or a separate shell; this is not proof of a browser policy block. Do not
+retry the policy-denied failed-tab cleanup. Assess useful CLI multi-track queue/
+saved-playlist commands using existing protocol contracts instead of waiting.

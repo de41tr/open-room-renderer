@@ -57,7 +57,7 @@ Working in this alpha:
 - can play direct DRM-free audio URLs,
 - uses `mpv` for actual playback,
 - supports play, pause, resume, stop, seek, volume, and mute,
-- supports real multi-track queues and [Repeat One / Repeat All](docs/COMPATIBILITY_MATRIX.md#local-queue-repeat-contract),
+- supports real multi-track queues, [Repeat One / Repeat All](docs/COMPATIBILITY_MATRIX.md#local-queue-repeat-contract), and [shuffle/history](docs/COMPATIBILITY_MATRIX.md#shuffle-traversal-and-navigation),
 - supports [editable local favorites](GETTING_STARTED.md#editable-local-favorites) through its own CLI/API and public-client recall,
 - supports persistent device rename,
 - supports channel balance,

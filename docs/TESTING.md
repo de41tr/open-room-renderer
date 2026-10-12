@@ -1532,3 +1532,69 @@ Final default suites including the runner passed 3155 /68 skips on Python 3.12
 (113.37s) and 3.11 (114.10s). Hosted x86_64/AArch64 completion is a separate gate.
 The reason for scheduling rather than weakened tests is measured: the preceding
 Repeat jobs already took 881.168s/882.316s under the 900s job cap.
+
+
+## Shuffle acceptance
+
+```sh
+ORR_TEST_LIBMPV_PATH=/path/to/libmpv.so.2 PYTHONPATH=. \
+  python -m pytest -q -s tests/test_libmpv_shuffle_queue.py
+```
+
+Four distinct generated 1.2-second WAVs, the production 0.5-second observer cadence,
+and an injected deterministic permutation prove actual non-numeric playback.
+The received HTTP/SOAP/GENA surfaces retain canonical item order and one-based
+indices. Native identity/codec/selected audio/progress verifies HTTP history
+2→4→2→4 without another draw; mode 3 traverses 2→4→1→3 and stops; mode 2 traverses
+2→4→1→3→4, with a deliberately bad first draw corrected at the cycle boundary.
+Stopped SOAP navigation remains numerical/nonwrapping and silent. Owner Stop
+remains native-idle with an empty playlist and no reload beyond source duration
+plus an observer tick. All handles/listeners/subscriptions/tasks are cleaned.
+The final exact test passed 0.37 in 15.55s and 0.40 in 15.37s, with 13 loads and 73
+received events each. This is REAL_BACKEND/null through the test command-node
+adapter; existing production Unix IPC, original app and physical audio remain
+separately scoped.
+
+Pure/controller tests exercise complete bounded permutations, one previous cycle,
+no consuming peeks, mode changes after awaited ownership/Stop checks, failed Stop
+and load, same-name replacement, duplicate URLs, exhausted restart, singleton
+behavior, station recovery and native-staging fences. The integrated favorites/
+repeat/shuffle default suite passed 3200 /69 opt-in skips on Python 3.11 (114.78s)
+and 3.12 (114.49s), including the scheduler fixtures. Full native groups passed
+20+43 on 0.37 (197.43s/249.38s) and 0.40 (196.01s/250.27s).
+The extra native file belongs in the second bounded group; none of the prior
+62 checks is removed. Hosted verification remains a separate checkpoint gate.
+
+
+### Proven public-radio favorite references
+
+The follow-on keeps the existing fixed anonymous station endpoint and moves its
+construction into a pure validated helper shared with resolve_station. Save-current
+uses it only for a matching trusted successful-resolution tuple on a live station
+with valid zero duration. Malformed/stale/nonstation/finite provenance fails with
+no temporary-target fallback. No source label, XML or JSON can create that private
+proof. Ordinary direct URL saving is unchanged; no save operation resolves media
+or changes generation, queue, active shuffle history or native commands.
+
+The existing short native favorites flow now materializes a genuine controlled
+header station, saves its stable reference, recreates service/backend without
+resolution or autoplay, then recalls via real pywiim and resolves a different
+local WAV. A fresh native entry ID after an immediately preceding same-URL direct
+favorite rules out merely observing old audio. Selected PCM and increasing time,
+station semantics/recovery, authoritative display fields and full cleanup pass
+on 0.37/0.40 (4.93s/4.94s). Independent 0.40 replay passed in 4.91s. Resolver I/O is
+controlled; native decoding and protocol clients are real. No fresh WAN/provider
+availability or partner-platform authority is claimed.
+
+Final author default suites passed 3235 /69 opt-in skips on both Python 3.11/3.12;
+404 focused guards/recovery/shuffle checks and 271 independent review checks passed.
+Full merged native results belong to the publication checkpoint. Captured display
+metadata intentionally retains existing authority, including a live-song title
+that may stay fixed on subsequent recall; no live-title policy change is hidden.
+
+
+Final combined Shuffle/radio-favorite native groups passed 20+43 on 0.37
+(195.37s/249.51s) and 0.40 (195.68s/250.68s), exit 0 on both. The 63 checks include
+50 actual native cases and 13 deterministic helpers. Both default Python minors
+passed 3235/69 before publication. This extends short controlled native coverage;
+it does not transfer the older frozen four-hour result to the new source digest.

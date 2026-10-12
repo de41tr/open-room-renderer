@@ -36,6 +36,8 @@ aiohttp app in fake_linkplay.http_api
 - `fake_linkplay/http_api.py`: HTTP/SOAP endpoints and current playback, queue, eventing, settings and DSP orchestration.
 - `fake_linkplay/metadata_formatting.py`: pure metadata artwork/live-tag, resource-URI and duration edits; no state, network or backend access.
 - `fake_linkplay/state.py`: in-memory renderer state and status payload generation.
+- `fake_linkplay/queue.py` and `queue_policy.py`: canonical items/indices and pure repeat/shuffle traversal; backend admission stays in HttpApi.
+- `fake_linkplay/favorites.py`: bounded renderer-owned library, atomic storage and its JSON routes; edits do not control playback.
 - `fake_linkplay/mpv_backend.py`: mpv process startup, JSON IPC commands, snapshots, volume/mute/seek, balance and PEQ filter graph.
 - `fake_linkplay/ssdp.py`: UDP multicast responder and periodic NOTIFY packets.
 - `fake_linkplay/mdns.py`: optional mDNS/DNS-SD responder.
@@ -46,7 +48,7 @@ aiohttp app in fake_linkplay.http_api
 
 ## Bounded extraction and target responsibilities
 
-This iteration extracts only three pure metadata-edit functions. HttpApi keeps
+The completed behavior-neutral refactor extracted only three pure metadata-edit functions. HttpApi keeps
 its existing helper signatures as delegation wrappers; DIDL construction and its
 dynamic attribute-escaping call remain in place. Existing string/regex behavior,
 including awkward legacy cases, is preserved rather than repaired in the move.
@@ -63,6 +65,8 @@ player-core framework or all these module boundaries already exist:
   A later extraction would preserve that single ownership contract and its
   locking/order tests. None of this logic moves in the current refactor.
 - **Queue:** `queue.py` owns item/index validation and queue parsing/serialization.
+  The later functional package adds pure repeat/shuffle policy and bounded history
+  in `queue_policy.py`; HttpApi commits selection with existing ownership checks.
   Native sequencing/staging orchestration stays where it is; queue data must not
   independently claim that a decoder changed source.
 - **Eventing:** leases, coalescing, delivery order and retries remain in HttpApi.

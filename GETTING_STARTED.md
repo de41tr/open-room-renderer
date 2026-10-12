@@ -321,8 +321,11 @@ does not alter audio that is already playing.
 `add` optionally accepts `--title`, `--artist`, `--album` and `--artwork`.
 `save-current` saves the canonical selected direct URL and display metadata, not
 an expanded playlist child, temporary resolved URL, queue position or account
-state. Resolver-backed radio is conservatively unsupported by save-current in
-this version; add a known stable public station URL explicitly instead.
+state. A proven live public-radio selection saves the existing fixed anonymous
+station reference and resolves it afresh when recalled. Malformed or mismatched
+resolver provenance is rejected. Captured title/artist/album remain authoritative,
+so a saved live-song title may remain displayed on later recall. Fresh provider
+availability is experimental and was not established by the local acceptance.
 
 This is an ORR-owned feature, not an OEM/provider preset-write implementation.
 It uses `state_dir/favorites.json`, with one running renderer as the writer.
