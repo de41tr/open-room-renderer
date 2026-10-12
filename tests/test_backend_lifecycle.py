@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import json
+import signal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -550,7 +551,7 @@ async def test_cli_backend_start_failure_keeps_control_api_available(monkeypatch
     assert "site0.start" in harness.events
     assert "mdns.start" in harness.events
     assert harness.events[-1] == "backend.close"
-    assert len(harness.removed_signals) == 2
+    assert set(harness.removed_signals) == {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
     assert all(task.done() for task in harness.tasks)
     if backend_error == "start":
         harness.backend.stop.assert_not_awaited()
@@ -579,6 +580,7 @@ async def test_cli_cleans_every_partially_started_resource_after_failure(monkeyp
     harness = ServiceHarness(monkeypatch, fail=stage)
     with pytest.raises(RuntimeError, match="synthetic"):
         await cli.serve("synthetic.yaml")
+    assert set(harness.removed_signals) == {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
     assert harness.events[-1] == "backend.close"
     for index in range(len(harness.runners)):
         assert f"runner{index}.close" in harness.events
@@ -830,7 +832,7 @@ async def test_socket_probe_reads_linux_peer_credentials_and_closes(monkeypatch)
 async def test_cli_signal_handlers_exist_before_startup_and_through_cleanup(monkeypatch):
     harness = ServiceHarness(monkeypatch)
     async def start():
-        assert len(harness.signal_callbacks) == 2
+        assert {sig for sig, _ in harness.signal_callbacks} == {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
         await harness.step("backend.start")
     async def close():
         assert harness.removed_signals == []
@@ -838,7 +840,7 @@ async def test_cli_signal_handlers_exist_before_startup_and_through_cleanup(monk
     harness.backend.start = start
     harness.backend.stop_process = close
     await cli.serve("synthetic.yaml")
-    assert len(harness.removed_signals) == 2
+    assert set(harness.removed_signals) == {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
 
 
 @pytest.mark.asyncio
@@ -851,8 +853,8 @@ async def test_cli_stuck_discovery_cleanup_is_bounded_and_backend_still_reaped(m
     assert all(task.done() for task in harness.tasks)
 
 
-@pytest.mark.parametrize("phase", ["startup", "shutdown"])
-@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGINT"])
+@pytest.mark.parametrize("phase", ["startup", "shutdown", "error"])
+@pytest.mark.parametrize("signal_name", ["SIGTERM", "SIGINT", "SIGHUP"])
 def test_real_process_signals_cannot_abandon_startup_or_teardown(phase, signal_name):
     """Actual OS signals in a child interpreter; player/network are mocked."""
     import subprocess
@@ -882,6 +884,8 @@ def test_real_process_signals_cannot_abandon_startup_or_teardown(phase, signal_n
         async def stop_backend():
             print("child_reaped", flush=True)
         async def start_mdns():
+            if phase == "error":
+                raise RuntimeError("synthetic startup failure")
             if phase == "shutdown":
                 asyncio.get_running_loop().call_soon(send_signal)
         async def stop_mdns():
@@ -902,11 +906,16 @@ def test_real_process_signals_cannot_abandon_startup_or_teardown(phase, signal_n
         print("clean_exit", flush=True)
     ''')
     result = subprocess.run([sys.executable, "-c", source, phase, signal_name], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=5)
-    assert result.returncode == 0, result.stdout + result.stderr
+    if phase == "error":
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "RuntimeError: synthetic startup failure" in result.stderr
+        assert "clean_exit" not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "clean_exit" in result.stdout
     assert "child_acquired" in result.stdout
     assert "child_reaped" in result.stdout
-    assert "clean_exit" in result.stdout
-    if phase == "shutdown":
+    if phase in {"shutdown", "error"}:
         assert "cleanup_entered" in result.stdout
         assert "cleanup_finished" in result.stdout
 

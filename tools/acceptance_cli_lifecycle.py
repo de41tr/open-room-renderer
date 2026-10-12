@@ -219,7 +219,7 @@ def exercise(directory: Path, mpv: Path, *, owned: bool, cli: Path | None = None
                     assert external.poll() is None, "Fixture mpv exited before IPC readiness"
                     return endpoint.is_socket() and prop(endpoint, "idle-active")
                 wait_for("fixture-owned mpv", external_ready)
-            for cycle, shutdown_signal in enumerate((signal.SIGTERM, signal.SIGINT)):
+            for cycle, shutdown_signal in enumerate((signal.SIGTERM, signal.SIGINT, signal.SIGHUP)):
                 with (directory / f"serve-{cycle}.log").open("wb") as log:
                     service = subprocess.Popen([*invocation, "serve", "--config", str(config)],
                         env=env, cwd=directory, stdout=log, stderr=log)
@@ -283,7 +283,7 @@ def exercise(directory: Path, mpv: Path, *, owned: bool, cli: Path | None = None
                         assert control("stop") == "OK"
                         status("stop")
                         assert prop(endpoint, "idle-active") is True
-                    # First lifetime stops idle; second is signalled while decoding.
+                    # First lifetime stops idle; later signals arrive while decoding.
                     service.send_signal(shutdown_signal)
                     assert service.wait(timeout=15) == 0, "CLI signal shutdown did not exit cleanly"
                     assert_ports_closed(ports)

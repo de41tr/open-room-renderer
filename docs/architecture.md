@@ -64,10 +64,14 @@ aiohttp AppRunner starts HTTP API and description ports
         +--> SSDP responder starts if enabled
         +--> mDNS responder starts if enabled
         v
-wait for SIGINT/SIGTERM
+wait for SIGINT/SIGTERM/SIGHUP
 ```
 
 At startup the backend starts or connects to `mpv`, then immediately stops playback so stale audio does not continue across restarts.
+
+On Linux, SIGINT, SIGTERM and SIGHUP request bounded graceful shutdown during
+startup or active service. SIGHUP stops the service; it does not reload
+configuration. Only renderer-owned mpv processes are terminated.
 
 ## Discovery And Control Flow
 

@@ -37,8 +37,8 @@ def test_real_cli_serve_signals_restart_and_persistence(ownership):
         assert evidence["launch"] == ("installed" if cli else "module")
         assert evidence["ownership"] == ownership
         assert evidence["same_ports_and_socket_restart"] and evidence["fixture_child_reaped"]
-        assert {cycle["signal"] for cycle in evidence["cycles"]} == {"SIGTERM", "SIGINT"}
-        assert len(evidence["cycles"]) == 2
+        assert {cycle["signal"] for cycle in evidence["cycles"]} == {"SIGTERM", "SIGINT", "SIGHUP"}
+        assert len(evidence["cycles"]) == 3
         for cycle in evidence["cycles"]:
             assert cycle["exit_status"] == 0 and cycle["decoded_null_output"] and cycle["http_ports_closed"]
             assert cycle["owned_child_reaped"] is (ownership == "owned")

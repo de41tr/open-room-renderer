@@ -88,8 +88,9 @@ async def serve(config_path: str) -> None:
 
     try:
         # Install before the first startup await, while no child/listener can
-        # yet require asynchronous cleanup after SIGINT or SIGTERM.
-        for sig in (signal.SIGINT, signal.SIGTERM):
+        # yet require asynchronous cleanup. On Linux, SIGHUP requests the
+        # same graceful stop as SIGINT/SIGTERM; it does not reload config.
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             loop.add_signal_handler(sig, request_shutdown)
             registered_signals.append(sig)
         try:
