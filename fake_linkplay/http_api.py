@@ -1628,17 +1628,7 @@ class HttpApi:
             presets = self.state.effective_presets()
             if number > len(presets):
                 raise ValueError("Unknown preset slot")
-            selected = presets[number - 1]
-            queue = PlaybackQueue(items=[QueueItem(
-                url=selected["url"], title=selected.get("title") or selected["name"], source=selected["source"],
-                artwork=selected.get("picurl", ""), id=f"preset:{number}",
-                artist=selected.get("artist", ""), album=selected.get("album", ""),
-            )], index=1)
-            queue.validate()
-            self.state.queue = queue
-            self._activate_queue_item()
-            await self._play_url(queue.current.url)
-            self._schedule_event_notify()
+            await self._play_preset_snapshot(presets[number - 1])
             return "OK"
         if name == "getPowerState":
             return {"power": "on", "status": "on"}
@@ -2661,6 +2651,19 @@ class HttpApi:
 
     def _tunein_capability_fields(self) -> dict[str, object]:
         return capability_fields(self.cfg)
+
+    async def _play_preset_snapshot(self, selected: dict[str, object]) -> None:
+        """Construct the admitted preset before yielding to the playback owner."""
+        queue = PlaybackQueue(items=[QueueItem(
+            url=selected["url"], title=selected.get("title") or selected["name"], source=selected["source"],
+            artwork=selected.get("picurl", ""), id=f"preset:{selected['number']}",
+            artist=selected.get("artist", ""), album=selected.get("album", ""),
+        )], index=1)
+        queue.validate()
+        self.state.queue = queue
+        self._activate_queue_item()
+        await self._play_url(queue.current.url)
+        self._schedule_event_notify()
 
     async def _play_url(self, url: str) -> None:
         """Resolve/load once and confirm only this generation's actual audio."""
