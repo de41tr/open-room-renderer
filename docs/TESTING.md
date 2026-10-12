@@ -1646,3 +1646,24 @@ local renderer core is byte-identical to the prior green checkpoint, while the n
 client flow and full default suites were verified locally. Hosted results remain
 pending until checked. The existing environment-recording step also lists any
 preinstalled browser executable read-only; it installs or starts none.
+
+
+The first hosted client checkpoint `763f7f7` **failed** Python 3.11's 180s step
+time budget: every assertion passed (3652/70), but pytest took181.55s. This is
+not recorded as a green job. The scheduling-only follow-on reuses the unchanged
+bounded group runner on the same floor runner. Group A discovers all tests except
+`test_queue_cli.py` and `test_playlist_cli.py`; group B runs exactly those files.
+Independent collection proves 3723 node IDs = 3593 + 130, without omissions, extras,
+duplicates or changed skip metadata. The added workflow guard accounts for the
+one extra default check. Exact local Python 3.11 execution passes 3523 + 130 tests
+/70 skips; group times 130.51s/36.69s. A165s watchdog leaves cleanup margin inside
+the unchanged 180s step and 8-minute job; no assertions or audio thresholds change.
+The helper's historical “Native group” log banner does not make these default
+unit/local-client tests a native-audio lane.
+
+Both native jobs of `763f7f7` completed successfully before the repair was
+published: all 3652/70 defaults, 20+44 libmpv checks (51 actual native cases/13
+deterministic helpers), six Unix cases and every later client, stress, installed
+CLI, clocked, discovery and same-host Snapcast gate passed. Python 3.11's timeout
+keeps the overall checkpoint failed. The exact scheduling repair also passed
+all 13 scheduler fixtures under Python 3.12 in 8.93s.

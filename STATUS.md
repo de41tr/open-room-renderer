@@ -20,7 +20,14 @@ authored playlist create/restore, with stopped-by-default replacement and no liv
 queue export claim. Final integrated defaults pass 3652/70 on Python 3.11/3.12.
 Nine real CLI subprocesses select three distinct native sources with protocol/event
 agreement on libmpv 0.37/0.40 in about 5.1s. No renderer core changes are included.
-This package is ready for publication; its hosted checkpoint is not yet verified.
+Published client package `763f7f7` completed all 3652 Python 3.11 tests in
+181.55s, but failed the unchanged 180s step cap. Both native jobs passed all stages, including 64 libmpv checks and every later
+Unix/client/stress/install/clocked/discovery/Snapcast gate.
+A scheduling-only correction preserves all test node IDs exactly once on the same
+runner: the two subprocess-heavy CLI files run beside the remaining suite, with a
+165s watchdog inside the unchanged 3-minute step/8-minute job. The exact local
+Python 3.11 run passes 3523 +130 tests /70 skips (130.51s longest group). No
+functional code, assertion, skip policy, dependency or audio threshold changes.
 
 The requested behavior-neutral extraction began at 09:14:53 UTC after its prerequisite green gate.
 It moves exactly three stateless metadata-edit helpers into metadata_formatting.py,

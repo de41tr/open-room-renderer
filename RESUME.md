@@ -166,3 +166,19 @@ all standard CI. No local full native rerun is needed for unchanged renderer cor
 Read-only preinstalled browser inventory is included in the existing CI environment
 step; no browser install/start or extra runner. The cloud desktop terminal's text
 input failed before any fixture, so actual browser QA remains unestablished.
+
+12:10 UTC: 763f7f7 failed Python 3.11's unchanged 180s step cap despite all 3652
+assertions passing in 181.55s. Keep that checkpoint failed. Native jobs are still
+running; let them finish to retain complete evidence/browser inventory before
+publishing the minimal scheduling correction. It reuses the unchanged two-group
+runner with a 165s watchdog; exact node-ID union is 3723 = 3593 + 130, no duplicates
+or missing/skipped-policy changes. Local 3.11 groups pass3523+130/70, longest 130.51s.
+Independent review approves; no new dependency/runner or relaxed cap. A separate
+private client-only next/previous/mute/seek/current-mode convenience patch is
+under review and short native verification, not part of this scheduling repair.
+
+12:15 UTC: both native jobs of 763f7f7 completed successfully, including 64 libmpv
+checks and every later gate. The checkpoint stays FAILED solely for the Python 3.11
+180s time budget. Publish the separately reviewed scheduling correction now.
+Read-only CI inventory found preinstalled browsers, but no supported actual
+browser QA route has been established; keep the controller UI deferred.
