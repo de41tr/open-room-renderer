@@ -107,3 +107,8 @@ Per-load native options now use named arguments shared by mpv0.37 and0.40,
 avoiding the positional insertion-index change in0.38. Actual0.40 start/options/
 reset and gain checks passed; the new production0.37 case awaits CI. This fixes
 option transport compatibility, not approximate byte-range timestamp accuracy.
+
+AP16 now has a reviewed clocked digital transition probe with a2ms reported
+tolerance, known-silence calibration and equal/mixed-rate/pause cases. Its first
+native execution is pending; no gapless capability is advertised. A passing
+measurement test must not be confused with a WITHIN_TOLERANCE audio result.

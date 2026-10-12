@@ -538,3 +538,27 @@ this revision's result; this does not certify bitrate-derived range timing.
 Log privacy is published as `de8b9b03d219e50734ff95295c307d34abf7f945`;
 [run38190231373](https://github.com/de41tr/open-room-renderer/actions/runs/38190231373)
 passed both native architectures and all existing lanes.
+
+## AP16 clocked transition measurement prepared
+
+Added an explicit native measurement using a private PulseAudio null sink and
+its continuously clocked48kHz monitor. Unlike concatenated fast PCM files, this
+sink records silent frames during actual idle gaps. The probe calibrates a known
+125ms gap, compares direct mpv playlist playback, then measures real renderer
+queues with equal/mixed source rates and a pause near EOF. Duration, queue
+metadata, actual sources and delivered GENA are checked. Results distinguish
+measured silence, non-silent boundary ambiguity and a stated2ms tolerance.
+
+No production playback behavior or gapless capability is changed. Private
+config/socket/cookie paths and generated low-level audio keep it off host audio
+devices/accounts; all child processes have bounded cleanup and a hard group
+timeout. Independent review checked clock/calibration, cleanup, and right-channel
+sequence validation. Local default snapshot: 1757 passed,17 explicit native
+skips. Native clocked execution is NOT_RUN locally because the required private
+server/executables are unavailable here. CI adds official PulseAudio utilities
+and runs the explicit lane; only its actual result can establish a transition
+measurement. This is not a physical DAC or general gapless certification.
+
+Named load options are published as `622d5ca9c21c8561e6ab81a544568878d683497d`;
+[run38190695731](https://github.com/de41tr/open-room-renderer/actions/runs/38190695731)
+passed both architectures, including the new native0.37 production options case.

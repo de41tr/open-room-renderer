@@ -37,7 +37,7 @@ jobs:
         id: setup
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y mpv libmpv2 ffmpeg python3.12-venv
+          sudo apt-get install --no-install-recommends -y mpv libmpv2 ffmpeg pulseaudio pulseaudio-utils python3.12-venv
           /usr/bin/python3.12 -m venv .venv-ci
           .venv-ci/bin/python -m pip install --upgrade pip
           .venv-ci/bin/python -m pip install -e '.[dev]'
@@ -104,3 +104,9 @@ jobs:
           .venv-ci/bin/python "$prefix/uninstall.py" --prefix "$prefix" --uninstall
           test -f "$prefix/state/uuid"
           test ! -e "$prefix/venv/bin/open-room-renderer"
+
+      - name: Measure clocked digital queue transitions
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          ORR_TEST_CLOCKED_QUEUE: "1"
+        run: .venv-ci/bin/python -m pytest -q -s tests/test_clocked_queue_transition.py

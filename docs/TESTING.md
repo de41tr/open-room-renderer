@@ -315,3 +315,19 @@ the appended production Unix case exercises the same real option behavior.
 This addresses the [documented0.38 positional change](https://github.com/mpv-player/mpv/blob/v0.40.0/DOCS/man/input.rst)
 using the [older named command contract](https://github.com/mpv-player/mpv/blob/v0.37.0/player/command.c).
 Snapshot: 1753 passed with13 libmpv cases, three local Unix IPC skips.
+
+## Clocked queue transitions
+
+Opt in with `ORR_TEST_CLOCKED_QUEUE=1` and run
+`tests/test_clocked_queue_transition.py`. Linux mpv, pulseaudio and
+pulseaudio-utils are required; missing dependencies fail after explicit opt-in.
+The helper starts only a private null sink/protocol socket, captures continuously
+clocked float PCM, checks idle clock rate and125ms silence calibration, then
+compares native mpv and renderer queue transitions. Generated quiet stereo
+markers verify both channels. Equal/mixed source rates share a fixed48kHz sink;
+this does not test DAC switching, codec padding, WAN buffering or hardware.
+A successful test means a valid measurement, not necessarily gapless playback:
+read GAP_OBSERVED, NON_SILENT_BOUNDARY or WITHIN_TOLERANCE plus frame counts.
+All native children are reaped; a95s parent deadline kills the owned process
+group if native code hangs. Local17 analyzer tests passed, clocked execution
+remains NOT_RUN until native CI. Full default snapshot:1757 passed,17 skips.

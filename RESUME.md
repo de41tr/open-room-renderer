@@ -41,7 +41,10 @@
    `9f4a1d5e7ca4f9dd8c96c25fa2b1c722847d2cca`; native CI run38189809370
    passed both architectures. Log privacy is published as
    `de8b9b03d219e50734ff95295c307d34abf7f945`, with native CI run38190231373
-   passed. Named load-option compatibility has a reviewed1753-pass snapshot.
+   passed. Named load options are published as
+   `622d5ca9c21c8561e6ab81a544568878d683497d`; native CI run38190695731
+   passed both architectures. The reviewed clocked-transition lane is prepared
+   for first native CI execution; do not claim a measured gap before reading it.
    Preserve pending log privacy, clocked-transition, named load-option, explicit
    discovery-interface and unready-load cleanup changes. Monitor each new CI.
 6. Keep production mpv JSON IPC. AF_UNIX is denied in this cloud sandbox; use
