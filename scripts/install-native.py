@@ -16,7 +16,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MIN_PYTHON = (3, 11)
-MIN_MPV = (0, 35)
+MIN_MPV = (0, 37)
 MANIFEST = "installed-files.json"
 
 
@@ -48,7 +48,7 @@ def environment(*, require_mpv: bool = True, require_alsa: bool = False) -> dict
         mpv = lines[0] if lines else ""
         match = re.search(r"\bmpv\s+v?(\d+)\.(\d+)", mpv)
         if not match or tuple(map(int, match.groups())) < MIN_MPV:
-            raise ValueError("The native profile requires identifiable mpv >= 0.35.")
+            raise ValueError("The native profile requires identifiable mpv >= 0.37 for playlist ancestry checks.")
     elif require_mpv:
         raise ValueError("Missing mpv. Install your distribution's native mpv package first.")
     alsa = [p for p in Path("/dev/snd").glob("pcm*") if os.access(p, os.R_OK | os.W_OK)]

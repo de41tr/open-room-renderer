@@ -8,9 +8,11 @@ It is alpha. It is useful. It is also a little weird in places because network a
 
 ## Start Here
 
-Use Linux with Python **3.11+**, venv support, and native **mpv 0.35+**. See
+Use Linux with Python **3.11+**, venv support, and native **mpv 0.37+**. See
 [Getting Started](GETTING_STARTED.md) for distribution prerequisites, ARM status,
 audio checks, service setup, and uninstall instructions.
+Debian 12/Bookworm's default mpv 0.35.1 is below this minimum; playlist
+ancestry checks require properties added in mpv 0.37.
 
 For an isolated user installation from this checkout:
 

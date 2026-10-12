@@ -8,15 +8,23 @@ keeps its identity across restarts and never automatically invokes sudo.
 Install these using your distribution's package manager:
 
 - Python **3.11 or newer**, with `venv` / `ensurepip` support
-- native **mpv 0.35 or newer**, with its distribution-provided codec/audio libraries
+- native **mpv 0.37 or newer**, with its distribution-provided codec/audio libraries
 - `curl`, `jq`, and `iproute2` for the checkout's diagnostics
 - optional: `alsa-utils` for ALSA checks; `tcpdump` for private packet diagnosis
 
-For Debian 12/Bookworm or newer, the usual package names are `python3`,
-`python3-venv`, `mpv`, `curl`, `jq`, and `iproute2`. Debian's
-[Python package](https://packages.debian.org/bookworm/python3) and
-[mpv package](https://packages.debian.org/bookworm/mpv) are available for `arm64`
-and `armhf`. Package availability is not hardware acceptance.
+On Debian-family systems, the usual package names are `python3`,
+`python3-venv`, `mpv`, `curl`, `jq`, and `iproute2`. Check `mpv --version` before
+installing the renderer. Debian 12/Bookworm's default
+[mpv 0.35.1 package](https://packages.debian.org/bookworm/mpv) does **not** meet the
+minimum, including its `arm64` and `armhf` builds. Use a maintained native OS or
+trusted distribution repository providing mpv 0.37 or newer; this installer does
+not add repositories or upgrade the OS.
+
+The renderer's M3U/PLS readiness and ownership checks use `playlist-path` and
+`playlist/N/playlist-path`, properties [introduced in mpv 0.37](https://github.com/mpv-player/mpv/blob/v0.37.0/DOCS/interface-changes.rst).
+Older mpv can decode a child without proving its playlist ancestry and therefore
+cannot meet this playback contract. Package availability is not hardware
+acceptance, and a newer mpv alone does not validate ARMv7 hardware.
 
 Python dependencies are `aiohttp`, `PyYAML`, `requests`, and `zeroconf`; `pywiim`
 and pytest are development/test extras. They install into a virtual environment,
@@ -34,7 +42,7 @@ Validation limits:
   The installer records interpreter bitness and reports that limit.
 - Raspberry Pi/XU4 hardware, audible output, systemd boot/reboot behavior, and
   original Android app acceptance still require separate acceptance.
-- The installer enforces the mpv 0.35 profile baseline; this is not a claim that
+- The installer enforces the mpv 0.37 profile baseline; this is not a claim that
   every mpv build, decoder, or output device has been exercised.
 
 ## 2. Install In A Private Prefix

@@ -62,11 +62,17 @@ def test_native_environment_version_and_architecture(installer, monkeypatch):
         installer.environment()
 
 
-@pytest.mark.parametrize("version", ["mpv 0.34.1", "unknown player"])
+@pytest.mark.parametrize("version", ["mpv 0.34.1", "mpv 0.35.1", "mpv v0.36.0", "unknown player"])
 def test_native_rejects_old_or_unknown_mpv(installer, monkeypatch, version):
     monkeypatch.setattr(installer, "run", lambda *args: version)
-    with pytest.raises(ValueError, match="mpv >= 0.35"):
+    with pytest.raises(ValueError, match=r"mpv >= 0\.37"):
         installer.environment()
+
+
+@pytest.mark.parametrize("version", ["mpv 0.37.0", "mpv v0.37.0", "mpv 0.40.0"])
+def test_native_accepts_supported_mpv_floor(installer, monkeypatch, version):
+    monkeypatch.setattr(installer, "run", lambda *args: version)
+    assert installer.environment()["mpv"] == version
 
 
 def test_native_rejects_old_python_and_missing_mpv(installer, monkeypatch):
