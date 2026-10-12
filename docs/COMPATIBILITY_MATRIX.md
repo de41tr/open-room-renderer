@@ -4,7 +4,7 @@ This is scoped evidence, not a product certification. Updated 2026-10-12 UTC.
 
 | Area | Evidence | Remaining limit |
 | --- | --- | --- |
-| SOAP action validation/faults | UNIT/MOCK; real typed standard DMR client and libmpv/null controls | Original app and new standard-client production-IPC lane pending |
+| SOAP action validation/faults | UNIT/MOCK; real typed standard DMR client and libmpv/null controls | Original app/hardware acceptance pending |
 | Volume/mute/control | Real Unix IPC on x86_64/AArch64; measured digital PCM; local PyWiiM integration | Physical mixer/DAC/acoustic effects pending |
 | Selected-URI playback/control | Real production Unix IPC + libmpv/null HTTP flows on x86_64/AArch64 | Physical audio and Android pending |
 | Playback generations/EOF | UNIT/MOCK races + actual Unix IPC observer/queue EOF | Target hardware and WAN conditions pending |
@@ -509,6 +509,36 @@ bounds. HTTP(S) URL bytes are preserved; whitespace, userinfo and reserved rende
 proxy targets are rejected. Raw CR queue names are rejected because they cannot
 round-trip through the existing server's SOAP acknowledgement.
 
+`playlist save-current FILE --host HOST --port PORT` performs one bodyless GET to
+`/orr/v1/queue/playlist` on the existing listener. It adds no bind, authentication
+or CORS change; like existing controls this is for the intended trusted LAN.
+Only HTTP 200 with identity-encoded application/json is accepted. Strict v1 decode,
+ordinary URL validation and the full escaped restore-request bound complete before
+any output temporary. Redirects, environment proxy/netrc, retries and old-server
+fallback are disabled. Files use existing private atomic no-clobber publication;
+this command offers no overwrite or play flag. Playlist GET responses carry Cache-Control:
+no-store, and neither payloads nor remote errors are logged by these adapters.
+
+The server captures one queue reference and synchronously detaches validated bytes
+before yielding, without backend synchronization, resolution, media fetches,
+favorite-store access or filesystem work. All five modes, selected one-based index,
+name, canonical order and duplicates survive. Every item is checked: malformed or
+stale radio provenance cannot fall back to a potentially temporary item.url.
+Locally proven radio stations use only their fixed anonymous public reference;
+ordinary URL bytes remain unchanged. Unproven direct station classifications are
+rejected because a plain-URL restore would lose their live/recovery semantics.
+An unresolved explicit public station reference remains an ordinary URL and is
+not resolved during saving. HTTP 409 has one data-free error for any unavailable,
+invalid, empty/provider-only, oversized or unrepresentable queue. Unexpected body
+or query input returns 400; other methods, including HEAD, return 405.
+
+This projection drops all display metadata, durations, provider/source fields,
+IDs, opaque metadata, playback position/state, shuffle history and provenance.
+It is a URL playlist, not a lossless backup or an account/provider export. Ordinary
+originally supplied temporary/token-bearing URLs cannot be identified reliably;
+files remain private and future playability is not guaranteed. The snapshot is
+coherent at capture; later queue changes do not invalidate it or imply CAS.
+
 `playlist import-m3u INPUT OUTPUT --name NAME` is an offline converter into that
 same authored JSON format, with index 1 and normal mode. It accepts only the
 [documented UTF-8 URL-list subset](../GETTING_STARTED.md#multi-track-queues-and-authored-playlists):
@@ -545,7 +575,7 @@ profiles and exercises typed controls plus all three service subscriptions.
 Actual library-parsed LastChange precedes polling in fake-audio integration and
 short real libmpv 0.37/0.40 two-source workflows. The existing pywiim acceptance
 primarily exercises its HTTP path; it did not establish this standard-DMR path.
-The new shared production-Unix flow is configured for hosted CI, not yet verified.
+The shared production-Unix flow passed on both x86_64 and AArch64 at 0d11eea.
 
 Canonical AVTransport/RenderingControl SCPDs omit optional vendor ControlSource;
 legacy alias SCPDs remain byte-identical. SOAP accepts the extension on either

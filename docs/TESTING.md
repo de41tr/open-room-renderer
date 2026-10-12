@@ -130,8 +130,8 @@ in 5.41s and 0.37 in 5.37s; independent 0.40 replay passed in 5.84s. Final integ
 The Unix wrapper runs the same flow against the production `MpvBackend` and two
 fixture-owned external mpv processes. It requires real IPC/client/mpv after opt-in,
 preserves the external process during renderer shutdown, and reaps fixture-owned
-children afterward. Local IPC preflight is NOT_RUN due to AF_UNIX denial; the new
-hosted Unix result must be recorded separately when observed. Both lanes retain
+children afterward. Local IPC preflight is NOT_RUN due to AF_UNIX denial; hosted production-Unix
+acceptance subsequently passed on both architectures at 0d11eea. Both lanes retain
 20s async and 25s outer bounds. Existing hosted jobs/caps and all prior stages stay;
 one libmpv case joins group two, and the Unix wrapper joins the existing real-client
 step. No multicast discovery, physical LAN, app, ALSA/DAC or hardware claim follows.
@@ -1868,3 +1868,82 @@ verified 13:58:28 UTC: https://github.com/de41tr/open-room-renderer/actions/runs
 Native x86_64/AArch64 durations were 838.805s/830.491s, with 3729/70 default checks,
 20+44 libmpv checks and all later gates passing. The floor passed 3586+143/70
 in 151.26s/51.19s. This does not predeclare the new DMR hosted lane successful.
+
+
+## Current-queue URL playlist snapshots
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_queue_playlist.py \
+  tests/test_playlist_save_current.py tests/test_radio_favorites.py \
+  tests/test_playlist_files.py
+```
+
+`tests/test_queue_playlist.py` covers the pure bounded projection and owned HTTP
+route. It checks exact order/duplicates/name/index/all five modes, detached bytes
+before the first yield and one captured queue reference. Invalid final items,
+mutable structures, empty/provider-only queues, malformed inactive radio proof,
+unproven direct stations, count/JSON/full escaped SOAP bounds and unexpected
+HTTP bodies/query/methods fail as a whole, with data-free responses. HEAD is
+explicitly excluded; chunked requests fail even when their content is empty.
+
+Deterministic playback tests retain state, generation, item identities, shuffle
+history/RNG, staged native successor and recovery ownership across capture.
+Header-materialized radio is checked before playback, while recovery is pending,
+and after refreshed resolution: only the anonymous canonical reference is saved;
+neither temporary stream leaks, and saving adds no resolver or backend call.
+These are UNIT/MOCK checks, not decoder or live-provider evidence.
+
+`tests/test_playlist_save_current.py` uses real loopback HTTP and in-process CLI
+calls, with a deterministic audio backend for five-mode save/restore round trips.
+Paused selection stays unchanged during saving; the separate restore replaces it
+stopped with exact URL bytes, name, mode and index. Client transport checks prove
+one bodyless GET, no proxy/netrc credentials, no redirect/retry/fallback and strict
+identity/JSON/byte/request validation before any output temporary. Existing file,
+symlink, dangling link, FIFO and directory destinations are preserved; successful
+files are 0600, missing parents stay absent, and pre/postcommit failures have
+truthful private diagnostics. CLI output/log assertions exclude synthetic URL,
+metadata and path secrets. No new subprocess-heavy test file is added.
+
+The tiny canonical-target helper extraction is separately testable with unchanged
+radio/managed-favorites tests; favorite errors and direct-target behavior remain
+unchanged. Snapshot-specific rejection of an unproven direct station is separate.
+Existing authored-file storage tests continue to cover atomic no-clobber races,
+private temporaries, cleanup and durability boundaries. Native playback evidence
+and the standard full-suite/hosted result must be reported separately; these
+focused tests do not establish Unix IPC, WAN, physical LAN, Android or audio output.
+
+
+The reviewed queue-CLI native case now includes read-only save-current while a
+three-item queue is paused at index 2. One real child sends exactly one bodyless
+GET and no SOAP; native entry 4, pause/position, queue identity/selection/mode,
+backend mutations and resolver/media request counts stay unchanged. Output is
+exact canonical v1 JSON with 0600 permissions. After all prior restore/play proofs,
+the saved file restores stopped across a 0.52s observer interval; only an explicit
+Play decodes its selected second source. All prior assertions and cleanup remain.
+The flow has 19 real CLI children and 10 cases under unchanged 18s inner/20s outer
+bounds. Exact final libmpv 0.37 probe 10.066s/pytest 10.71s and 0.40 probe 9.927s/pytest
+10.53s pass. This is ctypes/null REAL_BACKEND evidence; it does not add a production
+Unix, WAN or actual-radio export claim. Radio provenance cases remain UNIT/MOCK,
+with the extracted helper also covered by the existing native favorite flow.
+
+Helper-only extraction passes 132 unchanged favorite/native 0.40 checks in 11.52s
+(one existing warning), separately from the new export feature. The final floor
+partition moves only the existing 102-case favorites CLI file into the existing
+subprocess-heavy group. A focused 3.11 timing measured 25.843s in that file; projected
+margin is not a hosted guarantee. Final collection proof retains exactly 3982 IDs
+as 3737 +245, without omissions/duplicates or changed skip/xfail metadata. Watchdog,
+step/job caps, dependency/runner choices and all prior stages remain unchanged.
+
+The preceding standard-DMR checkpoint 0d11eea passed all three standard jobs,
+verified 14:16:09 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38259889939 .
+Actual production-Unix standard-client flows passed in both profiles on x86_64
+and AArch64, with distinct entries 1/2, parsed events before polling and complete
+cleanup. Native jobs completed in 796.797s/856.717s, all 65 libmpv checks and every
+later gate passed. The floor passed 3634+143/72 in 163.34s/56.96s, motivating the
+same-runner one-file rebalance rather than any increased timeout or removed check.
+
+Final integrated queue-save defaults pass 3910 tests /72 opt-in skips on Python
+3.12 (193.07s), and 3665 +245 /72 on Python 3.11 (121.63s/72.84s), retaining the
+32 existing warnings. Production digest:
+`5c35cfc1128bff993b3a6d405fd712212ea4e0dd65943cf8a3307e40face47ba`.
+The new checkpoint's hosted result remains pending until actually observed.

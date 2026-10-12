@@ -4,39 +4,40 @@ Optimize useful, verified user workflows per hour, not test/commit/line counts.
 All work stays on the autonomous branch and draft PR; no merge or release.
 Stabilization starts 2026-10-12 19:00 UTC; active work ends at 20:00 UTC.
 
-## Current decision (2026-10-12 13:59 UTC)
+## Current decision (2026-10-12 14:34 UTC)
 
-- **COMPLETE:** offline M3U import has full standard CI green at 369feeb, following
-  stable-ID favorites and local transport controls. Actual user workflows improve
-  without backend changes; earlier failed/missing checkpoints keep their history.
-- **CONTINUE:** publish the reviewed standard-DMR adapter correction and require
-  its new production-Unix client lane to pass hosted CI. Four actual-client
-  mismatches are reproduced and fixed, with short real libmpv and parsed-event
-  proof on both profiles. Existing core logic and all quality bounds remain.
-- **ASSESS next, not yet implement:** safe current-queue export to the existing
-  private authored format. BrowseQueue exposes resolved media and cannot serve
-  as canonical export. Trusted live-radio provenance needs special handling;
-  assess a bounded read-only snapshot first and defer if semantics are ambiguous.
-- **DEFER:** per-instance audio-device override. Owned mpv already honors its
-  service-account mpv.conf. The incremental multi-instance convenience currently
-  ranks below actual client compatibility and reusable playlists.
-- **DEFER:** browser controller without established acceptance, additional
-  multihour runs, broad core decomposition and provider-account experiments.
+- **COMPLETE:** standard DMR now has actual production-Unix client acceptance on
+  both architectures and full standard CI at 0d11eea. Four reproduced adapter
+  failures are fixed; original-app and duplicate-service selection limits remain.
+- **CONTINUE:** publish reviewed safe current-queue URL-playlist save. Exact local
+  native/read-only behavior and final integrated defaults pass. The one-file floor
+  rebalance improves local margin without dropping tests or increasing caps;
+  require hosted evidence for the new checkpoint.
+- **NEXT:** offline append/remove/reorder of saved playlists, then managed-favorite
+  URL repair preserving stable identity. Current files otherwise need hand-edited
+  JSON, and correcting a favorite target currently requires delete/recreate.
+  These are useful 45–90 minute adapter/file packages, not live queue redesign.
+- **DEFER:** DSP CLI unless its global/wifi context contract can be settled quickly
+  after those packages. Do not implement a band editor or add work merely to fill
+  time. Existing status already exposes transport/metadata; another view is low value.
+- **DEFER:** browser controller without established acceptance, per-instance DAC
+  YAML (owned mpv already honors its account's config), additional multihour runs,
+  broad core decomposition and provider-account experiments.
 
 Priority order: critical regressions/security and green CI; useful new local
 features; targeted low-risk refactoring; special tests only with high information
 value; documentation and later hardware preparation. Existing quality gates stay.
 
-Review after the next major package, or around 15:29–15:59 UTC. Record value,
+Review after the next major package, or around 16:04–16:34 UTC. Record value,
 effort, risk and CONTINUE/PIVOT/DEFER; green counts alone are not completion.
 
 ## Open proposals (maximum five)
 
 | Proposal | Category | Value / effort / risk | Next action |
 |---|---|---|---|
-| Standard UPnP client interoperability | A_AUTONOM | Four reproduced blockers fixed; independent and native review passed | Publish and establish the new shared production-Unix flow on both CI architectures. |
-| Safe current-queue export assessment | A_AUTONOM | Potential playlist reuse; canonical/radio provenance requires care | Read-only bounded assessment; implement only if small, explicit and loss-safe. |
-| Optional local controller page | A_AUTONOM / DEFER | Useful, but installed browsers alone do not establish supported QA | Keep deferred until a supported interaction route is genuinely verified. |
+| Safe current-queue URL-playlist save | A_AUTONOM | Reviewed/native-verified useful snapshot; no playback changes | Publish and verify complete standard CI. |
+| Offline saved-playlist editing | A_AUTONOM | Removes manual JSON edits; 60–90min, bounded file/index risk | Add append/remove/move to a new output only; preserve exact URLs and define selection rules. |
+| Managed-favorite target repair | A_AUTONOM | Preserves stable IDs when a target moves; 45–75min | Explicit replacement with documented metadata policy; active admitted playback stays unchanged. |
 | Further player-core / eventing decomposition | B_AWAITING_DECISION | Potential maintenance gain; major scope and ownership/timing risk | Defer this round. Present a concrete boundary/migration plan for explicit later decision; do other authorized work meanwhile. |
 | Merge or release | C_APPROVAL_REQUIRED | Distribution decision, not an implementation milestone | Do not act. Requires separate explicit authorization; current instruction prohibits it. Silence is not consent. |
 

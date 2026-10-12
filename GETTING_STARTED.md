@@ -423,6 +423,36 @@ already exist. Existing files are preserved unless you explicitly pass
 symlinks and nonregular files are rejected. Keep these files private: URL query
 strings can contain secrets even when usernames/passwords are rejected.
 
+To save a point-in-time URL playlist from the current queue:
+
+```sh
+open-room-renderer playlist save-current current.json --host 127.0.0.1 --port 8080
+open-room-renderer playlist restore current.json
+```
+
+`save-current` makes one read-only request on the renderer's existing local-network
+control listener. It preserves the canonical URL order and duplicates, queue name,
+selected one-based index and all five modes. Saving does not pause, stop, resolve,
+fetch media or otherwise change playback. The output parent must already exist;
+the private 0600 file is published atomically without overwriting anything,
+including a symlink. There is no `--overwrite` or `--play` option on this command.
+
+This is a **URL playlist, not a lossless queue backup**. Titles, artists, artwork,
+durations, source/provider fields, IDs, opaque metadata, playback position/state,
+shuffle history and runtime provenance are omitted. The separate restore defaults
+to stopped playback and preserves the saved selection and mode. A queue change
+after capture does not invalidate the file; there is no revision/CAS guarantee.
+
+Locally proven public-radio stations are saved as fixed anonymous public station
+references, never their temporary resolved streams. A later explicit playback
+resolves that reference afresh. Every item must be safe, including inactive items:
+empty/unresolved provider queues, invalid URLs/state/provenance, unproven direct
+station classifications and size-limit failures reject the entire save. No item
+is silently skipped. An ordinary explicit public station URL can be saved before
+resolution. Other originally supplied token-bearing or temporary URLs cannot be
+recognized reliably; **keep the file private and do not assume future playability**.
+Older renderers without this endpoint fail clearly, without a BrowseQueue fallback.
+
 To convert a local M3U URL list into that same JSON format:
 
 ```sh

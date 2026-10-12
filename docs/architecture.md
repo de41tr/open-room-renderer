@@ -276,3 +276,11 @@ ConnectionManager properties; `upnp_schema` selects canonical versus preserved
 legacy input contracts. HttpApi routes those schemas, serializes the same CM
 properties for reads/events, and accepts bounded unpadded seek syntax. Playback,
 recovery, queue staging and event-delivery lifecycle implementations are unchanged.
+
+
+Current-queue file export adds a read-only adapter, not a second queue authority:
+`canonical_target` reuses the existing pure trusted-radio target predicate;
+`queue_playlist` captures/validates one synchronous URL-only snapshot;
+`playlist_client` performs one bounded explicit read. Existing `playlist_files`
+remains the private atomic file boundary. HttpApi only registers the new route;
+no playback, recovery, staging, event delivery or server filesystem logic is added.

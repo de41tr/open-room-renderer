@@ -2,41 +2,40 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (13:58 UTC)
+## Current checkpoint (14:34 UTC)
 
-Strict offline M3U import is published at `369feeb`; all three standard jobs
-passed, verified at 13:58:28 UTC:
-https://github.com/de41tr/open-room-renderer/actions/runs/38257679612 .
-Native x86_64/AArch64 jobs passed every gate in 838.805s/830.491s under 900s.
-Python 3.11 groups passed 3586 +143 /70 in 151.26s/51.19s under unchanged caps.
-Earlier PR synchronization and Python-floor timeout records retain their original
-outcomes; no missing or failed checkpoint is relabeled.
+Published standard-DMR head `0d11eea` passed all three standard jobs, verified
+at 14:16:09 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38259889939 .
+Both native architectures passed the unchanged standard-client flow over actual
+production Unix IPC in both profiles: distinct decoded entries, parsed LastChange
+before polling, complete subscriptions and cleanup. All 65 libmpv checks and every
+previous stage passed. x86_64/AArch64 jobs took 796.797s/856.717s under 900s.
+The floor passed in 163.34s/56.96s, motivating the measured same-runner rebalance
+below. Original-app/hardware and duplicate-service first-entry client limits remain.
 
-The next reviewed checkpoint fixes four reproduced standard-client adapter gaps:
-canonical AVTransport/RenderingControl/ConnectionManager binding, optional vendor
-ControlSource incorrectly required by canonical SCPDs, the missing CM event URL,
-and the real client's unpadded seek time. Compatibility aliases and their AVT/RC
-schemas are preserved byte-for-byte; standard entries follow aliases for the
-tested client's last-entry-wins lookup. Other selection strategies remain limited.
-CM events reuse honest static read values; no connections or unsupported actions
-are invented. Existing playback/recovery/staging and event-delivery lifecycle
-implementations are unchanged.
+The next reviewed feature saves the current queue as a private URL playlist with
+one bodyless GET on existing listeners. It preserves canonical order, duplicates,
+name, selected index and mode without playback, backend-sync or resolver effects.
+Every item is checked; proven public radio becomes a stable anonymous reference,
+while stale provenance, unproven station semantics and unsupported queues reject
+as a whole. The new file is private and no-clobber. This is not a lossless backup:
+metadata, playback position/state and shuffle history are omitted. Restore remains
+an explicit separate operation, stopped by default. No bind/auth/CORS change.
 
-The unchanged installed standard DmrDevice now performs typed controls and parses
-all three subscriptions in both profiles. Actual libmpv 0.37/0.40 workflows select
-two distinct native WAV entries with PCM progress, verify pause/seek/resume and
-gain/stop, receive library-expanded LastChange before polling, then clean up.
-Exact final probes pass in 5.37s/5.41s; independent 0.40 replay passes in 5.84s and
-final combined replay in 5.55s. A shared production-Unix wrapper is included for
-the existing hosted client step; local AF_UNIX preflight is NOT_RUN, and its new
-hosted result is still pending. No hardware/original-app/discovery claim is added.
+The small existing radio target predicate is extracted separately with unchanged
+favorite behavior. Helper-only tests, including actual native favorite playback,
+pass 132 checks. Independent feature/native review is complete. The real queue-CLI
+flow now saves a paused three-item queue without changing native identity/position,
+restores its exact file stopped, then explicitly decodes the selected source.
+Both libmpv versions pass the unchanged 18s/20s bounds with all prior assertions.
 
-Final combined defaults pass 3777 /72 opt-in skips on Python 3.12 (187.30s), and
-3634 +143 /72 on Python 3.11 (145.54s/41.68s), with 32 existing warnings. All existing
-watchdogs/job caps remain. Independent review approved exact adapter and native
-patches. Production digest:
-`a9fc6a3d3e860c0d9385c366a1397fa2d1d32d8708aa55660d491d669151bcd8`.
-This candidate still requires its own complete standard CI after publication.
+Final combined defaults pass 3910 /72 opt-in skips on Python 3.12 (193.07s).
+Python 3.11 groups pass 3665 +245 /72 in 121.63s/72.84s, with 32 existing warnings.
+Only the existing favorites CLI file changes groups; exact collection is
+3982 = 3737 +245, without omissions, duplicates or altered skip/xfail metadata.
+All existing watchdogs/job caps remain. Production digest:
+`5c35cfc1128bff993b3a6d405fd712212ea4e0dd65943cf8a3307e40face47ba`.
+This new checkpoint still requires complete hosted verification after publication.
 
 The requested behavior-neutral extraction began at 09:14:53 UTC after its prerequisite green gate.
 It moves exactly three stateless metadata-edit helpers into metadata_formatting.py,

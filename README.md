@@ -61,7 +61,7 @@ Working in this alpha:
 - supports standard DMR typed controls and parsed events on the tested client, with [explicit alias/client limits](docs/COMPATIBILITY_MATRIX.md#standard-upnp-client-adapter-scope),
 - supports [editable local favorites](GETTING_STARTED.md#editable-local-favorites) through its own CLI/API, stable-ID recall and public-client numeric recall,
 - offers [local next/previous/mute/seek controls](GETTING_STARTED.md#local-transport-controls),
-- offers [multi-track queue commands and authored playlist files](GETTING_STARTED.md#multi-track-queues-and-authored-playlists), including strict offline M3U URL-list import and stopped-by-default replacement/restore,
+- offers [multi-track queue commands and authored playlist files](GETTING_STARTED.md#multi-track-queues-and-authored-playlists), including read-only current-queue save, strict offline M3U import and stopped-by-default restore,
 - supports persistent device rename,
 - supports channel balance,
 - supports a 10-band parametric EQ through mpv filters.

@@ -5,8 +5,8 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint 369feeb passed all three jobs, verified at
-   13:58:28 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38257679612
+   Latest completed checkpoint 0d11eea passed all three jobs, verified at
+   14:16:09 UTC: https://github.com/de41tr/open-room-renderer/actions/runs/38259889939
    Python floor uses complete bounded groups on the same runner, preserving the
    3-minute step/8-minute job; both native jobs retain all existing gates.
    The prior 763f7f7 remains failed solely for its floor time budget.
@@ -229,3 +229,30 @@ No core redesign; stabilization 19:00 UTC and active-work end 20:00 UTC remain.
 13:58:28 UTC: M3U checkpoint 369feeb is fully green. Both native architectures
 passed every stage in 838.805s/830.491s, floor groups 151.26s/51.19s. Publish the
 already-reviewed DMR package now; keep its new hosted-IPC result pending until seen.
+
+14:18 UTC: standard-DMR checkpoint 0d11eea has all three standard jobs green.
+Both native architectures passed the new shared production-Unix client flow,
+all 65 libmpv checks and every previous stage. Jobs took 796.797s/856.717s;
+floor groups passed in 163.34s/56.96s, close to the unchanged 165s watchdog.
+One-file scheduling rebalance is measured: existing favorites CLI cases cost
+25.84s, and moving them preserves the exact collection/skip semantics. Verify
+final combined grouping without changing caps or removing cases.
+
+The assessed safe current-URL-playlist save is now in private implementation.
+It uses an existing-listener read, no new bind/auth/CORS policy, coherent canonical
+snapshot and private no-clobber file publication. Trusted public-radio provenance
+must be canonicalized on every item; invalid/stale or unproven direct-station
+semantics reject the entire export. No playback/resolver/backend-sync effect.
+It is not a lossless backup; restore stays stopped and metadata/history are omitted.
+Require separate helper-only evidence if reusing extracted favorite canonicalization,
+independent review, focused actual-native CLI proof and complete final CI.
+Stabilization 19:00 UTC and active-work end 20:00 UTC remain unchanged today.
+
+14:34 UTC: queue-save candidate is reviewed and final integrated defaults pass
+3910/72 on Python 3.12 (193.07s); floor groups 3665+245/72 (121.63s/72.84s).
+Exact collection 3982=3737+245 preserves all IDs and skip metadata. Helper-only
+132 existing/native checks and both final native queue-save flows pass. Publish
+helper, feature, native acceptance, floor rebalance and docs as separate commits
+in one checkpoint. Then require full standard CI. Next useful work is offline
+saved-playlist editing, followed by stable-ID favorite target repair, each bounded
+and independent of live queue ownership. Keep all private/hardware/deadline limits.

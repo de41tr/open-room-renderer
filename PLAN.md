@@ -4,19 +4,21 @@ Branch: `dot/renderer-autonomous-20261012`; base: `3672b9838e9c39ae8191613108f0d
 Work window ends 2026-10-12 20:00 UTC. Stabilization only after 19:00 UTC.
 No main-branch edits, merge, or release.
 
-## Current functional package (13:46 UTC)
+## Current functional package (14:34 UTC)
 
-Strict offline M3U import is published and hash-verified at `369feeb`; standard CI
-run 38257679612 passed all three jobs, verified 13:58:28 UTC. This includes
-stable-ID favorite recall and transport controls. The prior PR/branch lag resolved
-on that natural checkpoint; `0b6defa` has no observed standalone hosted result.
+Standard-DMR checkpoint `0d11eea` has full standard CI green, including the new
+actual production-Unix flow on both architectures. Publish the reviewed safe
+current-queue URL-playlist save next, keeping the existing canonical-target
+extraction separate from the feature, native extension and scheduling rebalance.
+Final combined defaults and both short native versions pass; require hosted CI.
+No listener/auth/CORS or playback-core change is introduced.
 
-Publish the reviewed correction for four reproduced standard-UPnP-client blockers through a small
-protocol-adapter patch: canonical service binding, standard action arguments,
-honest ConnectionManager event subscription and bounded unpadded seek syntax. Preserve legacy aliases and
-existing playback/recovery/staging behavior. Require independent review, unchanged
-client-parsed events and a bounded two-source actual-backend acceptance. No new
-browser controller, dependency, provider authentication or multihour test.
+After this gate, prioritize offline append/remove/reorder of saved playlists,
+then explicit managed-favorite target repair preserving its stable ID. These fill
+real user-facing gaps without live queue mutation. Keep each bounded and separately
+reviewed. A DSP CLI is lower-confidence and should not be started merely to fill
+time. Browser UI, per-instance DAC override and additional longruns remain deferred.
+Stabilization starts 19:00 UTC; active work ends 20:00 UTC today.
 
 ## Ordered work
 
