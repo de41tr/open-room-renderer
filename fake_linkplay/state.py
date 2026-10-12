@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from .capabilities import capability_fields
+from .capabilities import capability_fields, configured_presets
 from .config import Config
 from .queue import PlaybackQueue
 
@@ -209,7 +209,7 @@ class RendererState:
             "VersionUpdate": "0",
             "NewVer": "0.1.0",
             "service_version": "1.4",
-            "preset_key": "6",
+            "preset_key": str(len(configured_presets(self.cfg))),
             "prompt_status": "0",
             "indicator_light": "0",
             "LightApiVersion": "",

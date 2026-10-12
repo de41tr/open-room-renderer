@@ -23,7 +23,10 @@
    AP12 is published as `2bab4bc4a802b9fe8108aca8ad8566ede49eb7b4`.
    Native IPC CI is published as `52f5c4d0dffc3dcc900c2726703d0af7524aba37`.
    Run 38185537983 passed on x86_64 and AArch64, including real Unix IPC.
-   AP09 metadata checkpoint is being published; verify the current remote head.
+   AP09 is published as `93f51e4c310827b1ec1ad9da38b3d6eb9eda851c`; its
+   native CI run 38187041169 also passed both architectures.
+   Configured music-preset selection is independently reviewed and being published.
+   Preserve concurrent seek, active EQ restore, native install and format fixes.
 6. Keep production mpv JSON IPC. AF_UNIX is denied in this cloud sandbox; use
    fake-backend tests and optional libmpv/null-output validation with honest scope.
 7. Review all changed files and commit content for private data before publishing;

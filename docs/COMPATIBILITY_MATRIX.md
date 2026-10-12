@@ -67,3 +67,10 @@ HTTP/SOAP/GENA and real queue navigation (UNIT and loopback INTEGRATION with
 fake audio). Explicit URI wins over metadata resource hints; absent fields clear
 and unknown source/MIME are not invented. Matching backend title updates only
 refine generated fallback metadata. Original Android presentation is untested.
+
+Configured local music favorites now have matching one-based listing, slot
+counts and actual selection (`MCUKeyShortClick`, optional index1 only). Real
+pywiim loopback verifies two distinct selected resources with MOCK audio.
+Unknown/invalid entries do not become phantom playable slots. Favorites remain
+configuration-owned; provider preset editing and saved playlist resume are not
+implemented.

@@ -17,7 +17,6 @@ from copy import deepcopy
 import os
 import re
 import time
-from dataclasses import asdict
 from dataclasses import dataclass, field
 from datetime import UTC
 from datetime import datetime
@@ -34,7 +33,7 @@ from aiohttp import ClientSession
 from aiohttp import ClientTimeout, TCPConnector
 from aiohttp import web
 
-from .capabilities import capability_fields, configured_sources, service_capability
+from .capabilities import configured_presets, capability_fields, configured_sources, service_capability
 from .config import Config
 from .mpv_backend import BackendError, MpvBackend
 from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_target, validate_callback_url
@@ -653,10 +652,32 @@ class HttpApi:
         if name == "getMetaInfo":
             return self.state.as_meta_info()
         if name == "getPresetInfo":
-            presets: list[dict[str, object]] = [asdict(p) for p in self.cfg.podcast_presets]
-            if self.cfg.source_experiment_variant in {"preset", "open_network_favorite", "all"}:
-                presets.extend(self._experimental_preset_payloads())
-            return {"preset_num": str(len(presets)), "presets": presets}
+            presets = configured_presets(self.cfg)
+            # Keep the legacy alias while exposing the real client's field.
+            return {"preset_num": str(len(presets)), "preset_list": presets, "presets": presets}
+        if name.startswith("MCUKeyShortClick:"):
+            match = re.fullmatch(r"MCUKeyShortClick:([1-9][0-9]{0,5})(?::([1-9][0-9]{0,5}))?", name)
+            if not match:
+                raise ValueError("Invalid preset selection")
+            number = int(match.group(1))
+            # A configured favorite represents one direct target, not a stored
+            # multi-track provider playlist. Reject unsupported indexes honestly.
+            if match.group(2) is not None and int(match.group(2)) != 1:
+                raise ValueError("Preset contains one direct target")
+            presets = configured_presets(self.cfg)
+            if number > len(presets):
+                raise ValueError("Unknown preset slot")
+            selected = presets[number - 1]
+            queue = PlaybackQueue(items=[QueueItem(
+                url=selected["url"], title=selected["name"], source=selected["source"],
+                artwork=selected.get("picurl", ""), id=f"preset:{number}",
+            )], index=1)
+            queue.validate()
+            self.state.queue = queue
+            self._activate_queue_item()
+            await self._play_url(queue.current.url)
+            self._schedule_event_notify()
+            return "OK"
         if name == "getPowerState":
             return {"power": "on", "status": "on"}
         if name == "getDeviceInfo":

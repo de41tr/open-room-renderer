@@ -351,3 +351,26 @@ audio and real HTTP/SOAP/GENA connections. This is not original Android acceptan
 Native Unix IPC and ARM64 evidence above belongs to the preceding CI checkpoint;
 the new commit's CI will be checked separately. Next: actual seek confirmation,
 active EQ restore and deployment acceptance.
+
+## Configured music presets now select actual targets
+
+`getPresetInfo` exposes the real client's `preset_list` plus the legacy alias,
+with one-based numbers shared by selection and advertised slot count.
+`MCUKeyShortClick:N` and `N:1` start that configured direct target through the
+normal confirmed queue/load path. Empty or malformed configured entries are not
+advertised; unknown slots and unsupported internal playlist indexes fail before
+changing the current owner. No phantom six slots, provider account, saved
+playlist position or successful audio from a failed load is claimed.
+
+Actual pywiim 2.3.9 over loopback lists and selects two different resources.
+Configured order, UTF-8 rename and identity survive configuration reload.
+Delayed old selection cannot replace a newer target. Isolated snapshot: 1477
+passed with seven real libmpv cases; two native IPC cases skipped locally.
+Nineteen preset checks include the explicit experimental slot and failed
+replacement while another target is active. Audio in these client checks is
+MOCK; native decoder coverage is in the separate existing lane.
+
+AP09 is published as `93f51e4c310827b1ec1ad9da38b3d6eb9eda851c`. Its
+[CI run 38187041169](https://github.com/de41tr/open-room-renderer/actions/runs/38187041169)
+passed on both x86_64 and AArch64: 1451 default tests, seven libmpv cases and
+two production Unix IPC cases per architecture.

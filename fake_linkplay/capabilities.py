@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 from .config import Config
+from .queue import PlaybackQueue, QueueError, QueueItem
 
 PLEX_STREAMS_BIT = 1 << 43
 
@@ -142,6 +143,38 @@ def configured_sources(cfg: Config) -> list[dict[str, object]]:
             "source": label, "SourceName": label, "service": label, "url": source.url, "uri": source.url,
             "icon": icon, "icon_url": icon, "type": source.type, "enabled": True})
     return sources
+
+
+def configured_presets(cfg: Config) -> list[dict[str, object]]:
+    """One-based configured local favorites, shared by listing and selection.
+
+    These are direct targets, not provider accounts or saved playlist positions.
+    Experimental favorites remain explicit opt-in and follow configured order.
+    """
+    records: list[dict[str, object]] = [
+        {"name": item.name, "url": item.url, "source": "Preset", "picurl": ""}
+        for item in cfg.podcast_presets
+    ]
+    if cfg.source_experiment_variant in {"preset", "open_network_favorite", "all"}:
+        for source in configured_sources(cfg):
+            records.append({
+                "id": source["id"], "name": source["name"], "title": source["name"],
+                "url": source["url"], "source": source["source"], "type": source["type"],
+                "icon": source["icon"], "picurl": source["icon"], "experimental": True,
+            })
+    valid: list[dict[str, object]] = []
+    for record in records:
+        # An empty experimental source is a UI experiment, not a selectable
+        # favorite. Use the same shape validation as actual queue admission.
+        try:
+            PlaybackQueue(items=[QueueItem(url=record["url"], title=record["name"],
+                source=record["source"], artwork=record.get("picurl", ""))], index=1).validate()
+        except QueueError:
+            continue
+        number = len(valid) + 1
+        record.update(number=number, index=str(number))
+        valid.append(record)
+    return valid
 
 
 def service_capability(cfg: Config | None) -> dict[str, object]:

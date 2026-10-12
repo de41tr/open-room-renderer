@@ -123,7 +123,7 @@ async def test_wiim_home_profile_status_uses_discovery_uuid_and_security() -> No
     assert payload["upnp_version"] == "1000"
     assert payload["VersionUpdate"] == "0"
     assert payload["NewVer"] == "0.1.0"
-    assert payload["preset_key"] == "6"
+    assert payload["preset_key"] == "0"
 
 
 @pytest.mark.asyncio

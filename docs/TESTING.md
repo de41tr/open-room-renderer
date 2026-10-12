@@ -236,3 +236,12 @@ queue navigation, no prior-track leakage, backend title refinement, unknown
 source/MIME and gain-confirmation schema parity. AP09 isolated snapshot: 1458
 passed with seven optional REAL_BACKEND cases; two native IPC cases skipped
 locally. Original handset rendering remains ANDROID_APP untested.
+
+Configured music presets: `test_music_presets.py` uses real loopback HTTP and
+pywiim listing/selection with fake audio. It checks exact distinct target URLs,
+slot/count parity, malformed/empty config omission, unsupported indexes, failed
+replacement, stale resolution, UTF-8 rename and identity/config reload. Only
+the client-specific case skips without pywiim; unit/HTTP cases remain runnable.
+Latest isolated preset snapshot: 1477 passed with seven libmpv cases enabled,
+two local Unix IPC skips. Direct presets restart their target, not a saved
+provider playlist position.
