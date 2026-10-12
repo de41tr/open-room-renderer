@@ -1,6 +1,7 @@
 """Native profile checks: no privilege changes, service starts, or network installs."""
 from __future__ import annotations
 
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -30,6 +31,16 @@ def installer(monkeypatch):
     monkeypatch.setattr(module.platform, "machine", lambda: "aarch64")
     monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/bin/mpv")
     monkeypatch.setattr(module, "run", lambda *args: "mpv v0.37.0")
+    # Unit boundaries below must not depend on the host's optional venv package.
+    # The absent-prerequisite test overrides these two availability lookups.
+    find_spec = module.importlib.util.find_spec
+
+    def available_venv_spec(name, package=None):
+        if name in {"venv", "ensurepip"}:
+            return importlib.machinery.ModuleSpec(name, loader=None)
+        return find_spec(name, package)
+
+    monkeypatch.setattr(module.importlib.util, "find_spec", available_venv_spec)
     return module
 
 
@@ -311,8 +322,14 @@ def test_generated_user_unit_passes_systemd_static_verification(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
-def test_native_requires_venv_support_before_writing(installer, monkeypatch, tmp_path):
-    monkeypatch.setattr(installer.importlib.util, "find_spec", lambda name: None)
+@pytest.mark.parametrize("missing_module", ["venv", "ensurepip"])
+def test_native_requires_venv_support_before_writing(installer, monkeypatch, tmp_path, missing_module):
+    find_spec = installer.importlib.util.find_spec
+
+    def missing_venv_spec(name, package=None):
+        return None if name == missing_module else find_spec(name, package)
+
+    monkeypatch.setattr(installer.importlib.util, "find_spec", missing_venv_spec)
     prefix = tmp_path / "missing-venv"
     with pytest.raises(ValueError, match="venv/ensurepip"):
         installer.install(prefix, port=8080, stage_only=False, dry_run=True, require_alsa=False)
