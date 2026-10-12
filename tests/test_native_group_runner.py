@@ -176,6 +176,8 @@ def test_floor_keeps_all_default_files_and_existing_step_budget():
     assert "tests -rs --ignore=tests/test_queue_cli.py --ignore=tests/test_playlist_cli.py" in step["run"]
     assert "::: tests/test_queue_cli.py tests/test_playlist_cli.py" in step["run"]
     assert "--ignore=tests/test_favorite_play_cli.py" in step["run"]
+    assert "--ignore=tests/test_favorites_cli.py" in step["run"]
+    assert step["run"].rstrip().endswith("tests/test_favorites_cli.py")
     assert "::: tests/test_queue_cli.py tests/test_playlist_cli.py tests/test_favorite_play_cli.py" in step["run"]
     assert floor["runs-on"] == "ubuntu-24.04"
     assert floor["timeout-minutes"] == 8
