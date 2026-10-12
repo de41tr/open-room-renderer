@@ -24,21 +24,22 @@ from pathlib import Path
 import platform
 import shlex
 import shutil
+import signal
 import socket
 import struct
 import sys
 import tempfile
 from typing import Any, AsyncIterator, Awaitable, Callable, Iterator
 import wave
+from xml.etree import ElementTree as ET
 
 import pytest
 from aiohttp import ClientSession, ClientTimeout, web
 
 from fake_linkplay.config import Config
-from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES
 from fake_linkplay.http_api import HttpApi
-from fake_linkplay.mpv_backend import BackendError, MpvBackend
-from fake_linkplay.state import RendererState
+from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES, BackendError, MpvBackend
+from fake_linkplay.state import PlaybackPhase, RendererState
 from fake_linkplay.queue import PlaybackQueue, QueueItem, serialize_queue_context
 
 
@@ -505,6 +506,224 @@ async def test_real_unix_ipc_named_load_options_and_per_file_reset(native_worksp
         "architecture": platform.machine(), "applied_options": actual,
         "start_position": position, "per_file_options_reset": True,
         "gain_preserved": True, "fixture_child_reaped": True,
+    }, sort_keys=True))
+
+
+@pytest.mark.asyncio
+async def test_real_unix_ipc_owned_player_death_is_terminal_until_renderer_restart(
+    native_workspace, monkeypatch,
+) -> None:
+    """AP07: kill only the peer-verified fixture child after real decoding."""
+    directory, executable = native_workspace
+    tracks = (directory / "killed-440.wav", directory / "restarted-660.wav")
+    for path, frequency in zip(tracks, (440, 660)):
+        _write_tone(path, frequency)
+    endpoint, spawn_log = directory / "death.sock", directory / "spawn-pids"
+    bin_directory = directory / "bin"
+    bin_directory.mkdir()
+    wrapper = bin_directory / "mpv"
+    # Record every invocation without wrapping/replacing any production method.
+    # exec preserves the spawned PID. Put safety options last so future
+    # backend arguments cannot override null output or config isolation.
+    wrapper.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$$\" >> " + shlex.quote(str(spawn_log))
+        + "\nexec " + shlex.quote(executable) + ' "$@" '
+        + " ".join(shlex.quote(option) for option in _NULL_OPTIONS) + "\n"
+    )
+    wrapper.chmod(0o700)
+    monkeypatch.setenv("PATH", str(bin_directory) + os.pathsep + os.environ.get("PATH", ""))
+    cfg = Config(
+        uuid="00000000-0000-4000-8000-000000000000",
+        advertise_ip="127.0.0.1", bind_address="127.0.0.1",
+        state_dir=str(directory / "state"), default_volume=25,
+        enable_ssdp=False, enable_mdns=False,
+    )
+    children: list[asyncio.subprocess.Process] = []
+    monitors: list[asyncio.Task] = []
+    version = ""
+    for cycle in range(2):
+        backend = MpvBackend(str(endpoint), initial_volume=cfg.default_volume,
+                             initial_mute=cfg.default_mute)
+        runner: web.AppRunner | None = None
+        receipts: dict[str, list[dict[str, Any]]] = {"AVTransport": [], "RenderingControl": []}
+        try:
+            async with asyncio.timeout(35):
+                await backend.start()
+                process = backend.process
+                assert process is not None and process.returncode is None
+                children.append(process)
+                assert backend._owned_process is process
+                identity = os.lstat(endpoint)
+                assert backend._owned_socket_identity == (identity.st_dev, identity.st_ino)
+                await backend.initialize_gain()
+                version = await _property(backend, "mpv-version")
+                api = HttpApi(cfg, RendererState.from_config(cfg), backend)
+
+                async def callback(request: web.Request) -> web.Response:
+                    properties = {node.tag.rsplit("}", 1)[-1]: node.text or ""
+                                  for prop in ET.fromstring(await request.text()) for node in prop}
+                    changes = {node.tag.rsplit("}", 1)[-1]: node.attrib["val"]
+                               for node in ET.fromstring(properties["LastChange"]).iter()
+                               if "val" in node.attrib}
+                    receipts[request.match_info["service"]].append({
+                        "properties": properties, "changes": changes,
+                        "seq": int(request.headers["SEQ"]), "sid": request.headers["SID"],
+                    })
+                    return web.Response()
+
+                app = api.app()
+                app.router.add_route("NOTIFY", "/test-events/{service}", callback)
+                runner = web.AppRunner(app, shutdown_timeout=1)
+                await runner.setup()
+                site = web.TCPSite(runner, "127.0.0.1", 0)
+                await site.start()
+                base = f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}"
+                assert api._state_monitor_task is not None
+                monitors.append(api._state_monitor_task)
+                async with ClientSession(timeout=ClientTimeout(total=12), trust_env=False) as session:
+                    async def command(value: str, expected_status: int = 200) -> Any:
+                        async with session.get(base + "/httpapi.asp", params={"command": value}) as response:
+                            body = await response.text()
+                            assert response.status == expected_status, (value, response.status, body)
+                            return json.loads(body) if response.content_type == "application/json" else body
+
+                    async def soap(action: str, fields: str = "", service: str = "AVTransport",
+                                   expected_status: int = 200) -> str:
+                        namespace = ("urn:schemas-wiimu-com:service:PlayQueue:1" if service == "PlayQueue"
+                                     else "urn:schemas-upnp-org:service:AVTransport:1")
+                        envelope = (f'<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">'
+                                    f'<s:Body><u:{action} xmlns:u="{namespace}">{fields}'
+                                    f'</u:{action}></s:Body></s:Envelope>')
+                        async with session.post(base + f"/upnp/control/{service}", data=envelope.encode(),
+                            headers={"SOAPACTION": f'"{namespace}#{action}"', "Content-Type": "text/xml"}) as response:
+                            body = await response.text()
+                            assert response.status == expected_status, (action, response.status, body)
+                            return body
+
+                    async def event_matches(service: str, **expected: str) -> bool:
+                        return bool(receipts[service] and all(
+                            receipts[service][-1]["changes"].get(key) == value
+                            for key, value in expected.items()))
+
+                    for service in receipts:
+                        async with session.request("SUBSCRIBE", base + f"/upnp/event/{service}", headers={
+                            "NT": "upnp:event", "CALLBACK": f"<{base}/test-events/{service}>",
+                            "TIMEOUT": "Second-60",
+                        }) as response:
+                            assert response.status == 200
+                            sid = response.headers["SID"]
+                        async def initial_event() -> bool:
+                            return bool(receipts[service])
+                        await _eventually("initial " + service + " callback", initial_event)
+                        assert receipts[service][0]["seq"] == 0 and receipts[service][0]["sid"] == sid
+
+                    if cycle == 0:
+                        assert await command("setPlayerCmd:vol:31") == "OK"
+                        assert await command("setPlayerCmd:mute:1") == "OK"
+                        queue = PlaybackQueue(name="Player death fixture", items=[
+                            QueueItem(str(tracks[0]), stream_type="station"),
+                            QueueItem(str(tracks[1]), duration=_DURATION),
+                        ], index=1)
+                        await soap("CreateQueue", f"<QueueContext>{escape(serialize_queue_context(queue))}</QueueContext>", "PlayQueue")
+                        await soap("PlayQueueWithIndex", "<QueueName>Player death fixture</QueueName><Index>1</Index>", "PlayQueue")
+                        recovery = api._station_recovery
+                        assert recovery is not None
+                    else:
+                        # Restart is a fresh backend/API at the clean socket;
+                        # even preserved gain must not restore an old source.
+                        assert await _property(backend, "idle-active") is True
+                        assert await _property(backend, "playlist") == []
+                        await asyncio.sleep(api._monitor_interval * 2)
+                        assert (await command("getPlayerStatus"))["status"] == "stop"
+                        assert await _property(backend, "idle-active") is True
+                        assert await command(f"setPlayerCmd:play:{tracks[1]}") == "OK"
+
+                    assert await _property(backend, "path") == str(tracks[cycle])
+                    assert await _property(backend, "current-ao") == "null"
+                    assert await _property(backend, "volume") == pytest.approx(31)
+                    assert await _property(backend, "mute") is True
+                    assert any(track.get("type") == "audio" and track.get("selected") is True
+                               for track in await _property(backend, "track-list"))
+                    before = await _property(backend, "playback-time")
+                    async def progressing() -> bool:
+                        return await _property(backend, "playback-time") > before + 0.25
+                    await _eventually("decoded playback before death/restart", progressing)
+                    await _eventually("playing callback", lambda: event_matches(
+                        "AVTransport", TransportState="PLAYING", TransportStatus="OK"))
+                    body = await command("getPlayerStatus")
+                    assert body["status"] == "play" and body["gain_confirmed"] is True, body
+                    if cycle:
+                        assert "<CurrentTransportState>PLAYING</CurrentTransportState>" in await soap("GetTransportInfo")
+                        assert await command("setPlayerCmd:stop") == "OK"
+                        assert await _property(backend, "idle-active") is True
+                    else:
+                        # Never select a PID by name or kill an external player.
+                        # Both the actual handle and fresh Linux peer credentials
+                        # must identify our live, null-output fixture-owned child.
+                        assert backend.process is backend._owned_process is process
+                        assert process.returncode is None and await backend._probe_socket() == process.pid
+                        process.kill()
+                        assert await asyncio.wait_for(process.wait(), 3) == -signal.SIGKILL
+                        # No status HTTP/SOAP request drives this failure transition.
+                        await _eventually("background death callback", lambda: event_matches(
+                            "AVTransport", TransportState="STOPPED", TransportStatus="ERROR_OCCURRED"))
+                        async def gain_unknown() -> bool:
+                            return bool(receipts["RenderingControl"] and not any(
+                                key in receipts["RenderingControl"][-1][section]
+                                for section in ("changes", "properties") for key in ("Volume", "Mute")))
+                        await _eventually("gain becomes unconfirmed callback", gain_unknown)
+                        assert api.state.phase == PlaybackPhase.ERROR
+                        assert api._station_recovery is None and api._station_recovery_task is None
+                        assert api._queue_advance_task is None and api.state.queue.index == 1
+                        assert api.state.current_url == str(tracks[0])
+                        # Observe beyond the full source-retry window: control loss
+                        # must neither trigger station recovery nor advance a queue.
+                        await asyncio.sleep(sum(api._station_recovery_delays) + api._monitor_interval)
+                        for _ in range(3):
+                            for query in ("getPlayerStatus", "getStatusEx"):
+                                body = await command(query)
+                                assert body["status"] == "stop" and body["playback_phase"] == "ERROR", body
+                                assert body["transport_error"] == "Backend control failed", body
+                                assert body["vol"] == "31" and body["mute"] == "1" and body["gain_confirmed"] is False
+                            transport = await soap("GetTransportInfo")
+                            assert "<CurrentTransportState>STOPPED</CurrentTransportState>" in transport
+                            assert "<CurrentTransportStatus>ERROR_OCCURRED</CurrentTransportStatus>" in transport
+                        assert api._station_recovery is None and api._queue_advance_task is None
+                        assert recovery.invalidated and recovery.attempts == 0
+                        assert api.state.queue.index == 1 and api.state.current_url == str(tracks[0])
+                        assert backend.process is backend._owned_process is None
+                        assert not endpoint.exists()
+                        assert spawn_log.read_text().splitlines() == [str(process.pid)]
+                        # An explicit Play against the failed instance still cannot
+                        # respawn it. Both surfaces report failure; restart is needed.
+                        await command(f"setPlayerCmd:play:{tracks[1]}", expected_status=503)
+                        assert "<errorCode>501</errorCode>" in await soap("Play", "<Speed>1</Speed>", expected_status=500)
+                        assert spawn_log.read_text().splitlines() == [str(process.pid)]
+                        assert not endpoint.exists() and backend.process is None
+                        assert backend._desired_volume == 31 and backend._desired_mute is True
+                        assert api.state.phase == PlaybackPhase.ERROR and api.state.gain_confirmed is False
+        finally:
+            try:
+                if runner is not None:
+                    await asyncio.wait_for(runner.cleanup(), 8)
+            finally:
+                await _stop_owned(backend)
+        assert runner is not None and not runner.sites
+        assert not api.event_subscribers
+        assert not endpoint.exists()
+        assert all(task is None or task.done() for task in (
+            backend._startup_task, backend._shutdown_task, backend._reap_task,
+        ))
+    assert all(child.returncode is not None for child in children)
+    assert all(monitor.done() for monitor in monitors)
+    assert spawn_log.read_text().splitlines() == [str(child.pid) for child in children]
+    print(json.dumps({
+        "lane": "PRODUCTION_UNIX_IPC/null/player-death", "architecture": platform.machine(),
+        "mpv_version": version, "owned_children": len(children), "peer_verified_sigkill": True,
+        "decoded_before_kill_and_after_restart": True, "background_http_soap_gena_failure": True,
+        "automatic_respawn_or_source_retry": False, "explicit_play_requires_renderer_restart": True,
+        "gain_preserved_and_unconfirmed_during_failure": True, "stale_source_reloaded": False,
+        "cleanup": {"children_reaped": True, "owned_socket_removed": True, "monitors_done": True},
     }, sort_keys=True))
 
 

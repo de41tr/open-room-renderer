@@ -308,3 +308,67 @@ def test_queue_name_whitespace_survives_text_and_lastchange_attribute(tmp_path):
     event = ET.fromstring(props["LastChange"])
     name = next(node for node in event.iter() if node.tag.endswith("CurrentPlayListName"))
     assert name.attrib["val"] == props["CurrentPlayListName"]
+
+
+@pytest.mark.asyncio
+async def test_backend_loss_converges_without_polling_and_stays_failed_until_explicit_play(local_events):
+    """Real HTTP/SOAP/GENA; backend loss/reappearance is synthetic, not SIGKILL."""
+    env = local_events
+    first, second = "https://media.example.test/first.wav", "https://media.example.test/second.wav"
+
+    async def command(value):
+        async with env.client.get(env.base + "/httpapi.asp", params={"command": value}) as response:
+            assert response.status == 200
+            return await response.json() if response.content_type == "application/json" else await response.text()
+
+    async def transport():
+        namespace = "urn:schemas-upnp-org:service:AVTransport:1"
+        body = (f'<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>'
+                f'<u:GetTransportInfo xmlns:u="{namespace}"/></s:Body></s:Envelope>')
+        async with env.client.post(env.base + "/upnp/control/AVTransport", data=body, headers={
+            "SOAPACTION": f'"{namespace}#GetTransportInfo"', "Content-Type": "text/xml",
+        }) as response:
+            assert response.status == 200
+            return await response.text()
+
+    def last_change(service):
+        matching = [entry for entry in env.receipts if entry[2] == "/events/" + service]
+        if not matching:
+            return {}
+        return {node.tag.rsplit("}", 1)[-1]: node.attrib["val"]
+                for node in ET.fromstring(properties(matching[-1][1])["LastChange"]).iter()
+                if "val" in node.attrib}
+
+    for service in ("AVTransport", "RenderingControl"):
+        assert (await env.subscribe(service, tail=service))[0] == 200
+    await eventually(lambda: len(env.receipts) == 2)
+    assert await command("setPlayerCmd:play:" + first) == "OK"
+    await eventually(lambda: last_change("AVTransport").get("TransportState") == "PLAYING")
+    assert (await command("getPlayerStatus"))["gain_confirmed"] is True
+    env.api.mpv.fail = True
+    # This first observation is solely through the real background callback.
+    await eventually(lambda: last_change("AVTransport").get("TransportStatus") == "ERROR_OCCURRED")
+    assert last_change("AVTransport")["TransportState"] == "STOPPED"
+    await eventually(lambda: "Volume" not in last_change("RenderingControl"))
+    for _ in range(3):
+        for query in ("getPlayerStatus", "getStatusEx"):
+            state = await command(query)
+            assert state["status"] == "stop" and state["playback_phase"] == "ERROR"
+            assert state["transport_error"] == "Backend control failed" and state["gain_confirmed"] is False
+            assert state["vol"] == "50" and state["mute"] == "0"
+        result = await transport()
+        assert "<CurrentTransportState>STOPPED</CurrentTransportState>" in result
+        assert "<CurrentTransportStatus>ERROR_OCCURRED</CurrentTransportStatus>" in result
+    assert env.api._station_recovery is None and env.api._queue_advance_task is None
+    assert env.api.mpv.calls == [("load", first)]
+    # Reappearance does not itself authorize stale playback or clear ERROR.
+    env.api.mpv.fail = False
+    await asyncio.sleep(env.api._monitor_interval * 3)
+    assert (await command("getPlayerStatus"))["playback_phase"] == "ERROR"
+    assert env.api.mpv.calls == [("load", first)]
+    assert await command("setPlayerCmd:play:" + second) == "OK"
+    await eventually(lambda: last_change("AVTransport").get("TransportState") == "PLAYING")
+    assert last_change("AVTransport")["TransportStatus"] == "OK"
+    assert env.api.mpv.calls == [("load", first), ("load", second)]
+    state = await command("getPlayerStatus")
+    assert state["uri"] == second and state["status"] == "play" and state["transport_error"] == ""

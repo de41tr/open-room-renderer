@@ -955,3 +955,75 @@ async def test_cli_always_initializes_balance_through_confirmed_api(monkeypatch,
     await cli.serve('synthetic.yaml')
     harness.api.initialize_channel_balance.assert_awaited_once()
     assert harness.events.index('api.initialize_balance') < harness.events.index('site0.start')
+
+
+@pytest.mark.asyncio
+async def test_death_after_ready_reaps_once_and_requires_a_fresh_backend(monkeypatch, ipc):
+    """UNIT/MOCK counterpart of the native post-decode player-death case."""
+    identity = None
+    children = []
+
+    async def spawn(*args, **kwargs):
+        nonlocal identity
+        process = FakeProcess()
+        process.pid = 100 + len(children)
+        children.append(process)
+        identity = (1, process.pid)
+        return process
+
+    async def probe(**kwargs):
+        if children[-1].returncode is not None:
+            raise ConnectionRefusedError(errno.ECONNREFUSED, "synthetic dead player")
+        return children[-1].pid
+
+    def unlink(path):
+        nonlocal identity
+        assert children[-1].returncode is not None
+        identity = None
+
+    spawn_mock, unlink_mock = AsyncMock(side_effect=spawn), Mock(side_effect=unlink)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn_mock)
+    monkeypatch.setattr("fake_linkplay.mpv_backend.os.unlink", unlink_mock)
+    backend = MpvBackend("/synthetic-death.sock", initial_volume=31, initial_mute=True)
+    backend._socket_identity = lambda: identity
+    backend._probe_socket = probe
+    try:
+        await backend.start()
+        process = children[0]
+        assert backend._owned_process is process and backend._owned_socket_identity == identity
+        assert (await backend.command(["get_property", "pause"]))["error"] == "success"
+        process.returncode = -9
+        process.exited.set()  # No real player, signal or Unix socket is used.
+        assert await backend.snapshot() == {"backend-error": True}
+        assert process.waited == 1 and process.terminated == process.killed == 0
+        assert backend.process is backend._owned_process is None and identity is None
+        unlink_mock.assert_called_once_with(backend.socket_path)
+        for _ in range(4):
+            assert await backend.snapshot() == {"backend-error": True}
+            with pytest.raises(BackendError):
+                await backend.loadfile("https://media.example.test/must-not-load.wav")
+        assert (backend._desired_volume, backend._desired_mute) == (31, True)
+        assert backend.gain_confirmed is False
+        assert [writer.payload["command"] for writer in ipc.writers if writer.payload] == [
+            ["get_property", "pause"],
+        ]
+        spawn_mock.assert_awaited_once()
+        assert process.waited == 1
+    finally:
+        await backend.stop_process()
+    with pytest.raises(BackendError, match="shut down"):
+        await backend.start()
+    replacement = MpvBackend(backend.socket_path, initial_volume=31, initial_mute=True)
+    replacement._socket_identity = lambda: identity
+    replacement._probe_socket = probe
+    try:
+        await replacement.start()
+        assert replacement.process is children[1]
+        assert replacement._owned_socket_identity == identity
+        assert spawn_mock.await_count == 2
+        # Startup alone issued no load, seek, unpause or gain-changing command.
+        assert len([writer for writer in ipc.writers if writer.payload]) == 1
+    finally:
+        await replacement.stop_process()
+    assert identity is None and all(child.returncode is not None for child in children)
+    assert all(child.waited == 1 for child in children)
