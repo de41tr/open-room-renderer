@@ -1,6 +1,6 @@
 # Development status
 
-Updated: 2026-10-11 UTC. Work is in progress, not a compatibility certification.
+Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
 ## Baseline
 
@@ -315,3 +315,39 @@ workflow runs; Actions settings were not changed.
 
 AP12 published as `2bab4bc4a802b9fe8108aca8ad8566ede49eb7b4`.
 Continue metadata/active settings/seek work while monitoring actual CI results.
+
+## Native Unix IPC and ARM64 CI verified
+
+Both standard Ubuntu jobs in
+[run 38185537983](https://github.com/de41tr/open-room-renderer/actions/runs/38185537983)
+passed at `52f5c4d0dffc3dcc900c2726703d0af7524aba37`. Logs verify native x86_64
+and AArch64, Python 3.12.3 and mpv/libmpv 0.37.0-1ubuntu4. Each job passed 1383
+default tests, then 7 libmpv cases and 2 production Unix IPC cases.
+
+Actual Unix JSON commands confirmed playback/control/queue EOF, independent
+resource selection, peer PID ownership, owned socket removal and fresh restart,
+and preservation of externally owned mpv. The same jobs also measured digital
+gain/DSP and decoded local source recovery. No physical audio, ARMv7/Odroid, LAN
+multicast or Android claim follows from this result. The sandbox restriction
+remains local; it is no longer the only evidence for production IPC.
+
+## AP09 metadata consistency checkpoint
+
+Queue items now retain artist, album and supplied DIDL alongside title/artwork.
+Explicit transport URI remains authoritative; metadata resource URLs are hints,
+never replacement destinations. Bounded, namespace-aware parsing rejects unsafe
+XML and preserves the original opaque payload, including significant whitespace.
+HTTP queue/status, SOAP media/position and actual loopback GENA agree through
+selection and Next. Missing fields clear rather than leaking the previous track.
+Matching backend titles can refine generated fallback metadata; stale/foreign
+source observations cannot. Unknown source and MIME stay unknown instead of
+being inferred from URL substrings. Extended gain-bearing SOAP reads now expose
+GainConfirmed consistently with their declared schemas.
+
+Validation: the isolated publication snapshot passed 1458 tests with all seven
+optional libmpv cases enabled; the two production Unix IPC cases explicitly
+skipped in this restricted sandbox. Thirteen new loopback client cases use fake
+audio and real HTTP/SOAP/GENA connections. This is not original Android acceptance.
+Native Unix IPC and ARM64 evidence above belongs to the preceding CI checkpoint;
+the new commit's CI will be checked separately. Next: actual seek confirmation,
+active EQ restore and deployment acceptance.

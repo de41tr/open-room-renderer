@@ -205,7 +205,7 @@ def test_extended_info_declares_all_implemented_outputs_and_client_fields():
     assert names == [
         "Track", "TrackDuration", "TrackMetaData", "TrackURI", "RelTime", "AbsTime",
         "RelCount", "AbsCount", "CurrentTransportState", "CurrentTransportStatus",
-        "CurrentSpeed", "LoopMode", "PlayType", "CurrentVolume", "CurrentMute",
+        "CurrentSpeed", "LoopMode", "PlayType", "CurrentVolume", "CurrentMute", "GainConfirmed",
         "CurrentChannel", "SlaveFlag", "SlaveList", "PlayMedium", "TrackSource",
         "StreamCapability", "InternetAccess", "VerUpdateFlag", "VerUpdateStatus",
         "BatteryFlag", "BatteryMains", "BatteryPercent", "AlarmFlag", "TimeStamp",
@@ -215,7 +215,7 @@ def test_extended_info_declares_all_implemented_outputs_and_client_fields():
     _, actions, _ = contract("RenderingControl")
     assert [name for name, _, _ in arguments(actions["GetControlDeviceInfo"], "out")] == [
         "MultiType", "PlayMode", "Router", "Ssid", "SlaveMask", "CurrentVolume",
-        "CurrentMute", "CurrentChannel", "SlaveList", "StreamCapability", "Status",
+        "CurrentMute", "GainConfirmed", "CurrentChannel", "SlaveList", "StreamCapability", "Status",
     ]
 
 

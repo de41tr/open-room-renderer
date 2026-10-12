@@ -117,8 +117,6 @@ class RendererState:
             self.title = url.rsplit("/", 1)[-1] or "Network stream"
         if not self.play_medium:
             self.play_medium = "STATION-NETWORK"
-        if not self.track_source:
-            self.track_source = "RadioParadise" if "radioparadise.com" in url else "CustomRadio"
 
     def mark_pause(self) -> None:
         """Mark the transport as paused without changing position."""

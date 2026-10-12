@@ -40,7 +40,7 @@ from .mpv_backend import BackendError, MpvBackend
 from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_target, validate_callback_url
 from .radio import RadioResolution, RadioResolutionError, resolve_station
 from .persistence import AtomicWriteCommittedError, atomic_write_text, save_gain
-from .queue import PlaybackQueue, QueueError, QueueItem, parse_queue_context, serialize_queue_context
+from .queue import PlaybackQueue, QueueError, QueueItem, parse_didl_metadata, parse_queue_context, serialize_queue_context
 from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
 from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
@@ -493,8 +493,24 @@ class HttpApi:
         elif isinstance(snap.get("duration"), (int, float)) and int(snap["duration"]) > 0:
             self.state.totlen = int(snap["duration"])
         selected = self.state.queue.current
-        if snap.get("media-title") and self.state.intent != "stop" and not (selected and selected.title):
-            self.state.title = str(snap["media-title"])
+        if (snap.get("media-title") and self.state.intent != "stop"
+                and (not selected or not selected.title or selected.title_is_fallback)):
+            title = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]", "\ufffd", str(snap["media-title"]))
+            changed = self.state.title != title
+            self.state.title = title
+            if selected:
+                selected.title = title
+                selected.title_is_fallback = True
+                self.queue_title = title
+                if not selected.metadata:
+                    self.state.track_metadata = self._didl_metadata(
+                        selected.resolved_url or selected.url, title, self.queue_source, self.queue_pic_url,
+                        self.queue_is_live, artist=selected.artist, album=selected.album, item_id=selected.id or None)
+                    if selected.duration > 0:
+                        self.state.track_metadata = self._metadata_with_duration(self.state.track_metadata, int(selected.duration))
+                self.queue_context = serialize_queue_context(self.state.queue)
+            if changed:
+                self._schedule_event_notify()
         if self.state.phase != old_phase:
             self._schedule_event_notify()
 
@@ -796,7 +812,7 @@ class HttpApi:
             url = parsed.args[0]
             self.queue_url = url
             self.queue_title = url.rsplit("/", 1)[-1] or "Network stream"
-            self.queue_source = "RadioParadise" if "radioparadise.com" in url else "CustomRadio"
+            self.queue_source = "CustomRadio"
             self.queue_search_url = url
             self.queue_pic_url = ""
             self.state.track_source = self.queue_source
@@ -804,7 +820,7 @@ class HttpApi:
             self.state.album_art_uri = ""
             self.state.track_metadata = self._didl_metadata(url, self.queue_title, self.queue_source)
             self.state.queue = PlaybackQueue(items=[QueueItem(url=url,
-                source=self.queue_source, metadata=self.state.track_metadata)], index=1)
+                source=self.queue_source)], index=1)
             self._activate_queue_item()
             await self._play_url(url)
             self._schedule_event_notify()
@@ -1617,6 +1633,13 @@ class HttpApi:
             selected = self.state.queue.current
             if selected and selected.url == url:
                 selected.resolved_url = direct_url
+                if not selected.metadata:
+                    self.state.track_metadata = self._didl_metadata(
+                        direct_url, self.state.title, self.queue_source, self.queue_pic_url,
+                        self.queue_is_live, artist=selected.artist, album=selected.album,
+                        item_id=selected.id or None)
+                    if selected.duration > 0:
+                        self.state.track_metadata = self._metadata_with_duration(self.state.track_metadata, int(selected.duration))
             self.state.phase = PlaybackPhase.BUFFERING
             self._schedule_event_notify()
             ready = await self._wait_for_mpv_audio_ready(generation, playback_url)
@@ -2119,11 +2142,11 @@ class HttpApi:
         )
 
     @staticmethod
-    def _xml_text(body: str, tag: str) -> str:
+    def _xml_text(body: str, tag: str, *, strip: bool = True) -> str:
         """Extract unescaped text from a simple XML tag."""
 
         match = re.search(rf"<(?:\w+:)?{re.escape(tag)}[^>]*>(.*?)</(?:\w+:)?{re.escape(tag)}>", body, re.IGNORECASE | re.DOTALL)
-        return html_unescape(match.group(1).strip()) if match else ""
+        return html_unescape(match.group(1).strip() if strip else match.group(1)) if match else ""
 
     @staticmethod
     def _first_stream_url(text: str) -> str:
@@ -2200,31 +2223,32 @@ class HttpApi:
             return (5, len(url))
         return (20, len(url))
 
-    def _didl_metadata(self, url: str, title: str, source: str = "", art_url: str = "", is_live: bool = True) -> str:
+    def _didl_metadata(self, url: str, title: str, source: str = "", art_url: str = "", is_live: bool = True, *, artist: str = "", album: str = "", item_id: str | None = None) -> str:
         """Build minimal DIDL-Lite metadata for the current queue item."""
 
-        protocol = "audio/aac" if "radioparadise.com" in url else "audio/mpeg"
-        origin_source = source or ("RadioParadise" if "radioparadise.com" in url else "CustomRadio")
+        # Source names/URL shapes do not establish an actual media format.
+        protocol = "*"
+        origin_source = source
         return (
             f'<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" '
             f'xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" '
             f'xmlns:song="www.wiimu.com/song/" '
             f'xmlns:custom="www.linkplay.com/custom/" '
             f'xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">'
-            f"<item id=\"{escape(title)}\">"
+            f"<item id=\"{self._event_attribute(title if item_id is None else item_id)}\">"
             f"<upnp:class>object.item.audioItem.musicTrack</upnp:class>"
             f"<song:isLive>{'1' if is_live else '0'}</song:isLive>"
             f"<song:originSource>{escape(origin_source)}</song:originSource>"
             f'<res protocolInfo="http-get:*:{protocol}:*" duration="0">{escape(url)}</res>'
             f"<dc:title>{escape(title)}</dc:title>"
-            f"<upnp:artist>{escape('ARD' if origin_source == 'CustomRadio' else title)}</upnp:artist>"
-            f"<upnp:creator>{escape('ARD' if origin_source == 'CustomRadio' else title)}</upnp:creator>"
-            f"<upnp:album></upnp:album>"
+            f"<upnp:artist>{escape(artist)}</upnp:artist>"
+            f"<dc:creator>{escape(artist)}</dc:creator>"
+            f"<upnp:album>{escape(album)}</upnp:album>"
             f"<upnp:albumArtURI>{escape(art_url)}</upnp:albumArtURI>"
             f"<song:image>{escape(art_url)}</song:image>"
             f"</item>"
             f"</DIDL-Lite>"
-        )
+        ).replace("\r", "&#13;")
 
     def _metadata_art_url(self, metadata: str) -> str:
         """Extract the best artwork URL from DIDL-like metadata."""
@@ -2868,8 +2892,6 @@ class HttpApi:
             return ""
         title = self.queue_title or self.state.title or "Network stream"
         source = self.queue_source or self.state.track_source or self._xml_text(self.queue_context, "SourceName") or self._xml_text(self.queue_context, "Source") or "radio"
-        if "radioparadise.com" in url:
-            source = "RadioParadise"
         search_url = self.queue_search_url or self._xml_text(self.queue_context, "SearchUrl") or url
         pic_url = self.queue_pic_url or self._xml_text(self.queue_context, "PicUrl")
         quality = self.queue_quality or self._xml_text(self.queue_context, "Quality") or "0"
@@ -2925,6 +2947,9 @@ class HttpApi:
         self.queue_url = item.url if item else ""
         self.queue_resolved_url = item.resolved_url if item else ""
         self.queue_title = (item.title or queue.list_name or item.url.rsplit("/", 1)[-1]) if item else ""
+        if item and not item.title:
+            item.title = self.queue_title
+            item.title_is_fallback = True
         self.queue_source = (item.source or queue.source) if item else queue.source
         self.queue_search_url = queue.search_url
         self.queue_pic_url = (item.artwork or queue.artwork) if item else queue.artwork
@@ -2936,12 +2961,12 @@ class HttpApi:
         self.state.current_url = self.queue_url
         self.state.resolved_url = self.queue_resolved_url
         self.state.title = self.queue_title
-        self.state.artist = ""
-        self.state.album = ""
+        self.state.artist = item.artist if item else ""
+        self.state.album = item.album if item else ""
         self.state.album_art_uri = self.queue_pic_url
         self.state.track_source = self.queue_source
         self.state.play_medium = "RADIO-NETWORK" if self.queue_is_live else "THIRD-DLNA"
-        self.state.track_metadata = (item.metadata or self._didl_metadata(item.url, self.queue_title, self.queue_source, self.queue_pic_url, self.queue_is_live)) if item else ""
+        self.state.track_metadata = (item.metadata or self._didl_metadata(item.resolved_url or item.url, self.queue_title, self.queue_source, self.queue_pic_url, self.queue_is_live, artist=item.artist, album=item.album, item_id=item.id or None)) if item else ""
         if item and not item.metadata and item.duration > 0:
             self.state.track_metadata = self._metadata_with_duration(self.state.track_metadata, int(item.duration))
         self.state.curpos = 0
@@ -3068,15 +3093,15 @@ class HttpApi:
                 self.state.mark_stop()
                 self.queue_url = url
                 self.state.current_url = url
-                self.state.title = url.rsplit("/", 1)[-1] or "Network stream"
-                self.state.track_metadata = self._xml_text(body, "CurrentURIMetaData") or self._didl_metadata(url, self.state.title, "DLNA")
-                self.state.album_art_uri = self._metadata_art_url(self.state.track_metadata)
-                self.state.track_metadata = self._metadata_with_art(self.state.track_metadata, self.state.album_art_uri)
-                self.state.play_medium = "STATION-NETWORK" if "radioparadise.com" in url else "THIRD-DLNA"
-                self.state.track_source = "RadioParadise" if "radioparadise.com" in url else "DLNA"
-                self.state.queue = PlaybackQueue(items=[QueueItem(url=url, title=self.state.title,
-                    source=self.state.track_source, metadata=self.state.track_metadata,
-                    artwork=self.state.album_art_uri)], index=1)
+                metadata = self._xml_text(body, "CurrentURIMetaData", strip=False)
+                hints = parse_didl_metadata(metadata)
+                title = hints.title or url.rsplit("/", 1)[-1] or "Network stream"
+                self.state.track_source = "DLNA"
+                self.state.queue = PlaybackQueue(items=[QueueItem(
+                    url=url, title=title, source="DLNA", metadata=metadata,
+                    artwork=hints.artwork, artist=hints.artist, album=hints.album,
+                    duration=hints.duration, title_is_fallback=not bool(hints.title),
+                )], index=1)
                 self._activate_queue_item()
                 LOG.info("SOAP SetAVTransportURI stored url=%s", url)
                 self._schedule_event_notify(("rendertransport1", "AVTransport"))
@@ -3637,7 +3662,7 @@ class HttpApi:
         transport_state = self._transport_state()
         metadata = self.state.track_metadata if self.state.current_url else ""
         if self.state.current_url and not metadata:
-            metadata = self._didl_metadata(self.state.current_url, self.state.title or "Network stream", self.state.track_source, self.state.album_art_uri)
+            metadata = self._didl_metadata(self.state.current_url, self.state.title or "Network stream", self.state.track_source, self.state.album_art_uri, artist=self.state.artist, album=self.state.album)
         track_uri = self.state.resolved_url or self.state.current_url
         track_duration = self._seconds_to_hms(self.state.totlen)
         rel_time = self._seconds_to_hms(self.state.curpos)

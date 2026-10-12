@@ -5,14 +5,15 @@ This is scoped evidence, not a product certification. Updated 2026-10-11 UTC.
 | Area | Evidence | Remaining limit |
 | --- | --- | --- |
 | SOAP action validation/faults | UNIT/MOCK regression coverage | Actual client/app execution pending |
-| Basic volume/mute/control acknowledgement | UNIT/MOCK + real local PyWiiM HTTP integration with fake backend | Real Unix IPC and DAC readback pending |
-| Selected-URI playback/control | MOCK + real libmpv/null through HTTP | Unix IPC and real audio pending |
-| Playback generations/EOF | UNIT/MOCK, generation-race and observer tests | Actual production IPC and hardware pending |
+| Volume/mute/control | Real Unix IPC on x86_64/AArch64; measured digital PCM; local PyWiiM integration | Physical mixer/DAC/acoustic effects pending |
+| Selected-URI playback/control | Real production Unix IPC + libmpv/null HTTP flows on x86_64/AArch64 | Physical audio and Android pending |
+| Playback generations/EOF | UNIT/MOCK races + actual Unix IPC observer/queue EOF | Target hardware and WAN conditions pending |
 | Concrete multi-item queue | UNIT/MOCK + REAL_BACKEND/null indexed/Next/Previous/EOF selection | Unsupported provider headers fail explicitly |
 | Next/Previous; normal loop mode | Actual queue selection; normal mode only | Repeat/shuffle remain unsupported |
 | Discovery/identity and app-shaped handshake | UNIT/MOCK discovery + actual local HTTP handshake with fake backend; truthful typed SCPDs | LAN multicast and actual Android app pending |
 | GENA lifecycle/callback safety | Real local subscribe/renew/notify/expiry tests; actual callbacks in REAL_BACKEND/null workflow | Actual Android parser/client pending |
 | Synthetic WAV/MP3/FLAC decode | REAL_BACKEND, mpv null output | No audible/DAC assertion |
+| Linux AArch64 | Native Ubuntu CI: build/dependencies, Unix IPC, null/PCM tests | Not a physical audio board or full native service install |
 | Linux ARMv7 / Odroid XU4 | Architectural target | HARDWARE not run |
 | Spotify/TIDAL/AirPlay/Cast/multiroom | Unsupported/deferred | No cloud login or provisioning performed |
 
@@ -55,6 +56,14 @@ candidate retention. Invalid/unimplemented controls fail instead of succeeding.
 Preset library persistence is tested; active EQ replay on restart remains pending.
 Configuration readback, decoded PCM and physical/acoustic effects remain separate.
 
-A standard public Ubuntu x86_64/ARM64 PR workflow and explicit real Unix IPC test
-are now prepared. Positive CI execution is pending; do not infer production IPC
-or ARM success from the workflow file or the sandbox's default skips.
+The standard Ubuntu x86_64/ARM64 jobs both passed actual production Unix IPC
+and all libmpv/null/PCM cases at `52f5c4d`, using Python 3.12.3 and mpv 0.37.0.
+[Verified CI run](https://github.com/de41tr/open-room-renderer/actions/runs/38185537983).
+This replaces the earlier IPC validation gap, not the physical audio/ARMv7/app
+limits. The development sandbox itself still cannot create Unix sockets.
+
+AP09 preserves supplied title/artist/album/artwork and opaque DIDL through
+HTTP/SOAP/GENA and real queue navigation (UNIT and loopback INTEGRATION with
+fake audio). Explicit URI wins over metadata resource hints; absent fields clear
+and unknown source/MIME are not invented. Matching backend title updates only
+refine generated fallback metadata. Original Android presentation is untested.

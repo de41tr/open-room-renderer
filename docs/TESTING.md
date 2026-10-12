@@ -6,12 +6,12 @@
 .venv/bin/python -m pytest -q
 ```
 
-AP04 checkpoint default suite: 739 passed and 1 explicit REAL_BACKEND skip on Python 3.12.14.
-With the optional libmpv lane enabled: 740 passed. Baseline: 92 passed.
-AP01 alone: 133 passed; the acceptance-state check adds 85 UNIT/MOCK cases.
-`tests/test_soap_faults.py` adds 41 UNIT/MOCK checks for SOAP framing,
-unsupported actions, argument validation, backend rejection, sanitized faults,
-namespace correctness, client extensions and exactly-once loading.
+Latest published CI checkpoint: `52f5c4d`. On each Ubuntu 24.04 x86_64 and
+AArch64 runner, the default suite passed 1383 tests with nine explicit opt-in
+skips, then all seven libmpv cases and both production Unix IPC cases passed.
+[Verified run](https://github.com/de41tr/open-room-renderer/actions/runs/38185537983).
+Baseline was 92 tests; checkpoint history is in STATUS.md. Counts alone do not
+establish app or hardware compatibility.
 
 ## Scope labels
 
@@ -31,7 +31,8 @@ or null output does not establish audible playback or Android app compatibility.
 
 The prepared mpv 0.40.0 decoder handled synthetic WAV/MP3/FLAC with null output.
 The execution sandbox denies Unix-domain sockets; production JSON IPC integration
-is NOT_RUN here. Multicast SSDP validation is also unavailable. Do not replace
+is NOT_RUN in this sandbox, but has passed on native x86_64 and AArch64 CI
+runners (below). Multicast SSDP validation is still unavailable here. Do not replace
 production IPC merely to accommodate this sandbox. ARMv7/Odroid, DAC, real audio,
 and actual Android app validation require a suitable separate environment.
 
@@ -217,5 +218,21 @@ standard Ubuntu x86_64/ARM64 runners. GitHub documents these standard runners as
 It records installed versions and runs default, libmpv and native IPC lanes
 separately. ARM64 runner execution is not ARMv7, Pi/DAC or handset acceptance.
 
-Initial status: workflow prepared and statically checked; positive native IPC
-execution is pending CI because this development sandbox forbids AF_UNIX.
+Verified status: both jobs in
+[run 38185537983](https://github.com/de41tr/open-room-renderer/actions/runs/38185537983)
+completed successfully at `52f5c4d`. Logs confirm native `x86_64`/`aarch64`,
+Python 3.12.3, Ubuntu mpv/libmpv 0.37.0-1ubuntu4, pywiim 2.3.9 and aiohttp 3.14.5.
+Per architecture: 1383 default passes (nine opt-in skips), seven real libmpv
+passes, two real Unix IPC passes. Logs independently confirm peer-PID ownership,
+owned socket removal/fresh restart, preservation of external mpv, distinct queue
+resources and decoded controls/EOF. No transport mock is used by that lane.
+
+## Metadata projection
+
+`test_queue_metadata.py` checks bounded namespace-aware hints without changing
+explicit resource selection. `test_metadata_surfaces.py` uses actual loopback
+HTTP/SOAP/GENA with fake audio: opaque DIDL/whitespace, title/artist/album/artwork,
+queue navigation, no prior-track leakage, backend title refinement, unknown
+source/MIME and gain-confirmation schema parity. AP09 isolated snapshot: 1458
+passed with seven optional REAL_BACKEND cases; two native IPC cases skipped
+locally. Original handset rendering remains ANDROID_APP untested.

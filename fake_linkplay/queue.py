@@ -40,6 +40,20 @@ class QueueItem:
     content_type: str = ""
     duration: float = 0.0
     resolved_url: str = ""
+    artist: str = ""
+    album: str = ""
+    title_is_fallback: bool = False
+
+
+@dataclass(frozen=True)
+class DidlMetadata:
+    """Optional display hints, never a replacement for the original DIDL text."""
+
+    title: str = ""
+    artist: str = ""
+    album: str = ""
+    artwork: str = ""
+    duration: float = 0.0
 
 
 @dataclass
@@ -106,10 +120,13 @@ class PlaybackQueue:
         for item in self.items:
             if not isinstance(item, QueueItem):
                 raise QueueError("Queue contains an invalid item")
+            if type(item.title_is_fallback) is not bool:
+                raise QueueError("Queue title origin flag must be boolean")
             if not isinstance(item.url, str) or not item.url.strip():
                 raise QueueError("Queue track requires a direct URL")
             for value in (item.url, item.title, item.source, item.id, item.metadata,
-                          item.artwork, item.stream_type, item.content_type, item.resolved_url):
+                          item.artwork, item.stream_type, item.content_type, item.resolved_url,
+                          item.artist, item.album):
                 _validate_text(value)
             if (isinstance(item.duration, bool)
                     or not isinstance(item.duration, (int, float))
@@ -223,29 +240,52 @@ def _duration(value: str) -> float:
     return float(result)
 
 
-def _metadata_fields(metadata: str, max_bytes: int) -> tuple[str, str, float]:
-    """Read optional DIDL hints without trusting URLs or altering the payload."""
-    if not metadata.strip():
-        return "", "", 0.0
+def parse_didl_metadata(
+    metadata: str | bytes,
+    *,
+    max_bytes: int = MAX_QUEUE_BYTES,
+) -> DidlMetadata:
+    """Read bounded, explicitly namespaced DIDL hints without changing text.
+
+    Read only the first direct DIDL item and the first matching direct, scalar
+    field. Unknown namespaces, nested fields and arbitrary URL-looking text
+    have no special meaning. The resource URL is deliberately never selected:
+    callers must continue to use their explicit transport/queue URL. Malformed,
+    unsafe or oversized metadata supplies no hints; preserve its original text
+    separately rather than serializing this projection back over the payload.
+    """
+    if type(max_bytes) is not int or max_bytes <= 0:
+        raise QueueError("Queue byte limit must be a positive integer")
     try:
         root = _parse_xml(metadata, max_bytes)
     except QueueError:
-        return "", "", 0.0
+        return DidlMetadata()
     if root.tag != f"{{{DIDL_NS}}}DIDL-Lite":
-        return "", "", 0.0
+        return DidlMetadata()
     item = root.find(f"{{{DIDL_NS}}}item")
     if item is None:
-        return "", "", 0.0
-    title = item.findtext(f"{{{DC_NS}}}title", "")
-    artwork = item.findtext(f"{{{UPNP_NS}}}albumArtURI", "")
+        return DidlMetadata()
+
+    def text(namespace: str, name: str) -> str:
+        node = item.find(f"{{{namespace}}}{name}")
+        if node is None or len(node):
+            return ""
+        return node.text or ""
+
     resource = item.find(f"{{{DIDL_NS}}}res")
     duration = 0.0
-    if resource is not None and resource.get("duration"):
+    if resource is not None and not len(resource) and resource.get("duration"):
         try:
             duration = _duration(resource.get("duration", ""))
         except (QueueError, ValueError, OverflowError):
             pass
-    return title, artwork, duration
+    return DidlMetadata(
+        title=text(DC_NS, "title"),
+        artist=text(UPNP_NS, "artist"),
+        album=text(UPNP_NS, "album"),
+        artwork=text(UPNP_NS, "albumArtURI"),
+        duration=duration,
+    )
 
 
 def parse_queue_context(
@@ -317,11 +357,14 @@ def parse_queue_context(
         if not url:
             raise QueueError("Queue track requires a direct URL")
         metadata = _text(track, "Metadata") or ""
-        title, artwork, duration = _metadata_fields(metadata, max_bytes)
+        hints = parse_didl_metadata(metadata, max_bytes=max_bytes)
         direct_title = _text(track, "Title")
+        direct_artist = _text(track, "Artist")
+        direct_album = _text(track, "Album")
         direct_artwork = _text(track, "PicUrl")
         direct_source = _text(track, "Source")
         direct_duration = _text(track, "Duration")
+        duration = hints.duration
         if direct_duration is not None:
             try:
                 duration = _duration(direct_duration)
@@ -329,11 +372,13 @@ def parse_queue_context(
                 raise QueueError("Invalid queue duration") from None
         items.append(QueueItem(
             url=url,
-            title=direct_title if direct_title is not None else title,
+            title=direct_title if direct_title is not None else hints.title,
+            artist=direct_artist if direct_artist is not None else hints.artist,
+            album=direct_album if direct_album is not None else hints.album,
             source=direct_source if direct_source is not None else source,
             id=_text(track, "Id") or "",
             metadata=metadata,
-            artwork=direct_artwork if direct_artwork is not None else artwork,
+            artwork=direct_artwork if direct_artwork is not None else hints.artwork,
             stream_type=_text(track, "StreamType") or _text(info, "StreamType") or "",
             content_type=_text(track, "ContentType") or _text(info, "ContentType") or "",
             duration=duration,
@@ -397,6 +442,7 @@ def serialize_queue_context(queue: PlaybackQueue) -> str:
         track = ET.SubElement(tracks, f"Track{number}")
         for name, value in (
             ("TrackNumber", number), ("Title", item.title), ("Source", item.source),
+            ("Artist", item.artist), ("Album", item.album),
             ("Id", item.id), ("URL", item.resolved_url or item.url), ("Metadata", item.metadata),
             ("PicUrl", item.artwork), ("StreamType", item.stream_type),
             ("ContentType", item.content_type), ("Duration", item.duration),

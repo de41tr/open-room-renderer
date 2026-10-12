@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC
 from datetime import datetime
-from html import escape
+from html import escape as _html_escape
 from typing import Any
 
 from .config import Config
@@ -15,6 +15,11 @@ from .upnp_schema import scpd_xml as _declared_scpd
 from .capabilities import (PLEX_STREAMS_BIT, add_plex_stream_service, add_stream_service_sentinels,
     capability_fields, configured_sources, new_tunein_stream_service, plex_stream_service,
     service_capability, stream_mask_with_plex, stream_service_item, stream_services_capability)
+
+
+def escape(value: str) -> str:
+    """Escape XML text without losing carriage returns to XML normalization."""
+    return _html_escape(value).replace("\r", "&#13;")
 
 
 def description_xml(cfg: Config) -> str:
@@ -177,6 +182,7 @@ def get_control_device_info_response_fields(cfg: Config, ip: str, state: Any | N
             "<SlaveMask>0</SlaveMask>",
             f"<CurrentVolume>{escape(str(volume))}</CurrentVolume>",
             f"<CurrentMute>{'1' if mute else '0'}</CurrentMute>",
+            f"<GainConfirmed>{'1' if getattr(state, 'gain_confirmed', True) else '0'}</GainConfirmed>",
             "<CurrentChannel>Master</CurrentChannel>",
             '<SlaveList>{"slaves":0,"slave_list":[]}</SlaveList>',
             f"<StreamCapability>{escape(str(stream_capability))}</StreamCapability>",
@@ -196,7 +202,7 @@ def avtransport_response_fields(action: str, state: Any | None = None) -> str | 
     track_uri = getattr(state, "resolved_url", "") or current_uri
     title = getattr(state, "title", "")
     track_metadata = getattr(state, "track_metadata", "")
-    track_source = getattr(state, "track_source", "") or ("RadioParadise" if current_uri else "")
+    track_source = getattr(state, "track_source", "")
     transport_state = {"play": "PLAYING", "pause": "PAUSED_PLAYBACK", "stop": "STOPPED", "transition": "TRANSITIONING"}.get(status, "STOPPED")
     transport_status = getattr(state, "transport_status", "OK")
     play_medium = getattr(state, "play_medium", "") or ("STATION-NETWORK" if current_uri else "NONE")
@@ -222,7 +228,7 @@ def avtransport_response_fields(action: str, state: Any | None = None) -> str | 
     if action in {"GetInfoEx", "GetPositionInfo"}:
         duration = seconds_to_hms(getattr(state, "totlen", 0))
         info_play_medium = play_medium if current_uri else "NETWORK"
-        info_track_source = track_source or "URL"
+        info_track_source = track_source
         return "\n".join(
             [
                 f"<Track>{getattr(state, 'plicurr', 0)}</Track>",
@@ -240,6 +246,7 @@ def avtransport_response_fields(action: str, state: Any | None = None) -> str | 
                 "<PlayType>0</PlayType>",
                 f"<CurrentVolume>{escape(str(volume))}</CurrentVolume>",
                 f"<CurrentMute>{'1' if mute else '0'}</CurrentMute>",
+                f"<GainConfirmed>{'1' if getattr(state, 'gain_confirmed', True) else '0'}</GainConfirmed>",
                 "<CurrentChannel>Master</CurrentChannel>",
                 "<SlaveFlag>0</SlaveFlag>",
                 "<SlaveList>[]</SlaveList>",

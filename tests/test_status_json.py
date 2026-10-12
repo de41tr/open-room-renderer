@@ -82,7 +82,7 @@ def test_renderer_state_basic_transitions() -> None:
     state.mark_playing("https://media.example.test/stream.mp3")
     assert state.status == "play"
     assert state.mode == "10"
-    assert state.track_source == "CustomRadio"
+    assert state.track_source == ""  # Playback alone cannot identify a provider.
     state.mark_pause()
     assert state.status == "pause"
     state.mark_transitioning()

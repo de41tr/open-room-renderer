@@ -62,6 +62,7 @@ _POSITION_OUTPUTS = (
     _out("PlayType"),
     _out("CurrentVolume", "Volume"),
     _out("CurrentMute", "Mute"),
+    _out("GainConfirmed"),
     _out("CurrentChannel"),
     _out("SlaveFlag"),
     _out("SlaveList"),
@@ -134,7 +135,7 @@ _ACTIONS: dict[str, dict[str, tuple[_Argument, ...]]] = {
         "GetControlDeviceInfo": (
             _INSTANCE, _out("MultiType"), _out("PlayMode", "DevicePlayMode"),
             _out("Router"), _out("Ssid"), _out("SlaveMask"),
-            _out("CurrentVolume", "Volume"), _out("CurrentMute", "Mute"),
+            _out("CurrentVolume", "Volume"), _out("CurrentMute", "Mute"), _out("GainConfirmed"),
             _out("CurrentChannel"), _out("SlaveList"), _out("StreamCapability"),
             _out("Status", "DeviceStatus"),
         ),
@@ -188,6 +189,7 @@ _VARIABLES: dict[str, _Variable] = {
     "A_ARG_TYPE_LoginCode": _Variable(),
     "Volume": _Variable("ui2", value_range=(0, 100, 1)),
     "Mute": _Variable("boolean"),
+    "GainConfirmed": _Variable("boolean"),
     # GetChannel/GetControlDeviceInfo use a numeric extension value, whereas
     # GetInfoEx uses Master.  Do not constrain this to the input Channel list.
     "CurrentChannel": _Variable(),

@@ -5,10 +5,11 @@
 2. Check `git status`, branch and remote head. Work only on
    `dot/renderer-autonomous-20261012`. Never merge or release.
 3. Read STATUS.md and PLAN.md, then run `.venv/bin/python -m pytest -q`.
-4. AP12 DSP transactionality and measured filters are implemented and reviewed.
-   AP09 pure queue metadata changes are ready but need HttpApi projection; keep
-   queue.py/test_queue_metadata.py edits. Native IPC/ARM64 CI files are in progress.
-   Active EQ restore and seek/native install acceptance remain open.
+4. AP09 metadata projection and exact opaque DIDL round trips are implemented
+   and independently reviewed (1458 passed with seven real libmpv cases).
+   AP10 confirmed-seek work is active; preserve its uncommitted edits. Active EQ
+   restore and native installation acceptance remain open. Native IPC/ARM64 CI
+   passed at the preceding published checkpoint; monitor each new commit's CI.
 5. AP01 is published in draft PR #1 as `2e3068ede2b095b572f7249bc7bdaadecdd9641a`.
    The exact-state PyWiiM checkpoint is published as `a079284e14b1d5f86286b97ff0e5237ca5014bde`.
    AP02 is published as `4a3849e391111e2fb45b95dc7ee6f6aaf30423fb`.
@@ -20,8 +21,9 @@
    AP08 is published as `a6b2b2594403bc92709a874fcf00b8848375cab7`.
    AP11 is published as `664483c0c2ddb22641f9bd25d42f33d5a11b1f74`.
    AP12 is published as `2bab4bc4a802b9fe8108aca8ad8566ede49eb7b4`.
-   Native IPC CI is the next publication; monitor its actual jobs after push.
-   Metadata changes remain uncommitted and must be preserved.
+   Native IPC CI is published as `52f5c4d0dffc3dcc900c2726703d0af7524aba37`.
+   Run 38185537983 passed on x86_64 and AArch64, including real Unix IPC.
+   AP09 metadata checkpoint is being published; verify the current remote head.
 6. Keep production mpv JSON IPC. AF_UNIX is denied in this cloud sandbox; use
    fake-backend tests and optional libmpv/null-output validation with honest scope.
 7. Review all changed files and commit content for private data before publishing;

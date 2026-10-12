@@ -27,5 +27,7 @@ this execution environment cannot create Unix-domain sockets.
 AP01, AP02, AP05, AP03, AP04, AP06, AP07 and AP08 have implementation checkpoints,
 including real libmpv/null control, two-track/callback and interrupted-source
 recovery flows. AP11 now confirms and persists actual digital gain. AP12 now validates and transactionally confirms existing DSP, with measured
-PCM effects. Active EQ restore, metadata/seek/install acceptance follow. A
-least-privilege public CI lane is being prepared for real Unix IPC and ARM64. This records progress, not full hardware/app acceptance.
+PCM effects. AP09 preserves canonical and opaque metadata across client surfaces.
+Confirmed seek, active EQ restore and installation acceptance follow. The
+least-privilege public CI lane passed real Unix IPC on x86_64 and ARM64.
+This records progress, not full hardware/app acceptance.
