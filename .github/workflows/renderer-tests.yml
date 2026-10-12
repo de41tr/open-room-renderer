@@ -110,7 +110,16 @@ jobs:
           done
 
       - name: Run default unit and local-client suite
-        run: .venv-ci/bin/python -m pytest -q -rs
+        # Reuse the floor's two groups on this same runner; retain every test.
+        # The 900s watchdog starts after the job clock; the unchanged 15-minute
+        # whole-job cap remains the effective bound.
+        run: |
+          .venv-ci/bin/python scripts/run-native-groups.py --timeout 900 \
+            --log-dir "$RUNNER_TEMP/orr-default-python312" -- \
+            tests -rs --ignore=tests/test_queue_cli.py --ignore=tests/test_playlist_cli.py \
+            --ignore=tests/test_favorite_play_cli.py --ignore=tests/test_favorites_cli.py \
+            ::: tests/test_queue_cli.py tests/test_playlist_cli.py tests/test_favorite_play_cli.py \
+            tests/test_favorites_cli.py
 
       - name: Run explicit real libmpv null and digital-PCM lanes
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
