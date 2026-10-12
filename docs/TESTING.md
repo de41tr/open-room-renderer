@@ -1438,3 +1438,44 @@ the real sustained case. Full frozen source and production digests are in
 STATUS.md. This was libmpv0.40, loopback AAC/ADTS and null output; its older frozen
 code cannot certify later commits, hardware, WAN or Unix IPC endurance. Do not
 launch another multihour run without a concrete new information need.
+
+## Repeat One / All acceptance
+
+The bounded native flow is opt-in:
+
+```sh
+ORR_TEST_LIBMPV_PATH=/path/to/libmpv.so.2 PYTHONPATH=. \
+  python -m pytest -q -s tests/test_libmpv_repeat_queue.py
+```
+
+It uses three distinct generated two-second WAVs and the production 0.5-second
+observer cadence. Real native identity, selected audio, codec/sample parameters,
+null output and increasing playback time prove A→B→C→Stop, RepeatAll C→A, and
+RepeatOne B→B with a new native ID/load. HTTP Next escapes RepeatOne; explicit
+boundary Next/Previous do not wrap. Mode changes preserve the active native
+lifetime/generation, and confirmed Stop remains idle with no reload beyond the
+media duration plus an observer tick. Raw HTTP, SOAP settings/position/queue and
+received GENA agree. The ctypes command transport is test-local, not Unix IPC;
+existing hosted Unix gates remain separate. Clean replay passed on libmpv 0.37 in
+15.55s and 0.40 in 15.53s, each with 43 received events and full cleanup. No hardware,
+audible-output, gapless-repeat or source-error-reason claim is made.
+
+Pure/controller tests cover strict adapters, empty/single queues, mode changes
+around awaited EOF preflight, owner/error priority, finite station retry budgets
+and normal-only native-staging fences. Actual pywiim writes and raw server reads
+were independently checked; its optimistic mode cache alone is not acceptance.
+The public numeric compatibility correction and station/end/staging limits are
+specified in COMPATIBILITY_MATRIX.md.
+
+The first integrated native replay exposed an older fixture race on 0.37:
+`test_libmpv_formats` accepted any selected audio after load acknowledgement and
+then asserted its path, although native properties could still describe the
+previous playlist child. This happened before renderer HTTP playback. The helper
+was byte-identical to the earlier green checkpoints; isolated replay passed.
+Both versions independently showed PLS acknowledgement still exposing the previous
+MP3 path before the actual AAC child became ready. The test-only correction waits
+for path-bracketed expected source, selected codec, null output and finite position,
+then requires actual same-source progress. Existing readiness/progress deadlines
+remain 3s each. Fifteen fast-clock regression checks retain wrong-source/no-progress
+failures; all four native format scenarios passed on both 0.37/0.40. The failed
+initial integrated run remains recorded; it is not relabeled as a pass.

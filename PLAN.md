@@ -117,3 +117,11 @@ is HARDWARE_ACCEPTANCE_PENDING; do not wait for unavailable hardware. Prepare
 the bounded later acceptance plan after higher-value software work. Final handover
 adds three practical constraints, three debts, three missing features and user
 decisions. Existing branch, publication, safety and deadline limits remain.
+
+
+10:34 UTC functional progress: Repeat One / All passes independent review, actual
+three-track native flows and the complete local default/native suites. Publish
+it with the separately reviewed native-format fixture correction and verify full
+standard CI. Continue isolated favorites/shuffle implementation meanwhile; do not
+restart another radio soak or wait for hardware. Keep mode/source/owner semantics
+explicit and one canonical queue authority.

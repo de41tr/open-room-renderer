@@ -2,10 +2,10 @@
 
 Updated: 2026-10-12 UTC. Work is in progress, not a compatibility certification.
 
-## Current checkpoint (10:08 UTC)
+## Current checkpoint (10:34 UTC)
 
-Draft PR remains unmerged. Published `8291763` passed all three standard jobs:
-https://github.com/de41tr/open-room-renderer/actions/runs/38230830981 .
+Draft PR remains unmerged. Published `b4ad9ad` passed all three standard jobs:
+https://github.com/de41tr/open-room-renderer/actions/runs/38234541452 .
 Both architectures passed the 60-test libmpv lane (47 actual native cases plus
 13 deterministic helpers), six production Unix cases, actual pywiim, stress,
 installed lifecycle, clocked transitions, discovery and eleven Snapcast stages.
@@ -44,7 +44,8 @@ The separately frozen four-hour changing-ICY run PASSED: baseline
 10:06:26.620761 UTC. All 1,795 autonomous title changes agreed across HTTP/SOAP/GENA,
 with one load/source/request, zero disconnects and 4,428 KiB live RSS growth.
 Full source and production digests stayed unchanged; see the scoped evidence below.
-Repeat One / All is the next functional package, still under implementation.
+Repeat One / All now passes full local/default/native verification; its new
+hosted checkpoint remains pending. Favorites and shuffle are isolated next packages.
 
 ## Baseline
 
@@ -1617,3 +1618,38 @@ do not transfer four-hour evidence to their different source digests. No physica
 DAC, WAN/provider reliability, original app or production-Unix endurance claim
 follows. Earlier failed/default/zero-history results remain separately recorded.
 No further multihour run is planned; development has pivoted to useful queue modes.
+
+
+## Real Repeat One / Repeat All queue behavior
+
+A small pure queue_policy module now owns supported mode adapters and the
+observed-end successor decision. Queue.loop is the single authority; HTTP status,
+SOAP settings, QueueContext and GENA agree, including an explicitly empty queue.
+The numeric public-client dialect is normal 4 / one 1 / all 0, correcting the former
+normal 0 misreport. Old explicit 0 queue documents now repeat all; the default
+actual sequential behavior remains unchanged. Full contract and conflicting
+vendor HTTP write documentation are in docs/COMPATIBILITY_MATRIX.md.
+
+Mode changes do not restart playback, increment its generation, cancel pending
+seek/recovery, resume pause or clear errors. Automatic selection rechecks mode
+following its ownership preflight. Manual numerical navigation and finite station
+recovery retain their existing semantics. Native staging is normal-only; an armed
+native playlist/cleanup/output-uncertainty rejects an actual mode change until
+confirmed Stop. Repeat does not claim gapless transitions or reason-aware EOF.
+
+Independent real pywiim/raw HTTP/SOAP and deterministic owner/staging review passed.
+The short real three-track flow passed on libmpv 0.37/0.40 in 15.55s/15.53s: exact
+A→B→C end, C→A wrap, B→B with distinct native IDs and decoded progress, manual
+navigation, live mode-change continuity, received GENA and final Stop/cleanup.
+
+Final immutable integration passed 2952 default tests /67 opt-in skips on
+Python3.12 (75.52s) and Python3.11 (79.57s). Complete selected native lanes passed
+61 checks on 0.37 (428.04s) and 0.40 (427.18s): 48 actual native cases plus 13
+unit helpers. Production digest:
+`55603494cf0c63fae1aa73f972e2e1c6c30d4ee331e9df66e74346ae4359605d`.
+The first integration attempt had one pre-existing raw-playlist readiness fixture
+failure on 0.37 (60 other passes; 0.40 passed 61). The separate test-only correction
+requires expected-source readiness/progress with unchanged 3s deadlines; its
+controlled red reproduction and four-format native replay are documented in
+TESTING.md. That failed attempt remains failed. Hosted verification for this new
+feature checkpoint must still finish; no hardware/original-app claim is added.

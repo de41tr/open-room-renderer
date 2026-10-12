@@ -33,7 +33,7 @@ is not functional completion.
 
 | Proposal | Category | Value / effort / risk | Next action |
 |---|---|---|---|
-| Repeat All / Repeat One for real local queues | A_AUTONOM | High everyday value; estimate 1–2h after contract check; medium ownership/EOF risk | Verify public mode semantics, implement a small queue-policy boundary, prove actual source/position and HTTP/SOAP/event agreement through EOF and owner controls. |
+| Repeat All / Repeat One verification | A_AUTONOM | Implemented; actual three-track native flow and full local suites pass; low remaining publication risk | Publish the reviewed checkpoint and finish standard native CI before closing this proposal. |
 | Shuffle with an explicit play-order contract | A_AUTONOM | High queue value; estimate 1–2h; medium index/history/staging risk | Build on a verified queue policy. Keep canonical item/index/source consistent; test a complete multi-item cycle and manual navigation. |
 | Editable persistent local favorites | A_AUTONOM | Useful local control; estimate 1–2h; medium persistence/interface risk | Check the public control contract, then choose a bounded create/rename/delete/recall workflow using existing atomic state. No provider accounts or invented compatibility claims. |
 | Further player-core / eventing decomposition | B_AWAITING_DECISION | Potential maintenance gain; major scope and ownership/timing risk | Defer this round. Present a concrete boundary/migration plan for explicit later decision; do other authorized work meanwhile. |

@@ -5,9 +5,9 @@
 2. Work only on dot/renderer-autonomous-20261012. Never edit main, merge or release.
    Draft PR: https://github.com/de41tr/open-room-renderer/pull/1
 3. Check local/remote head and CI, then read STATUS.md, PLAN.md and docs/TESTING.md.
-   Latest completed checkpoint 8291763 passed all three jobs, including the
+   Latest completed checkpoint b4ad9ad passed all three jobs, including the
    complete owned-player SIGKILL/error/fresh-backend explicit-restart tail:
-   https://github.com/de41tr/open-room-renderer/actions/runs/38230830981
+   https://github.com/de41tr/open-room-renderer/actions/runs/38234541452
    Both architectures passed 60 libmpv-lane checks (47 native/13 unit) and six Unix cases. Normal
    limits stay 180s stress /6min step /15min native job /8min Python3.11 floor.
 4. Native evidence also verifies real pywiim, repeated-lifetime stress, installed
@@ -116,3 +116,13 @@ is HARDWARE_ACCEPTANCE_PENDING; do not wait for unavailable hardware. Prepare
 the bounded later acceptance plan after higher-value software work. Final handover
 adds three practical constraints, three debts, three missing features and user
 decisions. Existing branch, publication, safety and deadline limits remain.
+
+
+Current functional handoff (10:34 UTC): Repeat One / All is reviewed and integrated.
+Final local default suites passed 2952/67 on Python3.11/3.12; full selected native
+lanes passed 61 on 0.37/0.40. New hosted CI remains pending until verified. Default
+mode reports 4; explicit 0 now means Repeat All, 1 Repeat One. Keep the documented public
+client dialect and original-app limit. Native staging remains normal-only with
+confirmed Stop required before changing an armed mode. The pure policy is queue-owned;
+no second mutable state.loop field remains. Next isolated packages are editable
+ORR-owned favorites and bounded shuffle, each requiring independent verification.
