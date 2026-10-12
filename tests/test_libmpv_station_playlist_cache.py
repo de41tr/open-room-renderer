@@ -4,6 +4,7 @@ import asyncio
 import ctypes as ct
 import json
 import locale
+import math
 import os
 from pathlib import Path
 import socket
@@ -16,7 +17,7 @@ import pytest
 from aiohttp import ClientSession, ClientTimeout, web
 
 from fake_linkplay.config import Config
-from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES
+from fake_linkplay.mpv_backend import BackendError, LIVE_STATION_BACK_BYTES
 from fake_linkplay.http_api import HttpApi, ParsedCommand
 from fake_linkplay.queue import PlaybackQueue, QueueItem
 from fake_linkplay.state import RendererState, PlaybackPhase
@@ -54,6 +55,59 @@ class _ChildHistoryBackend(_StationBackend):
             finally:
                 self._lib.mpv_free_node_contents(ct.byref(result))
         return await super().command(args, timeout)
+
+
+async def _child_playback_time(backend, child, identity, assert_owner, *, after=None, timeout=3):
+    """Wait only for this owned native child's clock, never a successor's clock.
+
+    mpv exposes path/current/playing before opening the demuxer and decoder.
+    A temporary MPV_ERROR_PROPERTY_UNAVAILABLE for playback-time is therefore
+    not readiness. Keep every ownership assertion live while waiting for a
+    real nonnegative sample, including zero. Gapless audio can briefly expose
+    a negative preroll clock before decoded playback starts.
+    """
+    position, entry_id, pid = identity
+    expected = {'path': child, 'pid': pid, 'position': position,
+                'entry': (child, entry_id, True, True)}
+    last = {}
+
+    def check_identity():
+        assert_owner()
+        snapshot = {'path': backend.read_property('path'),
+                    'pid': backend.read_property('pid'),
+                    'position': backend.read_property('playlist-pos')}
+        entries = backend.read_property('playlist')
+        entry = entries[position] if 0 <= position < len(entries) else {}
+        snapshot['entry'] = (entry.get('filename'), entry.get('id'),
+                             entry.get('current'), entry.get('playing'))
+        assert snapshot == expected, f'Native child ownership lost: expected={expected!r}; actual={snapshot!r}'
+        return snapshot
+
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        last['identity'] = check_identity()
+        try:
+            value = backend.read_property('playback-time')
+        except BackendError as exc:
+            # Do not retry invalid properties, stopped handles, or other errors.
+            if str(exc) != 'libmpv -10: property unavailable':
+                raise
+            last['playback-time'] = str(exc)
+        else:
+            last['playback-time'] = value
+            assert type(value) in (int, float) and math.isfinite(value), last
+            # Bracket the native sample to reject a child lost during the read.
+            check_identity()
+            if value >= 0 and (after is None or value > after + .25):
+                return value
+        check_identity()
+        await asyncio.sleep(.025)
+    for key in ('idle-active', 'core-idle', 'eof-reached', 'track-list', 'current-ao'):
+        try:
+            last[key] = backend.read_property(key)
+        except BackendError as exc:
+            last[key] = str(exc)
+    raise AssertionError(f'Timed out waiting for owned native child clock: expected={expected!r}; after={after!r}; last={last!r}')
 
 
 async def _exercise(library, root, extension):
@@ -101,18 +155,31 @@ async def _exercise(library, root, extension):
         await api._replace_queue(queue)
         await api._play_queue_index(1, queue.name)
         selected = api.state.queue.current
+        entries = backend.read_property('playlist')
+        identities = [(i, entry['id'], backend.read_property('pid')) for i, entry in enumerate(entries)]
+        assert [entry['filename'] for entry in entries] == children
+
+        def assert_owner():
+            assert api.state.generation == generation
+            assert api.state.queue is queue and api.state.queue.current is selected
+            assert selected.url == container and selected.duration == 0
+            assert api.state.current_url == api.state.backend_original_url == container
+            assert backend.loads == [container]
+
         old_identity = None
         for i, child in enumerate(children):
             await _eventually('native child ' + str(i), lambda: backend.read_property('path') == child, timeout=7)
-            before = backend.read_property('playback-time')
-            await _eventually('child decoded progress', lambda: backend.read_property('playback-time') > before + .25)
+            generation = api.state.generation
+            identity = identities[i]
+            before = await _child_playback_time(backend, child, identity, assert_owner)
+            after = await _child_playback_time(backend, child, identity, assert_owner, after=before)
             await _eventually('native child policy', lambda: backend.read_property('options/demuxer-max-back-bytes') == LIVE_STATION_BACK_BYTES)
             assert options() == {**defaults, 'demuxer-max-back-bytes': LIVE_STATION_BACK_BYTES, 'demuxer-donate-buffer': False}
             assert backend.read_property('option-info/demuxer-max-back-bytes/set-locally') is True
             assert backend.read_property('option-info/demuxer-donate-buffer/set-locally') is True
             entries = backend.read_property('playlist')
             active = next(entry for entry in entries if entry.get('current') and entry.get('playing'))
-            identity = (entries.index(active), active['id'], backend.read_property('pid'))
+            assert (entries.index(active), active['id'], backend.read_property('pid')) == identity
             if old_identity is not None:
                 # Old child command, delayed until natural advance, is rejected
                 # by mpv itself, without modifying the current child.
@@ -131,7 +198,8 @@ async def _exercise(library, root, extension):
                 await api.execute(ParsedCommand('resume'), '127.0.0.1')
                 assert backend.read_property('pause') is False
             evidence['children'].append({'id': active['id'], 'options': options(),
-                                         'set_locally': True, 'decoded': True})
+                                         'set_locally': True, 'decoded': True,
+                                         'progress': {'before': before, 'after': after}})
         await api._play_url(children[0])
         assert options() == defaults
         assert backend.read_property('option-info/demuxer-max-back-bytes/set-locally') is False
