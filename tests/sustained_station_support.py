@@ -22,6 +22,7 @@ from aiohttp import ClientSession, ClientTimeout, web
 
 from fake_linkplay.config import Config
 from fake_linkplay.http_api import HttpApi
+from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES
 from fake_linkplay.queue import PlaybackQueue, QueueItem, serialize_queue_context
 from fake_linkplay.state import PlaybackPhase, RendererState
 from libmpv_stability_support import (
@@ -54,7 +55,9 @@ def adts_frames(data: bytes) -> tuple[bytes, ...]:
 
 
 class PacedStation:
-    def __init__(self, frames: tuple[bytes, ...]) -> None:
+    def __init__(self, frames: tuple[bytes, ...], icy: bool = False) -> None:
+        from sustained_icy_support import ICYFramer
+        self.icy = ICYFramer() if icy else None
         self.frames = frames
         self.requests = self.active = self.sent_frames = self.sent_bytes = 0
         self.disconnects = 0
@@ -70,7 +73,11 @@ class PacedStation:
         assert request.headers.get('Range') in (None, 'bytes=0-'), 'No seeks in the uninterrupted baseline'
         self.active += 1
         self.task = asyncio.current_task()
-        response = web.StreamResponse(headers={'Content-Type': 'audio/aac', 'Cache-Control': 'no-store'})
+        headers = {'Content-Type': 'audio/aac', 'Cache-Control': 'no-store'}
+        if self.icy is not None:
+            assert request.headers.get('Icy-MetaData') == '1'
+            headers.update({'icy-metaint': str(self.icy.interval), 'icy-name': 'Synthetic AAC endurance'})
+        response = web.StreamResponse(headers=headers)
         await response.prepare(request)
         clock = asyncio.get_running_loop().time
         started = clock()
@@ -82,7 +89,7 @@ class PacedStation:
                 await asyncio.sleep(max(0.0, due - clock()))
                 self.max_lateness = max(self.max_lateness, clock() - due)
                 frame = self.frames[self.sent_frames % len(self.frames)]
-                await response.write(frame)
+                await response.write(self.icy.encode(frame) if self.icy is not None else frame)
                 self.sent_bytes += len(frame)
                 self.sent_frames += 1
         except (ConnectionError, asyncio.CancelledError):
@@ -192,7 +199,7 @@ def hms_seconds(value: str) -> int:
     return hours * 3600 + minutes * 60 + seconds
 
 
-async def exercise(library: str, directory: Path, seconds: int, source_sha256: str) -> dict[str, Any]:
+async def exercise(library: str, directory: Path, seconds: int, source_sha256: str, *, changing_icy: bool = False) -> dict[str, Any]:
     before_tasks, before = asyncio.all_tasks(), resources()
     loop = asyncio.get_running_loop()
     total_started = loop.time()
@@ -205,7 +212,12 @@ async def exercise(library: str, directory: Path, seconds: int, source_sha256: s
         'scope': 'One libmpv handle; loopback AAC/ADTS; null audio; no Unix IPC, hardware, original app, or WAN certification',
     }
     seed = (directory / 'quiet.aac').read_bytes()
-    fixture = PacedStation(adts_frames(seed))
+    from sustained_icy_support import ICYAudit
+    fixture = PacedStation(adts_frames(seed), icy=changing_icy)
+    icy = ICYAudit() if changing_icy else None
+    if icy is not None:
+        result['lane'] += ' / changing ICY'
+        result['icy'] = icy.evidence()
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     runner = backend = api = monitor = session = None
     events, subscriptions = Events(), {}
@@ -274,7 +286,7 @@ async def exercise(library: str, directory: Path, seconds: int, source_sha256: s
             await command('setPlayerCmd:vol:37')
             await subscribe()
             queue = PlaybackQueue(name='Synthetic continuous station', items=[
-                QueueItem(url, title='Synthetic quiet tone', stream_type='station', duration=0)], index=1)
+                QueueItem(url, title='' if changing_icy else 'Synthetic quiet tone', stream_type='station', duration=0)], index=1)
             context = serialize_queue_context(queue)
             await soap('CreateQueue', f'<QueueContext>{escape(context)}</QueueContext>', 'PlayQueue')
             await soap('PlayQueueWithIndex', '<QueueName>Synthetic continuous station</QueueName><Index>1</Index>', 'PlayQueue')
@@ -282,6 +294,7 @@ async def exercise(library: str, directory: Path, seconds: int, source_sha256: s
             await asyncio.sleep(3)  # Warmup is excluded from the full baseline.
             selected_queue, selected_item = api.state.queue, api.state.queue.current
             generation = api.state.generation
+            native_entry = backend.read_property('playlist')[0]['id']
 
             async def agreement() -> None:
                 body = await command('getPlayerStatus')
@@ -318,6 +331,7 @@ async def exercise(library: str, directory: Path, seconds: int, source_sha256: s
             assert api.last_monitor_observation is not None
             monitor_position = api.last_monitor_observation['raw_position']
             next_agreement = next_checkpoint = next_renewal = started
+            next_title = started
             while True:
                 await asyncio.sleep(1)
                 assert not (directory / 'cancel-requested').exists(), 'Sustained run cancellation requested'
@@ -338,6 +352,7 @@ async def exercise(library: str, directory: Path, seconds: int, source_sha256: s
                     assert backend.read_property(property_name) is False, property_name
                 assert api.state.phase == PlaybackPhase.PLAYING and api.state.last_error == ''
                 assert api.state.generation == generation and api.state.queue is selected_queue
+                assert backend.read_property('playlist')[0]['id'] == native_entry
                 assert api.state.queue.current is selected_item and api.state.queue.index == 1 and api.queue_is_live
                 assert api.last_observation is not None and api.last_monitor_observation is not None
                 assert api.state.curpos == api.last_observation['published_position']
@@ -363,10 +378,23 @@ async def exercise(library: str, directory: Path, seconds: int, source_sha256: s
                 within_budget(sample, baseline, LIVE_BUDGET)
                 maximum = {key: max(maximum[key], value) for key, value in sample.items()}
                 result['samples'] += 1
-                if now >= next_agreement or elapsed >= seconds:
+                if icy is not None:
+                    icy.sample_cache(backend.read_property('demuxer-cache-state'), elapsed)
+                    assert fixture.icy is not None
+                    assert backend.read_property('options/demuxer-max-back-bytes') == LIVE_STATION_BACK_BYTES
+                    assert backend.read_property('options/demuxer-donate-buffer') is False
+                    assert selected_item.title_is_fallback and selected_item.metadata == ''
+                    if icy.pending:
+                        if icy.observe(now, backend.read_property('media-title'), api.state.title, events, subscriptions, url):
+                            await icy.assert_surfaces(command, soap, events, url)
+                    if now >= next_title and elapsed < seconds and not icy.pending:
+                        fixture.icy.title = icy.begin(loop.time(), events)
+                        next_title = icy.requested_at + 8
+                    result['icy'] = icy.evidence()
+                if (icy is None or not icy.pending) and (now >= next_agreement or elapsed >= seconds):
                     await agreement()
                     next_agreement = now + 10
-                if now >= next_renewal:
+                if now >= next_renewal and (icy is None or not icy.pending):
                     await subscribe(renew=True)
                     next_renewal = now + 120
                 if now >= next_checkpoint or elapsed >= seconds:
@@ -377,8 +405,11 @@ async def exercise(library: str, directory: Path, seconds: int, source_sha256: s
                         'max_monitor_read_age_seconds': round(max_monitor_age, 6), 'updated_utc': utc_now()})
                     next_checkpoint = now + 60
                 last_position, last_sample_at = position, now
-                if elapsed >= seconds:
+                if elapsed >= seconds and (icy is None or not icy.pending):
                     break
+            if icy is not None:
+                icy.finish(elapsed, fixture.icy)
+                result['icy'] = icy.evidence()
             assert backend.events[6] == backend.events[8] == 1 and backend.events[7] == 0
             result.update(baseline_ended_utc=utc_now(), baseline_elapsed_seconds=round(elapsed, 3),
                 native_progress_seconds=round(position - first_position, 3), min_progress_per_sample_seconds=round(minimum_step, 4),

@@ -7,6 +7,10 @@ Default smoke baseline is 10 seconds. Set ORR_TEST_LIBMPV_SUSTAINED_SECONDS=3600
 for one full uninterrupted hour after warmup. Explicit opt-in fails if Linux,
 libmpv, or FFmpeg is missing. Run files remain in pytest's temporary directory;
 --basetemp can preserve aggregate progress/evidence outside the repository.
+Set ORR_TEST_LIBMPV_SUSTAINED_ICY=1 for changing-title AAC+ICY on the same
+connection (default 240 seconds; explicit 20..14400 seconds). Every requested
+title must reach fresh GENA callbacks before status polling. A cache plateau
+requires at least 240 seconds; shorter runs are smoke only.
 Sources are copied/hashed and a process-group supervisor enforces an outer
 seconds+90 deadline including native C calls, with bounded teardown.
 """
@@ -31,7 +35,7 @@ from tools.native_probe_supervisor import run_probe
 def freeze_sustained_sources(source: Path, target: Path) -> str:
     freeze_sources(source, target)
     for name in ('tests/test_libmpv_sustained_station.py', 'tests/sustained_station_support.py',
-                 'tools/native_probe_supervisor.py'):
+                 'tests/sustained_icy_support.py', 'tools/native_probe_supervisor.py'):
         destination = target / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes((source / name).read_bytes())
@@ -125,8 +129,9 @@ def test_real_libmpv_uninterrupted_station(tmp_path: Path) -> None:
     library = Path(value).resolve()
     ffmpeg = shutil.which('ffmpeg')
     assert ffmpeg, 'Explicit sustained lane requires FFmpeg with AAC encoding'
-    seconds = int(os.environ.get('ORR_TEST_LIBMPV_SUSTAINED_SECONDS', '10'))
-    assert 5 <= seconds <= 3600, 'Sustained baseline must be 5..3600 seconds'
+    icy = os.environ.get('ORR_TEST_LIBMPV_SUSTAINED_ICY') == '1'
+    seconds = int(os.environ.get('ORR_TEST_LIBMPV_SUSTAINED_SECONDS', '240' if icy else '10'))
+    assert (20 if icy else 5) <= seconds <= (14400 if icy else 3600), 'Invalid sustained duration'
     snapshot, media = tmp_path / 'snapshot', tmp_path / 'media'
     media.mkdir()
     digest = freeze_sustained_sources(Path(__file__).resolve().parents[1], snapshot)
@@ -142,13 +147,13 @@ def test_real_libmpv_uninterrupted_station(tmp_path: Path) -> None:
     generation_env.pop('LD_LIBRARY_PATH', None)
     generation = run_probe([ffmpeg, '-hide_banner', '-loglevel', 'error', '-nostdin', '-y',
         '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=16000', '-af', 'volume=0.25',
-        '-t', '2', '-ac', '1', '-c:a', 'aac', '-b:a', '32k', '-f', 'adts', str(media / 'quiet.aac')],
+        '-t', '2', '-ac', '1', '-c:a', 'aac', '-b:a', '64k' if icy else '32k', '-f', 'adts', str(media / 'quiet.aac')],
         cwd=snapshot, env=generation_env, timeout=15)
     assert generation.returncode == 0, 'Synthetic FFmpeg AAC generation failed: ' + generation.stderr
     version = subprocess.run([ffmpeg, '-version'], capture_output=True, text=True, timeout=5,
                              env=generation_env, check=True).stdout.splitlines()[0]
     completed = run_probe([sys.executable, str(snapshot / 'tests/test_libmpv_sustained_station.py'), '--probe',
-        str(library), str(media), str(seconds), digest], cwd=snapshot, env=env, timeout=seconds + 90)
+        str(library), str(media), str(seconds), digest, 'icy' if icy else 'constant'], cwd=snapshot, env=env, timeout=seconds + 90)
     assert completed.returncode == 0, f'Sustained native station failed\n{completed.stdout}\n{completed.stderr}'
     result = json.loads(completed.stdout)
     assert result['source_sha256'] == digest == source_digest(snapshot)
@@ -163,8 +168,102 @@ def test_real_libmpv_uninterrupted_station(tmp_path: Path) -> None:
     print(json.dumps(result, sort_keys=True))
 
 
+
+
+def test_sustained_icy_framing_preserves_every_audio_byte() -> None:
+    from sustained_icy_support import ICYFramer
+    framer = ICYFramer()
+    audio = bytes(range(256)) * 17
+    encoded = b''.join(framer.encode(audio[i:i + 37]) for i in range(0, len(audio), 37))
+    recovered = bytearray()
+    while len(encoded) >= framer.interval:
+        recovered.extend(encoded[:framer.interval])
+        length = encoded[framer.interval] * 16
+        metadata = encoded[framer.interval + 1:framer.interval + 1 + length]
+        assert metadata.rstrip(b'\0') == f"StreamTitle='{framer.title}';".encode()
+        encoded = encoded[framer.interval + 1 + length:]
+    recovered.extend(encoded)
+    assert bytes(recovered) == audio
+    assert framer.blocks == 4 and framer.changes == 1 and framer.remaining == 768
+    assert not any(isinstance(value, (list, bytearray)) for value in vars(framer).values())
+
+
+def test_sustained_icy_requires_each_fresh_callback_before_polling() -> None:
+    from html import escape
+    from sustained_icy_support import ICYAudit
+    from libmpv_stability_support import Events
+    events, audit = Events(), ICYAudit()
+    subscriptions = {name: name for name in audit.services}
+    url = 'http://127.0.0.1/synthetic.aac'
+    title = audit.begin(10, events)
+    metadata = '<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/"><item><dc:title>' + escape(title) + '</dc:title></item></DIDL-Lite>'
+    props = {'TrackURI': url, 'TrackTitle': title, 'CurrentIndex': '1', 'Count': '1',
+             'TrackMetaData': metadata, 'last:CurrentTrackMetaData': metadata,
+             'last:CurrentTrackURI': url, 'QueueContext': '<PlayList><Tracks><Track1><Title>' + escape(title) + '</Title></Track1></Tracks></PlayList>'}
+    for service in audit.services:
+        events.receipts[service].append((service, dict(props)))
+    # The right old payload does not count as a new delivery.
+    assert not audit.observe(11, title, title, events, subscriptions, url)
+    events.accepted['AVTransport'] += 1
+    assert not audit.observe(11, title, title, events, subscriptions, url)
+    with pytest.raises(AssertionError, match='unacknowledged'):
+        audit.begin(11, events)
+    with pytest.raises(AssertionError, match='deadline'):
+        audit.observe(16.001, title, title, events, subscriptions, url)
+    events.accepted['PlayQueue'] += 1
+    assert not audit.observe(11, 'Old native title', title, events, subscriptions, url)
+    assert not audit.observe(11, title, 'Old renderer title', events, subscriptions, url)
+    wrong = {**subscriptions, 'PlayQueue': 'unrelated-SID'}
+    assert not audit.observe(11, title, title, events, wrong, url)
+    assert audit.observe(11, title, title, events, subscriptions, url)
+    assert audit.observed == audit.requested == 1 and not audit.pending
+    next_title = audit.begin(20, events)
+    assert next_title != title
+    # A bounded receipt deque dropping old evidence cannot mark a missing
+    # current title successful, even after many newer unrelated callbacks.
+    for _ in range(100):
+        for service in audit.services:
+            events.receipts[service].append((service, dict(props)))
+            events.accepted[service] += 1
+    assert not audit.observe(21, next_title, next_title, events, subscriptions, url)
+    with pytest.raises(AssertionError, match='deadline'):
+        audit.observe(26.001, next_title, next_title, events, subscriptions, url)
+
+
+def test_sustained_icy_cache_bounds_reject_growth() -> None:
+    from sustained_icy_support import ICYAudit
+    from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES
+    audit = ICYAudit()
+    good = {'total-bytes': LIVE_STATION_BACK_BYTES, 'fw-bytes': 16000, 'raw-input-rate': 6000}
+    audit.sample_cache(good, 180)
+    assert audit.plateau_samples == 1 and audit.cache_epochs == 3
+    for changed in ({'total-bytes': LIVE_STATION_BACK_BYTES + 256 * 1024 + 1},
+                    {'fw-bytes': 256 * 1024 + 1}, {'fw-bytes': -1}):
+        with pytest.raises(AssertionError):
+            audit.sample_cache({**good, **changed}, 181)
+
+
+
+def test_sustained_icy_plateau_uses_retained_history_not_forward_bytes() -> None:
+    from sustained_icy_support import ICYAudit, ICYFramer
+    from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES
+    audit, framer = ICYAudit(), ICYFramer()
+    audit.requested = audit.observed = audit.surface_agreements = 2
+    framer.changes = 3
+    state = {'total-bytes': LIVE_STATION_BACK_BYTES, 'fw-bytes': 256 * 1024}
+    for second in range(180, 241):
+        audit.sample_cache(state, second)
+    assert not audit.evidence()['cache_plateau_verified']
+    with pytest.raises(AssertionError, match='history turnover'):
+        audit.finish(240, framer)
+    audit.late_back_min = LIVE_STATION_BACK_BYTES - 20000
+    audit.late_back_max = LIVE_STATION_BACK_BYTES
+    audit.finish(240, framer)
+    assert audit.evidence()['cache_plateau_verified']
+
+
 if __name__ == '__main__':
-    assert len(sys.argv) == 6 and sys.argv[1] == '--probe'
+    assert len(sys.argv) == 7 and sys.argv[1] == '--probe' and sys.argv[6] in {'icy', 'constant'}
     locale.setlocale(locale.LC_NUMERIC, 'C')
     from sustained_station_support import exercise
 
@@ -174,7 +273,7 @@ if __name__ == '__main__':
         assert Path(production.__file__).resolve().is_relative_to(root)
         assert source_digest(root) == sys.argv[5]
         async with asyncio.timeout(int(sys.argv[4]) + 60):
-            result = await exercise(sys.argv[2], Path(sys.argv[3]), int(sys.argv[4]), sys.argv[5])
+            result = await exercise(sys.argv[2], Path(sys.argv[3]), int(sys.argv[4]), sys.argv[5], changing_icy=sys.argv[6] == 'icy')
         assert source_digest(root) == sys.argv[5]
         print(json.dumps(result, sort_keys=True), flush=True)
 
