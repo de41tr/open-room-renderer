@@ -135,6 +135,19 @@ class NativeQueueStage:
     invalidated: bool = False
 
 
+def _decode_playback_argument(value: str) -> str:
+    """Decode an outer URI wrapper without changing an already decoded URI.
+
+    aiohttp has already decoded the command query parameter. A second decode
+    of an absolute URI would turn escaped path separators and signed-query
+    data into syntax. Some clients additionally encode the entire URI inside
+    the command, so retain exactly one wrapper decode for that representation.
+    """
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", value):
+        return value
+    return unquote(value)
+
+
 def parse_command(command: str) -> ParsedCommand:
     """Parse the HTTP ``command`` query parameter into a stable command name.
 
@@ -146,13 +159,13 @@ def parse_command(command: str) -> ParsedCommand:
     """
 
     if command.startswith("setPlayerCmd:play:"):
-        return ParsedCommand("play", (unquote(command.removeprefix("setPlayerCmd:play:")),))
+        return ParsedCommand("play", (_decode_playback_argument(command.removeprefix("setPlayerCmd:play:")),))
     if command.startswith("setPlayerCmd:playlist:"):
         rest = command.removeprefix("setPlayerCmd:playlist:")
         url, _, index = rest.rpartition(":")
-        return ParsedCommand("playlist", (unquote(url), index or "0"))
+        return ParsedCommand("playlist", (_decode_playback_argument(url), index or "0"))
     if command.startswith("setPlayerCmd:m3u:play:"):
-        return ParsedCommand("m3u_play", (unquote(command.removeprefix("setPlayerCmd:m3u:play:")),))
+        return ParsedCommand("m3u_play", (_decode_playback_argument(command.removeprefix("setPlayerCmd:m3u:play:")),))
     if command.startswith("setPlayerCmd:seek:"):
         return ParsedCommand("seek", (command.rsplit(":", 1)[-1],))
     if command.startswith("setPlayerCmd:vol:"):
