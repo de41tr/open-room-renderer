@@ -220,7 +220,8 @@ def _integer(value: object, minimum: int, maximum: int) -> int:
     return value
 
 
-def decode_command(encoded: bytes) -> WebCommand:
+def _decode_request(encoded: bytes) -> dict[str, object]:
+    """Shared strict JSON boundary for commands and explicit private reads."""
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -245,6 +246,14 @@ def decode_command(encoded: bytes) -> WebCommand:
                              parse_float=finite, parse_constant=invalid)
         if not isinstance(payload, dict) or not isinstance(payload.get("action"), str):
             raise ValueError
+        return payload
+    except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError):
+        raise WebAdmissionError() from None
+
+
+def decode_command(encoded: bytes) -> WebCommand:
+    try:
+        payload = _decode_request(encoded)
         action = payload["action"]
         if action not in _SCHEMAS or payload.keys() != _SCHEMAS[action] | {"action"}:
             raise ValueError
@@ -453,7 +462,7 @@ class WebControlApi:
                 or request.headers.getall("Content-Encoding", [])):
             raise WebAdmissionError()
 
-    async def _body(self, request: web.Request, origin: str) -> WebCommand:
+    async def _body(self, request: web.Request, origin: str) -> bytes:
         if request.query_string or request.headers.getall("Origin", []) != [origin]:
             raise WebAdmissionError("forbidden", 403)
         tokens = request.headers.getall("X-ORR-CSRF", [])
@@ -481,7 +490,7 @@ class WebControlApi:
             raise WebAdmissionError() from None
         except TimeoutError:
             raise WebAdmissionError("request_timeout", 408) from None
-        return decode_command(encoded)
+        return encoded
 
     def snapshot(self) -> dict[str, object]:
         """Detach one complete projection without awaiting or performing I/O."""
@@ -607,8 +616,8 @@ class WebControlApi:
                 raise WebAdmissionError("not_found", 404)
             if request.method != "POST":
                 raise WebAdmissionError("method_not_allowed", 405)
-            command = await self._body(request, origin)
-            command = self._admit(command)
+            encoded = await self._body(request, origin)
+            command = self._admit(decode_command(encoded))
             dispatched = True
             result = await self._dispatch(command)
             return web.json_response({"request_acknowledged": True, **(result or {})}, headers=_HEADERS)
