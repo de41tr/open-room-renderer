@@ -561,6 +561,9 @@
     const context = dialogContext;
     if (!context) return;
     // This detects observed changes, not an atomic server-side precondition.
+    // Save current keeps the selection from opening, even if a later observation
+    // changes back. A failed favorites read does not hide fresh selection changes.
+    if (context.mode === "current" && control.fresh && (context.generation !== snapshot.generation || context.session !== snapshot.session_id)) context.stale = true;
     // Rename/Delete latch even while pending, letting own successful readback
     // reach verification. Target drafts guard only before their single send;
     // the redacted list cannot verify that command’s exact saved URL.
@@ -569,7 +572,11 @@
       if (favoriteRecord(current) !== context.record) context.stale = true;
     }
     $("favorite-submit").disabled = !ready || !control.favoritesFresh || context.pending || context.stale || context.sent;
-    if (context.stale && !context.pending && !context.sent) text("favorite-dialog-status", (context.resultText ? context.resultText + " " : "") + "This favorite changed or is no longer available. Close this dialog and review the favorites list before reopening " + (context.mode === "target" ? "Change URL." : "Rename or Delete."));
+    if (context.stale && !context.pending && !context.sent) {
+      const guidance = context.mode === "current" ? "The current selection changed or the renderer restarted. Close this dialog and review the current track or stream before reopening Save current."
+        : "This favorite changed or is no longer available. Close this dialog and review the favorites list before reopening " + (context.mode === "target" ? "Change URL." : "Rename or Delete.");
+      text("favorite-dialog-status", (context.resultText ? context.resultText + " " : "") + guidance);
+    }
   }
   function openFavorite(mode, favorite = null, opener = $(mode === "current" ? "save-current" : "add-favorite")) {
     if ($("favorite-dialog").open || !control.canMutate("favorite_add") || !control.favoritesFresh || mode === "target" && !favorite?.editable) return;
@@ -611,7 +618,6 @@
     if (!context) return;
     renderFavoriteDraft(control.canMutate("play"));
     if (context.stale || context.pending || context.sent || !control.canMutate("favorite_add")) return;
-    if (context.mode === "current" && context.session !== snapshot.session_id) { text("favorite-dialog-status", "The renderer restarted. Close this dialog and choose Save current again."); return; }
     const name = $("favorite-name").value;
     const url = $("favorite-url").value;
     if (!["delete", "target"].includes(context.mode) && !name.trim()) { text("favorite-dialog-status", "Enter a name for this favorite."); $("favorite-name").focus(); return; }

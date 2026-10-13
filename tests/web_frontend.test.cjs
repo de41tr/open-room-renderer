@@ -215,6 +215,94 @@ test('app renders metadata as text, and polling preserves favorite form edits', 
   assert.equal(h.ids.get('favorite-name').value, 'My unsaved name'); assert.equal(h.ids.get('favorite-url').value, 'https://example.com/private?token=abc');
   assert.equal(h.ids.get('favorite-dialog').open, true);
 });
+const currentDraftWarning = 'The current selection changed or the renderer restarted. Close this dialog and review the current track or stream before reopening Save current.';
+test('Save current latches fresh selection or session changes, preserves input, and requires reopening', async () => {
+  for (const changed of [state({generation: 8}), state({session_id: 'restarted'})]) {
+    const h = await appHarness(); await h.ids.get('save-current').fire('click'); h.ids.get('favorite-name').value = 'My unsent name';
+    h.setState(changed); h.setFavorites(favorites([favorite()], changed.session_id)); await h.refresh();
+    assert.equal(h.ids.get('favorite-dialog').open, true); assert.equal(h.ids.get('favorite-name').value, 'My unsent name');
+    assert.equal(h.ids.get('favorite-submit').disabled, true); assert.equal(h.ids.get('favorite-dialog-status').textContent, currentDraftWarning);
+    // A stale draft stays blocked even if the observation returns to its original identity.
+    h.setState(state()); h.setFavorites(favorites([favorite()])); await h.refresh();
+    h.ids.get('favorite-submit').disabled = false; await h.ids.get('favorite-form').fire('submit');
+    assert.equal(h.posts().length, 0); assert.equal(h.ids.get('favorite-submit').disabled, true);
+    assert.equal(h.ids.get('favorite-dialog-status').textContent, currentDraftWarning);
+    h.setState(changed); h.setFavorites(favorites([favorite()], changed.session_id)); await h.refresh();
+    const dialog = h.ids.get('favorite-dialog'); dialog.close = () => {dialog.open = false;};
+    await h.ids.get('favorite-close').fire('click'); await h.ids.get('save-current').fire('click'); await dialog.fire('close');
+    assert.equal(dialog.open, true); assert.equal(h.ids.get('favorite-name').value, changed.media.title);
+    assert.equal(h.ids.get('favorite-dialog-status').textContent, ''); assert.equal(h.ids.get('favorite-submit').disabled, false);
+    h.ids.get('favorite-name').value = 'New deliberate save'; await h.ids.get('favorite-form').fire('submit');
+    assert.deepEqual(h.posts(), [{action: 'favorite_current', name: 'New deliberate save', expected_generation: changed.generation}]);
+  }
+});
+test('Save current distinguishes read loss and unchanged metadata from a fresh selection change', async () => {
+  const h = await appHarness(); await h.ids.get('save-current').fire('click'); h.ids.get('favorite-name').value = 'Keep this name';
+  for (const unavailable of ['state', 'favorites', 'offline']) {
+    if (unavailable === 'state') h.setState({generation: 8, session_id: 'unaccepted'});
+    else if (unavailable === 'favorites') h.setFavorites(favorites([], 'mixed-session'));
+    if (unavailable === 'offline') h.offline(); else await h.refresh();
+    assert.equal(h.ids.get('favorite-submit').disabled, true); assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+    await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 0);
+    h.setState(state({media: {...state().media, title: 'Updated metadata'}})); h.setFavorites(favorites([])); await h.refresh();
+    assert.equal(h.ids.get('favorite-submit').disabled, false); assert.equal(h.ids.get('favorite-name').value, 'Keep this name');
+    assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+  }
+  // A valid state change is sufficient even when the favorites read fails.
+  h.setState(state({generation: 8})); h.setFavorites({}); await h.refresh();
+  assert.equal(h.ids.get('favorite-dialog-status').textContent, currentDraftWarning);
+  h.setState(state()); h.setFavorites(favorites([favorite()])); await h.refresh();
+  await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 0); assert.equal(h.ids.get('favorite-submit').disabled, true);
+});
+test('Save current preserves pending and unverified outcomes after an observed change then restoration', async () => {
+  for (const outcome of ['acknowledged', 'unknown', 'rejected']) {
+    const h = await appHarness(), pending = deferred(); h.setPost(() => pending.promise);
+    await h.ids.get('save-current').fire('click'); h.ids.get('favorite-name').value = 'Saved selection';
+    const saving = h.ids.get('favorite-form').fire('submit'); await h.settle();
+    h.setState(state({generation: 8})); await h.refresh(); h.setState(state()); await h.refresh();
+    assert.match(h.ids.get('favorite-dialog-status').textContent, /^PENDING/);
+    assert.doesNotMatch(h.ids.get('favorite-dialog-status').textContent, /Close this dialog/);
+    await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 1);
+    if (outcome === 'unknown') pending.reject(new Error('lost response'));
+    else if (outcome === 'rejected') pending.resolve({__status: 409, error: 'stale_generation', outcome: 'REJECTED', message: 'Refresh before retrying.'});
+    else pending.resolve({request_acknowledged: true, favorite_id: 'saved-id'});
+    await saving; await h.refresh();
+    const status = h.ids.get('favorite-dialog-status').textContent;
+    assert.match(status, outcome === 'acknowledged' ? /^Request acknowledged.*not yet been verified/ : outcome === 'unknown' ? /^UNKNOWN.*No retry was sent/ : /^ERROR.*Refresh before retrying/);
+    assert.ok(status.endsWith(currentDraftWarning)); assert.equal(h.ids.get('favorite-dialog').open, true);
+    assert.equal(h.ids.get('favorite-name').value, 'Saved selection'); assert.equal(h.ids.get('favorite-submit').disabled, true);
+    await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 1);
+    assert.deepEqual(h.posts()[0], {action: 'favorite_current', name: 'Saved selection', expected_generation: 7});
+  }
+});
+test('Save current still closes on verified pending ACK and retains a prior UNKNOWN after later change', async () => {
+  const h = await appHarness(), pending = deferred(); h.setPost(() => pending.promise);
+  await h.ids.get('save-current').fire('click'); h.ids.get('favorite-name').value = 'Saved selection';
+  const saving = h.ids.get('favorite-form').fire('submit'); await h.settle();
+  h.setState(state({generation: 8})); h.setFavorites(favorites([{...favorite(), id: 'saved-id', name: 'Saved selection'}])); await h.refresh();
+  assert.match(h.ids.get('favorite-dialog-status').textContent, /^PENDING/);
+  pending.resolve({request_acknowledged: true, favorite_id: 'saved-id'}); await saving;
+  assert.equal(h.ids.get('favorite-dialog').open, false); assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+  await h.ids.get('save-current').fire('click'); h.setPost(() => {throw new Error('lost response');}); await h.ids.get('favorite-form').fire('submit');
+  const outcome = h.ids.get('favorite-dialog-status').textContent; assert.match(outcome, /^UNKNOWN.*No retry was sent/);
+  h.setState(state({generation: 9})); await h.refresh();
+  assert.equal(h.ids.get('favorite-dialog-status').textContent, outcome + ' ' + currentDraftWarning);
+  await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 2); assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN');
+});
+test('Save current navigation clears stale drafts without resending or hiding a late outcome', async () => {
+  const h = await appHarness(), pending = deferred(); h.setPost(() => pending.promise);
+  await h.ids.get('save-current').fire('click'); h.ids.get('favorite-name').value = 'Old name';
+  const saving = h.ids.get('favorite-form').fire('submit'); await h.settle();
+  h.setState(state({generation: 8})); await h.refresh(); h.pagehide(); h.pageshow();
+  assert.equal(h.ids.get('favorite-dialog').open, false); assert.equal(h.ids.get('favorite-name').value, '');
+  pending.reject(new Error('lost response')); await saving; await h.refresh();
+  assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN'); assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+  await h.ids.get('save-current').fire('click'); assert.equal(h.ids.get('favorite-submit').disabled, false);
+  h.setState(state({generation: 9})); await h.refresh(); assert.equal(h.ids.get('favorite-dialog-status').textContent, currentDraftWarning);
+  h.pagehide(); h.pageshow(); await h.refresh();
+  assert.equal(h.ids.get('favorite-dialog').open, false); assert.equal(h.ids.get('favorite-name').value, '');
+  assert.equal(h.ids.get('favorite-dialog-status').textContent, ''); assert.equal(h.posts().length, 1);
+});
 test('favorite Rename and Delete preserve drafts but reject an observed external change or removal', async () => {
   for (const mode of ['rename', 'delete']) for (const removed of [false, true]) for (const restart of [false, true]) {
     const h = await appHarness(); await favoriteAction(h, mode).fire('click');
