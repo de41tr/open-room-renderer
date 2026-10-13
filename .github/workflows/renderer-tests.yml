@@ -132,6 +132,7 @@ jobs:
     env:
       PYTHONPATH: .
       PYTHONUNBUFFERED: "1"
+      ORR_TEST_MIGRATION_SOCKET: "1"
     steps:
       - name: Check out contribution without saved credentials
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -235,6 +236,9 @@ jobs:
         run: |
           prefix="$RUNNER_TEMP/orr-native"
           .venv-ci/bin/python scripts/install-native.py --prefix "$prefix"
+          migration_source="$RUNNER_TEMP/orr-migration-source"
+          .venv-ci/bin/python scripts/install-native.py --stage-only --prefix "$migration_source"
+          "$prefix/venv/bin/python" -I scripts/smoke-migration-profile.py "$migration_source" "$prefix"
           "$prefix/venv/bin/python" -I - "$prefix" <<'PY'
           import json
           from importlib.resources import files
@@ -271,6 +275,8 @@ jobs:
             .venv-ci/bin/python -m pytest -q -s tests/test_cli_lifecycle_native.py
           .venv-ci/bin/python "$prefix/uninstall.py" --prefix "$prefix" --uninstall
           test -f "$prefix/state/uuid"
+          test -f "$prefix/migrated-profile/config.yaml"
+          test -f "$prefix/migrated-profile/state/uuid"
           test ! -e "$prefix/venv/bin/open-room-renderer"
 
       - name: Measure clocked digital queue transitions

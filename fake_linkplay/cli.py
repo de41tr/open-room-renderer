@@ -259,7 +259,11 @@ def build_parser(*, private_client_errors: bool = False) -> argparse.ArgumentPar
     """Build the command-line parser used by the console script."""
 
     parser_type = PrivateClientArgumentParser if private_client_errors else argparse.ArgumentParser
-    parser = parser_type(prog="open-room-renderer")
+    parser = parser_type(
+        prog="open-room-renderer",
+        epilog="Offline native upgrade preparation: use the new installation\'s Python with "
+               "-m fake_linkplay.migration_profile --help (see GETTING_STARTED.md).",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
     serve_p = sub.add_parser("serve")
     serve_p.add_argument("--config", help="YAML file (default: configs/config.example.yaml)")

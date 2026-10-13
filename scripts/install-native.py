@@ -265,7 +265,10 @@ def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require
         # Hash the files actually copied, not a concurrently edited working tree.
         receipt["source"] = source_receipt(prefix / "source")
         # JSON is a YAML subset, readable by the renderer's existing YAML loader.
-        (prefix / "config.yaml").write_text(json.dumps(config, indent=2) + "\n")
+        config_bytes = (json.dumps(config, indent=2) + "\n").encode("utf-8")
+        (prefix / "config.yaml").write_bytes(config_bytes)
+        # Verification metadata only: runtime config is never manifest-owned.
+        receipt["initial_config_sha256"] = hashlib.sha256(config_bytes).hexdigest()
         (prefix / "open-room-renderer.service").write_text(user_unit(prefix))
         shutil.copyfile(__file__, prefix / "uninstall.py")
         if stage_only:
