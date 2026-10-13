@@ -1,5 +1,64 @@
 # Test evidence and limits
 
+## Genuine browser and practical operator checkpoint
+
+**Real browser, not a DOM double:** hosted Chrome 154.0.8037.97/ChromeDriver 154
+ran with normal sandbox against production HTTP/Unix IPC and mpv 0.37/null.
+First run 38353544786 (`fc5e4a5`) passed desktop rendering/navigation and actual
+Play/Pause before a too-strict Tab-wrap assertion failed. Its console proved the
+`data:,` favicon violated CSP. Run 38354874024 (`97ce1f6`) has an empty captured
+console after the same-origin empty 204 fix, but fails the next assumption:
+noninteractive BODY fallback retains document.hasFocus=true under headless
+WebDriver. The corrected check records that value without inferring chrome
+focus, requires native Tab re-entry and rejects background controls. Both failed
+runs stay recorded. The corrected smoke then passed at `66cbe158` in run
+38356723243/job 115161233008, completing desktop/mobile and actual downloads.
+Verified artifact 11792544975 has empty console logs, four ACK200s, actual
+advancing/paused PCM-null readback and two 205-byte files matching canonical/
+server bytes. All 48 source hashes match the published revision; actual screenshots
+were inspected. Browser work finished at 06:29 within budget. This is not the
+full manual matrix or physical/Firefox acceptance.
+See [reproduction/artifacts scope](WEB_BROWSER_ACCEPTANCE.md).
+
+The favicon change passes 160 focused Web/frontend cases in 9.02s, including the
+existing 169 Node cases. Host/method/body/query/path/CSP rules and four packaged
+assets remain unchanged. No local browser/socket bypass was attempted.
+
+**Concrete Spotify diagnostic:** independent review and 23 synthetic REST/WS
+cases cover projection privacy, NO_SESSION, bounded requests/frames/deadlines,
+redirect refusal before a separate target is contacted, cleanup and lossy-event
+semantics. A callback-removed mutant contacts the forbidden second server and
+fails. Root diagnostic+legacyCLI checks pass 49 on Python 3.12/3.11 in 7.66s/7.72s.
+No upstream client/account/provider traffic, tokens, playback or hardware claim.
+
+**Explicit output configuration:** focused implementation checks pass 367 with
+seven native opt-in skips; a new existing-lane Unix test must prove production
+supplies audio-device=null, no-config, load-scripts=no and null-fallback=no, while
+ignoring a deliberately conflicting synthetic MPV_HOME. Its wrapper cannot mask
+those production options. This is pending hosted execution, not a local native
+pass or physical DAC test. Unset spawn arguments/signatures remain compatible;
+foreign/replaced/unverified peers are refused before writes only in opt-in mode.
+
+**Integrated CLI/input check:** combined output/startup/Spotify tests pass 416
+on Python 3.12/3.11 in 35.77s/35.63s. Config/Spotify/legacyCLI integration passes 56
+in 7.98s; independent review confirms parser/dispatch/privacy hooks. Config-check
+success is explicitly limited to existing startup-input checks; it does not
+read saved state, create identity, bind/network, spawn/contact a player or certify
+ports/final balance/DAC. An independent pre-import audit probe blocks audited
+write-capable opens, sockets and subprocess creation; this is not a syscall trace.
+**Output diagnosis** independently passes 152 focused cases on each interpreter
+plus existing CLI coverage; a real buffered-await deadline gap was fixed before
+freeze. Root final audio/output/lifecycle/config/Spotify/legacy integration passes
+**208** in **11.59s (3.12) /11.87s (3.11)**. The existing new null-device native
+case adds read-only intent/active-driver checks without a second player/campaign;
+that actual native slice is still hosted pending. No startup, playback, state
+write, unlink or signal is permitted in the diagnostic tests.
+
+The preceding exact browser head `66cbe158` is fully green in run 38356723243,
+all four jobs/every step, verified 06:40 UTC. Hosted floor 5492/74 finishes
+145.74s/142.65s under 165s. This does not certify the new operator code.
+No redundant full local sweep or long campaign. Exact new-head CI is required.
+
 ## Save current draft and observed floor correction
 
 A fresh selection/session change previously left Save current enabled with its
@@ -35,7 +94,15 @@ The one final candidate replay includes the frozen Save current frontend patch:
 **4,784 passed /74 skipped** in **125.67s**, and **707 passed** in **113.01s**;
 helper exits 0 in **126.976s** under 165s. This is local timing, not a guarantee of
 hosted headroom. No baseline full rerun or further timing campaign was added.
-Exact corrected-head hosted CI remains **PENDING** and decisive.
+Exact corrected head **`ba7c759`** passes
+[run 38343514991](https://github.com/de41tr/open-room-renderer/actions/runs/38343514991),
+all three jobs/every step, verified **04:03 UTC**. Hosted floor groups pass
+**142.33s/138.29s**; x86_64 defaults **138.50s/135.00s**, ARM64 defaults
+**135.96s/133.35s**, all totaling **5491/74**. All existing native/production Unix,
+client, installed lifecycle, discovery and Snapcast gates pass. Both installed
+owned/external CLI logs confirm the four assets across SIGTERM/SIGINT/SIGHUP and
+restart; they do not certify a real browser. Scheduling work is now closed.
+No additional local/native replay accompanies the 04:12 handover-only update.
 
 ## Initial balance startup privacy checkpoint
 
@@ -1335,7 +1402,7 @@ x86_64 and AArch64 in
 Actual multicast discovery led to fetched control/event URLs, two distinct WAV
 resources and real production Unix-IPC play/pause/resume/Next/volume/mute/unmute/
 Stop, with HTTP/SOAP/GENA agreement and complete child/task/listener cleanup.
-The new nested-playlist cleanup also passed with actual mpv0.37 decoding.
+The new nested-playlist cleanup also passed with actual mpv 0.37 decoding.
 
 The continuously clocked digital probe now calibrates the known125ms silence
 exactly and preserves all96000 frames per track. Equal-rate ORR boundary gaps
@@ -1580,7 +1647,7 @@ controller cleanup returned to one task, seven FDs, one thread and zero children
 Child resource counts were separate; this is bounded stress, not leak freedom.
 
 The repaired private clocked Snapcast ingress passed all eleven stages using
-production Unix IPC with mpv0.37, PulseAudio16.1 and Snapcast0.27 on both runners.
+production Unix IPC with mpv 0.37, PulseAudio16.1 and Snapcast0.27 on both runners.
 Two file-output clients demonstrated distribution, join/leave/rejoin, per-client
 non-atomic group gain, exact-zero group/upstream mute, reconnect retention and
 HTTP Stop draining to digital silence. All owned children were reaped and
@@ -1622,7 +1689,7 @@ skipped in 291.85s. Installed CLI/actual-client production IPC still await CI.
 
 [Run38200058359](https://github.com/de41tr/open-room-renderer/actions/runs/38200058359)
 passed every lane on x86_64 and AArch64. The actual pywiim2.3.9 client used
-production Unix IPC with mpv0.37, selected two distinct generated resources,
+production Unix IPC with mpv 0.37, selected two distinct generated resources,
 and delivered the exact encoded media path/query unchanged. Parsed client,
 canonical HTTP, native readback and ordered GENA agreed for play, pause, resume,
 Next/Previous, volume, mute/unmute and Stop. The null-output gate checks actual
@@ -1966,7 +2033,7 @@ request observations are printed. Scope is REAL_BACKEND/libmpv/null, not HLS
 through production Unix IPC, real WAN, original app, DRM or physical audio.
 
 
-At 3e74b24, actual Ubuntu mpv0.37/FFmpeg6.1.1 revealed that repeated segment
+At 3e74b24, actual Ubuntu mpv 0.37/FFmpeg6.1.1 revealed that repeated segment
 503s can end the HLS demuxer about 1.5s after its initial cache stall. Native
 END_FILE/EOF, idle and disappearance of path/time proved teardown, not just a
 missing clock. The no-EOF fixture therefore now holds an actual pending HTTP
@@ -1975,7 +2042,7 @@ body, with open-transport, no-EOF, stationary-time and delivery checks. Playlist
 
 The same hosted run exposed a native child-readiness race: path/current/playing
 can appear before the demuxer opens and playback-time exists. A public on_load
-hook reproduced the original failure on mpv0.37/0.40 with both M3U and PLS. The
+hook reproduced the original failure on mpv 0.37/0.40 with both M3U and PLS. The
 bounded test helper now waits for a nonnegative clock while pinning exact native
 child identity and renderer ownership, then still requires >0.25s actual decoded
 progress. Only exact property-unavailable and finite negative preroll are retried;
@@ -1985,7 +2052,7 @@ code, history policy, timeouts, pause/default-reset and stale guards are unchang
 
 
 The exact integrated correction passed 2363 default tests /62 opt-in skips.
-Private official Ubuntu mpv0.37 plus FFmpeg6.1.1 generation/decoding passed all
+Private official Ubuntu mpv 0.37 plus FFmpeg6.1.1 generation/decoding passed all
 five HLS cases, six child-cache cases and 27 deterministic readiness guards in
 112.46s. mpv0.40 plus FFmpeg7.1.5 passed the eleven native cases in 111.15s.
 These are actual x86_64 library replays with compatible host dependencies,

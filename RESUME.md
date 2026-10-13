@@ -10,10 +10,11 @@ stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 Work exclusively on `dot/renderer-next-phase-20261013` in
 [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
 `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest CI-verified checkpoint **`3e44ad0abb5af741fdad02418d776370cb57e257`** passes all three
-jobs/every step in **run 38339941041**, verified **03:24 UTC**. Its hosted floor
-passes **4849+550 /74 opt-in skips** in **153.33s/129.02s**, for **5399/74** overall.
-Verify the actual branch/head on resumption; any newer edit needs separate CI.
+Latest fully green checkpoint **`66cbe15871d6edec58cc0ad12bae9433ac711f6a`**
+passes all **four jobs/every step** in **run 38356723243**, verified **06:40 UTC**.
+Hosted floor groups **4784+708 /74 skips** pass **145.74s/142.65s**, for **5492/74**.
+Genuine Chrome and all prior native/Unix/installed/discovery/Snapcast gates pass.
+Later operator features still need their own exact-head CI/native proof.
 
 ## What is already delivered
 
@@ -46,45 +47,37 @@ external-file concurrency policy is added.
 
 ## Immediate priorities
 
-1. **Keep evidence exact-source.** Recheck the current published head and its
-   own CI before declaring a later checkpoint green. The `3e44ad0` run is complete;
-   old pending export/scheduling instructions are superseded. Retain existing
-   native, Unix IPC, installation, PCM, discovery and Snapcast gates and all caps.
-2. **Verify the initial-balance diagnostic checkpoint.** The known CLI startup
-   ValueError now has fixed private guidance and exit 2, rather than traceback/1.
-   Focused review passes 487 cases per interpreter. Its `696700c` floor run hit
-   the 165s watchdog; group 2 passed 550/136.61s, with no assertion failure.
-   The measured startup-state module transfer has reviewed exact collection/skip
-   parity on both interpreters. One combined floor replay passes 5491/74 in
-   125.67s/113.01s; corrected-head hosted CI is PENDING. Retain all caps and stop
-   timing work after that gate succeeds.
-   Preserve precedence, public exceptions, saved bytes and existing teardown.
-   This remains post-acquisition validation, with possible earlier identity/gain
-   effects. A separate frontend-only Save current stale-draft correction preserves
-   name/original intent and requires Close/reopen, with no silent retry/rebase.
-   Root 169 Node/159 Web checks pass; genuine browser acceptance stays pending.
-   One combined floor replay is justified by the failed gate, not a new campaign.
-3. **Review value/risk at 04:12–04:42 UTC**, then every 90–120 minutes within the
-   authorized window. Prefer concrete user workflow gaps; stop architecture,
-   timing and redundant soak/full-suite campaigns unless new evidence justifies
-   work. Use [PLAN.md](PLAN.md) and [STRATEGIC_REVIEW.md](docs/STRATEGIC_REVIEW.md)
-   for constraints and prior assessments, not superseded next-step sentences.
-4. **Keep acceptance gaps explicit.** Genuine browser layout/focus/download,
-   physical ARMv7/XU4/DAC/original-app and provider-account acceptance are pending.
-   Use [the browser checklist](docs/WEB_BROWSER_ACCEPTANCE.md) only when a supported
-   route is available; do not retry known-blocked routes or bypass security warnings.
-   [ADR 001](docs/adr/001-spotify-sidecar.md) defers integrated Spotify on policy
-   and all-entry audio arbitration; standalone official Soloist DIY is supported.
-   No provider-account login, credentials, OEM identity, proprietary redistribution
-   or private firmware/traces. No provider code or client/key was added.
-   Favorites/M3U export remains deferred.
-5. **Stabilize and hand over by the deadline.** No large/risky work after 16:30 UTC;
-   final stabilization begins at 17:00 UTC and active work stops at 18:00 UTC.
-   Preserve the single queue/playback authority, lock/generation ordering, normal
-   protocol/error behavior and private-state boundaries; document deliberate
-   degraded-failure fixes separately. Keep behavior-neutral extraction
-   commits separate from features, leave the PR in draft, and report remaining
-   acceptance limits and the final head's actual CI status.
+The explicit **05:35/05:56 corrected mandate** supersedes the 04:12 wait decision.
+Maintain three useful potential packages and work independently during CI.
+
+1. **Keep the real-browser checkpoint exact.** The bounded smoke completed
+   successfully at 06:29 on `66cbe158`, run 38356723243/job 115161233008. Verified
+   artifact 11792544975 proves desktop/mobile, native dialog keyboard/focus, actual
+   mpv/null control and downloaded JSON bytes. First two failed focus assumptions
+   and the repaired favicon CSP defect stay recorded. No further harness growth
+   is needed; later source gets the existing gate, with wider manual scope pending.
+2. **Publish reviewed operator features in separate commits.** The optional
+   read-only go-librespot REST/WS diagnostic has strict loopback/private/bounded
+   contracts and synthetic evidence. Explicit audio-device selection uses an
+   isolated owned-mpv profile; its new short native null proof is still pending.
+   `config check` exposes only pure startup-input validation, not runtime health.
+   `audio diagnose` is a bounded two-property no-start IPC reader; final merged
+   output/config/Spotify/legacy checks pass 208 per interpreter.
+   Combined output/startup/Spotify checks pass 416 per interpreter; integrated
+   config/Spotify/legacy CLI checks pass 56. Preserve source-specific CI claims.
+3. **Continue the concrete pipeline.** Next assess truthful output diagnostics
+   and Web room-name editing through the existing persisted transaction. Offline
+   new-prefix migration is lower priority; never put imported runtime state into
+   the uninstaller's owned-file manifest. No generic framework or artificial tests.
+4. **Honor the corrected Spotify choice.** [ADR001](docs/adr/001-spotify-sidecar.md)
+   ranks go-librespot 76 / librespot 69 / Soloist 61. Build expiry is not key renewal.
+   No actual account/client/provider operation occurred. A separately accepted
+   exclusive whole-service mode is possible without shared DSP, but foreign mpv,
+   uncertain shutdown, provider terms and physical output remain real boundaries.
+5. **Review value at 07:05–07:35 UTC**, then every 90–120 minutes, without waiting
+   just for reporting, CI or unavailable hardware/accounts. No large/risky work
+   after 16:30; stabilize 17:00; stop 18:00 UTC even if CI is pending. Remain on the
+   existing branch/Draft PR #2, no main push, merge or release.
 
 The historical handovers below are retained verbatim for evidence only. They do
 not reopen completed tasks or authorize work beyond this phase's hard stop.

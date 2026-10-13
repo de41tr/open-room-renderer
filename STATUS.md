@@ -8,12 +8,58 @@
 based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
 squash-merged. No main push, merge or release is authorized for this phase.
 
-Latest CI-verified checkpoint **`3e44ad0abb5af741fdad02418d776370cb57e257`** passes all three
-jobs and every step in **run 38339941041**, verified **03:24 UTC**. Hosted floor
-groups pass **4849 + 550 /74 opt-in skips** in **153.33s/129.02s** under the
-unchanged 165-second watchdog: **5399 passed /74 skipped** in total. Native,
-installed-lifecycle, production Unix and later acceptance gates are successful.
-This evidence applies only to that exact source; later edits need their own CI.
+Latest fully CI-verified checkpoint **`66cbe15871d6edec58cc0ad12bae9433ac711f6a`**
+passes **all four jobs/every step** in **run 38356723243**, verified **06:40 UTC**.
+This includes the genuine Chrome smoke and the unchanged floor/native/Unix/
+installed/discovery/Snapcast gates. Hosted floor groups **4784+708 /74 skips**
+pass **145.74s/142.65s** under 165s: **5492 passed /74 skipped** total.
+The browser artifact is verified below. Later operator features need their own
+exact-head CI, including the new short null-device/diagnostic proof.
+
+## Active corrected work
+
+The explicit 05:35/05:56 priorities supersede the earlier review/wait decision.
+The branch is active: real-browser acceptance, a concrete read-only Spotify
+integration, explicit output selection and safe configuration checking are
+separate reviewed packages. No account/hardware prerequisite prevents their
+software work; no report/CI wait is used instead of useful independent work.
+
+- **Browser:** Chrome 154.0.8037.97 actually rendered desktop layout/navigation
+  and drove Play/Pause through production HTTP/Unix IPC to mpv/null. Runs
+  38353544786 (`fc5e4a5`) and 38354874024 (`97ce1f6`) failed on documented native
+  Tab-boundary assumptions, not fabricated browser unavailability. Exact focus
+  state is now recorded; noninteractive BODY fallback must re-enter the modal
+  and background interaction remains forbidden. A real favicon CSP defect is
+  fixed by a guarded same-origin empty 204; second-run console is empty.
+  **REAL_CHROME_SMOKE_PASSED** at `66cbe158`, run 38356723243/job 115161233008:
+  desktop 1280/mobile 390, keyboard/focus, real control and both downloaded JSON
+  files passed; console logs are empty and all 48 source hashes match. Artifact
+  11792544975 is verified. Finished 06:29, within the 07:05:39 cutoff, without
+  relaxing CSP/sandbox or hiding errors. Broader manual/hardware scope is pending.
+- **Spotify:** revised ranking is go-librespot **76**, librespot **69**, Soloist
+  **61**. Soloist's binary expiry is distinct from key lifetime. The new optional
+  `spotify diagnose --port PORT [--watch-seconds 0..30]` uses read-only numeric-
+  loopback REST/WS, private allowlisted observations, explicit NO_SESSION, bounded
+  reads/events and no application retry loop. Independent synthetic tests pass;
+  no client/account/login/playback/lifecycle/shared-DSP claim. See
+  [the CLI](docs/SPOTIFY_DIAGNOSTIC.md) and [corrected ADR](docs/adr/001-spotify-sidecar.md).
+- **Output selection:** optional `mpv_audio_device` config starts only a verified
+  owned mpv with no ambient config/scripts or null fallback. Unset behavior is
+  unchanged; foreign/replaced/unverified sockets refuse commands. Exact device
+  discovery/configuration is documented. Focused tests pass; the new bounded
+  production-Unix/null proof is hosted-CI pending. Physical DAC remains pending.
+- **Output diagnosis:** `audio diagnose --config PATH` makes only two bounded
+  read-only IPC property requests, without starting/stopping a player or calling
+  playback/status reconciliation. It separates disk intent, live option and
+  active driver; null/unavailable/errors and sequential/non-atomic observations
+  stay explicit. Root final CLI/output integration passes **208** on both Python
+  versions; the small attached native slice is hosted-CI pending.
+- **Config preflight:** `config check --config PATH` uses the existing pure
+  startup-input reader without state/UUID creation, saved-state reads, network
+  or backend access. Fixed success explicitly excludes full runtime validation.
+  The merged config/Spotify/legacy CLI suite passes **56 tests**; combined
+  output/startup/Spotify checks pass **416** on each Python 3.11/3.12. No redundant
+  full local suite was run; new exact-head CI remains required.
 
 ## Implemented scope
 
@@ -70,7 +116,7 @@ playback with no native/media mutations; all 231 previous native assertions and
 30s/35s caps remain. A one-fence-removed negative probe really overwrites its
 synthetic file and fails. This is not process/systemd restart, unreadable-file
 native proof, repaired-library recovery, browser or physical audio acceptance.
-Exact preservation head `3e44ad0` is fully green in the run above. Hosted x86_64/
+Exact preservation head `3e44ad0` is fully green in run 38339941041. Hosted x86_64/
 ARM64 logs independently confirm all seven write refusals, byte preservation,
 usable active DSP and cleanup. Later changes still require their own CI.
 
@@ -106,7 +152,8 @@ green checkpoint. A one-module transfer moves `test_startup_state.py` (measured
 parity pass on both interpreters. One combined Python 3.11 replay passes
 **4784 + 707 /74 skips** in **125.67s/113.01s**, helper exit 0 in 126.98s under
 the same 165s cap. No coverage, assertion, helper, process count or cap changes.
-Exact corrected-head hosted CI is **PENDING**; no further timing run is needed.
+Exact corrected head `ba7c759` is fully green in run 38343514991, with hosted
+floor groups 142.33s/138.29s. No further timing run is needed.
 
 ### Latest favorite-repair evidence
 
@@ -146,26 +193,27 @@ and evidence limits are retained in [TESTING.md](docs/TESTING.md).
 
 ## Remaining limits and next decisions
 
-**BROWSER_ACCEPTANCE_PENDING:** genuine rendering/layout, accessibility/focus,
-interruption and download-to-disk acceptance remain unperformed. The full UI is
+**BROWSER_ACCEPTANCE_PENDING** applies to the wider manual/browser matrix.
+The bounded genuine Chrome desktop/mobile/control/dialog/download smoke passed
+at `66cbe158`; Firefox, physical mobile, full accessibility and interruption
+coverage remain outstanding. The full UI is
 available at the existing `/ui/` path; use [the browser checklist](docs/WEB_BROWSER_ACCEPTANCE.md)
-when a supported route is available. DOM doubles and native HTTP flows are not
+for the remaining scope. DOM doubles and native HTTP flows alone are not
 browser acceptance. Legacy unauthenticated controls remain a trusted-LAN limit.
 **HARDWARE_PENDING:** physical ARMv7/XU4, DAC/ALSA/audio and original-app acceptance
 remain outstanding; no physical-silence or hardware claim is made.
 
-Spotify feasibility is complete. [ADR 001](docs/adr/001-spotify-sidecar.md)
-supports a separately user-installed official Soloist DIY experiment, while
-integrated playback is **DEFERRED** on unresolved all-entry audio arbitration
-and combined-provider policy scope. Provider account acceptance is
-**ACCOUNT_PENDING**. No credentials, client/key, provider code or proprietary
-binary was added.
+Spotify's preferred technical candidate is now **go-librespot**, with a concrete
+read-only diagnostic first. Productive receiver/lifecycle/output mode still has
+**TERMS_PENDING / ACCOUNT_PENDING / HARDWARE_PENDING / ARBITRATION_PENDING**.
+An explicit exclusive whole-service mode is a valid later boundary; a universal
+multi-provider framework and shared DSP are not prerequisites for safe components.
 
-The combined draft-recovery and floor correction needs its own exact-head CI. The 02:42
-value review prioritizes concrete data-preservation/recovery defects over broad
-feature growth. Next review: **04:12–04:42 UTC**. Avoid redundant endurance,
-timing or known-blocked browser campaigns. Start no large/risky new work after
-**16:30 UTC**, stabilize from **17:00 UTC**, and stop at **18:00 UTC**.
+Next ranked packages: publish/verify the reviewed operator features, verify
+read-only output diagnosis, then complete the Web room-name workflow. The
+bounded genuine-browser package is complete. New-prefix migration is a lower-priority convenience
+candidate, not an excuse for an unsafe in-place updater. Next value review:
+**07:05–07:35 UTC**. Retain 16:30 risk cutoff, 17:00 stabilization and 18:00 hard stop.
 See [RESUME.md](RESUME.md) for the bounded next steps and [PLAN.md](PLAN.md) for
 this phase's full constraints. The historical reports below retain their own
 exact-source scope, deadlines and failures.

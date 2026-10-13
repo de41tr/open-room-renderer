@@ -5,6 +5,19 @@ real-Chrome smoke now has its own CI job; treat it as passed only when the
 **Real Chrome / desktop and mobile smoke** job succeeds for the exact revision.
 The older JavaScript/DOM-double tests remain separate and cannot satisfy it.
 
+**REAL_CHROME_SMOKE_PASSED** at `66cbe15871d6edec58cc0ad12bae9433ac711f6a`:
+[run 38356723243](https://github.com/de41tr/open-room-renderer/actions/runs/38356723243),
+Chrome job 115161233008. Desktop 1280 and mobile-emulated 390 rendering/navigation,
+modal keyboard/focus/background blocking, production HTTP/Unix IPC Play/Pause,
+and real downloaded JSON bytes all passed. Both console logs are empty. The two
+205-byte files match canonical/server bytes at SHA-256
+`f6c4393a80916c5f8222c81d072cf8dce16b5d1ab634b19ceadf13dd6b62fde4`.
+[Verified artifact](https://github.com/de41tr/open-room-renderer/actions/runs/38356723243/artifacts/11792544975)
+contains actual PNGs, downloads and source/readback evidence; all 48 source hashes
+match that published revision. Work completed at 06:29 UTC within the 90-minute
+budget. This scopes one real browser smoke, not physical audio/mobile, Firefox,
+screen readers or every manual case. Later changes require their own CI.
+
 ## Reproducible real-browser smoke
 
 On an unprivileged Linux environment with working loopback/Unix sockets, installed
@@ -74,8 +87,8 @@ response at `/ui/favicon.ico`, through the existing guarded static handler.
 The four packaged assets and CSP are unchanged; no error is filtered out.
 The second run's captured console is empty, confirming the favicon CSP error is
 removed for its desktop flow. Both early runs remain failed on their documented
-focus assertions. A later successful exact-head job is required for
-mobile, keyboard and downloaded-file acceptance; no unrun check is inferred.
+focus assertions. The later successful `66cbe158` smoke supplies the bounded
+mobile, keyboard and downloaded-file evidence above; no wider unrun check is inferred.
 
 ## Visual and keyboard checks
 

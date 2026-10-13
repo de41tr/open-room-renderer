@@ -2,6 +2,19 @@
 
 ## Current next-phase scope
 
+**Current operator/browser delta:** genuine hosted Chrome has passed desktop
+rendering/navigation and real Play/Pause, but the first two jobs failed on native
+focus assertions. Corrected BODY-boundary checks and the observed favicon CSP
+fix passed the bounded desktop/mobile/download smoke at `66cbe158` (run
+38356723243/job 115161233008, verified artifact 11792544975). Existing CSP/sandbox/gates
+remain intact. Optional `spotify diagnose` is read-only REST/WS with synthetic
+privacy/security evidence; `config check` is input-only and has no startup effects.
+`audio diagnose` separates disk intent, live option and active driver with two
+no-start property reads; its attached native proof is still pending.
+Optional `mpv_audio_device` selects an isolated owned player and refuses foreign
+peers; new hosted null-device proof and physical output acceptance are distinct.
+See the exact pending/failed/green source scopes in STATUS and TESTING.
+
 The new phase starts from merged main `ad21bd4` and works only in Draft PR #2.
 DSP library and pure queue contracts now have separate responsibility boundaries;
 protocol, playback, active DSP and existing acceptance contracts are unchanged.
@@ -15,10 +28,11 @@ head `7d68d79` is also fully green (run 38323337010), including measured native
 PCM and real isolated installed UI routes on x86_64/ARM64.
 BROWSER_ACCEPTANCE_PENDING is explicit; real-browser
 layout/interaction is not inferred from Node/DOM doubles. Optional Spotify is
-assessed in [ADR 001](adr/001-spotify-sidecar.md): official Soloist ARMv7/WS is
-verified in documentation; integrated playback is BLOCKED/DEFERRED pending
-policy/output-arbitration design and account/hardware tests. No provider playback
-or shared DSP is claimed.
+reassessed in [ADR 001](adr/001-spotify-sidecar.md): go-librespot is now the
+preferred technical candidate (76/100; librespot69, Soloist61). A concrete
+read-only local diagnostic is synthetic-tested; productive playback remains
+separately gated by policy, account, ownership and hardware. Shared DSP is not
+claimed, and universal multi-provider architecture is not a prerequisite.
 Stopped-only browser playlist import/editing is implemented with canonical
 metadata/duplicate selection and existing replacement semantics; no durable
 queue store or seamless live reorder. Explicit-config startup uses fixed private
@@ -76,8 +90,10 @@ correction retains coverage and caps. No new schema or early-validation claim.
 The separate Save current UI correction latches a freshly observed selection/
 session change, preserves entered name and captured intent, and requires Close/
 reopen. Pending/uncertain outcomes and successful verification remain unchanged.
-Root 169 Node/159 Web checks pass; combined exact-head CI and genuine browser
-acceptance remain separate.
+Root 169 Node/159 Web checks pass. Combined exact head `ba7c759` passes all
+three jobs/every step in run 38343514991, verified 04:03 UTC: 5491/74 hosted
+defaults, floor groups 142.33s/138.29s, and all native/installed/Unix/discovery/
+Snapcast gates on x86_64/ARM64. Genuine browser acceptance remains pending.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.

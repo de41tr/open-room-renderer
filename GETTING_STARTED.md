@@ -96,6 +96,21 @@ owned-file manifest for inspection/removal.
 
 ## 3. Start And Check
 
+Before starting the service, check an explicit configuration file without creating
+identity/state, reading saved settings, probing the network, or touching mpv/audio:
+
+```bash
+~/.local/share/open-room-renderer/venv/bin/open-room-renderer config check --config ~/.local/share/open-room-renderer/config.yaml
+```
+
+Exit **0** means only that the startup **input** checks below passed; exit **2**
+reports invalid arguments or unreadable/invalid input with a private-safe diagnostic.
+The command requires `--config` and has no implicit file/default fallback. It does
+not fully validate every runtime setting or verify saved state, backend, ports, or
+DAC availability. In particular, `channel_balance` is validated later at startup,
+after saved balance/active DSP precedence is applied. It does not configure logging
+or change any saved files. Once the check passes, start the service separately:
+
 ```bash
 ~/.local/share/open-room-renderer/venv/bin/open-room-renderer serve --config ~/.local/share/open-room-renderer/config.yaml
 ```
@@ -162,7 +177,7 @@ curl -fsS 'http://127.0.0.1:8080/description.xml'
 The API starting does not prove that sound works. Check your audio session/device:
 
 ```bash
-mpv --audio-device=help
+mpv --no-config --audio-device=help
 aplay -l
 mpv --no-video /path/to/your/local-test.wav
 ```
@@ -171,8 +186,60 @@ mpv --no-video /path/to/your/local-test.wav
 `--require-alsa` makes installation fail if no readable/writable ALSA PCM device
 exists under `/dev/snd`. Without that flag, absence is a warning, because session
 audio can work without direct ALSA access. Do not fix permissions with a broad
-`chmod`. Select the desired device in the service account's mpv configuration;
-see the [mpv audio-device documentation](https://mpv.io/manual/stable/#options-audio-device).
+`chmod`. Run discovery as the same user/session that runs the service: device
+names and access can differ between your desktop and a system service. Copy the
+quoted device name, not its description, into the renderer YAML, for example:
+
+```yaml
+auto_spawn_mpv: true
+mpv_audio_device: "alsa/dmix:default"
+```
+
+Use the exact name reported on your machine; this example does not establish
+that an ALSA device exists. Omit `mpv_audio_device` or set it to YAML `null` to
+retain existing mpv defaults and configuration. The quoted string `"auto"`
+explicitly requests mpv's normal device selection; it does not pin a DAC.
+Identifiers are preserved exactly, limited to 1024 UTF-8 bytes, and may not be
+blank, contain control characters, or use the special `help` value.
+
+Explicit selection takes effect on the next renderer restart. It is passed as
+one literal argument to the mpv child owned by that renderer, together with
+`--no-config`, `--load-scripts=no`, and `--audio-fallback-to-null=no`. This **opts
+out of ambient system/user mpv configuration**, including custom output, format,
+replaygain, and profile settings, and disables automatic script loading. These
+settings cannot override the selected driver or hide a failed device with silent
+null output. ORR's configured DSP and gain continue to apply. Leave this option
+unset if you rely on your own mpv profile. It requires `auto_spawn_mpv: true`,
+an unused private IPC socket at startup, and Linux peer
+credential verification. A preexisting, replaced, or unverifiable player/socket
+is refused before any control command is sent; ORR does not reconfigure or kill
+that foreign player. The API can remain available with backend errors so you
+can diagnose the problem. Choose an unused socket and restart; do not delete
+an unfamiliar socket. For an externally managed mpv, leave this setting unset
+and configure its output in its own service instead.
+
+This is startup configuration, not hot-switching or proof of audible output.
+To inspect the file's intent and a running player's two output properties
+without starting playback or changing settings, run on the renderer host:
+
+```bash
+open-room-renderer audio diagnose --config /path/to/renderer.yaml
+```
+
+It never starts an absent player. Run as the service user from its working
+directory. A missing socket, unavailable property and malformed/transport
+failure remain distinct. See [read-only audio diagnosis](docs/AUDIO_DIAGNOSTIC.md)
+for exit codes and the limits of this non-atomic observation.
+
+mpv's `audio-device` readback reports intent; `current-ao` identifies an active
+output driver, not a measured physical DAC. An audio server can still remap a
+logical device, and another local IPC client can alter player settings. ORR
+does not claim immutable hardware routing. Test a local file and the intended
+physical output after restart. See the official
+[audio-device](https://mpv.io/manual/stable/#options-audio-device),
+[configuration isolation](https://mpv.io/manual/stable/#options-no-config),
+and [null fallback](https://mpv.io/manual/stable/#options-audio-fallback-to-null)
+documentation.
 
 Stop with `Ctrl+C`. Restart uses the same `state/uuid`; do not copy that state
 between independent renderers. Each needs its own prefix, state directory and

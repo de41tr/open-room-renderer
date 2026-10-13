@@ -6,6 +6,31 @@ completed task boundaries below. Branch: `dot/renderer-next-phase-20261013`,
 created from verified remote main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`.
 No main push, merge or release is authorized.
 
+## Active corrected pipeline (05:35/05:56 mandate)
+
+The later mandate supersedes the earlier wait decision below. Continue on the
+same branch/PR; maintain at least three useful possible packages and pursue
+independent work while CI, hardware or provider prerequisites are pending.
+
+1. Genuine hosted Chrome desktop/mobile, keyboard/focus, real control/readback
+   and actual JSON download. Positive feasibility at 05:38; finish within
+   **07:05:39 UTC**, including fixes for demonstrated defects. This bounded
+   package passed at 06:29 on `66cbe158`; retain the existing smoke and move on.
+2. Reviewed go-librespot read-only REST/WS diagnostic and revised weighted ADR:
+   go-librespot 76, librespot 69, Soloist 61. Research ended within 14 minutes;
+   account/playback/terms acceptance remains separate.
+3. Explicit owned-mpv audio-device selection with deterministic opt-in isolation
+   and no foreign-player control; verify the new short native null-device case.
+4. Side-effect-free `config check --config PATH` and bounded no-start
+   `audio diagnose --config PATH` are implemented and reviewed. Complete their
+   hosted proof, then continue Web room-name editing against
+   the real backlog; offline new-prefix migration is lower priority.
+
+Do not grow a universal engine framework, broad E2E suite, or timing campaign.
+Next value review **07:05–07:35 UTC**; the original hard deadline remains.
+
+## Earlier phase plan and checkpoint history
+
 1. **ARCHITECTURE:** cohesive DSP preset-library and pure protocol-contract
    extractions, behavior-neutral commits, unchanged state/lock/error contracts.
    Limit this phase to approximately 3–4 hours; then pivot to user functionality.
@@ -94,7 +119,13 @@ measured module transfer is permitted only to correct this observed failure,
 with collection parity and unchanged caps. An independently reviewed frontend
 Save current draft guard also fixes a reproduced Refresh/reject loop without
 rebasing captured intent. Publish separate commits and verify combined CI.
-Next value review: 04:12–04:42 UTC.
+**04:12 closure:** `ba7c759` passes all three hosted jobs/every step in run
+38343514991. The floor correction passes 142.33s/138.29s under the unchanged
+165s cap; scheduling work is closed. Independent value review recommends
+holding feature expansion for the next 90–120 minutes: the requested workflows
+are implemented and genuine browser acceptance is the largest remaining gap.
+Continue with actionable new evidence or changed acceptance prerequisites rather
+than another speculative feature or test campaign. Next review: 05:42–06:12 UTC.
 
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
 and independent review precede milestone publication. Full native CI follows
