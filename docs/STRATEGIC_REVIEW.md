@@ -1,29 +1,27 @@
 # Next-phase strategic review
 
-## 10:10 value review: CONTINUE bounded preservation and recovery
+## 11:40 value review: CONTINUE the demonstrated gate correction
 
-1. **KEEP EXACT EVIDENCE:** `20bff6c` is fully green, all four jobs/every step.
-   Genuine browser smoke remains scoped to its original flows; new dialogs have
-   synthetic coverage. Keep `70d9308` FAILED with unresolved silence insertion.
-   No new browser/endurance/timing campaign or relaxed acceptance gate.
-2. **FINISH PRIVATE FAVORITES TRANSFER:** the paired managed-only backup and
-   restore into healthy empty storage is independently reviewed. Preserve exact
-   values/IDs/order, configured rows, existing limits and one atomic commit.
-   No merge, overwrite, reset, corrupt-library repair or external-writer promise.
-3. **CLOSE DEMONSTRATED RECOVERY DEFECTS:** dangling saved-audio entries must fail
-   instead of choosing defaults; exact pre-effect queue-edit rejection permits
-   explicit Refresh and a separate new click. Preserve valid behavior, UNKNOWN,
-   private diagnostics and independent Stop. Publish separate correction commits.
-4. **RANK NEXT VALUE:** the whole-product review supports a narrow read-only
-   `dsp show` for headless EQ recovery over the existing Web snapshot. It is now
-   fully CI green. Its review demonstrated eager redirect-body consumption and
-   private Location errors; separate six-client and two-helper corrections are
-   reviewed and await their own CI, preserving normal outcomes. Richer queue bookmarks and
-   effective-service/migrated-profile activation remain deferred for semantics,
-   marginal value and target prerequisites. No speculative port schema or engine.
-5. **BOUND:** next value review **11:40–12:10 UTC**. Continue independent useful
-   work during CI, but do not manufacture features or test counts. No new large/
-   risky work after 16:30; stabilize 17:00; hard stop 18:00 UTC.
+1. **RETAIN FAILURES:** `20bff6c` is fully green. Successor `0ea93ec` passes
+   Chrome and both native jobs but its floor group 1 hits the shared 165s limit;
+   group 2 already takes 157.96s. Keep that run FAILED and retain the earlier
+   `70d9308` Snapcast zero-run failure without claiming its cause resolved.
+2. **CORRECT SCHEDULING, NOT GATES:** use one measured coherent slice and a
+   bounded opt-in third default group. All old nodes/skips, native opt-in
+   two-group commands, shared deadlines and job/step caps remain. Cleanup/failure
+   behavior has fresh review. More processes add contention; only CI proves margin.
+3. **VERIFY ONCE:** publish the small separate scheduling correction and verify
+   its exact head. No full local/default sweep, additional native/browser campaign,
+   weakened assertion or retries-until-green loop. Fix another failure only from
+   its concrete evidence. Current client/privacy features are otherwise reviewed.
+4. **DEFER THE REMAINING CANDIDATES:** metadata-only transfer still crosses Web,
+   codec, CLI and occurrence-based edits; title origin and duration/seek semantics
+   prevent a harmless format tweak. Rich bookmarks remain deferred. Effective
+   service/profile activation needs a suitable authorized target. Whole-product
+   review finds no further independent GO package; stay available without inventing work.
+5. **BOUND:** next review **13:10–13:40 UTC**. After verification, use review/wait
+   for new evidence when no useful authorized work remains. No large/risky starts
+   after 16:30; stabilize 17:00; hard stop 18:00 UTC, even with CI pending.
 
 ## 04:12 UTC value/risk assessment
 

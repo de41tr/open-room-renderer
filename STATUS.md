@@ -18,6 +18,13 @@ Prior `70d9308` remains FAILED with unresolved zero-run cause. The subsequent
 redirect/privacy corrections require their own exact-head CI. Caps and scheduling
 remain unchanged; do not infer successor success from focused local checks.
 
+Redirect head **`0ea93ec`** is retained **FAILED** in run **38391477130**: floor
+group 1 reached the shared 165s watchdog (exit 124); group 2 passed 708 in
+157.96s. Chrome and both native hosts passed every step (native defaults 7228/75).
+The reviewed successor uses three explicit default groups under the same shared
+watchdogs; native opt-in lanes remain two-group. Every old node/skip is retained.
+Its exact-head CI remains PENDING; local candidate timing does not certify margin.
+
 ## Active corrected work
 
 The explicit 05:35/05:56 priorities supersede the earlier review/wait decision.
@@ -179,6 +186,13 @@ software work; no report/CI wait is used instead of useful independent work.
   unbounded. Root merged checks pass 826 per Python; fresh reviews pass. No
   follow, retry, new cap or total-deadline claim is introduced.
 
+- **Default scheduling:** explicit `--groups 3` balances complete modules after
+  the actual floor timeout. The same launch/deadline/owned-cleanup implementation
+  and all caps remain; native opt-in commands still use two groups. Both minors
+  preserve all 7,303 old node IDs and skip metadata exactly, adding 33 scheduler
+  cases only. New collections are 6,108 /562 /666; these are not runtime totals.
+  Root helper checks pass 46 per Python; hosted headroom still requires CI.
+
 ## Implemented scope
 
 - **Architecture:** `EqPresetLibrary` owns saved-curve validation/storage and
@@ -327,11 +341,12 @@ read-only diagnostic first. Productive receiver/lifecycle/output mode still has
 An explicit exclusive whole-service mode is a valid later boundary; a universal
 multi-provider framework and shared DSP are not prerequisites for safe components.
 
-Next ranked work: verify read-only DSP CLI exact-head CI; separately correct the
-newly demonstrated eager redirect-body/private-error gap in six existing bounded
-clients; keep richer queue bookmarks and effective-service activation rehearsal
-deferred for semantics/value and target prerequisites. No broad client framework,
-port schema or new engine. Next value review **11:40–12:10 UTC**.
+Next ranked work: verify the one evidence-led scheduling correction; keep
+metadata-only/richer queue transfer deferred for cross-format/provenance/seek
+semantics; keep effective-service activation rehearsal deferred for target
+prerequisites. The whole-product review found no other independent GO package.
+After exact-head verification, remain available for new evidence rather than
+invent code, tests or timestamp commits. Next review **13:10–13:40 UTC**.
 Retain 16:30 risk cutoff, 17:00 stabilization and 18:00 hard stop.
 See [RESUME.md](RESUME.md) for the bounded next steps and [PLAN.md](PLAN.md) for
 this phase's full constraints. The historical reports below retain their own

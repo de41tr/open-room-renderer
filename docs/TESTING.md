@@ -1,5 +1,42 @@
 # Test evidence and limits
 
+## Actual floor timeout and bounded third default group
+
+`0ea93ec`, run **38391477130**, floor job **115276061604**, is retained FAILED:
+group 1 was killed by the shared **165s** watchdog (exit 124); group 2 completed
+**708** in **157.96s**. No assertion failure was identified; the incomplete group
+has no passing-total claim. Chrome and both native jobs passed every step.
+Native defaults were **7228/75**, x86 groups **165.93s/141.74s** and ARM
+**157.92s/136.28s** under their unchanged 900s helper/15-minute job bounds.
+
+One candidate measurement ran 487 existing client cases on Python 3.11 in
+**16.39s**. Four complete modules move from group 1 to group 3; three existing
+CLI/runner modules move from group 2 to group 3. This avoids adding load to the
+already nearly full second group. It is a scheduling change, not a new product
+feature. Three concurrent pytest processes add CPU/memory contention; the local
+measurement estimates savings and does not certify hosted headroom.
+
+The helper defaults to two groups and permits three only with `--groups 3`.
+Its shared deadline, launch, failure continuation, owned process-tree cleanup and
+logging implementation remain unchanged. Native opt-in command lists/settings
+are identical. Floor stays **165s shared /3-minute step /8-minute job**; native
+defaults stay **900s helper /15-minute job**; explicit libmpv stays two-group
+**360s /7-minute step**, and stability remains **180s /6-minute step**.
+
+Collection-only parity on both Python minors preserves all **7,303** original
+node IDs and skip/skipif/xfail metadata, including active skip reasons. Original
+groups collect **6,595 /708**; final groups **6,108 /562 /666**, total **7,336**,
+with exactly 33 new scheduler tests. Groups are complete, disjoint and duplicate-
+free; all 76 active skip marks remain. Collection is not a runtime pass/skip count.
+
+Fresh independent review passes. Root focused helper/workflow checks pass **46**
+on Python 3.12/3.11 (**18.70s/18.66s**), preserving every old two-group case and
+covering third-group overlap/failure/launch failure, shared timeout, interrupts,
+owned descendants, unrelated-process survival, CLI bounds and exact file/budget
+coverage. All 16 workflow shell blocks parse. No full local replay, sweep, extra
+native/browser campaign, threshold relaxation or retry-until-green was used.
+One final exact-head CI remains required before claiming recovered margin.
+
 ## Redirect preparation and legacy CLI privacy
 
 Actual Requests 2.34.2 prepares Response.next even with allow_redirects=False.

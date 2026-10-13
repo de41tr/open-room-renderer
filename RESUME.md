@@ -20,6 +20,13 @@ Prior `70d9308` remains FAILED with unresolved zero-run cause. The subsequent
 redirect/privacy corrections require their own exact-head CI. Caps and scheduling
 remain unchanged; do not infer successor success from focused local checks.
 
+Redirect head **`0ea93ec`** is retained **FAILED** in run **38391477130**: floor
+group 1 reached the shared 165s watchdog (exit 124); group 2 passed 708 in
+157.96s. Chrome and both native hosts passed every step (native defaults 7228/75).
+The reviewed successor uses three explicit default groups under the same shared
+watchdogs; native opt-in lanes remain two-group. Every old node/skip is retained.
+Its exact-head CI remains PENDING; local candidate timing does not certify margin.
+
 ## What is already delivered
 
 The bounded architecture extractions, functional local Web controller,
@@ -64,21 +71,21 @@ Maintain three useful potential packages and work independently during CI.
    output selection, pure config checking and no-start output diagnosis are
    published and fully green at `4fd1607`. Native output/null proof passes on both
    architectures. No provider-account, shared-DSP or physical-output claim.
-3. **Next ranked packages:** `dsp show` is fully green at `20bff6c`. Verify the
-   separate reviewed redirect-boundary and legacy-private-error corrections. Six
-   bounded clients refuse eager body reads; two non-streaming helpers gain only
-   privacy protection and remain unbounded. Preserve all outcomes and caps.
-   Whole-product review defers richer queue bookmarks (3–5 hours plus unresolved
-   position/restore semantics) and actual service/migrated-profile rehearsal
-   (requires a suitable authorized user-service target). No substitute inert
-   framework or speculative port schema is justified.
+3. **Next ranked packages:** finish exact-head CI for the bounded default-only
+   three-group correction after the retained floor timeout. All original test
+   nodes/skips and native opt-in commands remain; no cap or assertion is relaxed.
+   Metadata-only/richer queue transfer remains DEFERRED after a separate source
+   review: even labels need versioning/title-origin policy, and duration affects
+   seek. Effective-service activation needs a suitable authorized target. No
+   other independent GO package emerged; do not invent work while staying
+   available through the deadline.
 4. **Honor the corrected Spotify choice.** [ADR001](docs/adr/001-spotify-sidecar.md)
    ranks go-librespot 76 / librespot 69 / Soloist 61. Build expiry is not key renewal.
    No actual account/client/provider operation occurred. A separately accepted
    exclusive whole-service mode is possible without shared DSP, but foreign mpv,
    uncertain shutdown, provider terms and physical output remain real boundaries.
-5. **10:10 value decision: CONTINUE** the bounded preservation/recovery work;
-   review again around 11:40–12:10 UTC, without waiting
+5. **11:40 value decision: CONTINUE** the bounded failed-gate correction;
+   review again around 13:10–13:40 UTC, without waiting
    just for reporting, CI or unavailable hardware/accounts. No large/risky work
    after 16:30; stabilize 17:00; stop 18:00 UTC even if CI is pending. Remain on the
    existing branch/Draft PR #2, no main push, merge or release.

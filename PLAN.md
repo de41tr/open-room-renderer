@@ -42,8 +42,11 @@ executable in generated handover guidance; verify their own CI. Preserve
 all UNKNOWN, privacy, atomicity and single-writer limits.
 
 Do not grow a universal engine framework, broad E2E suite, or timing campaign.
-**10:10 value decision: CONTINUE** these bounded packages, then assess only real
-startup/configuration or operator-handover gaps; next review **11:40–12:10 UTC**.
+**11:40 value decision: CONTINUE** the evidence-led failed-floor correction;
+next review **13:10–13:40 UTC**. The 165s failure is retained, not retried away.
+An opt-in third default group preserves all tests/skips and existing shared caps;
+finish its one exact-head verification. No other independent GO package emerged
+from the whole-backlog and metadata-only feasibility reviews.
 General favorites merge/overwrite and whole-library DSP transfer stay deferred.
 The original hard deadline remains.
 

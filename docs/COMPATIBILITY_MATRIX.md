@@ -2,6 +2,13 @@
 
 ## Current next-phase scope
 
+After the retained 0ea93ec floor timeout, default suites explicitly opt into
+three same-runner groups. Native opt-in lanes remain two-group; every cap,
+assertion and existing skip is unchanged. Exact collection retains all 7,303
+previous nodes and adds only 33 scheduling checks. Root 46-case helper tests
+pass per Python. Increased process contention and hosted headroom still need
+exact-head CI; this does not add product or hardware acceptance.
+
 Six bounded clients now reject redirects before Requests prepares the next
 request, consumes bodies or parses Location. Ordinary successful/rejected/unknown
 outcomes, caps and inactivity timeouts stay unchanged. Two older CLI convenience
