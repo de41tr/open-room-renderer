@@ -10,14 +10,14 @@ stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 Work exclusively on `dot/renderer-next-phase-20261013` in
 [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
 `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest fully CI-verified checkpoint **`884de2facc38baf7b20df3a11bd982727adb1c5d`**
-passes **all four jobs/every step** in **run 38370547216**, verified **08:51 UTC**.
-Floor groups **5319+708 /76 skips** pass **155.29s/149.29s** under 165s:
-**6027 passed /76 skipped**. Native defaults pass **6028/75**. The unchanged
-Chrome, native/Unix, installed migration/packaging, discovery and Snapcast gates
-pass. Dedicated interaction/physical acceptance of the new inspection card is
-not inferred from that standard smoke. Prior `70d9308` run 38362764862 remains
-FAILED with unresolved zero-run cause. The favorites correction needs its own CI.
+Latest fully CI-verified checkpoint **`a38674acf6808fd2e704027dc734718c0e8f04bd`**
+passes **all four jobs/every step** in **run 38373082322**, verified **09:18 UTC**.
+Floor groups **5399+708 /76 skips** pass **155.09s/143.27s** under 165s:
+**6107 passed /76 skipped**. Standard Chrome and all native/Unix, installed,
+discovery and Snapcast gates pass. This includes favorites-link preservation.
+Prior `70d9308` run 38362764862 stays FAILED with unresolved zero-run cause.
+The subsequent saved-curve transfer package still requires exact-head CI and
+has no dedicated new-workflow browser or physical-audio acceptance claim.
 
 ## What is already delivered
 
@@ -64,7 +64,7 @@ Maintain three useful potential packages and work independently during CI.
    published and fully green at `4fd1607`. Native output/null proof passes on both
    architectures. No provider-account, shared-DSP or physical-output claim.
 3. **Next ranked packages:** verify the Web operator and favorites-preservation
-   checkpoints; complete single saved-DSP-curve transfer between existing rooms
+   checkpoints; verify the reviewed single saved-DSP-curve transfer between existing rooms
    without touching active state/audio; defer private favorites bulk restore until
    its atomic empty-destination/conflict/privacy contract justifies the cost.
    Whole-library DSP transfer is also deferred. No format or cap expansion merely

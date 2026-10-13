@@ -32,9 +32,10 @@ independent work while CI, hardware or provider prerequisites are pending.
    All service activation remains explicit operator work.
 
 The Web operator/input-safety package is published at `884de2f`. The next
-small correction preserves observed dangling favorites storage. Continue one
-saved-DSP-curve transfer between existing rooms using the existing v1 shape;
-keep active DSP/backend state unchanged. Whole-library transfer and private
+small correction preserves observed dangling favorites storage and is fully
+green at `a38674a`. One saved-DSP-curve transfer between existing rooms is now
+reviewed and integrated using the existing v1 shape; verify its own CI while
+keeping active DSP/backend state unchanged. Whole-library transfer and private
 favorites bulk restore are deferred for their larger conflict/privacy contract.
 
 Do not grow a universal engine framework, broad E2E suite, or timing campaign.

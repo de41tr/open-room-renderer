@@ -2,6 +2,14 @@
 
 ## Current next-phase scope
 
+Single saved-DSP-curve transfer uses the existing v1 representation with a strict
+transfer-only decoder, current plugin and new safe name. It commits only saved
+library data under the existing DSP lock, leaving active state/files/backend calls
+untouched. Consent, exact bounds, stale ownership and durability UNKNOWN are
+explicit. Root 840-case checks pass on both Python versions; dedicated transfer
+browser/native/physical acceptance is not claimed. Whole-library transfer and
+private favorites bulk restore remain outside this bounded workflow.
+
 An observed dangling favorites.json link now triggers the existing unavailable-
 storage policy instead of being replaced by a save. This intentional error-policy
 correction preserves healthy files, genuine absence and existing valid-symlink

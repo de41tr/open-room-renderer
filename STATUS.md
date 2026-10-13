@@ -8,14 +8,14 @@
 based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
 squash-merged. No main push, merge or release is authorized for this phase.
 
-Latest fully CI-verified checkpoint **`884de2facc38baf7b20df3a11bd982727adb1c5d`**
-passes **all four jobs/every step** in **run 38370547216**, verified **08:51 UTC**.
-Floor groups **5319+708 /76 skips** pass **155.29s/149.29s** under 165s:
-**6027 passed /76 skipped**. Native defaults pass **6028/75**. The unchanged
-Chrome, native/Unix, installed migration/packaging, discovery and Snapcast gates
-pass. Dedicated interaction/physical acceptance of the new inspection card is
-not inferred from that standard smoke. Prior `70d9308` run 38362764862 remains
-FAILED with unresolved zero-run cause. The favorites correction needs its own CI.
+Latest fully CI-verified checkpoint **`a38674acf6808fd2e704027dc734718c0e8f04bd`**
+passes **all four jobs/every step** in **run 38373082322**, verified **09:18 UTC**.
+Floor groups **5399+708 /76 skips** pass **155.09s/143.27s** under 165s:
+**6107 passed /76 skipped**. Standard Chrome and all native/Unix, installed,
+discovery and Snapcast gates pass. This includes favorites-link preservation.
+Prior `70d9308` run 38362764862 stays FAILED with unresolved zero-run cause.
+The subsequent saved-curve transfer package still requires exact-head CI and
+has no dedicated new-workflow browser or physical-audio acceptance claim.
 
 ## Active corrected work
 
@@ -126,6 +126,16 @@ software work; no report/CI wait is used instead of useful independent work.
   root focused checks pass 199 on both Python versions. Healthy/missing storage,
   valid-link semantics and response categories remain unchanged. No automatic
   repair/reload or protection against unobserved external writers is claimed.
+
+- **Saved DSP curve transfer:** export one selected saved current-plugin curve in
+  the existing v1 shape and import it under a new safe name in another room.
+  Explicit consent, exact escaped-request limits, collisions/context checks and
+  unavailable-storage fencing prevent silent normalization or overwrite. Only the
+  saved library commits under the existing DSP lock; active fields/files and
+  backend calls remain unchanged. Root focused integration passes 840 on each
+  Python version, including both frontend suites (219 Node cases). Review fixed
+  decimal rounding/underflow acceptance before freeze. Dedicated browser/native
+  transfer acceptance remains pending; broader whole-library restore is deferred.
 
 ## Implemented scope
 

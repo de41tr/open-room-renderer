@@ -1,5 +1,36 @@
 # Test evidence and limits
 
+## Single saved DSP curve transfer
+
+The strict codec, saved-only adapter and consent-bound UI are separate commits.
+The existing v1 format carries exactly one safe name, one exact current plugin
+and forty complete records. The transfer decoder rejects ambiguity, nonfinite or
+lossily rounded/underflowed decimal tokens without tightening the legacy loader.
+Exact 32,768-byte file/request boundaries and the 1 MiB library limit are tested.
+Export proves its escaped import-envelope round trip; shared-name exports disclose
+that other plugin contexts are omitted rather than claiming a whole-preset backup.
+
+Two independent synthetic rooms prove source/existing destination preservation
+and no changes to active bands/plugin/source/enablement/balance/name caches, gain,
+configuration, renderer state, active_dsp.json or backend calls. Lock-wait/session
+staleness, unavailable storage, collisions, orphan-label changes, precommit rollback
+and known replacement with UNKNOWN durability are covered. No active persistence
+wrapper or reconcile path is reused. Explicit privacy consent and user-clicked
+Blob downloads retain dismissal/pagehide/staleness/late-response safeguards.
+
+Root exact merged package passes **840** focused cases on Python 3.12 in **12.08s**
+and Python 3.11 in **12.57s**, including both Node suites (**219 cases**, 32 new).
+All reviewed code/test hashes match; only documentation incorporates the subsequent
+favorites correction. Independent review and clean replay pass. These are pure,
+in-memory HTTP/mock and DOM-double checks; no new native socket/browser campaign
+or physical-audio claim. New source requires its own hosted CI.
+
+Preceding favorites-preservation head **a38674a** is fully green in run
+**38373082322**, all four jobs/every step, verified **09:18 UTC**. Floor
+**6107/76**, groups **155.09s/143.27s**, unchanged caps. Standard Chrome and all
+native/Unix/installed/discovery/Snapcast gates pass; the earlier failed Snapcast
+run remains retained and unexplained.
+
 ## Saved-favorites dangling-link preservation
 
 The published `189784309d6eb86e10ed2a0c7294e731fed0226d` behavior was reproduced
@@ -3201,3 +3232,12 @@ run; no account, pairing, provider traffic, mpv service, DAC or physical handove
 was tested. The installed-package CI smoke checks the shipped module and parser
 without invoking client execution or service activation. This is a focused
 addition to existing lanes, not a new endurance campaign or full-suite result.
+
+## Saved-only Web DSP curve transfer
+
+[The transfer contract](WEB_DSP_CURVE_TRANSFER.md#verification-scope) lists the
+bounded focused checks for the strict codec, two independent synthetic rooms,
+active/backend non-effects, persistence rollback/uncertainty, and private
+import/export dialog lifecycle. These additions use in-memory HTTP/MOCK and
+JavaScript DOM doubles. No dedicated browser/native/hardware acceptance is
+claimed for this workflow, and the earlier browser campaign is unchanged.

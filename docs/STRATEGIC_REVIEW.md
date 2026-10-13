@@ -6,7 +6,7 @@
    Web/operator head `884de2f` is fully green, including installed migration and the
    unchanged Snapcast gate. Keep `70d9308` failed with unresolved zero-run cause;
    do not start a retries-until-green or new long-test campaign.
-2. **FINISH SMALL DATA-PRESERVATION FIX:** a dangling favorites link was treated
+2. **CLOSE SMALL DATA-PRESERVATION FIX:** `a38674a` is fully CI green. A dangling favorites link was treated
    as new empty storage and lost during save. Six synthetic reproductions confirm
    it. Reuse the existing unavailable latch; preserve healthy/missing behavior,
    exact link/target bytes and existing private errors. No automatic repair.
@@ -14,6 +14,8 @@
    is distinct from whole-installation migration. Reuse the v1 preset shape for
    one current-context curve, reject collisions/ambiguity/overflow, and commit only
    the saved library under the existing DSP lock. No active metadata/audio changes.
+   Implementation and independent review now pass 840 focused cases per Python;
+   exact-head CI is the next acceptance step, with dedicated browser QA separate.
 4. **DEFER BROADER RESTORE:** whole-library DSP transfer adds hidden contexts and
    size/conflict policy. Favorites backup/restore needs an atomic bulk contract;
    export alone is not a supported restore workflow. These remain ranked real
