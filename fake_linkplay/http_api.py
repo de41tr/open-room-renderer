@@ -43,7 +43,7 @@ from .queue_playlist import QueuePlaylistApi
 from .web_audio_output import make_output_inspector
 from .web_playlists import PLAYLIST_ACTIONS
 from .web_ui import (WebAdmissionError, WebCommand, WebControlApi, WebDspCommandError,
-                     WebRuntime)
+                     WebDspExport, WebRuntime, prepare_dsp_curve_export)
 from .config import Config
 from .device_name import DeviceNameCommittedError, validate_device_name
 from .log_safety import redact_media_urls
@@ -301,6 +301,7 @@ class HttpApi:
             device_name=lambda: self.device_name_override or self.cfg.friendly_name,
             runtime=self._web_runtime, dsp_snapshot=self._web_dsp_snapshot,
             favorites=self.favorites, dispatch=self._web_dispatch,
+            export_dsp_curve=self._web_export_dsp_curve,
             inspect_output=make_output_inspector(socket_path=cfg.mpv_socket,
                 configured_output=cfg.mpv_audio_device, auto_spawn=cfg.auto_spawn_mpv),
             allowed_hosts=(self.cfg.advertise_ip or "", self.cfg.bind_address,
@@ -441,6 +442,8 @@ class HttpApi:
             await self._run_dsp_command("setChannelBalance:" + format(command.value, ".3f"))
         elif action == "eq":
             await self._run_dsp_command("EQOn" if command.enabled else "EQOff")
+        elif action == "dsp_preset_import":
+            await self._web_import_dsp_curve(command)
         elif action.startswith("dsp_"):
             await self._run_dsp_command("", web_command=command)
         elif action == "favorite_play":
@@ -2060,6 +2063,69 @@ class HttpApi:
         if self._dsp_active_confirmed and not self._dsp_state_uncertain and self._pending_dsp_restore is None:
             self._require_dsp_readback()
             atomic_write_text(Path(self.cfg.state_dir) / "active_dsp.json", encode_active_dsp(self._active_dsp_snapshot()))
+
+    def _web_curve_context(self, expected_dsp: str) -> dict[str, object]:
+        """Read-only admission while the existing DSP lock is held.
+
+        Unlike active DSP commands this path must not reconcile/publish staged
+        active state. Saved transfer refuses pending or uncertain DSP instead.
+        """
+        if self._eq_library.unavailable:
+            raise WebAdmissionError("preset_library_unavailable", 409)
+        if (self._pending_dsp_restore is not None or not self._dsp_active_confirmed
+                or self._dsp_state_uncertain or getattr(self.mpv, "confirmed_dsp", False) is None):
+            raise WebAdmissionError("unavailable", 409)
+        try:
+            active = self._active_dsp_snapshot()
+            encode_active_dsp(active)
+        except (ValueError, TypeError, UnicodeError):
+            raise WebAdmissionError("unavailable", 409) from None
+        if expected_dsp != self.web_api.dsp_revision(active, self._eq_library):
+            raise WebAdmissionError("stale_dsp", 409)
+        return active
+
+    async def _web_export_dsp_curve(self, request: WebDspExport) -> tuple[bytes, bool]:
+        async with self._dsp_command_lock:
+            active = self._web_curve_context(request.expected_dsp)
+            plugin = active["plugin"]
+            name = self.web_api.dsp_preset_name(request.preset_id, plugin, self._eq_library)
+            contexts = self.eq_presets.get(name, {})
+            if plugin not in contexts:
+                raise WebAdmissionError("curve_export_unavailable", 409)
+            return prepare_dsp_curve_export(name, plugin, contexts[plugin]), len(contexts) > 1
+
+    async def _web_import_dsp_curve(self, command: WebCommand) -> None:
+        """Add one detached saved curve, with zero active/backend effects.
+
+        No await occurs between validation, proposal, durable write and rollback.
+        Never route through EQSave or _persist_eq_presets: both touch active DSP.
+        """
+        async with self._dsp_command_lock:
+            active = self._web_curve_context(command.expected_dsp)
+            curve = command.curve
+            if curve is None:
+                raise WebAdmissionError()
+            if curve.plugin != active["plugin"]:
+                raise WebAdmissionError("curve_context_mismatch", 409)
+            if curve.name in self.eq_presets:
+                raise WebAdmissionError("preset_conflict", 409)
+            before = deepcopy(self.eq_presets)
+            self._eq_library.save(curve.name, curve.plugin, curve.bands)
+            try:
+                # A restored orphan active name may match a newly imported
+                # name/curve. Refuse rather than silently change its display.
+                if self._active_dsp_snapshot() != active:
+                    raise WebAdmissionError("preset_conflict", 409)
+                self._eq_library.persist(self.cfg.state_dir, write_text=atomic_write_text)
+            except AtomicWriteCommittedError:
+                raise WebDspCommandError("LIBRARY_COMMITTED_DURABILITY_UNKNOWN") from None
+            except BaseException as exc:
+                self.eq_presets = before
+                if isinstance(exc, ValueError) and not isinstance(exc, WebAdmissionError):
+                    raise WebAdmissionError("curve_library_full", 409) from None
+                if isinstance(exc, OSError):
+                    raise WebDspCommandError("UNKNOWN") from None
+                raise
 
     def _prepare_web_dsp_command(self, command: WebCommand) -> str:
         """Locked compare-and-translate; no browser-controlled source or plugin.

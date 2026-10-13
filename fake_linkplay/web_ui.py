@@ -26,6 +26,7 @@ from .canonical_target import canonical_target_url
 from .device_name import DeviceNameCommittedError, validate_device_name
 from .favorites import FavoriteError, FavoritesStore, validate_target_edit
 from .eq_presets import EqPresetLibrary, PRESET_LIBRARY_UNAVAILABLE_MESSAGE, normalize_eq_preset_name
+from .eq_transfer import EqTransferCurve, decode_eq_transfer, encode_eq_transfer
 from .log_safety import redact_media_urls
 from .mpv_backend import BackendError
 from .persistence import AtomicWriteCommittedError, validate_eq_records
@@ -77,7 +78,9 @@ _SCHEMAS = {
     "dsp_preset_save": {"expected_dsp", "name"},
     "dsp_preset_rename": {"expected_dsp", "preset_id", "name"},
     "dsp_preset_delete": {"expected_dsp", "preset_id"},
+    "dsp_preset_import": {"expected_dsp", "text", "private_import_confirmed"},
 }
+CURVE_EXPORT_FILENAME = "open-room-renderer-eq-curve.json"
 _EXPORT_FILENAME = "open-room-renderer-playlist.json"
 _EXPORT_DOMAIN = b"orr:web-playlist-export:v1\0"
 _EXPORT_SCHEMAS = {
@@ -110,6 +113,7 @@ class WebCommand:
     expected_device: str = ""
     preset_id: str = ""
     bands: list[dict[str, object]] | None = None
+    curve: EqTransferCurve | None = field(default=None, repr=False)
     source: PlaybackQueue | None = field(default=None, repr=False)
     urls: list[str] | None = field(default=None, repr=False)
     from_index: int | None = None
@@ -123,6 +127,16 @@ class WebPlaylistExport:
     action: str
     expected_session: str
     expected_generation: int
+    expected_export: str = ""
+    private_export_confirmed: bool = False
+
+
+@dataclass(frozen=True)
+class WebDspExport:
+    """Saved current-context curve read; never a live DSP command."""
+    action: str
+    expected_dsp: str
+    preset_id: str
     expected_export: str = ""
     private_export_confirmed: bool = False
 
@@ -344,6 +358,42 @@ def prepare_playlist_export(queue: PlaybackQueue) -> tuple[bytes, PlaybackQueue]
         raise WebAdmissionError("export_unavailable", 409) from None
 
 
+def decode_dsp_export(encoded: bytes) -> WebDspExport:
+    payload = _decode_request(encoded)
+    action = payload["action"]
+    fields = {"action", "expected_dsp", "preset_id"}
+    if action == "download":
+        fields |= {"expected_export", "private_export_confirmed"}
+    if action not in {"prepare", "download"} or payload.keys() != fields:
+        raise WebAdmissionError()
+    token_fields = ("expected_dsp", "preset_id", "expected_export") if action == "download" else ("expected_dsp", "preset_id")
+    for key in token_fields:
+        if not isinstance(payload[key], str) or not _DSP_TOKEN.fullmatch(payload[key]):
+            raise WebAdmissionError()
+    if action == "download" and payload["private_export_confirmed"] is not True:
+        raise WebAdmissionError()
+    return WebDspExport(**payload)
+
+
+def prepare_dsp_curve_export(name: str, plugin: str, bands: object) -> bytes:
+    """Prove the exact escaped import envelope fits, without library I/O.
+
+    The only changing outer import value is a fixed-size process-bound DSP
+    revision. Names/plugin IDs remain private JSON text, never metadata.
+    """
+    try:
+        encoded = encode_eq_transfer(name, plugin, bands)
+        envelope = json.dumps({"action": "dsp_preset_import", "expected_dsp": "f" * 64,
+            "text": encoded.decode("utf-8"), "private_import_confirmed": True},
+            ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+        restored = decode_command(envelope).curve
+        if restored != decode_eq_transfer(encoded):
+            raise ValueError
+        return encoded
+    except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError):
+        raise WebAdmissionError("curve_export_unavailable", 409) from None
+
+
 def decode_command(encoded: bytes) -> WebCommand:
     try:
         payload = _decode_request(encoded)
@@ -386,6 +436,11 @@ def decode_command(encoded: bytes) -> WebCommand:
             _integer(payload["index"], 1, 1000)
         if action == "queue_mode" and (not isinstance(payload["mode"], str) or payload["mode"] not in MODES):
             raise ValueError
+        if action == "dsp_preset_import":
+            if payload["private_import_confirmed"] is not True or not isinstance(payload["text"], str):
+                raise ValueError
+            payload["curve"] = decode_eq_transfer(payload.pop("text").encode("utf-8"))
+            del payload["private_import_confirmed"]
         if action.startswith("dsp_"):
             if not isinstance(payload["expected_dsp"], str) or not _DSP_TOKEN.fullmatch(payload["expected_dsp"]):
                 raise ValueError
@@ -430,7 +485,8 @@ class WebControlApi:
                  dsp_snapshot: Callable[[], dict[str, object]], favorites: FavoritesStore,
                  dispatch: Callable[[WebCommand], Awaitable[dict[str, object] | None]],
                  allowed_hosts: tuple[str, ...],
-                 inspect_output: Callable[[], Awaitable[dict[str, object]]] | None = None) -> None:
+                 inspect_output: Callable[[], Awaitable[dict[str, object]]] | None = None,
+                 export_dsp_curve: Callable[[WebDspExport], Awaitable[tuple[bytes, bool]]] | None = None) -> None:
         self._current_state = current_state
         self._device_name = device_name
         self._runtime = runtime
@@ -438,6 +494,7 @@ class WebControlApi:
         self._favorites = favorites
         self._dispatch = dispatch
         self._inspect_output = inspect_output
+        self._export_dsp_curve = export_dsp_curve
         self._output_inspection_busy = False
         self._allowed_hosts = frozenset(host.lower().rstrip(".") for host in allowed_hosts if host and host not in {"0.0.0.0", "::", "*"})
         self._csrf_token = secrets.token_urlsafe(32)
@@ -507,6 +564,9 @@ class WebControlApi:
             "stale_export": "The queue or renderer session changed. Reopen Export and review it again.",
             "stale_device": "The room name changed. Reopen Rename room and review the current name.",
             "device_rename_committed": "The room name was applied, but persistence or discovery is unconfirmed. Readback alone cannot confirm either. No automatic retry was sent.",
+            "curve_export_unavailable": "This saved curve cannot be exported for browser import. A legacy unsafe name must be explicitly renamed to a plain safe name first. The curve and complete import request must fit the transfer limits.",
+            "curve_context_mismatch": "The file’s plugin does not match this room’s current DSP context. No remapping or import was performed.",
+            "curve_library_full": "This curve cannot fit within the 1 MiB saved preset library limit. No import was performed.",
             "stale_dsp": "DSP settings or saved presets changed. Refresh and review before choosing again.",
             "preset_conflict": "That preset name already exists. Choose another name.",
             "preset_library_unavailable": PRESET_LIBRARY_UNAVAILABLE_MESSAGE,
@@ -739,6 +799,24 @@ class WebControlApi:
             command = replace(command, prepared_queue=queue)
         return command
 
+    async def _dsp_export(self, encoded: bytes) -> web.Response:
+        request = decode_dsp_export(encoded)
+        if self._export_dsp_curve is None:
+            raise WebAdmissionError("unavailable", 409)
+        data, shared = await self._export_dsp_curve(request)
+        revision = self._dsp_digest("curve_export", [request.expected_dsp, request.preset_id,
+                                                     data.decode("utf-8")])
+        if request.action == "download":
+            if not secrets.compare_digest(request.expected_export, revision):
+                raise WebAdmissionError("stale_dsp", 409)
+            return web.Response(body=data, content_type="application/json", headers={
+                **_HEADERS, "Content-Length": str(len(data)),
+                "Content-Disposition": f'attachment; filename="{CURVE_EXPORT_FILENAME}"'})
+        return web.json_response({"version": 1, "dsp_revision": request.expected_dsp,
+            "preset_id": request.preset_id, "revision": revision, "size_bytes": len(data),
+            "filename": CURVE_EXPORT_FILENAME, "scope": "current_plugin", "shared": shared,
+            "band_count": 40}, headers=_HEADERS)
+
     async def _output_inspection(self, encoded: bytes) -> web.Response:
         payload = _decode_request(encoded)
         if (payload.keys() != {"action", "expected_session"} or payload["action"] != "inspect"
@@ -798,11 +876,13 @@ class WebControlApi:
                             return self._error("favorites_unavailable", 503, "ERROR")
                         raise
                 return web.json_response(value, headers=_HEADERS)
-            if path not in {PREFIX + "/command", PREFIX + "/playlist/export", PREFIX + "/output/inspect"}:
+            if path not in {PREFIX + "/command", PREFIX + "/playlist/export", PREFIX + "/output/inspect", PREFIX + "/dsp/export"}:
                 raise WebAdmissionError("not_found", 404)
             if request.method != "POST":
                 raise WebAdmissionError("method_not_allowed", 405)
             encoded = await self._body(request, origin)
+            if path == PREFIX + "/dsp/export":
+                return await self._dsp_export(encoded)
             if path == PREFIX + "/output/inspect":
                 return await self._output_inspection(encoded)
             if path == PREFIX + "/playlist/export":
