@@ -27,6 +27,7 @@ from aiohttp.test_utils import TestServer
 import pytest
 
 from fake_linkplay.config import Config
+from fake_linkplay.favorites import FavoritesStore
 from fake_linkplay.http_api import HttpApi
 from fake_linkplay.playlist_files import decode_playlist
 from fake_linkplay.queue import PlaybackQueue, QueueItem, serialize_queue_context
@@ -556,6 +557,67 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
             assert backend.read_property("af") == graph
             evidence["favorite"] = {"stable_id_recalled": True, "actual_source": 2,
                                     "gain_and_dsp_retained": True, "raw_url_omitted": True}
+
+            # Repair only the stored target while its detached favorite is
+            # actually playing. The existing command wrapper supplies the
+            # same-origin/CSRF guard; library edits do not take a generation.
+            # A second record makes order/sibling retention non-vacuous.
+            sibling = await command("favorite_add", name="Other owned tone", url=urls[0])
+            library_before = api.favorites.document()
+            assert [item["id"] for item in library_before["favorites"]] == [identifier, sibling["favorite_id"]]
+            original_favorite = library_before["favorites"][0]
+            assert original_favorite["editable"] is True and original_favorite["url"] == urls[1]
+            assert {key: original_favorite[key] for key in ("title", "artist", "album", "artwork")} == {
+                "title": "Synthetic tone 2", "artist": "Owned fixture", "album": "Web acceptance", "artwork": ""}
+            repair_queue = api.state.queue
+            repair_item = repair_queue.current
+            repair_queue_value = deepcopy(repair_queue)
+            repair_state = await canonical(1, "PLAYING")
+            repair_handle = backend._handle
+            assert repair_handle is not None and repair_item.url == urls[1]
+            properties = ("path", "playlist", "idle-active", "pause", "af", "volume", "mute",
+                          "track-list", "audio-params", "current-ao")
+            repair_native = {key: backend.read_property(key) for key in properties}
+            assert repair_native["path"] == urls[1] and repair_native["idle-active"] is False
+            assert repair_native["pause"] is False and repair_native["current-ao"] == "null"
+            before = len(backend.commands)
+            requests_before = list(media_requests)
+            repair_evidence = []
+            for policy, target in (("keep", urls[0]), ("clear", urls[1])):
+                assert api.favorites.document()["favorites"][0]["url"] != target
+                result = await command("favorite_target", id=identifier, url=target, metadata=policy)
+                assert not any(url in json.dumps(result) for url in urls), "Target edit response leaked a raw target"
+                expected_record = {**original_favorite, "url": target}
+                if policy == "clear":
+                    expected_record.update(dict.fromkeys(("title", "artist", "album", "artwork"), ""))
+                expected_library = {"version": 1, "favorites": [expected_record, library_before["favorites"][1]]}
+                assert api.favorites.document() == expected_library
+                persisted_fields = ("id", "name", "url", "title", "artist", "album", "artwork")
+                assert json.loads(api.favorites.path.read_bytes()) == {"version": 1, "favorites": [
+                    {key: item[key] for key in persisted_fields} for item in expected_library["favorites"]]}
+                assert FavoritesStore(cfg).document() == expected_library
+                async with session.get(server.make_url(BASE + "/favorites")) as response:
+                    repaired = await response.json()
+                    assert response.status == 200, repaired
+                assert [item["id"] for item in repaired["favorites"]] == [identifier, sibling["favorite_id"]]
+                assert repaired["favorites"][0]["name"] == original_favorite["name"]
+                assert not any(url in json.dumps(repaired) for url in urls), "Repaired favorites leaked a raw target"
+                after = await canonical(1, "PLAYING")
+                assert api.state.queue is repair_queue and api.state.queue.current is repair_item
+                assert api.state.queue == repair_queue_value and repair_item.url == urls[1]
+                assert backend._handle == repair_handle
+                assert backend.commands[before:] == [] and media_requests == requests_before
+                assert {key: backend.read_property(key) for key in properties} == repair_native
+                for key in ("session_id", "generation", "queue", "transport", "gain", "dsp"):
+                    assert after[key] == repair_state[key], (key, repair_state[key], after[key])
+                repair_evidence.append({"metadata": policy, "status": 200,
+                    "exact_target_persisted": True, "metadata_policy_persisted": True,
+                    "id_name_order_and_sibling_retained": True, "reload_matches": True,
+                    "detached_queue_identity_and_value_retained": True,
+                    "generation_transport_dsp_gain_retained": True, "native_properties_retained": True,
+                    "native_mutations": 0, "media_requests": 0, "raw_url_omitted": True})
+            evidence["favorite_target"] = {"requests": repair_evidence,
+                "scope": "same-origin CSRF-protected Web JSON action; no browser or repaired-target playback"}
             await command("stop")
             assert backend.read_property("idle-active") is True
             await canonical(1, "STOPPED")
@@ -761,6 +823,13 @@ def test_real_libmpv_web_controls(tmp_path: Path) -> None:
     assert {sample["source"] for sample in evidence["decoded"]} == {1, 2}
     assert evidence["dsp_editor"]["complete_bands"] == 40
     assert evidence["dsp_editor"]["stale_extra_native_mutations"] == 0
+    assert [request["metadata"] for request in evidence["favorite_target"]["requests"]] == ["keep", "clear"]
+    assert all(request["status"] == 200 and request["native_mutations"] == request["media_requests"] == 0
+               and all(request[key] for key in ("exact_target_persisted", "metadata_policy_persisted",
+                   "id_name_order_and_sibling_retained", "reload_matches",
+                   "detached_queue_identity_and_value_retained", "generation_transport_dsp_gain_retained",
+                   "native_properties_retained", "raw_url_omitted"))
+               for request in evidence["favorite_target"]["requests"])
     assert evidence["playlist_edits"]["canonical_metadata_retained"] is True
     assert evidence["playlist_edits"]["native_mutations_before_explicit_play"] == 0
     assert evidence["playlist_import"]["formats"] == ["json", "m3u", "urls"]
