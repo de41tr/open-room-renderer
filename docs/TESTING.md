@@ -1,5 +1,55 @@
 # Test evidence and limits
 
+## Saved-favorites dangling-link preservation
+
+The published `189784309d6eb86e10ed2a0c7294e731fed0226d` behavior was reproduced
+in an isolated copy with disposable synthetic storage. Direct store add,
+browser `favorite_add`, and existing `/orr/v1/favorites` JSON POST each treated
+a dangling `favorites.json` link as empty and replaced that link on save. The
+browser/JSON routes returned success (200/201). In all six cases the link was
+lost, whether the target stayed missing or was restored after initialization;
+restored target bytes were unchanged, but the saved-library reference was lost.
+
+The correction checks the file entry with `lstat` after a read reports not found.
+Only a genuinely absent entry permits a new empty library. An existing entry
+or another existence-check error flows through the existing unavailable-storage
+latch. This is a deliberate dangling-link/uncertain-absence error-policy change,
+not a format or storage refactor. No writer, availability category, private
+recovery message, automatic repair/reload, or healthy valid-link semantics was
+changed. It only fences writes after an observed load failure, and makes no
+claim about unobserved later external writers or atomic read/write races.
+
+`tests/test_favorites_storage_preservation.py` failed **76** cases against the
+published code while **4** healthy-storage controls passed; all **80** pass with
+the correction. Coverage includes add, save-current, rename, target edit and
+delete through the store, browser command and existing JSON API, missing and
+later-restored targets, existing entries despite a failed read, injected
+`lstat` permission/I/O failures, exact link bytes/inode and target-byte
+preservation, and zero calls to the writer or mock audio backend. Missing files
+and parent directories, valid files/links, and restart-only recovery retain
+their healthy responses. Browser reads retain 503 / ERROR with fixed private
+guidance; dispatched mutations remain 502 / UNKNOWN, and JSON mutations retain
+503 `library_unavailable`.
+
+Root preservation/managed-favorites/Web-diagnostic integration passes **199**
+on Python 3.12 (**5.96s**) and 3.11 (**5.99s**), each with the existing pywiim
+TLSv1 warning. The bounded related favorites/Web/CLI slice passes **568** on Python 3.12.14
+(52.63s, one existing pywiim TLSv1 deprecation warning). Independent review
+passed **199** overlapping preservation/managed/diagnostic tests and four
+additional synthetic link-shape checks. The six-case original reproduction
+also passes preservation after the correction with unchanged target bytes.
+Only disposable files and loopback HTTP with mock audio were used. No actual
+user state, provider credentials, external service, full/native campaign or
+AF_UNIX attempt was involved. This is focused evidence, not a full-suite or
+native-runtime pass.
+
+The preceding Web/operator head **884de2f** passes all four jobs/every step in
+run **38370547216**, verified **08:51 UTC**. Floor **6027/76**, groups
+**155.29s/149.29s** under unchanged 165s; native **6028/75**. Standard Chrome,
+installed migration/packaging and both unchanged Snapcast lanes pass. This does
+not erase the earlier Snapcast failure or certify dedicated new-card interaction.
+The favorites correction is subsequent source and still needs exact-head CI.
+
 ## Web operator guidance and startup-input boundary
 
 The Web inspection callback captures only running-config scalars and creates a

@@ -10,15 +10,14 @@ stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 Work exclusively on `dot/renderer-next-phase-20261013` in
 [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
 `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest fully CI-verified checkpoint **`189784309d6eb86e10ed2a0c7294e731fed0226d`**
-passes **all four jobs/every step** in **run 38365397046**, verified **08:05 UTC**.
-Floor groups **5102+708 /76 skips** pass **128.36s/102.14s** under 165s:
-**5810 passed /76 skipped**. Native defaults pass **5811/75**, including the required
-real socket-refusal case. Both architectures prove genuine installed migration,
-seven-file preservation/Plex omission, no-clobber and installed Spotify packaging.
-The unchanged Snapcast gate also passes both architectures. Prior `70d9308` run
-38362764862 remains FAILED on a shared 431-frame zero run; this later pass does
-not identify its cause. Subsequent Web/recovery/config changes require new CI.
+Latest fully CI-verified checkpoint **`884de2facc38baf7b20df3a11bd982727adb1c5d`**
+passes **all four jobs/every step** in **run 38370547216**, verified **08:51 UTC**.
+Floor groups **5319+708 /76 skips** pass **155.29s/149.29s** under 165s:
+**6027 passed /76 skipped**. Native defaults pass **6028/75**. The unchanged
+Chrome, native/Unix, installed migration/packaging, discovery and Snapcast gates
+pass. Dedicated interaction/physical acceptance of the new inspection card is
+not inferred from that standard smoke. Prior `70d9308` run 38362764862 remains
+FAILED with unresolved zero-run cause. The favorites correction needs its own CI.
 
 ## What is already delivered
 
@@ -64,18 +63,19 @@ Maintain three useful potential packages and work independently during CI.
    output selection, pure config checking and no-start output diagnosis are
    published and fully green at `4fd1607`. Native output/null proof passes on both
    architectures. No provider-account, shared-DSP or physical-output claim.
-3. **Next useful work:** publish the reviewed output-inspection, recovery,
-   duplicate-input and special-file-guard commits; verify exact-head CI without
-   changing acceptance gates. Assess saved DSP/favorites portability against
-   existing codecs and full offline migration before choosing further work.
-   Keep any new feature bounded and evidence-backed; no mandatory format growth.
+3. **Next ranked packages:** verify the Web operator and favorites-preservation
+   checkpoints; complete single saved-DSP-curve transfer between existing rooms
+   without touching active state/audio; defer private favorites bulk restore until
+   its atomic empty-destination/conflict/privacy contract justifies the cost.
+   Whole-library DSP transfer is also deferred. No format or cap expansion merely
+   to create work. The next value review is **10:10–10:40 UTC**.
 4. **Honor the corrected Spotify choice.** [ADR001](docs/adr/001-spotify-sidecar.md)
    ranks go-librespot 76 / librespot 69 / Soloist 61. Build expiry is not key renewal.
    No actual account/client/provider operation occurred. A separately accepted
    exclusive whole-service mode is possible without shared DSP, but foreign mpv,
    uncertain shutdown, provider terms and physical output remain real boundaries.
-5. **07:10 value decision: CONTINUE** the three packages above; review again
-   around 08:40–09:10 UTC, without waiting
+5. **08:40 value decision: CONTINUE** the bounded preservation/transfer work;
+   review again around 10:10–10:40 UTC, without waiting
    just for reporting, CI or unavailable hardware/accounts. No large/risky work
    after 16:30; stabilize 17:00; stop 18:00 UTC even if CI is pending. Remain on the
    existing branch/Draft PR #2, no main push, merge or release.

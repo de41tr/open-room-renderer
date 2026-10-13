@@ -2,6 +2,12 @@
 
 ## Current next-phase scope
 
+An observed dangling favorites.json link now triggers the existing unavailable-
+storage policy instead of being replaced by a save. This intentional error-policy
+correction preserves healthy files, genuine absence and existing valid-symlink
+semantics. Synthetic store/Web/JSON byte/link proofs and both Python versions pass;
+no automatic repair/reload or later external-writer guarantee is introduced.
+
 The subsequent Web output card is an explicit single-probe read with hidden
 identifiers, no playback mutations and no automatic retry. Recovery messages are
 pure current-selection projections; retry budgets and command gates are unchanged.
@@ -9,7 +15,7 @@ Duplicate explicit root startup settings intentionally fail before effects, whil
 legacy loading and valid YAML merge overrides remain compatible. The offline
 Spotify preparer now rejects existing special inputs before opening them.
 Focused merged checks pass; dedicated new-card browser/physical acceptance is
-pending. Preceding head `1897843` is fully green, including installed migration
+pending. Web/operator head `884de2f` is fully green, including installed migration
 and the unchanged Snapcast gate, without erasing the earlier `70d9308` failure.
 
 **Current operator/browser delta:** bounded genuine Chrome desktop/mobile,

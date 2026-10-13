@@ -1,32 +1,27 @@
 # Next-phase strategic review
 
-## 07:10 value review: CONTINUE practical operator workflows
+## 08:40 value review: CONTINUE preservation and saved-curve workflows
 
-The explicit 05:35/05:56 mandate supersedes the historical wait decision below.
-
-1. **CLOSE BROWSER PACKAGE:** genuine desktop/mobile Chrome passed at 06:29,
-   within budget, and the unchanged smoke passes again at `4fd1607`. Keep exact
-   scope; do not expand the harness or call new dialogs browser-accepted.
-2. **KEEP SPOTIFY BOUNDED:** go-librespot 76 / librespot 69 / Soloist 61; research
-   completed in 14 minutes. Passive REST/WS diagnosis is implemented and green.
-   A credential-free offline config/unit/drop-in generator is now implemented,
-   with a manual handover guide and no activation. Account/provider/lifecycle/
-   arbitration acceptance remains separate. No fake play.
-3. **FOLLOW THROUGH ON WEB OPERATIONS:** room rename is published and green.
-   On-demand output inspection and fixed recovery guidance are now reviewed,
-   with 535 merged checks per interpreter and no new browser claim. Duplicate
-   startup keys are separately rejected before effects without a full schema rewrite.
-4. **FIX USER-DATA OWNERSHIP, THEN OFFLINE MIGRATION:** unchanged native config
-   could be deleted by uninstall. Protect root config/state/profile paths even
-   against old manifest claims. A new-prefix profile preparer may then remove
-   manual copy/path-edit errors without replacing active config or starting audio.
-   Preserve originals/bytes, refuse ambiguity, exclude provider credentials.
-5. **BOUND AND REASSESS:** operator head `1897843` is fully green; the unchanged
-   Snapcast gate passed after `70d9308` failed on a shared short zero-run pattern.
-   Keep that failure and unresolved cause; no extra replay or weakened gate.
-   Assess portable saved-library workflows for actual value. Keep at least three ranked
-   candidates and work independently during CI. Next review **08:40–09:10 UTC**;
-   risk cutoff 16:30, stabilize 17:00, hard stop 18:00 UTC.
+1. **KEEP COMPLETED EVIDENCE EXACT:** browser acceptance finished within budget.
+   Web/operator head `884de2f` is fully green, including installed migration and the
+   unchanged Snapcast gate. Keep `70d9308` failed with unresolved zero-run cause;
+   do not start a retries-until-green or new long-test campaign.
+2. **FINISH SMALL DATA-PRESERVATION FIX:** a dangling favorites link was treated
+   as new empty storage and lost during save. Six synthetic reproductions confirm
+   it. Reuse the existing unavailable latch; preserve healthy/missing behavior,
+   exact link/target bytes and existing private errors. No automatic repair.
+3. **TRANSFER ONE SAVED CURVE:** copying a deliberate curve between existing rooms
+   is distinct from whole-installation migration. Reuse the v1 preset shape for
+   one current-context curve, reject collisions/ambiguity/overflow, and commit only
+   the saved library under the existing DSP lock. No active metadata/audio changes.
+4. **DEFER BROADER RESTORE:** whole-library DSP transfer adds hidden contexts and
+   size/conflict policy. Favorites backup/restore needs an atomic bulk contract;
+   export alone is not a supported restore workflow. These remain ranked real
+   gaps, but do not justify automatic merging, overwriting or format expansion now.
+5. **BOUND NEXT REVIEW:** finish exact-head CI and the two bounded packages above,
+   then reassess **10:10–10:40 UTC**. Spotify remains optional passive diagnosis and
+   offline proposals, with provider/account/hardware/arbitration gates pending.
+   No new large/risky work after 16:30; stabilize 17:00; hard stop 18:00 UTC.
 
 ## 04:12 UTC value/risk assessment
 

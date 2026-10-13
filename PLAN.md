@@ -31,14 +31,15 @@ independent work while CI, hardware or provider prerequisites are pending.
    usability gaps. Retain the prior Snapcast failure without weakening gates.
    All service activation remains explicit operator work.
 
-The next reviewed package adds on-demand Web output inspection, fixed current
-recovery guidance, duplicate startup-input refusal and a narrow offline input
-preflight correction. Verify exact-head CI, then assess portable saved-library
-workflows against existing codecs before choosing further features.
+The Web operator/input-safety package is published at `884de2f`. The next
+small correction preserves observed dangling favorites storage. Continue one
+saved-DSP-curve transfer between existing rooms using the existing v1 shape;
+keep active DSP/backend state unchanged. Whole-library transfer and private
+favorites bulk restore are deferred for their larger conflict/privacy contract.
 
 Do not grow a universal engine framework, broad E2E suite, or timing campaign.
-07:10 value decision: continue these practical workflows; next review
-**08:40–09:10 UTC**. The original hard deadline remains.
+08:40 value decision: continue the bounded preservation and saved-curve workflows;
+next review **10:10–10:40 UTC**. The original hard deadline remains.
 
 ## Earlier phase plan and checkpoint history
 

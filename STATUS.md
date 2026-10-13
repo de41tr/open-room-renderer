@@ -8,15 +8,14 @@
 based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
 squash-merged. No main push, merge or release is authorized for this phase.
 
-Latest fully CI-verified checkpoint **`189784309d6eb86e10ed2a0c7294e731fed0226d`**
-passes **all four jobs/every step** in **run 38365397046**, verified **08:05 UTC**.
-Floor groups **5102+708 /76 skips** pass **128.36s/102.14s** under 165s:
-**5810 passed /76 skipped**. Native defaults pass **5811/75**, including the required
-real socket-refusal case. Both architectures prove genuine installed migration,
-seven-file preservation/Plex omission, no-clobber and installed Spotify packaging.
-The unchanged Snapcast gate also passes both architectures. Prior `70d9308` run
-38362764862 remains FAILED on a shared 431-frame zero run; this later pass does
-not identify its cause. Subsequent Web/recovery/config changes require new CI.
+Latest fully CI-verified checkpoint **`884de2facc38baf7b20df3a11bd982727adb1c5d`**
+passes **all four jobs/every step** in **run 38370547216**, verified **08:51 UTC**.
+Floor groups **5319+708 /76 skips** pass **155.29s/149.29s** under 165s:
+**6027 passed /76 skipped**. Native defaults pass **6028/75**. The unchanged
+Chrome, native/Unix, installed migration/packaging, discovery and Snapcast gates
+pass. Dedicated interaction/physical acceptance of the new inspection card is
+not inferred from that standard smoke. Prior `70d9308` run 38362764862 remains
+FAILED with unresolved zero-run cause. The favorites correction needs its own CI.
 
 ## Active corrected work
 
@@ -119,6 +118,14 @@ software work; no report/CI wait is used instead of useful independent work.
   before opening them, retaining post-open checks and the documented same-user
   replacement-race limit. A five-line fix passes 168 related checks on each Python;
   synthetic negative controls confirm the prior gap without opening any device.
+
+- **Favorites storage preservation:** an observed dangling favorites.json link
+  previously looked like new empty storage and could be replaced by a save.
+  A narrow lstat absence check now uses the existing unavailable latch instead.
+  Six original store/Web/JSON reproductions preserve exact link/target bytes;
+  root focused checks pass 199 on both Python versions. Healthy/missing storage,
+  valid-link semantics and response categories remain unchanged. No automatic
+  repair/reload or protection against unobserved external writers is claimed.
 
 ## Implemented scope
 
