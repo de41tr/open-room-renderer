@@ -333,7 +333,7 @@ personally; never put credentials in this config or share the private logs.
 Zeroconf and MPRIS are off; audio cache and metadata prefetch are disabled.
 Normal daemon shutdown uses systemd signals/cgroup termination, never REST stop.
 A later explicit read-only observation can use:
-open-room-renderer spotify diagnose --host {q(host)} --port {port}
+{q(str(prefix / 'venv/bin/open-room-renderer'))} spotify diagnose --host {q(host)} --port {port}
 That proves only a sidecar-reported snapshot; it cannot clear the pending gates.
 Test real DAC handover/failure paths, session recovery, XU4 ABI and resource use
 separately before calling this a productive installation. There is no claim of

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import socket
 import stat
@@ -93,12 +94,33 @@ def test_deterministic_private_package_and_manual_handover(profile):
             assert required in text
     assert "ExecStart" not in dropin and "After=" not in dropin
     guide = first["MANUAL_HANDOVER.md"].decode()
+    executable = Path(profile["renderer_prefix"]) / "venv/bin/open-room-renderer"
+    assert f"\n{shlex.quote(str(executable))} spotify diagnose --host 127.0.0.1 --port 3678\n" in guide
     for required in ("disable open-room-renderer.service", "empty owned", "physical device release",
                      "defense in depth", "never sudo", "Never automatically fall back", "not legal clearance"):
         assert required.lower() in guide.lower()
     shutil.rmtree(root)  # Test-owned output only, not generator behavior.
     assert invoke(profile) == result
     assert first == {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("prefix", [
+    "/opt/renderer", "/opt/renderer with spaces", "/opt/renderer%literal",
+    "/opt/renderer;echo & (literal) | < > * ? [a] {b} # ~ ! `literal`",
+])
+def test_guide_diagnostic_uses_shell_quoted_native_executable(prefix):
+    prefix = exclusive._path(prefix)
+    guide = exclusive._guide(
+        prefix, prefix / "config.yaml", prefix / exclusive.RENDERER_SERVICE,
+        Path("/opt/client/go-librespot"), Path("/opt/proposal"), "127.0.0.2", 4567,
+    )
+    commands = [line for line in guide.splitlines() if " spotify diagnose " in line]
+    # Parse the inert guide only; never execute its commands.
+    assert len(commands) == 1
+    assert shlex.split(commands[0]) == [
+        str(prefix / "venv/bin/open-room-renderer"), "spotify", "diagnose",
+        "--host", "127.0.0.2", "--port", "4567",
+    ]
 
 
 def test_migrated_profile_is_explicit_and_separate(profile):
