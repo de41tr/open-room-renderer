@@ -1,3 +1,140 @@
+# Next-phase status and handover — 13 October 2026
+
+## Verified checkpoint
+
+**Software checkpoint verified; target acceptance remains open.**
+`53f4831bd469735e13c1448a91abdeba838dc1cf` passes **all four jobs/every step** in
+[run 38394821007](https://github.com/de41tr/open-room-renderer/actions/runs/38394821007),
+verified **12:21 UTC**. Python 3.11 floor: **7260 passed /76 skipped**, three
+same-runner groups **149.62s /94.67s /89.85s** under the unchanged **165s shared
+watchdog**. Native defaults: **7261/75** on Linux x86_64 and ARM64; the existing
+Chrome, libmpv/null/PCM, production Unix IPC, installed-package, discovery,
+lifecycle and Snapcast gates pass. Native opt-in lanes remain two-group;
+assertions, skips, shared deadlines and job/step caps are unchanged.
+
+Work remains on `dot/renderer-next-phase-20261013` in
+[Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), open and unmerged.
+Main remains `ad21bd4972d4af81dd29d1d952e38313dbe491d9`; PR #1 was already
+squash-merged. No main push, merge or release is authorized. The active window
+ends **2026-10-13 18:00 UTC (20:00 Europe/Berlin)**: no large/risky starts after
+**16:30**, stabilization from **17:00**. Runtime acceptance stays pinned to
+this source. Documentation-only handover revisions receive their own PR checks;
+no pass for them is inferred here.
+
+## What is delivered
+
+- **Cohesive architecture:** `EqPresetLibrary` owns saved-curve validation/storage;
+  `queue_protocol` owns pure authored-queue/request contracts. Playback retains
+  one queue authority; active DSP, lock order and error semantics stay in their
+  existing owners. No universal player framework was added. See
+  [architecture](docs/architecture.md#saved-dsp-library-and-authored-queue-contracts).
+- **Responsive local controller:** the existing listener serves `/ui/`, with
+  playback/seek/volume/mute, queue selection and all five supported modes,
+  managed favorites and URL repair, ten-band/saved-preset DSP, balance/bypass,
+  stopped-only playlist loading/editing, room rename and explicit output
+  inspection. Canonical state, private-safe failures, stale drafts and sticky
+  UNKNOWN outcomes remain visible. See [Web controls](docs/WEB_UI.md).
+- **Private file workflows:** current-queue JSON export uses redacted review,
+  explicit private-URL consent and a user-clicked download. One saved DSP curve
+  can transfer under a new safe name, without changing active DSP. Managed
+  favorites backup/restore preserves IDs/order/exact values and restores only
+  into healthy empty managed storage; configured rows are excluded. No durable
+  queue, general merge/overwrite or whole-library DSP restore is implied. See
+  [queue export](docs/WEB_PLAYLIST_EXPORT.md),
+  [curve transfer](docs/WEB_DSP_CURVE_TRANSFER.md) and
+  [favorites transfer](docs/WEB_UI.md#back-up-and-restore-managed-favorites).
+- **Operator checks:** pure `config check`, explicit owned-player audio-device
+  selection, no-start `audio diagnose`, and Web output inspection distinguish
+  configuration intent, live option and active driver without claiming sound.
+  `dsp show` reports only validated active status, balance, bypass, source/context
+  and bands. CONFIRMED exits 0; PENDING/UNKNOWN exits 1 with null values. It omits
+  private fields and does not prove an earlier write's success/durability or
+  physical output. See [DSP recovery](GETTING_STARTED.md#read-active-dsp-over-ssh)
+  and [output diagnosis](docs/AUDIO_DIAGNOSTIC.md).
+- **Safer state and startup handling:** observed unavailable saved libraries are
+  fenced against destructive writes; dangling saved-audio/config entries and
+  known malformed input fail privately rather than silently selecting defaults.
+  No automatic repair/reset, external-writer guarantee or new queue authority
+  was added. Exact no-effect queue-edit rejection permits explicit review and
+  a separate new click; uncertain outcomes are never automatically replayed.
+- **Native retention and offline upgrade:** config.yaml, state/ and
+  migrated-profile/ are retained even against older manifest claims. Old installed
+  uninstallers need the documented updated-checkout invocation. A fresh-prefix
+  offline preparer preserves seven state files, omits Plex session/identity
+  files, rebases only state/socket config paths and publishes a separate private
+  profile. Installed/native/socket proof passes; no user migration or effective
+  user-service activation occurred. See
+  [upgrade and recovery](GETTING_STARTED.md#uninstall-or-upgrade).
+- **Optional Spotify preparation:** the reviewed ranking is go-librespot **76**,
+  librespot **69**, Soloist **61**. Passive `spotify diagnose` has bounded local
+  REST/WS contracts; `spotify prepare-exclusive` generates credential-free
+  offline config/unit/drop-in proposals and manual guidance. No client was
+  installed/activated, account accessed or provider audio played. The proposed
+  direct-ALSA exclusive mode has separate status/volume and bypasses ORR DSP.
+  See [ADR 001](docs/adr/001-spotify-sidecar.md),
+  [diagnosis](docs/SPOTIFY_DIAGNOSTIC.md) and
+  [exclusive-mode gates](docs/SPOTIFY_EXCLUSIVE.md#required-manual-gates).
+
+## Evidence boundaries and retained debt
+
+- **Real browser:** the original Chrome 154 smoke actually rendered desktop
+  1280/mobile-emulated 390 layouts, checked modal keyboard/focus, drove Play/Pause
+  through production HTTP/Unix IPC to mpv/null and downloaded both queue JSON
+  files. It first passed at `66cbe158`; the unchanged smoke passes at `53f4831`.
+  Room-name, output-inspection and transfer/recovery additions have automated
+  contract coverage but no dedicated genuine-browser acceptance. Firefox,
+  physical mobile, screen readers and the wider interruption/accessibility matrix
+  remain open. See [browser evidence/checklist](docs/WEB_BROWSER_ACCEPTANCE.md).
+- **Native versus hardware:** Linux x86_64/ARM64 and native mpv 0.37 acceptance
+  are software/null/digital-PCM evidence. Selected local 0.37/0.40 replays have
+  their own recorded scope. Physical ARMv7/XU4, DAC/ALSA/acoustic output, effective
+  user-service/boot behavior, physical LAN and the original app remain unaccepted.
+  Prior limited emulated ARMv7 evidence does not close those gates.
+- **New DSP read:** actual CLI/Requests over synthetic TCP and guarded production
+  projection/admission pass. Installed `dsp show --help` on both native hosts
+  proves packaging only; it is not a live native DSP read or new PCM measurement.
+- **Security/transport:** legacy LAN HTTP/SOAP APIs remain unauthenticated; use a
+  trusted private network, not public exposure. Six bounded clients now refuse
+  Requests' eager redirect preparation before body consumption/private Location
+  parsing. Two old convenience helpers gain private errors but retain unbounded
+  non-streaming reads. Connect/read inactivity timeouts are not total deadlines.
+- **Failed floor retained:** `0ea93ec` stays FAILED in
+  [run 38391477130](https://github.com/de41tr/open-room-renderer/actions/runs/38391477130):
+  floor group 1 hit 165s (exit 124), while group 2 passed 708 in 157.96s and all
+  three other jobs passed. The reviewed three-group correction passes at
+  `53f4831`; it preserves all 7,303 old nodes/skip metadata and adds 33 scheduler
+  tests. This closes that correction, not a guarantee of future timing margin.
+- **Unresolved Snapcast debt:** `70d9308` stays FAILED in
+  [run 38362764862](https://github.com/de41tr/open-room-renderer/actions/runs/38362764862).
+  ARM joined_group_gain_50 matched 5/7 windows, with a shared 431-frame zero-run
+  despite correct median gain/RMS. Later unchanged-gate passes do not explain
+  the cause. A recurrence calls for focused common-path capture attribution,
+  without weakened thresholds or retries-until-green.
+
+## Next three user decisions
+
+1. Review Draft PR #2 and decide whether to merge it or request specific changes.
+   Merge/release remains a separate manual decision.
+2. Arrange and authorize real ARMv7/XU4 + DAC acceptance and effective user-service
+   testing, using the [hardware checklist](docs/TESTING.md#deferred-xu4--dac--original-app-acceptance)
+   and [service guide](GETTING_STARTED.md#4-optional-user-service). Include original
+   app/physical-LAN behavior; keep low-volume listening separate from software reads.
+3. Decide whether to proceed with optional go-librespot setup. Terms/account
+   acceptance and hardware/exclusive-output arbitration remain manual gates;
+   direct Spotify audio bypasses ORR EQ/balance and cannot share its state claims.
+
+No further independent feature is justified by the completed whole-product and
+metadata-only reviews. Richer queue bookmarks/metadata remain deferred because
+of cross-consumer/versioning, title-origin and duration/seek policy, not hardware
+availability. General favorites merge and whole-library DSP restore are also
+outside this phase. Use [RESUME.md](RESUME.md) for bounded continuation,
+[PLAN.md](PLAN.md) for scope and [TESTING.md](docs/TESTING.md) for detailed evidence.
+Historical sections below retain their original source, deadlines and results.
+
+---
+
+## Historical completed work
+
 # Bounded GENA architecture extraction
 
 Actual start: **2026-10-12 21:05:18 UTC (23:05:18 Berlin)**.

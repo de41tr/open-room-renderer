@@ -43,4 +43,6 @@ def test_real_cli_serve_signals_restart_and_persistence(ownership):
             assert cycle["exit_status"] == 0 and cycle["decoded_null_output"] and cycle["http_ports_closed"]
             assert cycle["owned_child_reaped"] is (ownership == "owned")
             assert cycle["external_peer_preserved"] is (ownership == "external")
+            assert set(cycle["web_assets"]) == {"/ui/", "/ui/index.html", "/ui/style.css",
+                                               "/ui/controller.js", "/ui/app.js"}
         print(json.dumps(evidence, sort_keys=True))

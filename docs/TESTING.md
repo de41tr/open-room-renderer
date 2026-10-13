@@ -1,5 +1,1087 @@
 # Test evidence and limits
 
+## Verified runtime checkpoint and how to read this record
+
+**`53f4831bd469735e13c1448a91abdeba838dc1cf`** passes **all four jobs/every step**
+in [run 38394821007](https://github.com/de41tr/open-room-renderer/actions/runs/38394821007),
+verified **12:21 UTC**. Python 3.11 floor: **7260 passed /76 skipped**, groups
+**149.62s /94.67s /89.85s** under the unchanged **165s shared watchdog**. Native
+defaults: **7261/75** on x86_64 and ARM64. The existing real-Chrome, libmpv/null/PCM,
+production Unix IPC, installed/migration/socket, discovery/lifecycle and Snapcast
+steps pass. Default suites use three groups; native opt-in lanes remain two-group.
+No assertion, skip, deadline or job/step cap was weakened.
+
+This closes the bounded scheduling correction after `0ea93ec`; its original
+floor timeout remains FAILED. The older `70d9308` ARM Snapcast 431-frame zero-run
+also remains FAILED with an unresolved cause despite later unchanged-gate passes.
+Detailed failures and checkpoint-specific evidence below are retained. Earlier
+PENDING statements describe those checkpoints, not a blanket current failure or
+acceptance of broader scope. A documentation-only successor requires its own
+exact-head run; the result above belongs only to its named source.
+
+The passing Chrome smoke covers the original desktop/mobile-emulated
+control/focus/queue-download flow. Later room-name, output-inspection and transfer/
+recovery interactions lack dedicated genuine-browser acceptance. New `dsp show`
+coverage is actual CLI/synthetic TCP plus guarded production projection; installed
+help proves packaging only. Physical ARMv7/DAC, effective user-service/boot,
+original app, wider browser and Spotify account/audio acceptance remain open.
+
+## Actual floor timeout and bounded third default group
+
+`0ea93ec`, run **38391477130**, floor job **115276061604**, is retained FAILED:
+group 1 was killed by the shared **165s** watchdog (exit 124); group 2 completed
+**708** in **157.96s**. No assertion failure was identified; the incomplete group
+has no passing-total claim. Chrome and both native jobs passed every step.
+Native defaults were **7228/75**, x86 groups **165.93s/141.74s** and ARM
+**157.92s/136.28s** under their unchanged 900s helper/15-minute job bounds.
+
+One candidate measurement ran 487 existing client cases on Python 3.11 in
+**16.39s**. Four complete modules move from group 1 to group 3; three existing
+CLI/runner modules move from group 2 to group 3. This avoids adding load to the
+already nearly full second group. It is a scheduling change, not a new product
+feature. Three concurrent pytest processes add CPU/memory contention; the local
+measurement estimates savings and does not certify hosted headroom.
+
+The helper defaults to two groups and permits three only with `--groups 3`.
+Its shared deadline, launch, failure continuation, owned process-tree cleanup and
+logging implementation remain unchanged. Native opt-in command lists/settings
+are identical. Floor stays **165s shared /3-minute step /8-minute job**; native
+defaults stay **900s helper /15-minute job**; explicit libmpv stays two-group
+**360s /7-minute step**, and stability remains **180s /6-minute step**.
+
+Collection-only parity on both Python minors preserves all **7,303** original
+node IDs and skip/skipif/xfail metadata, including active skip reasons. Original
+groups collect **6,595 /708**; final groups **6,108 /562 /666**, total **7,336**,
+with exactly 33 new scheduler tests. Groups are complete, disjoint and duplicate-
+free; all 76 active skip marks remain. Collection is not a runtime pass/skip count.
+
+Fresh independent review passes. Root focused helper/workflow checks pass **46**
+on Python 3.12/3.11 (**18.70s/18.66s**), preserving every old two-group case and
+covering third-group overlap/failure/launch failure, shared timeout, interrupts,
+owned descendants, unrelated-process survival, CLI bounds and exact file/budget
+coverage. All 16 workflow shell blocks parse. No full local replay, sweep, extra
+native/browser campaign, threshold relaxation or retry-until-green was used.
+The exact correction now passes at `53f4831`, as recorded above. This is
+observed hosted margin for that run, not a guarantee of future timing.
+
+## Redirect preparation and legacy CLI privacy
+
+Actual Requests 2.34.2 prepares Response.next even with allow_redirects=False.
+Baseline synthetic TCP evidence showed DSP reading 4,352 total bytes against its 256-byte
+cap and queue reading 1,052,672 against its 1,048,576-byte cap; malformed Location
+values escaped private failure handling. Exactly one original request was sent,
+not a followed redirect. Eighteen production lines now suppress preparation in
+six bounded clients while preserving all methods, parsers, caps and outcomes.
+
+A real-Requests guarded adapter matrix covers nine read/mutation routes, five
+redirect statuses and three Location forms; nine small TCP cases confirm wire
+behavior. All 144 new cases fail on baseline and pass corrected, as does clean
+replay. Worker focused coverage passes 658 on both Python versions, with nine
+async renderer fixtures deliberately excluded locally. Independent review passes
+144 per runtime, 330 adjacent cases and 162 extra in-memory controls. Root merged
+new/legacy DSP, queue, transport and redirect checks pass 718 per Python.
+
+A separate six-line correction prevents raw private Location/Unicode tracebacks
+from api_get and favorites_request. Tiny actual CLI subprocess probes establish
+the original failure and fixed private HTTP307 result, with one original request
+and no target contact. Its worker/reviewer focused slice passes 457 per Python;
+108 new cases retain success text, payloads and committed-durability warnings.
+These older helpers remain non-streaming and **unbounded**; no body-cap guarantee
+is inferred from this privacy-only change.
+
+Final combined root integration passes **826** on Python 3.12/3.11 in
+**17.36s/17.59s**. No actual renderer, native/audio/browser/provider/service or
+full/timing campaign was added. All timeouts remain connect/read inactivity,
+not total elapsed deadlines. The redirect checkpoint `0ea93ec` then failed
+its floor timing gate; the combined scheduling successor `53f4831` passes as
+recorded above, without changing these client semantics.
+
+Preceding **20bff6c** is fully green, all four jobs/every step in **38388607430**,
+verified **11:27 UTC**: floor **6975/76**, groups **163.24s/140.10s**, native defaults
+**6976/75**. Both installed native packages execute dsp show --help; this proves
+packaging only. Existing caps and partition remain unchanged despite narrow
+floor headroom; investigate scheduling only if an actual failed gate justifies it.
+
+## Implicit-config intent and native handover correction
+
+Bare serve's compatibility fallback now requires a missing selected leaf after
+read failure, rather than treating an observable dangling config as new absence.
+The existing fixed private error handles an existing entry or lstat uncertainty;
+no path reselection, read retry, ancestor walk or state/backend effect is added.
+Genuine absence/missing parents, successful regular/link reads, explicit errors,
+captured input and legacy public/print behavior remain. Worker checks pass
+154 on Python 3.11/3.12 with one unrelated subprocess case deselected; fresh
+independent review passes all 48 new guarded cases. CLI coroutine stepping and
+wrapper stubs prove the pre-hydration boundary without actual services/sockets.
+The root's broader startup/config/saved-entry checks pass **385** on each Python
+(**23.04s/23.24s**); contributor documentation checks pass **5**.
+
+The generated Spotify handover now names the shell-quoted native-prefix
+executable rather than assuming a global PATH entry. Five new assertions fail
+on baseline and pass corrected; shlex tokenization covers spaces, percent signs
+and allowed shell metacharacters without executing output. Root generator checks
+pass **122**, one existing static unit verifier deselected, on both Python versions
+(**0.57s/0.55s**). Host/port and manual acceptance gates remain unchanged.
+
+Preceding **322139c** is fully green in **38382292288**, all four jobs/every step,
+verified **10:31 UTC**: floor **6656/76**, groups **156.60s/143.82s** under unchanged
+165s caps; native defaults **6657/75**. Subsequent operator head **144db38** also
+passes all four jobs/every step in **38384524114**, verified **10:54 UTC**: floor
+**6708/76**, groups **132.44s/106.58s**, native defaults **6709/75**, unchanged caps.
+
+## Managed-favorites transfer and bounded recovery corrections
+
+The paired private favorites workflow exports only managed records and restores
+only into healthy empty managed storage. Exact IDs/order/URLs/metadata, duplicate
+names/URLs, configured-prefix preservation and restart are covered. One existing
+lock spans validation, fresh bounded disk inspection and one atomic commit;
+pre-replace failures preserve bytes, while post-replace fsync uncertainty retains
+the new tuple with UNKNOWN/committed. No partial add loop, merge or overwrite.
+Strict nested keys/IDs/targets and complete escaped envelopes keep existing limits:
+a 32,310-byte synthetic file becomes a 64,496-byte request and is rejected whole.
+Private summaries, fresh consent, deliberate downloads and late-response/dismissal
+cleanup are covered without rendering private names, filenames or targets.
+
+Worker Python 3.11/3.12 and fresh ordered replay each pass **838** focused cases;
+root affected transfer/preservation/export/frontend integration passes **514** on
+each (**4.69s/5.02s**). All 13 reviewed file hashes matched before the subsequent
+queue recovery merge. Independent review found no blockers. The new transfer
+suite is synthetic/in-memory; existing selected adjacent tests use established
+local TCP fixtures. No dedicated new-dialog real-browser download/layout claim.
+
+The saved-state correction changes only degraded read policy in three readers:
+gain.json, active_dsp.json and optional device_name/channel_balance text now require
+verified absence before defaults. Eighteen baseline controls proved silent fallback
+and later loss of a dangling reference. New regressions fail on baseline; corrected
+root gain/DSP/startup integration passes **333** on each Python (**10.97s/10.75s**).
+Independent review passes the 68 new cases on both and 12 additional link/error
+controls. Valid/missing files and links, writers, UUID and active-DSP precedence
+remain unchanged. Private CLI/second-API-read behavior uses guarded fake startup;
+no actual audio, socket or service was started. Later external writes are not fenced.
+
+A real legacy status-read coroutine/admission proof over a yielding mock snapshot
+establishes a transient 409 unavailable/REJECTED with no queue/generation/backend
+mutation. Its actual response bytes drive the three row-action DOM regressions.
+Only that exact flat raw envelope permits explicit Refresh to review/re-arm a
+completed rejection; a subsequent separate click sends the next edit. Duplicate
+raw keys, contradictory fields, UNKNOWN/ERROR/lost/malformed/ACK and pending or
+superseded review stay latched. Independent review and combined **270 Node** cases
+pass, including 13 new recovery cases. Browser smoke is unchanged, not a dedicated
+acceptance claim for this new recovery interaction.
+Final merged frontend/docs/favorites/playlist checks pass **261** on each Python
+(**4.94s/5.12s**). A separate integration reviewer confirms the exact source union
+and passes 26 focused overlap controls; no dropped cleanup or uncertainty branch.
+
+The latest preceding exact head **52ccf01** passes all four jobs/every step in
+**38376589573**, verified **09:44 UTC**: floor **6413/76**, groups
+**130.07s/106.97s**, native defaults **6414/75**, unchanged caps. The combined
+successor `322139c` now passes all four jobs/every step in 38382292288; this does
+not add dedicated browser coverage for the new dialogs/recovery interaction.
+
+## Single saved DSP curve transfer
+
+The strict codec, saved-only adapter and consent-bound UI are separate commits.
+The existing v1 format carries exactly one safe name, one exact current plugin
+and forty complete records. The transfer decoder rejects ambiguity, nonfinite or
+lossily rounded/underflowed decimal tokens without tightening the legacy loader.
+Exact 32,768-byte file/request boundaries and the 1 MiB library limit are tested.
+Export proves its escaped import-envelope round trip; shared-name exports disclose
+that other plugin contexts are omitted rather than claiming a whole-preset backup.
+
+Two independent synthetic rooms prove source/existing destination preservation
+and no changes to active bands/plugin/source/enablement/balance/name caches, gain,
+configuration, renderer state, active_dsp.json or backend calls. Lock-wait/session
+staleness, unavailable storage, collisions, orphan-label changes, precommit rollback
+and known replacement with UNKNOWN durability are covered. No active persistence
+wrapper or reconcile path is reused. Explicit privacy consent and user-clicked
+Blob downloads retain dismissal/pagehide/staleness/late-response safeguards.
+
+Root exact merged package passes **840** focused cases on Python 3.12 in **12.08s**
+and Python 3.11 in **12.57s**, including both Node suites (**219 cases**, 32 new).
+All reviewed code/test hashes match; only documentation incorporates the subsequent
+favorites correction. Independent review and clean replay pass. These are pure,
+in-memory HTTP/mock and DOM-double checks; no new native socket/browser campaign
+or physical-audio claim. Exact source `52ccf01` is now fully CI green in run
+38376589573; that does not add dedicated new-dialog browser coverage.
+
+Preceding favorites-preservation head **a38674a** is fully green in run
+**38373082322**, all four jobs/every step, verified **09:18 UTC**. Floor
+**6107/76**, groups **155.09s/143.27s**, unchanged caps. Standard Chrome and all
+native/Unix/installed/discovery/Snapcast gates pass; the earlier failed Snapcast
+run remains retained and unexplained.
+
+## Saved-favorites dangling-link preservation
+
+The published `189784309d6eb86e10ed2a0c7294e731fed0226d` behavior was reproduced
+in an isolated copy with disposable synthetic storage. Direct store add,
+browser `favorite_add`, and existing `/orr/v1/favorites` JSON POST each treated
+a dangling `favorites.json` link as empty and replaced that link on save. The
+browser/JSON routes returned success (200/201). In all six cases the link was
+lost, whether the target stayed missing or was restored after initialization;
+restored target bytes were unchanged, but the saved-library reference was lost.
+
+The correction checks the file entry with `lstat` after a read reports not found.
+Only a genuinely absent entry permits a new empty library. An existing entry
+or another existence-check error flows through the existing unavailable-storage
+latch. This is a deliberate dangling-link/uncertain-absence error-policy change,
+not a format or storage refactor. No writer, availability category, private
+recovery message, automatic repair/reload, or healthy valid-link semantics was
+changed. It only fences writes after an observed load failure, and makes no
+claim about unobserved later external writers or atomic read/write races.
+
+`tests/test_favorites_storage_preservation.py` failed **76** cases against the
+published code while **4** healthy-storage controls passed; all **80** pass with
+the correction. Coverage includes add, save-current, rename, target edit and
+delete through the store, browser command and existing JSON API, missing and
+later-restored targets, existing entries despite a failed read, injected
+`lstat` permission/I/O failures, exact link bytes/inode and target-byte
+preservation, and zero calls to the writer or mock audio backend. Missing files
+and parent directories, valid files/links, and restart-only recovery retain
+their healthy responses. Browser reads retain 503 / ERROR with fixed private
+guidance; dispatched mutations remain 502 / UNKNOWN, and JSON mutations retain
+503 `library_unavailable`.
+
+Root preservation/managed-favorites/Web-diagnostic integration passes **199**
+on Python 3.12 (**5.96s**) and 3.11 (**5.99s**), each with the existing pywiim
+TLSv1 warning. The bounded related favorites/Web/CLI slice passes **568** on Python 3.12.14
+(52.63s, one existing pywiim TLSv1 deprecation warning). Independent review
+passed **199** overlapping preservation/managed/diagnostic tests and four
+additional synthetic link-shape checks. The six-case original reproduction
+also passes preservation after the correction with unchanged target bytes.
+Only disposable files and loopback HTTP with mock audio were used. No actual
+user state, provider credentials, external service, full/native campaign or
+AF_UNIX attempt was involved. This is focused evidence, not a full-suite or
+native-runtime pass.
+
+The preceding Web/operator head **884de2f** passes all four jobs/every step in
+run **38370547216**, verified **08:51 UTC**. Floor **6027/76**, groups
+**155.29s/149.29s** under unchanged 165s; native **6028/75**. Standard Chrome,
+installed migration/packaging and both unchanged Snapcast lanes pass. This does
+not erase the earlier Snapcast failure or certify dedicated new-card interaction.
+The favorites correction is subsequent source and still needs exact-head CI.
+
+## Web operator guidance and startup-input boundary
+
+The Web inspection callback captures only running-config scalars and creates a
+fresh no-spawn diagnostic client. The existing bounded two-property method is
+unchanged. Exact admission, hidden identifiers, immediate overlap refusal,
+cancellation/cleanup, session changes and discarded late results are covered.
+Independent busy/privacy negative controls fail as intended. Recovery guidance
+uses only current selection-owned counters and allowlisted errors; exhaustion
+still performs exactly initial load plus three retries, and explicit Play makes
+the next load. No snapshot read drives recovery or changes command gates.
+
+Root merged Web/output/recovery/diagnostic/export checks pass **535** on Python
+3.12 (**11.13s**) and 3.11 (**11.14s**), including the combined frontend suite.
+Earlier isolated recovery integration passes 279 in 10.00s/9.96s. These are
+synthetic transport/server and DOM-double checks, not dedicated browser acceptance
+of the new card or physical audio evidence. No local AF_UNIX route was retried.
+
+Duplicate explicit root YAML settings now fail before construction or effects.
+The change preserves unique inputs, legitimate merges, aliases, coercions and
+legacy public load_config. Review caught a !!value-key normalization bypass before
+freeze. Root startup/config-check/migration checks pass **266 +1 declared native
+skip** in **15.45s/15.32s** on Python 3.12/3.11. This is an intentional startup
+validation change, not a behavior-neutral parser extraction.
+
+The separate five-line offline Spotify input guard refuses existing special leaves
+before opening them, while retaining post-open type/permission checks. Thirty
+synthetic pre-open regressions fail on the baseline and pass after correction;
+no real special file/device is opened. Root related checks pass **168** in
+**8.95s/9.23s** on Python 3.12/3.11. Same-user replacement races remain outside its
+pre-open guarantee, as documented; no broader filesystem framework was added.
+
+Preceding head **1897843** is fully green in run **38365397046**, all four jobs/every
+step, verified 08:05 UTC. Floor **5810/76** (128.36s/102.14s); native **5811/75**
+includes the required real socket-refusal case. Both architectures pass genuine
+installed-profile capture/Plex omission/no-clobber and Spotify parser packaging.
+The unchanged Snapcast gate passes all stages, including the previously failed
+one. Earlier run 38362764862 stays failed and its cause unresolved; no thresholds,
+windows, warmup or caps changed. The new source still requires its own CI.
+
+## Latest integrated operator package and unresolved hosted failure
+
+Root Spotify/diagnostic/config/CLI/migration/installer integration passes **279 +1
+explicit native skip** on both Python 3.12 and 3.11 (**9.51s** each). The subsequent
+separate native executable-path fix passes **167 +1 native skip** on both
+interpreters (**1.47s/1.23s**), with independent review. Static systemd verification
+rejects both literal quote types/DEL in executable prefixes while accepting
+spaces/percent and quoted config arguments. New install/destination preflight
+refuses before effects; legacy manifest-aware cleanup still works for old paths.
+Default unit/config bytes remain unchanged. No runtime service claim follows.
+
+Hosted ARM run **38362764862** at head `70d9308` **FAILED** Snapcast
+joined_group_gain_50: all four channel measurements matched only 5/7 windows,
+despite correct median gain and passing RMS. Both clients showed the same
+431-frame (~9 ms) zero-run pattern; phase evidence is consistent with inserted
+silence, but its origin is unresolved. Acceptance/audio code, gates, runner image
+and tested package versions were unchanged from passing run 38361339841. Other
+jobs and all ARM preceding steps, including installed/uninstall, passed. Keep
+this run failed; the next feature-head CI supplies a fresh observation without
+changing thresholds, windows, warmup or caps. A later pass does not establish the
+cause. Recurrence warrants focused common-path capture attribution, not retries
+until green. No extra replay was started for this read-only diagnosis.
+
+## Offline native migration preparation
+
+Captured-config validation and the unchanged default unit template are separate
+prerequisite commits. The feature adds initial-config receipt verification and
+an offline, new-prefix-only profile with bounded same-user descriptor reads,
+byte-preserving state capture, strict YAML, explicit offline acknowledgment and
+config-last no-clobber publication. Source/destination mutation, unsafe types,
+relocated snapshots, two-hop profiles, fsync/publication/close failures and
+unchanged original settings are covered. Independent review found and fixed
+leading-double-slash aliasing, scientific-float round-trip and committed close
+error classification before freezing the patch.
+
+Root integration with the installer ownership fix passes **250 +1 declared native
+opt-in skip** on Python 3.12 (**14.08s**) and 3.11 (**13.78s**). The worker's focused
+slice passes 80/1; an exact-candidate installed wheel smoke imports from isolated
+site-packages with staged synthetic receipts. It is not a full native-install or
+live-service migration claim. A genuine fresh installed-prefix smoke is attached
+to the existing hosted install step; the real socket-refusal case is required in
+native CI and explicitly skipped locally. One normal and one escalated local
+socket construction were blocked by EPERM before this constraint was correctly
+propagated; neither created/contacted a socket, and no further retry occurred.
+No provider files were read, no user installation was migrated, and no service,
+backend or physical audio was activated. New exact-head CI remains required.
+
+Room head `e9fd18a` is fully green in run 38361339841, all four jobs/every step,
+verified 07:27 UTC. Floor **5594/75**, groups **147.26s/141.59s**. The later retention
+head `70d9308` has the recorded ARM Snapcast failure and does not include migration.
+
+## Native user-data ownership correction
+
+The installer no longer inventories root config.yaml, state/ or migrated-profile/.
+Uninstall protects those paths even under older format-1 ownership claims, after
+validating the complete manifest before effects. Synthetic checks prove exact-root
+boundaries, nested files/empty directories, dry run, symlinks, partial-install
+recovery and modified-owned-file retention. Root runs pass **58** on Python 3.12
+in **0.73s** and Python 3.11 in **0.60s**; independent review independently passes
+all 58. An unneeded worker full-default run was stopped at 76% without observed
+failures; it is **UNCOMPLETED**, not full-suite evidence. No real user installation
+or services were changed. Old installed uninstall scripts are not retroactively
+updated; the documented updated-checkout command is required for old prefixes.
+Exact new-head hosted CI remains required.
+
+## Room-name workflow and operator CI
+
+The separate pure validator extraction passes 60 existing rename transaction
+cases. The complete Web rename delta passes **249** focused cases on Python 3.12
+in **9.70s**, and Python 3.11 in **9.96s**, including **175 Node** cases. Independent
+review and clean replay pass; a compare-before-lock mutant fails the stale-owner
+case. Literal-percent names, legacy decoding, session changes, redaction, durable
+commit uncertainty, discovery failure and log privacy are covered. No genuine
+browser claim is made for this newly added dialog; the unchanged Chrome smoke
+continues to cover its existing desktop/mobile/control/export workflow.
+
+Operator head `4fd1607` passes every step in all four jobs of run **38359036576**,
+verified **07:07 UTC**. Floor: **5580/75**, groups **118.93s/94.21s**. Both x86_64
+and AArch64 production Unix lanes explicitly report null intent/active output,
+ambient-config isolation, disabled null fallback, child cleanup and read-only
+diagnosis preserving player/socket. Native Unix groups pass seven cases in
+25.74s/25.09s. Existing libmpv, installed, lifecycle, discovery and Snapcast gates
+also pass. This closes the operator pending statements recorded below; it does
+not certify subsequent room-name source or physical audio.
+
+## Genuine browser and practical operator checkpoint
+
+**Real browser, not a DOM double:** hosted Chrome 154.0.8037.97/ChromeDriver 154
+ran with normal sandbox against production HTTP/Unix IPC and mpv 0.37/null.
+First run 38353544786 (`fc5e4a5`) passed desktop rendering/navigation and actual
+Play/Pause before a too-strict Tab-wrap assertion failed. Its console proved the
+`data:,` favicon violated CSP. Run 38354874024 (`97ce1f6`) has an empty captured
+console after the same-origin empty 204 fix, but fails the next assumption:
+noninteractive BODY fallback retains document.hasFocus=true under headless
+WebDriver. The corrected check records that value without inferring chrome
+focus, requires native Tab re-entry and rejects background controls. Both failed
+runs stay recorded. The corrected smoke then passed at `66cbe158` in run
+38356723243/job 115161233008, completing desktop/mobile and actual downloads.
+Verified artifact 11792544975 has empty console logs, four ACK200s, actual
+advancing/paused PCM-null readback and two 205-byte files matching canonical/
+server bytes. All 48 source hashes match the published revision; actual screenshots
+were inspected. Browser work finished at 06:29 within budget. This is not the
+full manual matrix or physical/Firefox acceptance.
+See [reproduction/artifacts scope](WEB_BROWSER_ACCEPTANCE.md).
+
+The favicon change passes 160 focused Web/frontend cases in 9.02s, including the
+existing 169 Node cases. Host/method/body/query/path/CSP rules and four packaged
+assets remain unchanged. No local browser/socket bypass was attempted.
+
+**Concrete Spotify diagnostic:** independent review and 23 synthetic REST/WS
+cases cover projection privacy, NO_SESSION, bounded requests/frames/deadlines,
+redirect refusal before a separate target is contacted, cleanup and lossy-event
+semantics. A callback-removed mutant contacts the forbidden second server and
+fails. Root diagnostic+legacyCLI checks pass 49 on Python 3.12/3.11 in 7.66s/7.72s.
+No upstream client/account/provider traffic, tokens, playback or hardware claim.
+
+**Explicit output configuration:** focused implementation checks pass 367 with
+seven native opt-in skips; a new existing-lane Unix test must prove production
+supplies audio-device=null, no-config, load-scripts=no and null-fallback=no, while
+ignoring a deliberately conflicting synthetic MPV_HOME. Its wrapper cannot mask
+those production options. This is pending hosted execution, not a local native
+pass or physical DAC test. Unset spawn arguments/signatures remain compatible;
+foreign/replaced/unverified peers are refused before writes only in opt-in mode.
+
+**Integrated CLI/input check:** combined output/startup/Spotify tests pass 416
+on Python 3.12/3.11 in 35.77s/35.63s. Config/Spotify/legacyCLI integration passes 56
+in 7.98s; independent review confirms parser/dispatch/privacy hooks. Config-check
+success is explicitly limited to existing startup-input checks; it does not
+read saved state, create identity, bind/network, spawn/contact a player or certify
+ports/final balance/DAC. An independent pre-import audit probe blocks audited
+write-capable opens, sockets and subprocess creation; this is not a syscall trace.
+**Output diagnosis** independently passes 152 focused cases on each interpreter
+plus existing CLI coverage; a real buffered-await deadline gap was fixed before
+freeze. Root final audio/output/lifecycle/config/Spotify/legacy integration passes
+**208** in **11.59s (3.12) /11.87s (3.11)**. The existing new null-device native
+case adds read-only intent/active-driver checks without a second player/campaign;
+that actual native slice is still hosted pending. No startup, playback, state
+write, unlink or signal is permitted in the diagnostic tests.
+
+The preceding exact browser head `66cbe158` is fully green in run 38356723243,
+all four jobs/every step, verified 06:40 UTC. Hosted floor 5492/74 finishes
+145.74s/142.65s under 165s. This does not certify the new operator code.
+No redundant full local sweep or long campaign. Exact new-head CI is required.
+
+## Save current draft and observed floor correction
+
+A fresh selection/session change previously left Save current enabled with its
+old captured generation. The backend correctly rejected the stale request, but
+Refresh could not repair that open draft. A small frontend-only latch now blocks
+submission, preserves the entered name/original intent and gives explicit Close/
+review/reopen guidance. Read loss alone does not latch. PENDING, unverified ACK,
+UNKNOWN and rejected outcomes remain; already-sent verified saves still close.
+No server/controller/codec/persistence behavior or atomic guarantee is added.
+
+Five discriminating DOM regressions all fail against baseline app.js. Independent
+review passes 70 distinct related cases; clean replay and exact hashes match.
+Root complete frontend checks pass **169 in 1.51s**, plus **159 focused Web/frontend
+Python cases in 8.76s**. These are DOM doubles/HTTP checks, not genuine browser
+layout/focus acceptance. No native replay was added for this frontend-only delta.
+
+The preceding initial-balance head `696700c` failed the Python 3.11 floor in
+[run 38342139978](https://github.com/de41tr/open-room-renderer/actions/runs/38342139978):
+group 1 was terminated by the unchanged 165s watchdog without a reported assertion
+failure; group 2 passed 550 in 136.61s. Both native jobs subsequently passed
+every step. This is recorded as a failed gate, not
+replaced by local focused passes. A single measured partition correction and
+combined candidate floor replay follow, retaining all tests, opt-in skips,
+assertions, process count and caps. `test_startup_state.py` measures **157 passed
+in 10.02s** on local Python 3.11. Moving only that file to the smaller group in
+both identical default selectors preserves the helper/native lanes and 165s cap.
+Independent review finds no blocker. Collection proofs on both 3.11/3.12 retain
+all **5,565 nodes**, with identical evaluated skip reasons and 74 opt-in skips:
+old groups 5,015+550 become disjoint 4,858+707; their exact multisets and complete
+cross-version records match. No test/assertion/filter is dropped.
+
+The one final candidate replay includes the frozen Save current frontend patch:
+**4,784 passed /74 skipped** in **125.67s**, and **707 passed** in **113.01s**;
+helper exits 0 in **126.976s** under 165s. This is local timing, not a guarantee of
+hosted headroom. No baseline full rerun or further timing campaign was added.
+Exact corrected head **`ba7c759`** passes
+[run 38343514991](https://github.com/de41tr/open-room-renderer/actions/runs/38343514991),
+all three jobs/every step, verified **04:03 UTC**. Hosted floor groups pass
+**142.33s/138.29s**; x86_64 defaults **138.50s/135.00s**, ARM64 defaults
+**135.96s/133.35s**, all totaling **5491/74**. All existing native/production Unix,
+client, installed lifecycle, discovery and Snapcast gates pass. Both installed
+owned/external CLI logs confirm the four assets across SIGTERM/SIGINT/SIGHUP and
+restart; they do not certify a real browser. Scheduling work is now closed.
+No additional local/native replay accompanies the 04:12 handover-only update.
+
+## Initial balance startup privacy checkpoint
+
+Exact preceding head `3e44ad0` is fully green in
+[run 38339941041](https://github.com/de41tr/open-room-renderer/actions/runs/38339941041),
+verified 03:24 UTC: all three jobs/every step, 5399/74 defaults and all existing
+native/Unix/installed/client/discovery/Snapcast gates. Floor groups 4849+550 /74
+finish in 153.33s/129.02s under the unchanged 165s cap. Both native logs confirm
+seven preset write refusals, exact-byte preservation and active playback/cleanup.
+
+The new startup-only balance diagnostic is independently reviewed. The four-file
+focused scope (`test_startup_state`, `test_startup_config`, `test_backend_lifecycle`,
+`test_dsp_api`) passes **487** on each Python 3.11/3.12, including 92 new cases.
+Root exact-file replay passes in **24.81s (3.12) /25.11s (3.11)**. Against unchanged
+baseline, those additions produce **17 expected failures /75 compatibility passes**;
+clean patch replay passes all 92. Shared normalizer AST, config.py and cli.py are
+unchanged. No default/native/browser sweep or real backend socket was attempted
+for this ten-net-line production correction before publication. Its subsequent
+hosted floor watchdog failure and bounded correction are recorded above.
+
+With a fully stubbed backend, synthetic credential-bearing configuration/saved
+text produces exactly one fixed
+source-neutral stderr line and exit 2, replacing unhandled traceback/exit 1.
+Backend acquisition/gain initialization already happened: existing stop/cleanup
+runs once, listeners/DSP staging/socket requests are unreached, and previously
+published identity may remain. Repeated failure retains identity and saved bytes.
+Compatibility checks preserve saved-over-config and active-DSP-over-both
+precedence, empty/NUL saved text, percentage/encoded/range/nonfinite/rounding
+behavior, public-loader/ordinary-API errors, programmer errors and cancellation.
+This is not early validation, automatic repair or a new schema policy.
+
+## Failed-load EQ preset preservation checkpoint
+
+Preceding exact head `660cab1` passed all three jobs/every step in
+[run 38337365883](https://github.com/de41tr/open-room-renderer/actions/runs/38337365883),
+verified 02:47 UTC. Hosted defaults total 5357/74; floor groups 4807+550 /74 run
+in 153.73s/131.05s under the unchanged 165s cap. This result scopes the favorites
+read diagnostic, not the following failure-policy correction.
+
+Final combined defaults pass **4849+550 /74 opt-in skips** on Python 3.12
+(127.72s/103.47s) and 3.11 (130.48s/102.39s). Same selectors, assertions and caps;
+no scheduling change. Node/DOM checks pass **164**. Focused preservation/rollback/
+Web suites pass 298 on each interpreter; 42 new Python cases and eight frontend
+regressions have independent review. Five synthetic destructive-write probes
+fail against baseline and pass with the candidate. All final source/test hashes
+match the independently reviewed and native-tested files.
+
+The existing native Web case adds one terminal fresh-object startup slice:
+malformed saved-library bytes plus an independently valid active-DSP snapshot,
+new Config/RendererState/HttpApi/native handle and listeners. Actual mpv 0.37
+passes in **5.16s**, 0.40 in **4.85s**. Three Web saved-library refusals return
+409/REJECTED; four legacy Save/SourceSave/no-op Delete refusals return 502/Failed.
+Each retains exact files, active state, queue identity/value, generation, gain,
+native handle/properties and playing lifetime with zero native/media mutations.
+Builtin Flat load, negative band edit and bypass/enable remain operational.
+All 231 original assertions and the original flow's AST remain unchanged (283
+assertions total); 30s child/35s supervisor caps and cleanup assertions remain.
+
+One bounded negative-sensitivity run removes only the persistence fence in a
+separate disposable copy. It fails in 4.78s on legacy Save returning 200 and
+actually replacing the malformed fixture file. This distinguishes real byte
+preservation from the Web admission guard alone. No real user data was read or
+repaired. No additional native case, Unix retry or endurance campaign was added.
+
+Native scope is malformed-file fresh-object startup/readback with libmpv/null,
+not an unreadable-file native probe, CLI/systemd/process restart, library repair,
+production Unix transport or physical audio. Unreadable-but-replaceable storage,
+dangling symlink, unavailable lifetime, ordinary valid/missing loads and error
+privacy are synthetic/unit coverage. The protection does not close external-file
+races after healthy/missing load. Healthy write failures retain existing pre-/
+post-replacement uncertainty. Exact head `3e44ad0` subsequently passed run
+38339941041, all jobs/every step, verified 03:24 UTC. Hosted x86_64/ARM64 logs
+confirm all seven refusals and exact-byte/active-state retention. That result
+does not certify the later initial-balance diagnostic.
+
+
+## Saved-favorites read diagnostics checkpoint
+
+Exact preceding head `8c7df63` passed all three jobs/every step in
+[run 38334412981](https://github.com/de41tr/open-room-renderer/actions/runs/38334412981),
+verified 02:08 UTC. Hosted default groups total **5324/74**, with the floor's
+4774+550 /74 in 140.96s/118.60s. Both native logs report keep and clear exact
+persistence, unchanged detached playback/DSP/gain, zero media/native mutations
+and complete cleanup. That result does not cover the later diagnostic change.
+
+The new read-only correction passes **246 focused Python tests** on each 3.11
+and 3.12 and **156 Node/DOM tests**. Root integrated replay passes 246 in 16.69s
+and 156 in 1.45s. The first root Python command named a nonexistent target-test
+file and collected nothing; the corrected command is the reported pass. All five
+production/test file hashes match the independently reviewed candidate.
+
+Thirty-three new loopback/synthetic-backend cases cover malformed/unreadable
+startup, unchanged bytes/no partial payload, admission, exact private-safe 503
+ERROR envelope, generic/other/state failure passthrough, unchanged mutation
+UNKNOWN, unrelated playback and configured legacy recall. Seven new JS cases
+cover strict known-response classification, stale rows/gates, fixed local text,
+invalid/private/mixed/superseded reads, unchanged poll timing and recovery.
+Baseline-only code fails the three startup diagnostic probes and all seven new
+JS probes as expected. Independent review reran the 33/7 focused cases and found
+no blocker. No native/full/local-browser or long campaign was added; exact
+new-head hosted CI remains PENDING. This changes one admitted Web read failure,
+not the library, storage or mutation error contract.
+
+Current STATUS/RESUME sections are consolidated; their historical suffixes and
+delimiters remain byte-identical. Current instructions no longer retain obsolete
+pending export/scheduling steps. Detailed older checkpoint evidence stays below.
+
+
+## Browser favorite target repair checkpoint
+
+Exact preceding head `5534c4d` passed all three jobs/every step in
+[run 38332263993](https://github.com/de41tr/open-room-renderer/actions/runs/38332263993),
+verified 01:42 UTC. Its floor passes 4774+548 /74 in 150.56s/128.84s under the
+unchanged 165s watchdog. Installed/native/Unix and later acceptance gates all
+pass on x86_64/ARM64. This scopes the startup/focus checkpoint, not later changes.
+
+The observed favorite-conflict correction separately passes 136 Node checks and
+157 focused Python cases with independent review. The subsequent Change URL UI
+passes 149 Node checks and 159 focused Python Web/frontend checks on each 3.12
+and 3.11. These include two actual loopback HTTP keep/clear cases with a synthetic
+backend: exact same-host URL bytes and nonempty title/artist/album/artwork policy,
+unchanged canonical queue/generation/media and zero backend calls. Root integrated
+syntax/Node checks pass (149 cases, 1.42s); integrated Web/frontend/installer
+checks pass 195 in 9.34s. No production Python
+server/store code or command schema changed, so no redundant full local suite
+is substituted for exact-head hosted CI, which remains PENDING.
+
+Independent review corrected UTF-8 byte counting before the private draft is
+cleared. A multibyte over-limit URL now rejects locally without sending or losing
+its draft. ACK remains ACKNOWLEDGED even with fresh same-host redacted readback;
+failed rereads and sticky UNKNOWN remain explicit. Single-use submission, private
+cleanup, conflict/reversion, focus and late-response paths use DOM doubles, not
+real-browser acceptance.
+
+The existing short native Web flow now repairs a playing managed favorite with
+keep (fixture 2 to 1), then clear (1 to 2). Final actual mpv 0.37/0.40 runs pass
+in 4.32s/4.19s, preserving all 208 previous assertions (231 total) and unchanged
+30s/35s caps. Each request proves persisted/reloaded exact records, stable
+ID/name/order/sibling, detached queue/current-item identity/value, generation,
+transport, DSP/gain, handle and ten native properties, with zero native mutations
+or media fetches. Nonempty native title/artist/album are exercised; artwork starts
+empty there, with nonempty artwork covered by the HTTP integration above.
+A review strengthened clear to replace a different URL rather than reuse keep's
+already-stored target; final code passed once per library after that correction.
+Four short executions total, no extra native case, Unix retry or long campaign.
+This is real same-origin/CSRF HTTP/ctypes/null evidence, not a browser, repaired-
+target playback, physical audio, sample-level or crash-durability claim.
+
+
+## Saved-state diagnostics and logical focus follow-through
+
+Exact export head `1dfd642` passed all three jobs/every step in
+[run 38330676949](https://github.com/de41tr/open-room-renderer/actions/runs/38330676949),
+verified 01:22 UTC. Both native architectures report the six private export
+requests, zero export-induced native/media mutations and complete cleanup;
+all production Unix, installed lifecycle, discovery and Snapcast gates pass.
+The floor passes 4709+548 /74 in 136.54s/115.50s. That result does not certify
+subsequent saved-state/focus changes.
+
+A synthetic malformed active_dsp.json numeric value reproduced a raw credential-
+bearing traceback at startup: baseline exit 1, candidate exit 2 with one fixed
+150-byte DSP diagnostic, identical persisted bytes. Known startup reader errors
+are now narrowly translated; programming/cancellation exceptions propagate,
+public loader/persistence/ordinary API exceptions stay unchanged, and second-read
+failure still cleans up the acquired backend before listeners. No reset/default
+fallback is added. Independent review and 505 distinct focused cases pass on
+each Python version; the root integration replay passes 159 startup/lifecycle
+cases in 10.61s. A first root invocation named a nonexistent installer test and
+collected no tests; the corrected focused replay is the stated result.
+
+Logical dialog-return tests establish detached/disabled opener conditions and
+application focus choices, not native browser focus or next-Tab behavior. Final
+Node/DOM checks pass 128, with 16 new regressions (13 fail against original app).
+The helper rejects hidden/inert/collapsed targets, resolves favorite replacements
+only in the same session, restores synchronously for dismissal/success, and does
+no application focus work on pagehide or queued close events. Late responses and
+reopened/other dialogs retain focus isolation. Independent review found no
+blocker. Root frontend/installation checks pass 39 in 1.60s; all four assets and
+the new Python module remain included by existing package/source enumeration.
+BROWSER_ACCEPTANCE_PENDING remains; no new physical or native-audio claim.
+
+Final combined defaults pass **4774 + 548 /74 opt-in skips** on Python 3.12
+(126.67s/106.08s) and 3.11 (128.75s/105.72s), with unchanged selectors and the
+165s floor watchdog. Exact new-head hosted CI remains a separate pending gate.
+
+
+## Private queue export local checkpoint (13 October, 01:02 UTC)
+
+The final combined default groups pass **4709 + 548 / 74 opt-in skips** on both
+Python 3.12 (117.00s/102.29s) and 3.11 (119.87s/101.59s). The floor replay uses
+the unchanged 165s watchdog and final existing two-process selectors. No native
+opt-in skips are reclassified as native passes. Focused Web checks pass 508 in
+9.80s; dependency-free Node/DOM-double checks pass 112. The server adds 210
+cases. The behavior-neutral admission helper separately passed 154 existing
+checks before the private export feature was integrated.
+
+The extended existing native Web flow passes actual libmpv/null 0.37 in 4.43s
+and 0.40 in 3.98s. Six guarded HTTP export requests verify exact codec round
+trips while playing/stopped, duplicate order, consent rejection and same-generation
+mode staleness. Queue identity/value, generation, DSP, gain and native properties
+are retained with zero export-induced native mutation or media request. All 178
+original assertions remain (208 total), and the 30s/35s caps are unchanged.
+This is real HTTP/ctypes/native evidence, not browser download, physical audio,
+production Unix, WAN or provider-account evidence. Radio provenance is synthetic.
+
+Independent server/browser reviews found no remaining blocker. The frontend
+retains unchanged bytes rather than reject server-valid scoped IPv6 URLs through
+WHATWG URL parsing. Source and exact file limits remain server-authoritative.
+BROWSER_ACCEPTANCE_PENDING includes actual Blob navigation/CSP, filename, focus,
+cancellation and download-to-disk checks; see WEB_BROWSER_ACCEPTANCE.md.
+Exact export-head hosted CI is separate and initially PENDING.
+
+The preceding exact head `59726d5` passed all three jobs/every step in
+[run 38328911125](https://github.com/de41tr/open-room-renderer/actions/runs/38328911125),
+verified 01:02 UTC. Its floor reports 4499+548 /74 in 145.49s/138.67s; this proves
+the final scheduling checkpoint, not the later export changes.
+
+
+## Recovery checkpoint and bounded final scheduling balance
+
+Exact head `0668209` passed all three jobs/every step in
+[run 38326558265](https://github.com/de41tr/open-room-renderer/actions/runs/38326558265),
+verified at 00:31 UTC on 13 October. Both native logs explicitly show gain UNKNOWN
+after successful Stop, then confirmed native volume 0/mute readbacks without
+Play/media requests, and complete owned cleanup. All 67 native checks and later
+installed/Unix/client/lifetime/clocked/discovery/Snapcast gates pass. Complete
+default coverage remains 5047 passed/74 skipped; actual browser/physical audio
+remain separate acceptance requirements.
+
+The floor passed narrowly again: **160.64s/118.16s** versus 149.89s/105.22s in
+the preceding run, with both groups slowing and no backend-source change. One
+90-second-bounded Python 3.11 focused measurement passed **39 tests in 15.95s**;
+rounded pytest phase sums were 8.84s for `test_native_group_runner.py` and 6.96s
+for `test_cli_commands.py`. That evidence supports moving those two complete
+independent modules to the existing second group. It is not a hosted timing
+prediction or a reason to optimize production code.
+
+The final workflow-only balance preserves all **5,121 unique nodes**, identical
+skip/skipif/xfail metadata on 3.11/3.12, and disjoint **4,573 + 548** groups.
+Both lanes use the same selectors; `favorites_cli.py` remains last. Independent
+review and all 13 focused helper/workflow checks pass on each Python version.
+No full local rerun was added. Helpers, processes, runners, assertions, skips
+and every cap remain unchanged. New-head hosted scheduling is PENDING; make
+no further timing adjustment unless an actual gate fails.
+
+## Operator recovery and navigation privacy delta
+
+End-to-end operator review reproduced two concrete gaps: favorite/preset private
+input survived page navigation, and UNKNOWN gain left no fresh Web-only quiet
+recovery after Stop. A composed pagehide handler now scrubs all three private
+dialogs, including displayed names, while preserving sent requests, later
+outcomes and reopened drafts. An UNKNOWN-only **Set volume to 0** button reuses
+the existing checked volume command; it never fabricates gain, starts playback,
+changes backend/controller logic or silently retries. Fresh state and idle
+command admission are still required; Stop remains available while pending.
+
+Final focused checks pass **87 Node/DOM cases** and **334 Python Web cases**.
+The new lifecycle/recovery regressions fail against their respective original
+source. Native Web acceptance retains every previous assertion and its 30s/35s
+caps, discards one real native volume-readback reply in the existing test
+transport to induce uncertainty, then proves actual Stop leaves gain UNKNOWN
+and unmodified native volume=0/mute readbacks restore CONFIRMED while remaining
+stopped. Queue, generation, DSP, native playlist and media-request counts remain
+unchanged during recovery. Final integrated libmpv 0.37/0.40 runs pass in
+**4.26s/4.07s**. This is real native/null/readback with one synthetic transport
+fault, not a browser, physical silence or a new digital-PCM capture.
+
+No full local default rerun was added for this small frontend/test delta. Earlier
+complete-source results retain their own scope; exact new-head hosted CI remains
+required. Current supported browser capabilities were checked without repeating
+blocked probes; there is no new fixture bridge. BROWSER_ACCEPTANCE_PENDING and
+HARDWARE_PENDING remain explicit.
+
+## Published playlist/startup checkpoint
+
+Exact head `f7c6ed7` passed all three jobs and every step in
+[run 38325071508](https://github.com/de41tr/open-room-renderer/actions/runs/38325071508),
+verified at 00:14 UTC on 13 October. The final floor partition passes
+**4538+509 /74** in **149.89s/105.22s**, closing the earlier local selector-order
+finding under the unchanged 165-second watchdog. Both native jobs pass the
+complete defaults and all **23+44** native checks, followed by production Unix,
+client, repeated lifetime, actual installed CLI/assets, clocked, discovery and
+Snapcast stages. This certifies that exact software checkpoint, not the newer
+navigation/quiet-gain delta or genuine browser/physical acceptance.
+
+## Published DSP and native-install checkpoint
+
+Exact head `7d68d79` passed all three jobs and every step in
+[run 38323337010](https://github.com/de41tr/open-room-renderer/actions/runs/38323337010),
+verified at 23:53 UTC. Native groups retain 23+44 checks on x86_64 and ARM64.
+Logs explicitly confirm installed package resources and all five Web routes on
+each owned/external SIGTERM, SIGINT and SIGHUP restart cycle, followed by owned
+uninstall. Existing Unix/client/lifetime/clocked/discovery/Snapcast gates pass.
+This closes the native installer delivery gap for that exact software scope;
+browser, physical ARMv7/audio and later playlist/startup changes remain separate.
+
+Hosted default groups complete in 157.08s on x86_64 and 147.76s on ARM64, versus
+235.97s/225.40s in the first-Web run. This is an observed different-source run
+comparison, not a controlled benchmark. The floor group reached 159.50s under
+its unchanged 165-second watchdog, motivating a bounded same-process rebalance
+before adding new startup/Web tests; no cap relaxation is authorized.
+
+## Floor headroom: final same-runner rebalance
+
+The floor's measured 159.50s remainder group at `7d68d79` left little of its
+unchanged 165-second watchdog for new startup coverage. Both default invocations
+now move only `test_startup_config.py` and `test_web_ui.py` into the existing CLI
+group. The helper, two processes, runners, caps, assertions and skips are unchanged.
+Final collection comparison on actual Python 3.11.17 and 3.12.14 preserves all
+**5,121 unique nodes** and identical skip/skipif/xfail metadata, with disjoint
+**4,612 + 509** groups. There is no coverage omission or duplication.
+
+One measured Python 3.11 replay finished in 134.941s wall, but **was not green**:
+remainder 4537 passed/74 skipped/1 failed (133.71s), second group 509 passed
+(86.05s). The unchanged workflow-string assertion required `favorites_cli.py`
+last. Only selector order was corrected; the assertion was preserved. All 13
+focused helper/workflow checks then passed, and final collection parity was
+reconfirmed. No second complete replay was used to disguise the failed result.
+The preceding full runtime checks below remain valid for runtime source;
+final hosted scheduling/timing must be established on the new exact head.
+
+## Stopped playlist and startup checkpoint
+
+Final combined default groups pass **5047 tests / 74 opt-in skips** on each
+interpreter: Python 3.12 4797+250 (147.74s/68.58s), Python 3.11 4797+250
+(151.29s/68.47s). The default full-coverage partition is distinct from native
+opt-in acceptance; no existing assertion or skip was removed. Final frontend
+checks pass 75 Node/DOM cases, including delayed-close/reopen, file-read races,
+private input cleanup and stale rows/drafts. These remain browser doubles. Programmatic Stop events in the DOM harness
+verify controller concurrency, not clickability through a native modal: real
+users first close the modal, then choose Stop. The manual checklist records
+that accessible sequence; modal close never cancels a sent request.
+
+The short actual libmpv Web flow retains its old assertions and 30s/35s caps,
+then checks all three import formats, canonical append/move/remove, selected
+duplicate occurrence and metadata preservation, stale/playing rejection without
+native mutations, zero media requests before explicit Play, and actual decoding
+after Play. Final integrated 0.37/0.40 runs pass in **4.25s/4.06s**. This uses the
+existing ctypes command adapter and real aiohttp/native null output, not local
+production Unix IPC, a browser, physical audio or a new PCM measurement.
+
+A measured maximum-size queue initially spent about 59 ms per eligibility poll.
+A small reviewed copy-on-write validation view removes redundant deep copying
+and URL parsing while preserving full escaped bounds and per-call freshness.
+Twenty alternating pairs measured **54.86 → 34.00 ms** median for 1,000 ordinary
+tracks, **63.77 → 44.15 ms** for 1,000 equal-resolved tracks at the exact 1 MiB
+SOAP bound. Independent differential/duplicate/detachment checks pass. There is
+no cache; cost remains synchronous O(track count), with no ARMv7 timing claim.
+
+Exact newly published-head hosted CI is independently required. The unchanged
+existing installed-CLI, Unix, native audio, lifetime and client lanes remain
+part of that verification; prior green source checkpoints cannot substitute.
+
+## Explicit startup configuration errors
+
+### Duplicate explicit root settings
+
+`tests/test_startup_duplicates.py` covers the deliberate startup-input policy
+change: repeated explicit top-level string settings fail before Config
+construction, including output followed by null, state paths, HTTP/UPnP ports,
+quoted/escaped/aliased/value-tag keys, identical values and duplicates beside a YAML merge.
+Exact fixed diagnostics omit even an unknown private key and credential-bearing
+value. Captured text never reopens its pathname. Config-check and explicit-serve
+dispatch are tested with construction, state, UUID, logging, backend, process
+and socket guards; existing synthetic saved bytes remain unchanged. The serve
+coroutine is advanced only to its synchronous validation failure, without an
+event loop, self-pipe, listeners or native services.
+
+Compatibility coverage preserves empty/null defaults, accepted scalar coercions,
+aliases (including recursive values), merge order/precedence, single explicit
+merge overrides, and nested-map behavior. The public legacy loader still selects
+the last duplicate value. This root-only rejection is a behavior/error-policy
+change, not a diagnostic-only refactor or a complete configuration schema.
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_startup_duplicates.py tests/test_config_check.py
+```
+
+### Existing startup boundary
+
+`tests/test_startup_config.py` covers the startup-only input boundary: real CLI
+and checkout-wrapper subprocesses reject missing/directory/unreadable files,
+invalid UTF-8, secret-bearing YAML syntax/tag failures, unsupported mappings and
+preset/source entries, existing constructor constraints, and failing logging/gain
+conversions with fixed stderr and exit status 2. Unit guards prove these errors
+precede identity/state hydration, logging, backend construction and listeners.
+An unreadable-file subprocess requires a non-root user and otherwise skips that
+specific case.
+
+Minimal YAML/default acceptance is checked in real processes with the backend
+constructor deliberately replaced by a stopping sentinel. These tests do not
+start mpv, bind ports, advertise discovery, or claim a live service health check.
+They also preserve the bare-serve missing-default fallback, public loader behavior,
+accepted volume coercions/clamping and unknown logging-name fallback. The tests
+also distinguish an invalid configured volume (rejected before reading
+otherwise valid saved gain) from normal saved-gain restoration for valid YAML.
+Checkout probe doubles check the existing privileged-port probe is not duplicated
+and its OS error detail is not echoed. Existing mocked lifecycle tests continue to
+own degraded backend availability, binding failure and cleanup behavior.
+
+Focused commands (no native services or provider accounts):
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_startup_config.py
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_backend_lifecycle.py tests/test_active_dsp_persistence.py -k cli
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_identity.py tests/test_gain_persistence.py tests/test_discovery_interface.py tests/test_native_installation.py -k 'runner or custom_missing_port or identity or gain or discovery_interface or public_yaml or public_ports'
+```
+
+This does not establish comprehensive config validation, persisted-state error
+redaction, actual listener startup, systemd behavior, or hardware acceptance.
+
+## Web DSP editor: locked state and measured audio
+
+The band/preset extension reuses the existing DSP transaction, with a Web-only
+admission check inside its existing lock. Independent review includes queued
+context/library changes, repeated cancellation, legacy exception identity and
+post-commit effects. A reproduced percent-escaped plugin edge applies and saves
+successfully but fails a legacy return parser; the Web result now truthfully says
+applied/follow-up-unknown instead of falsely claiming persistence failed. Legacy
+parser behavior is unchanged. OSError-specific storage classification is scoped
+to the fixed Web band/load paths, whose only post-confirmation I/O is persistence.
+
+Final integrated defaults pass **4791/74** on Python 3.12 (204.38s), and
+**4541+250/74** on Python 3.11 (137.52s/71.36s). Independent focused review passes
+414 backend/persistence/race cases plus 48 Node/DOM-double cases. The unchanged
+real-native Web and PCM test cases are extended, not replaced: all 160 original
+assertions, 14 captures, nine CLI children and time bounds remain.
+
+The PCM flow first retains every old legacy setup/readback check, then verifies
+a flat native graph, applies the negative curve through the guarded Web endpoint,
+and reuses the original capture/assertions. A no-op Web apply would therefore
+fail. The -12 dB/1 kHz request measures **-12.0387 dB** on actual libmpv 0.37 and
+0.40. Final integrated Web+PCM tests pass 2/2 in 7.09s/7.52s. The null flow also
+verifies complete band graph changes, bypass retention, saved-preset restoration,
+PENDING concealment, locked stale rejection and zero native writes for library
+save/rename/delete. This is actual ctypes-backed native/digital-PCM evidence,
+not production Unix Web control, browser rendering or physical audio.
+
+BROWSER_ACCEPTANCE_PENDING and HARDWARE_PENDING remain; see the extended manual
+checklist. Exact newly published-head hosted CI is independently required.
+
+A subsequent independent lifecycle review reproduced queued native dialog-close
+events erasing a freshly reopened favorite/preset draft. Two narrow open-state
+guards fix that race; both regressions fail before the correction and pass after.
+The final 50 Node/DOM checks pass, including unchanged immediate private-input
+cleanup and accurately modeled native Escape events. This focused final delta
+follows the complete Python runs above; it is still not real-browser acceptance.
+
+## Native installation includes the browser controller
+
+Review found the native installer's Python-only source snapshot omitted the Web
+assets even though direct-checkout wheel packaging worked. The installer now
+explicitly selects exactly four assets, includes them in provenance/ownership
+hashes and rejects missing or symlink-traversed inputs. Modified owned assets
+remain protected during uninstall; arbitrary adjacent files are not packaged.
+
+Independent review passes 54 focused tests (two native opt-in skips), additional
+selection/path checks, wheel/RECORD/source/stage/installed byte comparisons and
+receipt recomputation. An actual staged-source offline wheel was installed into
+an isolated target; Python `-I` outside the checkout served `/ui/` plus all four
+assets through real aiohttp with exact bodies/MIME. That local proof uses an idle
+fixture backend, not native CLI/Unix IPC. The existing hosted installed-entry
+lane now verifies all five routes on every owned/external restart cycle; every
+old lifecycle assertion and the 90-second supervisor cap remains. Hosted native
+lifecycle completion must be verified on the new exact head.
+
+The final integrated source, including the dialog correction and installation
+fix, passes complete default groups on both interpreters: Python 3.12
+**4551+250 /74** (137.78s/71.01s), Python 3.11 **4551+250 /74**
+(139.46s/70.05s). Thus final default coverage is **4801 passed, 74 skipped**
+on each. The existing 165-second floor watchdog was unchanged.
+
+## Same-runner default-suite scheduling
+
+Native Python 3.12 jobs reuse the existing Python 3.11 two-process partition,
+with no additional runner. Collection-only comparison proves the same 4,865
+unique nodes (4,615 + 250), identical skip/skipif/xfail metadata and 74 skips.
+One executed grouped replay passes 4541/74 + 250/0 in **139.519s wall**, compared
+with the preceding 204.38s serial pytest duration. This is a single local
+comparison, not a controlled benchmark or hosted x86/ARM timing claim.
+
+The helper's explicit 900-second watchdog starts after the unchanged 15-minute
+whole-job clock, so the existing job cap remains the effective bound. All later
+native gates, assertions and caps are unchanged. Peak CPU/memory contention can
+increase, and helper logs are buffered until group completion. Ten existing
+helper tests and independent workflow/collection review pass.
+
+First-Web hosted evidence is complete at `81a3d72`: all three jobs in
+[run 38319222442](https://github.com/de41tr/open-room-renderer/actions/runs/38319222442),
+including 67 native checks and explicit Node presence. Later DSP/scheduling
+changes require their own exact-head CI; prior green does not cover them.
+
+## Functional Web controller checks
+
+The final Web boundary has focused real-loopback HTTP/MOCK tests for all typed
+controls, generation/source races, checked gain/DSP, library persistence errors,
+strict Host/Origin/CSRF and request framing, private-safe metadata and static
+routing. Dependency-free Node tests cover state ordering, single-shot mutation,
+Stop superseding, server restart/session binding, form drafts/dialog cleanup and
+lost responses using explicit DOM doubles. These are not real-browser tests.
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_web_ui.py tests/test_web_frontend.py
+node --test tests/web_frontend.test.cjs
+ORR_TEST_LIBMPV_PATH=/absolute/path/to/libmpv.so.2 PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_libmpv_web_controls.py
+```
+
+Node >=18 is a development-only optional dependency locally; native CI explicitly
+requires it before the default suite so its Web checks cannot silently skip in
+both native jobs. No browser install, new runner or widened timeout is added.
+The single new libmpv test joins the existing second native group. All earlier
+native/Unix/PCM/client/installation/discovery/Snapcast gates remain intact.
+
+The new REAL_BACKEND/null flow uses actual aiohttp Web endpoints, generated local
+media and the existing ctypes command-node adapter to libmpv. Held media proves
+BUFFERING has no optimistic acknowledgement; checked playback, pause/seek/resume,
+queue mode without reload, gain/mute, EQ/balance native graph, stable-ID favorite
+recall, stale/cross-origin rejection before backend effects and cleanup are
+verified. It does not operate a browser, production Unix socket or physical DAC,
+and does not measure PCM samples. Existing digital-PCM DSP tests retain their
+separate measured scope. Exact final-source results and hosted CI are recorded
+at the current milestone; older intermediate passes are not substituted.
+Final Web native flow passes 0.37/0.40 in 3.59s/3.56s. Final integrated defaults
+pass **4755/74** on Python 3.12 (203.45s), and **4505+250/74** on Python 3.11
+(137.65s/71.10s); 74 includes the one new explicit native opt-in skip. All old
+skip policies and time caps remain. Published-head hosted CI is separately pending.
+
+Offline wheel checks verify all four local assets, isolated package imports and
+actual loopback static/state responses. Independent security review reproduced
+and fixed known URL-tail/encoded-metadata leakage and restart-stale favorites.
+Legacy routes remain unauthenticated trusted-LAN controls.
+
+**BROWSER_ACCEPTANCE_PENDING:** real rendering, viewport/accessibility/focus and
+browser interruption checks remain unperformed. The full implementation is
+locally reproducible; follow [the manual checklist](WEB_BROWSER_ACCEPTANCE.md).
+Hardware and provider-account acceptance remain separate.
+
+## Next-phase architecture boundary checks
+
+The saved DSP library and shared authored-queue contracts were extracted without
+changing existing assertions, opt-in skips, workflows or time caps. Six library
+ownership/persistence cases and four import/identity cases protect the new seams.
+The independent review found no blocking issue. Synthetic differential checks
+compare **51 DSP observations** and **102 queue/adapter observations** with exact
+baseline equality, including wire bytes, exception semantics and persisted bytes.
+These are UNIT/MOCK/HTTP evidence, not native or physical acceptance.
+
+The integrated short DSP + restore replay passes actual libmpv 0.37 and 0.40
+(2 cases each, 4.46s/4.19s). It retains the existing measured digital PCM checks,
+actual CLI children, and restore-before-first-samples assertion. The first local
+invocations failed before native initialization because the prepared libraries'
+dependency directories were omitted from LD_LIBRARY_PATH; corrected environment
+runs passed with no code/test changes. Do not classify those failed invocations
+as successful tests. Production Unix IPC remains separately verified by hosted CI.
+
+Exact integrated defaults pass **4598 /73 unchanged opt-in skips** on Python
+3.12 (203.14s), and **4348 +250 /73** on Python 3.11 (136.46s/70.96s), under the
+unchanged 165-second group watchdog. Existing 32 warnings remain. Hosted native
+results are PENDING until verified for the published head. Baseline or separate
+single-extraction runs do not certify later changes. No new endurance run is planned.
+
+## Read-only DSP CLI snapshot
+
+Root exact integration passes **426** focused cases on Python 3.12/3.11
+(**8.16s/8.37s**); worker/replay/independent review also pass. These include actual
+CLI/Requests over synthetic TCP and guarded production projection/admission,
+not a live native renderer or physical DSP measurement. Exact `20bff6c` CI is
+fully green; the installed-help line passes both native hosts and proves packaging only.
+
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_dsp_read_client.py tests/test_dsp_show_projection.py tests/test_dsp_client.py
+```
+
+The read-only client tests validate the small version-1 output allowlist, exact
+numeric bounds and all forty unique parameters, honest CONFIRMED/PENDING/UNKNOWN
+exit semantics, null unconfirmed values and omission of unrelated private data.
+Hostile framing covers duplicate keys, non-finite/overflowing JSON, UTF-8,
+nesting, whole-response and cumulative stream size, content type/encoding,
+redirects (including requests' hidden next-request preparation), truncation and
+fixed private transport failures. Timeout cases use
+injected requests exceptions; they do not claim a measured total deadline.
+
+Normal loopback TCP fixtures run actual CLI children for ordinary/chunked
+responses, unconfirmed states, redirect refusal, truncated bodies and isolation
+from ambient proxy/netrc credentials. Separate synchronous fixtures exercise
+real Web admission, HttpApi DSP projection and Web JSON responses against a
+guarded synthetic backend, including global/WiFi, bypass, pending/unknown,
+unavailable saved-library storage and existing cached-DSP reconciliation.
+They guard backend, persistence, playback, queue and generation effects. No
+asyncio socketpair is needed. These are parser/transport and in-memory production
+projection checks, not a live HttpApi listener, native DSP/PCM or physical-output
+measurement. Existing native DSP acceptance remains separate. The existing installed-package
+CI step also runs `dsp show --help` with isolated Python; it makes no read request.
+
 ## Local DSP CLI acceptance
 
 ```sh
@@ -763,7 +1845,7 @@ x86_64 and AArch64 in
 Actual multicast discovery led to fetched control/event URLs, two distinct WAV
 resources and real production Unix-IPC play/pause/resume/Next/volume/mute/unmute/
 Stop, with HTTP/SOAP/GENA agreement and complete child/task/listener cleanup.
-The new nested-playlist cleanup also passed with actual mpv0.37 decoding.
+The new nested-playlist cleanup also passed with actual mpv 0.37 decoding.
 
 The continuously clocked digital probe now calibrates the known125ms silence
 exactly and preserves all96000 frames per track. Equal-rate ORR boundary gaps
@@ -1008,7 +2090,7 @@ controller cleanup returned to one task, seven FDs, one thread and zero children
 Child resource counts were separate; this is bounded stress, not leak freedom.
 
 The repaired private clocked Snapcast ingress passed all eleven stages using
-production Unix IPC with mpv0.37, PulseAudio16.1 and Snapcast0.27 on both runners.
+production Unix IPC with mpv 0.37, PulseAudio16.1 and Snapcast0.27 on both runners.
 Two file-output clients demonstrated distribution, join/leave/rejoin, per-client
 non-atomic group gain, exact-zero group/upstream mute, reconnect retention and
 HTTP Stop draining to digital silence. All owned children were reaped and
@@ -1050,7 +2132,7 @@ skipped in 291.85s. Installed CLI/actual-client production IPC still await CI.
 
 [Run38200058359](https://github.com/de41tr/open-room-renderer/actions/runs/38200058359)
 passed every lane on x86_64 and AArch64. The actual pywiim2.3.9 client used
-production Unix IPC with mpv0.37, selected two distinct generated resources,
+production Unix IPC with mpv 0.37, selected two distinct generated resources,
 and delivered the exact encoded media path/query unchanged. Parsed client,
 canonical HTTP, native readback and ordered GENA agreed for play, pause, resume,
 Next/Previous, volume, mute/unmute and Stop. The null-output gate checks actual
@@ -1394,7 +2476,7 @@ request observations are printed. Scope is REAL_BACKEND/libmpv/null, not HLS
 through production Unix IPC, real WAN, original app, DRM or physical audio.
 
 
-At 3e74b24, actual Ubuntu mpv0.37/FFmpeg6.1.1 revealed that repeated segment
+At 3e74b24, actual Ubuntu mpv 0.37/FFmpeg6.1.1 revealed that repeated segment
 503s can end the HLS demuxer about 1.5s after its initial cache stall. Native
 END_FILE/EOF, idle and disappearance of path/time proved teardown, not just a
 missing clock. The no-EOF fixture therefore now holds an actual pending HTTP
@@ -1403,7 +2485,7 @@ body, with open-transport, no-EOF, stationary-time and delivery checks. Playlist
 
 The same hosted run exposed a native child-readiness race: path/current/playing
 can appear before the demuxer opens and playback-time exists. A public on_load
-hook reproduced the original failure on mpv0.37/0.40 with both M3U and PLS. The
+hook reproduced the original failure on mpv 0.37/0.40 with both M3U and PLS. The
 bounded test helper now waits for a nonnegative clock while pinning exact native
 child identity and renderer ownership, then still requires >0.25s actual decoded
 progress. Only exact property-unavailable and finite negative preroll are retried;
@@ -1413,7 +2495,7 @@ code, history policy, timeouts, pause/default-reset and stale guards are unchang
 
 
 The exact integrated correction passed 2363 default tests /62 opt-in skips.
-Private official Ubuntu mpv0.37 plus FFmpeg6.1.1 generation/decoding passed all
+Private official Ubuntu mpv 0.37 plus FFmpeg6.1.1 generation/decoding passed all
 five HLS cases, six child-cache cases and 27 deterministic readiness guards in
 112.46s. mpv0.40 plus FFmpeg7.1.5 passed the eleven native cases in 111.15s.
 These are actual x86_64 library replays with compatible host dependencies,
@@ -2343,3 +3425,32 @@ discovery and Snapcast gates. Native groups take 235.66s/230.77s on x86_64 and
 revision still requires its own exact-head CI verification in the draft PR.
 Native ctypes/null/PCM and production Unix-IPC evidence remain distinct. This
 refactor does not claim physical XU4/DAC/ALSA, original-app or two-host acceptance. Those remain **HARDWARE_ACCEPTANCE_PENDING**.
+
+## Offline exclusive Spotify proposal
+
+`tests/test_spotify_exclusive.py` uses only inert Linux executable fixtures and
+private native-profile data. It covers deterministic receipts, 0700/0600 output,
+exact canonical unit proposals, migrated-profile selection, strict routes and
+ports, no-overwrite/no-symlink traversal, Linux double-leading-slash aliases,
+explicit YAML scalar constructor error privacy, parser dispatch and snapshot
+inclusion. Socket/subprocess/device operations are forbidden in the generator
+side-effect test. Optional `systemd-analyze --user verify` checks generated
+units with inert binaries; it never starts services. Space/percent executable
+paths and literal-quote config arguments pass; quoted executable paths are
+rejected before output. The pinned upstream listener requires the generator's
+IPv4-only restriction, even though the read-only diagnostic also supports IPv6.
+
+This remains **OFFLINE_ARTIFACT_ONLY**. No go-librespot client was installed or
+run; no account, pairing, provider traffic, mpv service, DAC or physical handover
+was tested. The installed-package CI smoke checks the shipped module and parser
+without invoking client execution or service activation. This is a focused
+addition to existing lanes, not a new endurance campaign or full-suite result.
+
+## Saved-only Web DSP curve transfer
+
+[The transfer contract](WEB_DSP_CURVE_TRANSFER.md#verification-scope) lists the
+bounded focused checks for the strict codec, two independent synthetic rooms,
+active/backend non-effects, persistence rollback/uncertainty, and private
+import/export dialog lifecycle. These additions use in-memory HTTP/MOCK and
+JavaScript DOM doubles. No dedicated browser/native/hardware acceptance is
+claimed for this workflow, and the earlier browser campaign is unchanged.

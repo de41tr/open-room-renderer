@@ -72,6 +72,9 @@ def set_favorite_url(host: str, port: int, identifier: str, url: str, metadata: 
         # Requests' default adapters do not retry. No environment proxy/netrc
         # credentials, redirects, preliminary GET, or legacy-client fallback.
         with requests.Session() as session:
+            # allow_redirects=False still prepares Response.next and reads its body.
+            # Skip that work so status/size checks remain before any body read.
+            session.resolve_redirects = lambda *_args, **_kwargs: iter(())
             session.trust_env = False
             with session.put(endpoint, data=body, timeout=10, allow_redirects=False, stream=True,
                              headers={"Accept-Encoding": "identity", "Content-Type": "application/json"}) as response:

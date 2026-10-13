@@ -1,6 +1,7 @@
 """Native profile checks: no privilege changes, service starts, or network installs."""
 from __future__ import annotations
 
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -131,6 +132,14 @@ def test_stage_load_restart_distinct_identity_and_safe_uninstall(installer, tmp_
         assert receipt["mode"] == "staged-only"
         assert receipt["source"]["source_sha256"]
         assert not (prefix / "venv").exists()
+        assets = prefix / "source/fake_linkplay/web_assets"
+        assert {path.name for path in assets.iterdir()} == {"index.html", "style.css", "controller.js", "app.js"}
+        manifest = json.loads((prefix / installer.MANIFEST).read_text())
+        entries = {entry["path"]: entry for entry in manifest["files"]}
+        for name in ("index.html", "style.css", "controller.js", "app.js"):
+            body = (ROOT / "fake_linkplay/web_assets" / name).read_bytes()
+            assert (assets / name).read_bytes() == body
+            assert entries[f"source/fake_linkplay/web_assets/{name}"]["sha256"] == hashlib.sha256(body).hexdigest()
     config = load_config(first / "config.yaml")
     assert config.http_api_port == config.upnp_port == 8080
     assert not config.mirror_port_80
@@ -143,17 +152,22 @@ def test_stage_load_restart_distinct_identity_and_safe_uninstall(installer, tmp_
     foreign.write_text("keep this")
     edited = first / "config.yaml"
     edited.write_text(edited.read_text() + "\n# User edit\n")
+    edited_asset = first / "source/fake_linkplay/web_assets/style.css"
+    edited_asset.write_text(edited_asset.read_text() + "\n/* User edit */\n")
     installer.uninstall(first, dry_run=True)
     assert (first / "source/pyproject.toml").exists()
     installer.uninstall(first, dry_run=False)
     assert not (first / "source/pyproject.toml").exists()
     assert foreign.read_text() == "keep this"
     assert edited.is_file()
+    assert edited_asset.read_text().endswith("/* User edit */\n")
+    assert not (first / "source/fake_linkplay/web_assets/index.html").exists()
     assert (first / "state/uuid").read_text().strip() == config.uuid
     assert (first / installer.MANIFEST).is_file()  # retained with modified owned files
     assert (first / "uninstall.py").is_file()
     installer.uninstall(second, dry_run=False)
     assert (second / "state/uuid").is_file()
+    assert not (second / "source/fake_linkplay/web_assets").exists()
 
 
 def test_native_refuses_existing_prefix(installer, tmp_path):
@@ -190,6 +204,140 @@ def test_uninstall_rejects_replaced_parent_and_unlinks_owned_symlink_only(instal
     installer.uninstall(prefix, dry_run=False)
     assert (outside / "file").read_text() == "keep"
     assert not prefix.exists()
+
+
+def test_manifest_excludes_only_root_user_data_without_traversing_it(installer, tmp_path, monkeypatch):
+    prefix = tmp_path / "p"
+    protected = ("config.yaml", "state/nested/settings.json", "migrated-profile/nested/config.yaml")
+    owned = ("config.yaml.backup", "stateful/file", "migrated-profile-old/file",
+             "source/config.yaml", "source/state/file", "source/migrated-profile/file")
+    for relative in (*protected, *owned):
+        path = prefix / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("synthetic data")
+    for name in ("state", "migrated-profile"):
+        (prefix / name / "empty").mkdir()
+    scandir = installer.os.scandir
+
+    def no_user_data_traversal(path):
+        assert Path(path) not in (prefix / "state", prefix / "migrated-profile")
+        return scandir(path)
+
+    monkeypatch.setattr(installer.os, "scandir", no_user_data_traversal)
+    installer.write_manifest(prefix)
+    data = json.loads((prefix / installer.MANIFEST).read_text())
+    assert {entry["path"] for entry in data["files"]} == set(owned)
+    assert set(data["directories"]) == {
+        "stateful", "migrated-profile-old", "source", "source/state", "source/migrated-profile"}
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_old_manifest_cannot_own_user_data_or_retain_cleanup_tools(installer, tmp_path, capsys, changed):
+    prefix = tmp_path / "p"
+    protected = ("config.yaml", "state/nested/settings.json", "migrated-profile/nested/config.yaml")
+    owned = ("source/config.yaml", "source/state/file", "source/migrated-profile/file",
+             "installation-receipt.json", "uninstall.py")
+    entries = []
+    for relative in (*protected, *owned):
+        path = prefix / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("original synthetic data")
+        entries.append(installer.file_entry(path, prefix))
+        if changed and relative in protected:
+            path.write_text("changed synthetic user data")
+    directories = ("state", "state/nested", "state/empty", "migrated-profile",
+                   "migrated-profile/nested", "migrated-profile/empty", "source",
+                   "source/state", "source/migrated-profile")
+    for relative in directories:
+        (prefix / relative).mkdir(exist_ok=True)
+    # Old manifests include the exact hashes of configuration and saved state.
+    manifest = prefix / installer.MANIFEST
+    manifest.write_text(json.dumps({"format": 1, "files": entries, "directories": directories}))
+    before = {relative: (prefix / relative).read_bytes() for relative in (*protected, *owned, installer.MANIFEST)}
+    installer.uninstall(prefix, dry_run=True)
+    assert {relative: (prefix / relative).read_bytes() for relative in before} == before
+    assert all((prefix / relative).is_dir() for relative in directories)
+    output = capsys.readouterr().out
+    assert "Preserved modified file:" not in output
+    for relative in protected:
+        assert f"Would remove {prefix / relative}" not in output
+
+    installer.uninstall(prefix, dry_run=False)
+    assert {relative: (prefix / relative).read_bytes() for relative in protected} == {
+        relative: before[relative] for relative in protected}
+    assert all((prefix / relative).is_dir() for relative in directories if not relative.startswith("source"))
+    assert not (prefix / "source").exists()
+    assert not any((prefix / relative).exists() for relative in (*owned, installer.MANIFEST))
+    assert "Preserved modified file:" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["config.yaml", "state", "migrated-profile"])
+@pytest.mark.parametrize("kind", ["regular_file", "symlink", "broken_symlink"])
+def test_user_data_names_are_protected_regardless_of_file_kind(installer, tmp_path, name, kind):
+    prefix = tmp_path / "p"
+    prefix.mkdir()
+    path = prefix / name
+    outside = tmp_path / "outside"
+    if kind == "regular_file":
+        path.write_text("user data")
+    else:
+        if kind == "symlink":
+            outside.mkdir()
+            (outside / "data").write_text("outside user data")
+        path.symlink_to(outside, target_is_directory=True)
+    entry = installer.file_entry(path, prefix)
+    installer.write_manifest(prefix)
+    manifest = prefix / installer.MANIFEST
+    data = json.loads(manifest.read_text())
+    assert data["files"] == data["directories"] == []
+    # Simulate an old or forged ownership claim; the link itself must survive.
+    data["files"] = [entry]
+    data["directories"] = [name]
+    manifest.write_text(json.dumps(data))
+    installer.uninstall(prefix, dry_run=False)
+    assert installer.file_entry(path, prefix) == entry
+    assert not manifest.exists()
+    if kind == "symlink":
+        assert (outside / "data").read_text() == "outside user data"
+
+
+@pytest.mark.parametrize("section", ["files", "directories"])
+@pytest.mark.parametrize("unsafe", ["state/../safe", "migrated-profile/./file", "config.yaml/../safe"])
+def test_protected_paths_do_not_bypass_manifest_validation(installer, tmp_path, section, unsafe):
+    prefix = tmp_path / "p"
+    prefix.mkdir()
+    safe = prefix / "safe"
+    safe.write_text("keep until all paths validate")
+    data = {"format": 1, "files": [installer.file_entry(safe, prefix)], "directories": []}
+    data[section].append({"path": unsafe, "sha256": "anything"} if section == "files" else unsafe)
+    manifest = prefix / installer.MANIFEST
+    manifest.write_text(json.dumps(data))
+    before = manifest.read_bytes()
+    with pytest.raises(ValueError, match="Unsafe path"):
+        installer.uninstall(prefix, dry_run=False)
+    assert safe.read_text() == "keep until all paths validate"
+    assert manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize("section", ["files", "directories"])
+@pytest.mark.parametrize("name", ["state", "migrated-profile"])
+def test_protected_subtrees_still_reject_symlink_traversal_before_deletion(installer, tmp_path, section, name):
+    prefix = tmp_path / "p"
+    (prefix / name).mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "file").write_text("outside user data")
+    (prefix / name / "nested").symlink_to(outside, target_is_directory=True)
+    safe = prefix / "safe"
+    safe.write_text("owned file")
+    data = {"format": 1, "files": [installer.file_entry(safe, prefix)], "directories": []}
+    unsafe = f"{name}/nested/file"
+    data[section].append({"path": unsafe, "sha256": "anything"} if section == "files" else unsafe)
+    (prefix / installer.MANIFEST).write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="traverses a symlink"):
+        installer.uninstall(prefix, dry_run=False)
+    assert safe.read_text() == "owned file"
+    assert (outside / "file").read_text() == "outside user data"
 
 
 def test_portable_and_compat_runners_keep_identity(runner, monkeypatch):
@@ -295,8 +443,11 @@ def test_incomplete_install_has_safe_manifest(installer, tmp_path, monkeypatch):
     assert receipt["mode"] == "installation-incomplete"
     assert receipt["source"]["source_sha256"] == installer.source_receipt(prefix / "source")["source_sha256"]
     assert (prefix / installer.MANIFEST).is_file()
+    config = (prefix / "config.yaml").read_bytes()
     installer.uninstall(prefix, dry_run=False)
-    assert not prefix.exists()
+    assert {path.name for path in prefix.iterdir()} == {"config.yaml", "state"}
+    assert (prefix / "config.yaml").read_bytes() == config
+    assert not any((prefix / "state").iterdir())
 
 
 def test_generated_unit_quotes_spaces_and_specifiers(installer):
@@ -305,7 +456,66 @@ def test_generated_unit_quotes_spaces_and_specifiers(installer):
     assert 'ExecStart="/tmp/test name%%value/venv/bin/open-room-renderer"' in text
 
 
-def test_generated_user_unit_passes_systemd_static_verification(tmp_path):
+@pytest.mark.parametrize("character", ["'", '"', "\x7f"])
+@pytest.mark.parametrize("stage_only,dry_run", [(False, False), (False, True), (True, False), (True, True)])
+def test_native_executable_path_rejected_before_effects(installer, tmp_path, monkeypatch, character, stage_only, dry_run):
+    prefix = tmp_path / f"native{character}path"
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid executable prefixes must fail before environment probes or installation")
+    monkeypatch.setattr(installer, "environment", forbidden)
+    with pytest.raises(ValueError, match="executable path.*quotes or DEL"):
+        installer.checked_prefix(str(prefix))
+    with pytest.raises(ValueError, match="executable path.*quotes or DEL"):
+        installer.install(prefix, port=8080, stage_only=stage_only, dry_run=dry_run, require_alsa=False)
+    args = ["--prefix", str(prefix)]
+    if stage_only:
+        args.append("--stage-only")
+    if dry_run:
+        args.append("--dry-run")
+    assert installer.main(args) == 2
+    assert not prefix.exists()
+
+
+@pytest.mark.parametrize("character", ["'", '"', "\x7f"])
+@pytest.mark.parametrize("standalone", [False, True])
+def test_old_executable_path_can_still_be_uninstalled(installer, tmp_path, monkeypatch, character, standalone):
+    prefix = tmp_path / f"old{character}path"
+    prefix.mkdir()
+    (prefix / "state").mkdir()
+    (prefix / "state/uuid").write_text("keep identity")
+    (prefix / "config.yaml").write_text("keep config")
+    (prefix / "owned").write_text("remove owned file")
+    copied = prefix / "uninstall.py"
+    copied.write_text((ROOT / "scripts/install-native.py").read_text())
+    installer.write_manifest(prefix)
+    if standalone:
+        # The copied tool has no checkout-relative native_profile helper.
+        monkeypatch.setattr(sys, "dont_write_bytecode", True)
+        spec = importlib.util.spec_from_file_location("standalone_uninstaller", copied)
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("uninstall must not probe or execute renderer binaries")
+    monkeypatch.setattr(installer, "environment", forbidden)
+    before = {path.name: path.read_bytes() for path in prefix.iterdir() if path.is_file()}
+    args = ["--prefix", str(prefix), "--uninstall"]
+    assert installer.main([*args, "--dry-run"]) == 0
+    assert {path.name: path.read_bytes() for path in prefix.iterdir() if path.is_file()} == before
+    assert installer.main(args) == 0
+    assert {path.name for path in prefix.iterdir()} == {"config.yaml", "state"}
+    assert (prefix / "config.yaml").read_text() == "keep config"
+    assert (prefix / "state/uuid").read_text() == "keep identity"
+
+
+def test_native_executable_path_keeps_supported_characters(installer, tmp_path):
+    prefix = tmp_path / "space %;`*?[]()#&é"
+    assert installer.checked_prefix(str(prefix)) == prefix
+    installer.install(prefix, port=8080, stage_only=True, dry_run=False, require_alsa=False)
+    assert (prefix / "open-room-renderer.service").read_text() == installer.user_unit(prefix)
+
+
+@pytest.mark.parametrize("quoted_config", [False, True])
+def test_generated_user_unit_passes_systemd_static_verification(tmp_path, quoted_config):
     installer = load_script("install-native")
     import shutil
     analyzer = shutil.which("systemd-analyze")
@@ -315,7 +525,14 @@ def test_generated_user_unit_passes_systemd_static_verification(tmp_path):
     (prefix / "venv/bin").mkdir(parents=True)
     (prefix / "venv/bin/open-room-renderer").symlink_to(sys.executable)
     unit = tmp_path / "open-room-renderer.service"
-    unit.write_text(installer.user_unit(prefix))
+    if quoted_config:
+        from fake_linkplay.native_profile import systemd_quote, user_unit
+        config = tmp_path / 'config \'"%name.yaml'
+        text = user_unit(prefix, config=config)
+        assert f" --config {systemd_quote(config)}\n" in text
+        unit.write_text(text)
+    else:
+        unit.write_text(installer.user_unit(prefix))
     runtime = tmp_path / "xdg"
     runtime.mkdir(mode=0o700)
     result = subprocess.run([analyzer, "--user", "verify", str(unit)], env={**os.environ, "XDG_RUNTIME_DIR": str(runtime)}, text=True, capture_output=True)
@@ -384,3 +601,46 @@ def test_32bit_userspace_on_arm64_kernel_is_not_claimed_as_ci(installer, monkeyp
     assert "32-bit ARM" in info["validation"]
     assert "untested" in info["validation"]
     assert "CI" not in info["validation"]
+
+
+def test_staged_web_assets_are_allowlisted_and_all_affect_source_receipt(installer, tmp_path):
+    prefix = tmp_path / "staged"
+    installer.install(prefix, port=8080, stage_only=True, dry_run=False, require_alsa=False)
+    snapshot = prefix / "source"
+    assets = snapshot / "fake_linkplay/web_assets"
+    original = installer.source_receipt(snapshot)["source_sha256"]
+    for name in ("index.html", "style.css", "controller.js", "app.js"):
+        path = assets / name
+        body = path.read_bytes()
+        path.write_bytes(body + b"\nChanged asset\n")
+        assert installer.source_receipt(snapshot)["source_sha256"] != original
+        path.write_bytes(body)
+    for name in ("unexpected.js", "private.json", "private.txt"):
+        (assets / name).write_text("not installation input")
+    assert installer.source_receipt(snapshot)["source_sha256"] == original
+    selected = installer.source_files(snapshot)
+    assert {path.name for path in selected if path.parent == assets} == {
+        "index.html", "style.css", "controller.js", "app.js"}
+
+
+@pytest.mark.parametrize("replacement", ["missing", "file_symlink", "directory_symlink"])
+def test_source_assets_reject_missing_files_and_symlinks(installer, tmp_path, replacement):
+    prefix = tmp_path / "staged"
+    installer.install(prefix, port=8080, stage_only=True, dry_run=False, require_alsa=False)
+    snapshot = prefix / "source"
+    assets = snapshot / "fake_linkplay/web_assets"
+    if replacement == "directory_symlink":
+        outside = tmp_path / "outside-assets"
+        assets.rename(outside)
+        assets.symlink_to(outside, target_is_directory=True)
+    else:
+        target = assets / "app.js"
+        target.unlink()
+        if replacement == "file_symlink":
+            outside = tmp_path / "outside.js"
+            outside.write_text("not an owned source")
+            target.symlink_to(outside)
+    with pytest.raises(ValueError, match="Missing regular|must not traverse symlinks"):
+        installer.source_files(snapshot)
+    with pytest.raises(ValueError, match="Missing regular|must not traverse symlinks"):
+        installer.source_receipt(snapshot)

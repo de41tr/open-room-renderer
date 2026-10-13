@@ -18,7 +18,9 @@ from urllib.parse import quote
 import requests
 from aiohttp import web
 
-from .config import load_config
+from .audio_diagnostic import add_audio_parser, run_audio_diagnostic
+from .config import StartupConfigError, load_config, load_startup_config
+from .config_check import add_config_parser, run_config_check
 from .discovery_client import add_discovery_parser, run_discovery
 from .dsp_client import add_dsp_parser, run_dsp_command
 from .favorites_client import favorite_play_id, play_favorite
@@ -29,8 +31,10 @@ from .mpv_backend import BackendError, MpvBackend
 from .playlist_cli import add_playlist_parser, run_playlist
 from .queue_client import (PrivateClientArgumentParser, QueueClientError, _endpoint,
                            add_queue_commands, run_queue_command)
+from .spotify_diagnostic import add_spotify_parser, run_spotify_diagnostic
 from .ssdp import SsdpServer
 from .state import RendererState
+from .startup_state import StartupStateError
 from .transport_client import COMMANDS, add_transport_commands, run_transport_command
 from .upnp_description import description_xml
 from .utils import setup_logging
@@ -39,23 +43,26 @@ LOG = logging.getLogger(__name__)
 RESOURCE_CLEANUP_TIMEOUT = 10.0
 
 
-async def serve(config_path: str) -> None:
+async def serve(config_path: str | None = None) -> None:
     """Start HTTP, discovery, mDNS, and mpv services until interrupted.
 
     Args:
-        config_path: Path to the YAML config file.
+        config_path: Explicit YAML file path, which must be readable. None uses
+            the historical example-path default, including its missing fallback.
 
     Side Effects:
         Starts network listeners, may start an mpv subprocess, and persists
         runtime state through lower-level handlers.
     """
 
-    cfg = load_config(config_path)
+    cfg = (load_startup_config("configs/config.example.yaml", missing_ok=True)
+           if config_path is None else load_startup_config(config_path))
     setup_logging(cfg.log_level)
     state = RendererState.from_config(cfg)
     mpv = MpvBackend(
         cfg.mpv_socket, cfg.auto_spawn_mpv,
         initial_volume=state.volume, initial_mute=state.mute,
+        audio_device=cfg.mpv_audio_device,
     )
     runners: list[web.AppRunner] = []
     ssdp: SsdpServer | None = None
@@ -109,7 +116,7 @@ async def serve(config_path: str) -> None:
         except BackendError as exc:
             state.mark_error()
             LOG.warning("backend unavailable at startup; control API will report failures: %s", exc)
-        api = HttpApi(cfg, state, mpv)
+        api = HttpApi(cfg, state, mpv, _startup=True)
         try:
             # Restore the complete active EQ/balance graph, including bypass,
             # before listeners. Backend load/resume will retry this desired
@@ -183,6 +190,9 @@ def api_get(host: str, port: int, command: str) -> int:
         # Use only the explicit endpoint, without ambient proxy/netrc credentials.
         # Default Requests adapters do not retry; redirects remain disabled.
         with requests.Session() as session:
+            # Skip hidden Location parsing despite allow_redirects=False, keeping
+            # errors private. Existing non-streaming body reads remain unbounded.
+            session.resolve_redirects = lambda *_args, **_kwargs: iter(())
             session.trust_env = False
             with session.get(url, timeout=10, allow_redirects=False) as response:
                 if not 200 <= response.status_code < 300:
@@ -222,6 +232,9 @@ def favorites_request(
     try:
         kwargs = {"json": payload} if payload is not None else {}
         with requests.Session() as session:
+            # Skip hidden Location parsing despite allow_redirects=False, keeping
+            # errors private. Existing non-streaming body reads remain unbounded.
+            session.resolve_redirects = lambda *_args, **_kwargs: iter(())
             session.trust_env = False
             with session.request(method, url, timeout=10, allow_redirects=False, **kwargs) as response:
                 if not 200 <= response.status_code < 300:
@@ -252,10 +265,16 @@ def build_parser(*, private_client_errors: bool = False) -> argparse.ArgumentPar
     """Build the command-line parser used by the console script."""
 
     parser_type = PrivateClientArgumentParser if private_client_errors else argparse.ArgumentParser
-    parser = parser_type(prog="open-room-renderer")
+    parser = parser_type(
+        prog="open-room-renderer",
+        epilog="Offline native upgrade preparation: use the new installation\'s Python with "
+               "-m fake_linkplay.migration_profile --help (see GETTING_STARTED.md).",
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
     serve_p = sub.add_parser("serve")
-    serve_p.add_argument("--config", default="configs/config.example.yaml")
+    serve_p.add_argument("--config", help="YAML file (default: configs/config.example.yaml)")
+    add_config_parser(sub)
+    add_audio_parser(sub)
     for name in ("status", "pause", "resume", "stop"):
         p = sub.add_parser(name)
         p.add_argument("--host", default="127.0.0.1")
@@ -270,6 +289,7 @@ def build_parser(*, private_client_errors: bool = False) -> argparse.ArgumentPar
     p.add_argument("--port", type=int, default=8080)
     add_discovery_parser(sub)
     add_dsp_parser(sub)
+    add_spotify_parser(sub)
     add_transport_commands(sub)
     add_queue_commands(sub)
     add_playlist_parser(sub)
@@ -314,19 +334,31 @@ def main(argv: list[str] | None = None) -> int:
     legacy_favorite = (len(argv) > 1 and argv[0] == "favorites"
                        and argv[1] in {"list", "add", "save-current", "rename", "delete"})
     # There are no global CLI options. Preserve existing diagnostics when a
-    # legacy command uses "discover" as a name/value, while keeping malformed
-    # discovery invocations (including leading flags) private.
+    # legacy command uses a new command name as a value, while keeping malformed
+    # standalone discovery/config/audio/Spotify invocations (including leading flags) private.
     legacy_command = bool(argv) and argv[0] in {
         "serve", "status", "pause", "resume", "stop", "play", "volume", "queue",
         "playlist", "favorites", "dsp", "print-description", "print-discovery-info", *COMMANDS,
     }
     private_discovery = "discover" in argv and not legacy_command
-    private_errors = (private_discovery or any(arg in {"queue", "playlist", "dsp", *COMMANDS} for arg in argv)
+    private_spotify = "spotify" in argv and not legacy_command
+    private_config = "config" in argv and not legacy_command
+    private_audio = "audio" in argv and not legacy_command
+    private_errors = (private_discovery or private_spotify or private_config or private_audio or any(arg in {"queue", "playlist", "dsp", *COMMANDS} for arg in argv)
                       or {"favorites", "play"} <= set(argv)
                       or ({"favorites", "set-url"} <= set(argv) and not legacy_favorite))
     args = build_parser(private_client_errors=private_errors).parse_args(argv)
+    if args.cmd == "audio":
+        return run_audio_diagnostic(args)
+    if args.cmd == "config":
+        return run_config_check(args)
     if args.cmd == "discover":
         return run_discovery(args)
+    if args.cmd == "spotify":
+        if args.spotify_cmd == "prepare-exclusive":
+            from .spotify_exclusive import run_prepare_exclusive
+            return run_prepare_exclusive(args)
+        return run_spotify_diagnostic(args)
     if args.cmd == "dsp":
         return run_dsp_command(args)
     if args.cmd in COMMANDS:
@@ -336,7 +368,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "playlist":
         return run_playlist(args)
     if args.cmd == "serve":
-        asyncio.run(serve(args.config))
+        try:
+            asyncio.run(serve(args.config))
+        except (StartupConfigError, StartupStateError) as exc:
+            print(f"Startup error: {exc}", file=sys.stderr)
+            return 2
         return 0
     if args.cmd == "status":
         return api_get(args.host, args.port, "getStatusEx")

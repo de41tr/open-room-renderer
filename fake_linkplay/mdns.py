@@ -271,7 +271,7 @@ class CustomMdnsProtocol(asyncio.DatagramProtocol):
                 continue
             target = addr if question.wants_unicast else (MDNS_GROUP, MDNS_PORT)
             self.transport.sendto(response, target)
-            LOG.debug("mDNS response qname=%s qtype=%s target=%s bytes=%s", question.name, question.qtype, target, len(response))
+            LOG.debug("mDNS response qtype=%s target=%s bytes=%s", question.qtype, target, len(response))
 
     def refresh(self) -> None:
         """Withdraw the old instance after a rename and announce its new name."""
@@ -351,8 +351,7 @@ class CustomMdnsResponder:
             sock.close()
             raise
         LOG.info(
-            "custom mDNS responder started: %s -> %s:%s",
-            f"{self.cfg.linkplay_instance_name}._linkplay._tcp.local.",
+            "custom mDNS responder started: _linkplay._tcp.local. -> %s:%s",
             self.cfg.mdns_hostname,
             self.cfg.http_api_port,
         )

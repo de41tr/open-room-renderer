@@ -47,3 +47,6 @@ include = ["fake_linkplay*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.setuptools.package-data]
+fake_linkplay = ["web_assets/*.html", "web_assets/*.css", "web_assets/*.js"]

@@ -41,6 +41,9 @@ def play_favorite(host: str, port: int, identifier: str) -> int:
     try:
         # No environment proxy/netrc credentials, redirects, or request retry.
         with requests.Session() as session:
+            # allow_redirects=False still prepares Response.next and reads its body.
+            # Skip that work so status/size checks remain before any body read.
+            session.resolve_redirects = lambda *_args, **_kwargs: iter(())
             session.trust_env = False
             with session.post(endpoint, timeout=10, allow_redirects=False, stream=True,
                               headers={"Accept-Encoding": "identity"}) as response:

@@ -1,3 +1,263 @@
+# Next-phase strategic review
+
+## Current decision: verified correction; useful handover, no feature expansion
+
+1. **CLOSE THE DEMONSTRATED CORRECTION.** `53f4831` is fully green in run
+   38394821007, all four jobs/every step, verified 12:21 UTC. Floor **7260/76**
+   passes in **149.62s /94.67s /89.85s** under the unchanged shared 165s limit;
+   native defaults **7261/75** pass on both architectures. No more scheduling,
+   broad native/browser or soak work is justified without a concrete failure.
+2. **RETAIN THE DEBT AND LIMITS.** `0ea93ec` remains FAILED on its floor timeout;
+   `70d9308` remains FAILED with unexplained ARM Snapcast 431-frame zero-runs.
+   Later unchanged-gate passes explain neither historical failure away. Original
+   Chrome smoke and native/null/PCM proof do not close new-dialog, wider-browser,
+   physical ARMv7/DAC, effective-service, original-app or provider-account gates.
+3. **KEEP THE HANDOVER DURABLE.** The six required docs separate pinned runtime
+   evidence from handover-only PR checks, reduce repeated STATUS/RESUME prose
+   and retain frozen history verbatim. The next user decisions are PR review/merge,
+   authorized hardware/service acceptance and optional go-librespot setup. Verify
+   each published revision's exact-head checks without a follow-on timestamp
+   commit or an inherited CI claim.
+4. **DEFER UNJUSTIFIED EXPANSION.** Whole-product and metadata-only reviews found
+   no independent GO feature. Rich bookmarks/metadata require cross-consumer and
+   versioning policy, title provenance, and duration/seek semantics. Effective
+   service rehearsal needs an authorized target. General restore/merge, a new
+   format or a universal audio framework would add risk without closing the
+   present acceptance gaps. Spotify remains passive/offline; direct exclusive
+   audio bypasses ORR DSP and still needs manual terms/account/output acceptance.
+5. **HOLD THE ORIGINAL BOUNDARY.** Respond to concrete new evidence and complete
+   exact-source verification within the authorized window. No large/risky starts
+   after **16:30 UTC**; stabilize from **17:00**; hard stop **18:00**, with any
+   unfinished gate reported PENDING. Do not fill quiet time with speculative code,
+   redundant test campaigns or timestamp-only commits.
+
+The assessments below are historical decisions, not current instructions to
+reopen completed work or revive superseded acceptance claims.
+
+## 11:40 value review: CONTINUE the demonstrated gate correction
+
+1. **RETAIN FAILURES:** `20bff6c` is fully green. Successor `0ea93ec` passes
+   Chrome and both native jobs but its floor group 1 hits the shared 165s limit;
+   group 2 already takes 157.96s. Keep that run FAILED and retain the earlier
+   `70d9308` Snapcast zero-run failure without claiming its cause resolved.
+2. **CORRECT SCHEDULING, NOT GATES:** use one measured coherent slice and a
+   bounded opt-in third default group. All old nodes/skips, native opt-in
+   two-group commands, shared deadlines and job/step caps remain. Cleanup/failure
+   behavior has fresh review. More processes add contention; only CI proves margin.
+3. **VERIFY ONCE:** publish the small separate scheduling correction and verify
+   its exact head. No full local/default sweep, additional native/browser campaign,
+   weakened assertion or retries-until-green loop. Fix another failure only from
+   its concrete evidence. Current client/privacy features are otherwise reviewed.
+4. **DEFER THE REMAINING CANDIDATES:** metadata-only transfer still crosses Web,
+   codec, CLI and occurrence-based edits; title origin and duration/seek semantics
+   prevent a harmless format tweak. Rich bookmarks remain deferred. Effective
+   service/profile activation needs a suitable authorized target. Whole-product
+   review finds no further independent GO package; stay available without inventing work.
+5. **BOUND:** next review **13:10–13:40 UTC**. After verification, use review/wait
+   for new evidence when no useful authorized work remains. No large/risky starts
+   after 16:30; stabilize 17:00; hard stop 18:00 UTC, even with CI pending.
+
+## 04:12 UTC value/risk assessment
+
+1. **CONTINUE:** keep the completed checkpoint and operator handover exact.
+   `ba7c759` is fully green in run 38343514991, all three jobs/every step,
+   verified 04:03 UTC. The required Web/DSP/playlist/favorite workflows and
+   reproduced data-preservation/privacy/recovery corrections are implemented.
+2. **CLOSE:** the actual floor timeout has a measured, reviewed one-module
+   correction. Hosted groups now pass 142.33s/138.29s under the unchanged 165s
+   cap. Stop timing, redundant local/native and endurance work unless a new
+   failed gate supplies concrete evidence; retain the failed run in the record.
+3. **DEFER EXPANSION:** independent value review finds no additional practical
+   feature worth adding in the next 90–120 minutes. More UI, formats, storage,
+   provider engines or architecture would increase risk without closing the
+   principal acceptance gap. This is not an early end to the authorized window.
+4. **KEEP ACCEPTANCE HONEST:** actual browser layout/focus/download, physical
+   ARMv7/DAC/original-app and provider-account checks remain pending. Use the
+   existing acceptance checklist if a supported prerequisite changes; do not
+   repeat blocked routes, install a workaround or infer acceptance from doubles.
+5. **REASSESS:** remain available for actionable review, a reproducible operator
+   defect or changed acceptance access. Next value review **05:42–06:12 UTC**;
+   no new large/risky work after 16:30, stabilize at 17:00, hard stop at 18:00 UTC.
+
+## 02:42 UTC value/risk assessment
+
+1. **CONTINUE:** finish the separately scoped failed-load EQ preset write fence.
+   Synthetic Web/legacy probes establish an actual overwrite risk; focused tests
+   and independent review pass. Complete bounded native startup proof and final
+   combined checks before publication. This deliberately changes degraded-write
+   failure policy, while preserving valid-storage responses and active DSP.
+2. **CONTINUE:** verify the exact saved-favorites diagnostic head `660cab1`
+   (run 38337365883) before publishing a later checkpoint. Its current native
+   gates are still running; earlier `8c7df63` success does not certify it.
+3. **PIVOT:** the requested controller and practical playlist/favorite/DSP
+   workflows are implemented. Prioritize concrete data-preservation/recovery
+   defects and clear handover over speculative feature growth or more seams.
+4. **DEFER:** external-file concurrency/CAS, automatic repair/migration/salvage,
+   additional audio engines and provider integration. Genuine browser and
+   physical/account acceptance remain separate; do not retry blocked routes or
+   infer them from synthetic/native null-output evidence.
+5. **BOUND:** keep all existing assertions, watchdogs and scheduling unchanged.
+   No new soak/timing campaign. Reassess value at **04:12–04:42 UTC**; retain the
+   16:30 risk cutoff, 17:00 stabilization and 18:00 hard stop.
+
+
+**03:24 follow-through:** both preservation and preceding diagnostics are fully
+green; exact preservation run 38339941041 certifies `3e44ad0`, including native
+x86_64/ARM64 no-overwrite evidence. One previously documented initial-balance
+traceback is reproduced with synthetic private input. A ten-line startup-only
+ValueError correction has independent review and 487 focused passes per runtime.
+Integrate with explicit exit-1→2/private-message documentation, preserving source
+precedence, public exceptions and teardown; no redundant native/full replay.
+The next formal review remains 04:12–04:42 UTC.
+
+**03:38 observed gate failure:** initial-balance head `696700c` exceeded the
+unchanged floor watchdog in group 1; group 2 passed 550/136.61s. This is concrete
+new evidence permitting one measured module transfer, not broader timing work
+or a cap increase. A separate UI review reproduced an open Save current draft
+that stayed actionable after selection changed and instructed an ineffective
+Refresh. A small frontend-only stale latch now requires explicit Close/reopen,
+preserving names, captured intent and dispatched outcomes. Independent review
+and focused checks pass; combine separate commits with one floor replay and
+exact-head hosted verification, then stop this scheduling thread.
+
+## 01:12 UTC value/risk assessment
+
+1. **CONTINUE:** verify exact export head `1dfd642` in hosted CI. Its complete
+   local suites, independent reviews and native no-mutation checks already pass;
+   earlier `59726d5` CI does not certify this new feature.
+2. **CONTINUE, BOUNDED:** investigate the reproduced malformed saved-DSP startup
+   traceback and keep its diagnostic private without resetting state, weakening
+   fail-closed behavior or changing public loader/library recovery contracts.
+3. **CONTINUE, BOUNDED:** restore a logical keyboard return target when favorites
+   are rebuilt while a dialog is open. Static/DOM evidence establishes a detached
+   opener; actual browser focus behavior remains a separate acceptance gate.
+4. **DEFER:** favorites/M3U export, provider integration, physical ARMv7/DAC and
+   real browser acceptance. No speculative new format/engine, repeated blocked
+   browser route or unsupported download-to-disk claim.
+5. **STOP LOW-RETURN WORK:** scheduling is green with unchanged gates; make no
+   further timing changes without a failed gate. Retain existing endurance
+   evidence. Reassess practical value in 90–120 minutes, by 03:12 UTC.
+
+
+The preceding corrections are now fully green at `5534c4d` in run 38332263993.
+A focused review justified one small remaining favorite workflow: repair its URL
+using the existing stable-ID API instead of delete/recreate. The browser does not
+read back the secret URL, so it deliberately reports ACKNOWLEDGED, with a separate
+explicit metadata choice and single-use private draft. Observed conflict guards
+are local safeguards, not a new revision framework. No server contract or audio
+engine is added. The next formal review remains due 02:42–03:12 UTC.
+
+The favorite repair checkpoint is fully green at `8c7df63` (run 38334412981).
+A reproduced saved-library read failure justifies a narrow fixed diagnostic,
+not a dashboard or relaxed storage policy. It preserves stale-list gates and
+mutation UNKNOWN. Current handover text is consolidated while retaining exact
+historical evidence. A separate read-only preset assessment reproduced destructive overwrites after
+failed loading, including legacy no-op Delete. Proceed with a narrow, separately
+documented failed-load write fence, preserving healthy responses and active DSP.
+It is a failure-policy correction, not a behavior-neutral extraction; no repair,
+reset, migration or external-file concurrency framework is added.
+
+## 23:42 UTC value/risk assessment (first 90 minutes)
+
+1. **CONTINUE:** integrate stopped-only local playlist loading/editing and verify
+   actual explicit-Play behavior. This completes a useful browser workflow while
+   retaining the existing queue authority and strict limits.
+2. **CONTINUE:** fail closed with private-safe diagnostics for explicitly selected
+   startup config errors. Preserve public/default-loader compatibility and normal
+   backend-degraded availability; independent review precedes integration.
+3. **PIVOT:** architecture work is complete at the two cohesive boundaries. Spend
+   effort on delivered workflows and installation correctness, not more seams.
+4. **DEFER:** Spotify integration, physical ARMv7/DAC/original-app acceptance and
+   genuine browser acceptance remain separate gates; no fake success or repeated
+   known-blocked browser routes. Retain prior long-run evidence without new soaks.
+5. **BOUND:** a measured 1,000-item playlist eligibility check costs about 59 ms
+   median on this host; examine only a small semantics-preserving reduction in
+   repeated work, without caches or weaker validation. If no clean improvement,
+   document the cost and move on. Reassess within 90–120 minutes.
+
+The hard stop remains 2026-10-13 18:00 UTC, with no large/risky work after 16:30
+and stabilization from 17:00. Published DSP/package head `7d68d79` has final local
+checks green; exact-head hosted CI is still running. Private candidates are not
+covered by earlier published green results.
+
+## Operator-path follow-through
+
+A bounded final-path review found two concrete issues rather than recommending
+another diagnostic panel: private favorite/preset drafts survived navigation,
+and a stopped renderer with UNKNOWN gain offered no fresh quiet Web recovery.
+Small browser-only corrections reuse existing cleanup and checked volume=0
+transactions. They add no playback owner, backend changes, automatic retry or
+silence claim. Independent review and focused/native wiring checks pass; exact
+new-head CI is separate. No further useful installation/format/restart blocker
+was found by that review. Continue only evidence-led follow-through, not a broad
+new feature or architecture search simply to use the remaining time.
+
+That recovery checkpoint is fully green at `0668209`. A second near-cap floor
+run justifies one final two-file same-process balancing change, based on a
+focused measurement and exact coverage parity; stop timing work unless a gate
+actually fails. Assess deliberate private-file export next as a practical
+workflow, with redacted ordinary state and explicit disclosure, rather than
+reopening the blocked Spotify integration or inventing another status panel.
+
+The final scheduling head `59726d5` is fully green in run 38328911125. The
+bounded queue-only export is implemented/reviewed with complete local suites
+and short native no-mutation checks. It exposes private source bytes after
+explicit consent and Prepare private file; saving additionally requires the
+user-clicked Download JSON link. It enforces existing Web round-trip limits
+and leaves ordinary polling redacted. Favorites export lacks a matching
+existing restore contract and is deferred; no new library format is justified.
+Next formal value/risk assessment remains due 01:12–01:42 UTC.
+
+## Architecture checkpoint and pivot
+
+Two bounded, cohesive extractions remove saved-DSP-library ownership and pure
+queue-authoring contracts from orchestration/transport adapters. They preserve
+one playback authority, existing locks and effects. Compatibility costs are a
+mutable library forwarding property and legacy function/error exports; private
+internal helper override dispatch is not an extension contract. Stateful player
+recovery/staging remains intentionally concentrated rather than risk a rewrite.
+
+The highest-value next step is a complete local browser controller. Architecture
+work stops at these seams once integrated checks pass; the 3–4-hour allocation
+is a ceiling, not a target to fill. UI implementation proceeds independently while
+CI runs. Existing long-duration evidence is retained without a redundant rerun.
+After functional UI, spend at most one hour on evidence-based optional Spotify
+sidecar feasibility, then choose implementation or a reasoned deferral.
+
+The functional Web milestone now provides the required browser controls plus
+balance/EQ bypass. Security review drove concrete fixes for signed URL fallback
+metadata, safe live titles, session-crossed favorites reads, stale queue intent,
+pending DSP values and linked top-level navigation. Native controls and packaged
+assets are tested; actual browser acceptance remains explicitly pending. No
+placeholder browser/provider buttons are being advertised as working.
+
+Next: compare the three named Spotify candidates within one hour. A second audio
+engine must have honest separate state and enforceable source ownership across
+all legacy and new controls; a UI-only switch is not sufficient arbitration.
+If legal/account/audio-contract constraints block a safe useful first stage,
+record the ADR and prioritize DSP preset/band UI, playlists and diagnostics.
+
+The Spotify feasibility pass completed within its one-hour cap. The accepted
+[ADR](adr/001-spotify-sidecar.md) selects official Soloist as the future standalone
+candidate but defers integration, with separate account, target-hardware, policy
+and output-arbitration gates. No account work or speculative second player was
+started. This preserves the existing renderer and redirects effort to real
+DSP-band/preset editing through its checked transactions.
+
+The DSP editor now exposes the useful existing engine rather than adding a new
+one: checked bands, safe drafts and saved-preset management, with native graph
+and discriminating PCM verification. Next, continue the bounded stopped-only
+playlist workflow. The existing native jobs nearly filled their 15-minute caps;
+reuse the already-tested default-suite partition on each same runner, preserving
+exact coverage/caps. One local replay supports the change; hosted improvement
+must be measured on the next exact-head run.
+
+No new user decision is needed for these reversible steps. The active hard stop
+is 2026-10-13 18:00 UTC; no large/risky work starts after 16:30 UTC and stabilization
+starts at 17:00 UTC. All older strategic task boundaries below are historical.
+
+---
+
 # Strategic review
 
 Optimize useful, verified user workflows per hour, not test/commit/line counts.
@@ -95,7 +355,7 @@ not authorize unattended work, merge, release or provider-account access later.
    controller may select the legacy schema. Changing this compromise requires
    explicit controller/profile acceptance, not a claim of universal UPnP support.
 
-See [the target architecture](architecture.md#bounded-extraction-and-target-responsibilities)
+See [the target architecture](architecture.md)
 for protocol, player, queue, eventing, DSP and service-adapter boundaries.
 
 ### Three high-value missing features

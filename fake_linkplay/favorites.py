@@ -140,6 +140,31 @@ def _decode(encoded: bytes) -> object:
         raise FavoriteError("invalid_json", "Invalid JSON document") from None
 
 
+def decode_favorites_document(encoded: bytes) -> tuple[Favorite, ...]:
+    """Decode the existing persisted v1 format, without rewriting field values."""
+    if len(encoded) > MAX_FAVORITES_BYTES:
+        raise ValueError("Persisted favorites exceeds its size limit")
+    payload = _decode(encoded)
+    if (not isinstance(payload, dict) or set(payload) != {"version", "favorites"}
+            or type(payload["version"]) is not int or payload["version"] != 1
+            or not isinstance(payload["favorites"], list)
+            or len(payload["favorites"]) > MAX_FAVORITES):
+        raise ValueError("Unsupported persisted favorites document")
+    records = tuple(_record(record, persisted=True) for record in payload["favorites"])
+    if len({record.id for record in records}) != len(records):
+        raise ValueError("Duplicate persisted favorite ID")
+    return records
+
+
+def encode_favorites_document(records: tuple[Favorite, ...]) -> bytes:
+    """Use the existing seven-field persisted representation and byte limit."""
+    encoded = json.dumps({"version": 1, "favorites": [asdict(record) for record in records]},
+                         ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n"
+    if len(encoded.encode("utf-8")) > MAX_FAVORITES_BYTES:
+        raise FavoriteError("library_full", "Favorites library exceeds its size limit", 409)
+    return encoded.encode("utf-8")
+
+
 class FavoritesStore:
     """One-process, bounded atomic library. Callers never receive owned records."""
 
@@ -167,25 +192,17 @@ class FavoritesStore:
             with self.path.open("rb") as stream:
                 encoded = stream.read(MAX_FAVORITES_BYTES + 1)
         except FileNotFoundError:
-            return ()
-        if len(encoded) > MAX_FAVORITES_BYTES:
-            raise ValueError("Persisted favorites exceeds its size limit")
-        payload = _decode(encoded)
-        if (not isinstance(payload, dict) or set(payload) != {"version", "favorites"}
-                or type(payload["version"]) is not int or payload["version"] != 1
-                or not isinstance(payload["favorites"], list)
-                or len(payload["favorites"]) > MAX_FAVORITES):
-            raise ValueError("Unsupported persisted favorites document")
-        records = tuple(_record(record, persisted=True) for record in payload["favorites"])
-        if len({record.id for record in records}) != len(records):
-            raise ValueError("Duplicate persisted favorite ID")
-        return records
+            # A dangling file symlink is existing storage that an atomic save
+            # could replace. Treat only a genuinely absent entry as new.
+            try:
+                self.path.lstat()
+            except FileNotFoundError:
+                return ()
+            raise
+        return decode_favorites_document(encoded)
 
     def _commit(self, records: tuple[Favorite, ...]) -> None:
-        encoded = json.dumps({"version": 1, "favorites": [asdict(record) for record in records]},
-                             ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n"
-        if len(encoded.encode("utf-8")) > MAX_FAVORITES_BYTES:
-            raise FavoriteError("library_full", "Favorites library exceeds its size limit", 409)
+        encoded = encode_favorites_document(records).decode("utf-8")
         try:
             atomic_write_text(self.path, encoded)
         except AtomicWriteCommittedError:
@@ -194,6 +211,35 @@ class FavoritesStore:
             self._records = records
             raise
         self._records = records
+
+    def backup_bytes(self) -> bytes:
+        """Snapshot only owned records, never the configured presentation prefix."""
+        with self._lock:
+            self._require_available()
+            return encode_favorites_document(self._records)
+
+    def restore_empty(self, encoded: bytes) -> None:
+        """Restore one complete document only into healthy, empty owned storage.
+
+        One lock covers validation, the fresh disk check and the single commit.
+        The disk check fences observable external changes, not filesystem races:
+        this remains a single-writer store; do not edit its file while serving.
+        """
+        with self._lock:
+            self._require_available()
+            records = decode_favorites_document(encoded)
+            if self._records:
+                raise FavoriteError("library_not_empty", "Managed favorites must be empty before restoring", 409)
+            try:
+                persisted = self._load()
+            except (ValueError, OSError):
+                raise FavoriteError("library_unavailable",
+                    "Managed favorites storage could not be verified. Stop the renderer, repair or restore its saved library, then restart.", 503) from None
+            if persisted:
+                raise FavoriteError("library_not_empty", "Managed favorites must be empty before restoring", 409)
+            # Empty input is a no-write no-op, never a way to clear a library.
+            if records:
+                self._commit(records)
 
     def effective_presets(self) -> list[dict[str, object]]:
         """Configured prefix stays unchanged; managed entries receive dense slots."""

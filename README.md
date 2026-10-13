@@ -27,6 +27,13 @@ source/dependency versions and owned files, and generates a reviewable user unit
 It does **not** install distro packages, start services, change firewall settings,
 or use sudo. The default profile uses port **8080** and a stable local identity.
 
+Once running, open `http://<renderer-ip>:8080/ui/` (or your configured API port)
+for the [local Web controller](docs/WEB_UI.md): playback, queue, repeat/shuffle,
+volume/mute, favorites, balance, ten-band EQ, presets and stopped playlist editing
+without a control CLI. A genuine Chrome desktop/mobile smoke has passed real
+controls, dialog keyboard/focus and downloaded JSON checks; the broader browser
+and physical-device matrix remains pending. See [the exact evidence and limits](docs/WEB_BROWSER_ACCEPTANCE.md).
+
 For editable development instead:
 
 ```bash
@@ -50,7 +57,7 @@ on the selected media, network, and audio device.
 Working in this alpha:
 
 - advertises itself on the local network,
-- exposes a local renderer/control API,
+- exposes a local renderer/control API and [responsive Web controller](docs/WEB_UI.md),
 - can be discovered by open-source WiiM/Linkplay-style clients,
 - has real open-source client and app-shaped HTTP/SOAP/GENA test coverage; original Android app acceptance remains untested,
 - can play TuneIn-style streams,
@@ -129,10 +136,20 @@ and connection failures exit nonzero with a short error on stderr. Redirects are
 not followed; use the renderer's direct host and port. Error messages omit the
 request URL and response body because media URLs may contain credentials.
 
-Local DSP commands expose existing balance and EQ bypass controls:
-`open-room-renderer dsp balance get`, `dsp balance set -0.25`, and `dsp eq on|off`.
+Local DSP commands inspect active DSP and expose existing balance/EQ bypass controls:
+`open-room-renderer dsp show`, `dsp balance get`, `dsp balance set -0.25`, and `dsp eq on|off`.
+`dsp show` prints a private-safe, read-only snapshot; only `CONFIRMED` exits zero.
 Balance is normalized -1..1. See [DSP controls and unknown-outcome handling](GETTING_STARTED.md#local-dsp-controls)
 before enabling an unfamiliar EQ configuration.
+
+An optional `open-room-renderer spotify diagnose --port PORT` command reads an
+already running local go-librespot sidecar. It does not start a player or control
+audio. See [the read-only Spotify diagnostic](docs/SPOTIFY_DIAGNOSTIC.md) for
+explicit setup requirements, privacy limits and sidecar-reported status meanings.
+`spotify prepare-exclusive` can separately write a credential-free, offline
+manual service proposal for a supported native direct-ALSA installation. It
+never installs, activates or pairs a client. See [the exclusive-mode proposal](docs/SPOTIFY_EXCLUSIVE.md);
+terms, account, hardware and arbitration gates remain pending.
 
 ## Trying The Phone App
 

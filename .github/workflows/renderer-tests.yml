@@ -55,14 +55,74 @@ jobs:
       - name: Run default unit and local-client suite on Python 3.11
         timeout-minutes: 3
         # Preserve every default test and the existing cap on this same runner.
-        # Isolate subprocess-heavy CLI cases; the other group discovers all others.
+        # Three bounded processes share one deadline; the first discovers all others.
+        # Isolate client subprocess work instead of overfilling either existing group.
         run: |
-          python scripts/run-native-groups.py --timeout 165 \
+          python scripts/run-native-groups.py --groups 3 --timeout 165 \
             --log-dir "$RUNNER_TEMP/orr-default-python311" -- \
             tests -rs --ignore=tests/test_queue_cli.py --ignore=tests/test_playlist_cli.py \
             --ignore=tests/test_favorite_play_cli.py --ignore=tests/test_favorites_cli.py \
+            --ignore=tests/test_startup_config.py --ignore=tests/test_web_ui.py \
+            --ignore=tests/test_native_group_runner.py --ignore=tests/test_cli_commands.py \
+            --ignore=tests/test_startup_state.py --ignore=tests/test_legacy_cli_redirect_privacy.py \
+            --ignore=tests/test_dsp_read_client.py --ignore=tests/test_dsp_client.py \
+            --ignore=tests/test_transport_client.py \
             ::: tests/test_queue_cli.py tests/test_playlist_cli.py tests/test_favorite_play_cli.py \
-            tests/test_favorites_cli.py
+            tests/test_startup_config.py tests/test_startup_state.py tests/test_web_ui.py \
+            ::: tests/test_native_group_runner.py tests/test_cli_commands.py \
+            tests/test_legacy_cli_redirect_privacy.py tests/test_dsp_read_client.py \
+            tests/test_dsp_client.py tests/test_transport_client.py tests/test_favorites_cli.py
+
+  browser-smoke:
+    name: Real Chrome / desktop and mobile smoke
+    # Independent short lane: never take time from either existing native job.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      PYTHONPATH: .
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out contribution without saved credentials
+        timeout-minutes: 1
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python for the browser smoke
+        timeout-minutes: 2
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          architecture: x64
+
+      - name: Check installed browser and install the null-output renderer fixture
+        timeout-minutes: 3
+        run: |
+          test "$(id -u)" -ne 0
+          command -v google-chrome
+          command -v chromedriver
+          google-chrome --version
+          chromedriver --version
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y mpv
+          python -m pip --isolated install --index-url https://pypi.org/simple --disable-pip-version-check --no-cache-dir -e . 'pytest>=8'
+          python -m pip check
+
+      - name: Exercise genuine Chrome against production HTTP and mpv Unix IPC
+        timeout-minutes: 3
+        # Normal Chrome sandbox, existing runner browser/driver, no accounts.
+        # The script has 120s work / 150s process-tree watchdog bounds.
+        run: python tools/browser_smoke.py --artifacts "$RUNNER_TEMP/orr-browser-smoke"
+
+      - name: Retain synthetic browser evidence and failure diagnostics
+        if: ${{ always() }}
+        timeout-minutes: 1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-smoke-${{ github.sha }}
+          path: ${{ runner.temp }}/orr-browser-smoke
+          if-no-files-found: warn
+          retention-days: 7
 
   renderer-tests:
     name: Renderer / ${{ matrix.runner }}
@@ -77,6 +137,7 @@ jobs:
     env:
       PYTHONPATH: .
       PYTHONUNBUFFERED: "1"
+      ORR_TEST_MIGRATION_SOCKET: "1"
     steps:
       - name: Check out contribution without saved credentials
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -97,6 +158,9 @@ jobs:
           uname -m
           dpkg --print-architecture
           .venv-ci/bin/python --version
+          # UI control-flow checks are required in the native lanes, not skipped.
+          node --version
+          node -e 'if (Number(process.versions.node.split(".")[0]) < 18) process.exit(1)'
           mpv --version
           dpkg-query -W mpv libmpv2
           .venv-ci/bin/python -m pip freeze
@@ -107,7 +171,25 @@ jobs:
           done
 
       - name: Run default unit and local-client suite
-        run: .venv-ci/bin/python -m pytest -q -rs
+        # Reuse the floor's three default groups on this runner; retain every test.
+        # Explicit native opt-in lanes below continue to use two groups.
+        # The 900s watchdog starts after the job clock; the unchanged 15-minute
+        # whole-job cap remains the effective bound.
+        run: |
+          .venv-ci/bin/python scripts/run-native-groups.py --groups 3 --timeout 900 \
+            --log-dir "$RUNNER_TEMP/orr-default-python312" -- \
+            tests -rs --ignore=tests/test_queue_cli.py --ignore=tests/test_playlist_cli.py \
+            --ignore=tests/test_favorite_play_cli.py --ignore=tests/test_favorites_cli.py \
+            --ignore=tests/test_startup_config.py --ignore=tests/test_web_ui.py \
+            --ignore=tests/test_native_group_runner.py --ignore=tests/test_cli_commands.py \
+            --ignore=tests/test_startup_state.py --ignore=tests/test_legacy_cli_redirect_privacy.py \
+            --ignore=tests/test_dsp_read_client.py --ignore=tests/test_dsp_client.py \
+            --ignore=tests/test_transport_client.py \
+            ::: tests/test_queue_cli.py tests/test_playlist_cli.py tests/test_favorite_play_cli.py \
+            tests/test_startup_config.py tests/test_startup_state.py tests/test_web_ui.py \
+            ::: tests/test_native_group_runner.py tests/test_cli_commands.py \
+            tests/test_legacy_cli_redirect_privacy.py tests/test_dsp_read_client.py \
+            tests/test_dsp_client.py tests/test_transport_client.py tests/test_favorites_cli.py
 
       - name: Run explicit real libmpv null and digital-PCM lanes
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
@@ -132,7 +214,7 @@ jobs:
             tests/test_libmpv_stall_recovery.py tests/test_libmpv_queue_staging.py \
             tests/test_libmpv_queue_navigation_intent.py \
             tests/test_libmpv_favorites.py \
-            tests/test_libmpv_queue_cli.py \
+            tests/test_libmpv_queue_cli.py tests/test_libmpv_web_controls.py \
             tests/test_libmpv_standard_dmr.py \
             tests/test_libmpv_source_ownership.py \
             tests/test_libmpv_admitted_load_root.py \
@@ -164,16 +246,35 @@ jobs:
         run: |
           prefix="$RUNNER_TEMP/orr-native"
           .venv-ci/bin/python scripts/install-native.py --prefix "$prefix"
+          "$prefix/venv/bin/python" -I "$prefix/venv/bin/open-room-renderer" dsp show --help
+          migration_source="$RUNNER_TEMP/orr-migration-source"
+          .venv-ci/bin/python scripts/install-native.py --stage-only --prefix "$migration_source"
+          "$prefix/venv/bin/python" -I scripts/smoke-migration-profile.py "$migration_source" "$prefix"
           "$prefix/venv/bin/python" -I - "$prefix" <<'PY'
           import json
+          from importlib.resources import files
           from pathlib import Path
           import sys
           from xml.etree import ElementTree
           import fake_linkplay
           from fake_linkplay.config import Config, load_config
+          from fake_linkplay.cli import build_parser
+          from fake_linkplay import spotify_exclusive
           from fake_linkplay.upnp_description import description_xml
           prefix = Path(sys.argv[1]).resolve()
           assert Path(fake_linkplay.__file__).resolve().is_relative_to(prefix / "venv")
+          assert Path(spotify_exclusive.__file__).resolve().is_relative_to(prefix / "venv")
+          offline_args = build_parser().parse_args(["spotify", "prepare-exclusive",
+              "--renderer-prefix", str(prefix), "--renderer-config", str(prefix / "config.yaml"),
+              "--renderer-unit", str(prefix / "open-room-renderer.service"),
+              "--go-librespot-binary", "/not-executed/go-librespot",
+              "--output-dir", "/not-created/offline-proposal", "--port", "3678"])
+          assert offline_args.spotify_cmd == "prepare-exclusive"
+          for name in ("index.html", "style.css", "controller.js", "app.js"):
+              asset = files("fake_linkplay").joinpath("web_assets", name)
+              assert Path(str(asset)).resolve().is_relative_to(prefix / "venv")
+              expected = (prefix / "source/fake_linkplay/web_assets" / name).read_bytes()
+              assert expected and asset.read_bytes() == expected
           first = load_config(prefix / "config.yaml")
           second = load_config(prefix / "config.yaml")
           assert first.uuid == second.uuid and first.uuid
@@ -183,17 +284,19 @@ jobs:
           receipt = json.loads((prefix / "installation-receipt.json").read_text())
           assert receipt["mode"] == "installed"
           assert receipt["source"]["revision"] and receipt["source"]["source_sha256"]
-          print("Installed site-packages, stable identity, neutral ports and description verified.")
+          print("Installed site-packages and four Web assets, stable identity, neutral ports and description verified.")
           print("Installation architecture:", receipt["environment"]["machine"])
           print("No service enabled, no physical audio or reboot claim.")
           PY
           # The installed entry point must serve from a private working
-          # directory without inheriting source PYTHONPATH, then survive both
+          # directory without inheriting source PYTHONPATH, then survive all
           # signal/restart cycles and release only its own native resources.
           ORR_TEST_CLI_LIFECYCLE=1 ORR_TEST_CLI_EXECUTABLE="$prefix/venv/bin/open-room-renderer" \
             .venv-ci/bin/python -m pytest -q -s tests/test_cli_lifecycle_native.py
           .venv-ci/bin/python "$prefix/uninstall.py" --prefix "$prefix" --uninstall
           test -f "$prefix/state/uuid"
+          test -f "$prefix/migrated-profile/config.yaml"
+          test -f "$prefix/migrated-profile/state/uuid"
           test ! -e "$prefix/venv/bin/open-room-renderer"
 
       - name: Measure clocked digital queue transitions

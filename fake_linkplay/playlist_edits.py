@@ -7,7 +7,7 @@ The file reader/writer separately enforce their independent byte limits.
 from __future__ import annotations
 
 from .playlist_files import PlaylistError, validate_playlist
-from .queue_client import explicit_queue
+from .queue_protocol import explicit_queue
 
 
 def _validated(payload: object) -> dict[str, object]:

@@ -12,7 +12,8 @@ from .playlist_files import (PLAYLIST_MODES, PlaylistCommittedError, PlaylistErr
                              read_playlist_bytes, save_playlist,
                              validate_playlist)
 from .playlist_m3u import M3UError, decode_m3u_urls
-from .queue_client import QueueClient, QueueClientError, explicit_queue, prepare_replace
+from .queue_client import QueueClient, QueueClientError
+from .queue_protocol import explicit_queue, prepare_replace
 
 
 def _positive_index(value: str) -> int:

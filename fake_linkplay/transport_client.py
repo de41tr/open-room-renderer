@@ -64,6 +64,9 @@ class TransportClient:
         wire_command = prepare_command(command, value)
         try:
             with requests.Session() as session:
+                # allow_redirects=False still prepares Response.next and reads its body.
+                # Skip that work so status/size checks remain before any body read.
+                session.resolve_redirects = lambda *_args, **_kwargs: iter(())
                 session.trust_env = False
                 # Default adapters have zero retries. Ten seconds is a
                 # connect/read inactivity timeout, not a total deadline.

@@ -1,3 +1,84 @@
+# Resume the next-phase task
+
+## Boundary and exact checkpoint
+
+The authorized window is **2026-10-12 22:12:31 UTC → 2026-10-13 18:00 UTC**
+(13 October, 20:00 Europe/Berlin). No large/risky starts after **16:30 UTC**;
+stabilize from **17:00 UTC** and stop at **18:00 UTC**, reporting unfinished
+checks as PENDING. Older deadlines below are historical only.
+
+Use only `dot/renderer-next-phase-20261013` and
+[Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), open/unmerged.
+Main remains `ad21bd4972d4af81dd29d1d952e38313dbe491d9`; never push main, merge or
+release under this phase's authority.
+
+**Verified source: `53f4831bd469735e13c1448a91abdeba838dc1cf`.**
+[Run 38394821007](https://github.com/de41tr/open-room-renderer/actions/runs/38394821007)
+passes all four jobs/every step, verified **12:21 UTC**. Floor **7260/76**;
+groups **149.62s /94.67s /89.85s** under the same **165s shared** watchdog.
+Native defaults **7261/75** on x86_64/ARM64; Chrome and all native gates pass.
+Three groups apply only to default suites; native opt-in lanes remain two-group.
+All assertions, skips, shared deadlines and caps remain unchanged.
+Runtime acceptance stays pinned to that source; documentation-only handover
+revisions receive their own PR checks. Do not infer a successor's result here.
+
+## What to do next
+
+1. **Verify identity before continuing:** inspect branch/HEAD, clean status,
+   remote PR head and CI's head SHA. Read [STATUS.md](STATUS.md) for the compact
+   delivered scope; do not restart completed architecture, Web, Spotify research,
+   operator features or scheduling work.
+2. **Use the consolidated handover and check its PR revision:** the six required
+   documents distinguish runtime evidence, unaccepted targets and next decisions.
+   Keep the frozen STATUS/RESUME historical suffixes byte-identical. Observe the
+   existing workflow for any published successor through every job/step, without
+   transferring the runtime checkpoint's pass. Do not create another handover,
+   feature, broad E2E/soak run or timestamp-only commit merely to refresh a date.
+3. **Respond to concrete new evidence:** a demonstrated regression or changed,
+   authorized acceptance target may justify bounded work. The whole-product and
+   metadata-only reviews found no other independent GO package. Stay available
+   within the window; preserve the 16:30/17:00/18:00 boundaries.
+
+## Claims that must stay separate
+
+- The `/ui/` controller and the original genuine Chrome 154 desktop/mobile-
+  emulated control/focus/queue-download smoke work. The unchanged gate passes at
+  this head; later room-name/output/transfer/recovery interactions lack dedicated
+  browser acceptance. Wider browser/mobile/accessibility checks remain open.
+- Native Linux x86_64/ARM64/mpv 0.37, null/PCM and installed/migration/socket proof
+  do not certify physical ARMv7/XU4, DAC, effective user-service/boot, physical LAN
+  or the original app. Install/migration never activated a user service.
+- `dsp show` has real CLI/synthetic TCP plus guarded production-projection proof.
+  Native installed-help proof is packaging only. Its private active snapshot
+  cannot prove a prior write, persistence durability or physical sound.
+- Spotify diagnosis is passive; prepare-exclusive creates offline artifacts only.
+  Ranking remains go-librespot 76 / librespot 69 / Soloist 61. No client/account
+  activation or provider audio occurred. TERMS/ACCOUNT/HARDWARE/ARBITRATION stay
+  pending; any accepted direct-ALSA exclusive mode bypasses ORR DSP.
+- Legacy LAN APIs remain unauthenticated. Bounded-client redirect/privacy fixes
+  do not make old convenience helpers' response reads bounded or convert
+  inactivity timeouts into total deadlines.
+
+## Retained failures and next decisions
+
+`0ea93ec` remains FAILED (run 38391477130, floor 165s exit 124; other three jobs
+passed). The three-group successor is verified; no more timing work is warranted
+without another actual failed gate. `70d9308` remains FAILED (run 38362764862,
+ARM Snapcast shared 431-frame zero-run); later passes leave its cause unresolved.
+
+The next user decisions are **PR review/merge**, **authorized real target/service
+acceptance**, and **whether to proceed with optional go-librespot setup and its
+manual terms/account/exclusive-output gates**. Rich queue metadata/bookmarks
+remain deferred for cross-consumer/versioning/title-origin/duration/seek policy;
+no hardware excuse or new format/framework is needed to fill this window.
+
+The historical handovers below are retained verbatim for evidence only. They do
+not reopen completed tasks or authorize work beyond this phase's hard stop.
+
+---
+
+## Historical completed handovers
+
 # Bounded GENA architecture extraction
 
 Actual start: **2026-10-12 21:05:18 UTC (23:05:18 Berlin)**.

@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIN_PYTHON = (3, 11)
 MIN_MPV = (0, 37)
 MANIFEST = "installed-files.json"
+WEB_ASSETS = ("index.html", "style.css", "controller.js", "app.js")
 
 
 def run(*args: str) -> str:
@@ -67,7 +68,7 @@ def environment(*, require_mpv: bool = True, require_alsa: bool = False) -> dict
     }
 
 
-def checked_prefix(value: str) -> Path:
+def checked_prefix(value: str, *, for_install: bool = True) -> Path:
     prefix = Path(value).expanduser().absolute()
     if str(prefix) != str(prefix).rstrip():
         raise ValueError("Installation path must not end with whitespace (systemd strips it).")
@@ -75,6 +76,10 @@ def checked_prefix(value: str) -> Path:
         raise ValueError("Installation path must not contain parent-directory traversal (..).")
     if any(ord(char) < 32 for char in str(prefix)) or any(char in str(prefix) for char in ("$", "\\")):
         raise ValueError("Installation path must not contain control characters, backslashes, or $ (systemd expansion).")
+    # systemd checks the unquoted executable with string_is_safe(); escaping
+    # cannot make literal quotes or DEL valid. Keep old-prefix cleanup possible.
+    if for_install and any(char in str(prefix) for char in ("'", '"', "\x7f")):
+        raise ValueError("Installation executable path must not contain quotes or DEL (systemd restriction).")
     if prefix == Path("/") or prefix == Path.home():
         raise ValueError("Choose a dedicated installation directory, not / or your home directory.")
     for path in (prefix, *prefix.parents):
@@ -102,36 +107,27 @@ def user_config(prefix: Path, port: int) -> dict:
     }
 
 
-def systemd_quote(value: Path) -> str:
-    # systemd specifier expansion applies even inside quotes.
-    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
-
-
 def user_unit(prefix: Path) -> str:
-    return f"""# Copy to ~/.config/systemd/user/open-room-renderer.service after review.
-# Generated unit does not install, enable, start, or configure login lingering.
-[Unit]
-Description=Open Room Renderer (unprivileged native profile)
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory={str(prefix).replace("%", "%%")}
-ExecStart={systemd_quote(prefix / 'venv/bin/open-room-renderer')} serve --config {systemd_quote(prefix / 'config.yaml')}
-Restart=on-failure
-RestartSec=5
-TimeoutStopSec=45
-UMask=0077
-NoNewPrivileges=yes
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=default.target
-"""
+    # Load this dependency-free helper from the trusted installer checkout.
+    # The copied uninstall tool does not call the template generator.
+    spec = importlib.util.spec_from_file_location("native_profile", ROOT / "fake_linkplay/native_profile.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.user_unit(prefix)
 
 
 def source_files(root: Path = ROOT) -> list[Path]:
-    return [root / name for name in ("pyproject.toml", "README.md", "LICENSE")] + sorted((root / "fake_linkplay").rglob("*.py"))
+    files = [root / name for name in ("pyproject.toml", "README.md", "LICENSE")]
+    files += sorted((root / "fake_linkplay").rglob("*.py"))
+    # Keep the installation snapshot narrow: no arbitrary files from web_assets.
+    files += [root / "fake_linkplay/web_assets" / name for name in WEB_ASSETS]
+    for source in files:
+        if any(path.is_symlink() for path in (source, *source.parents)
+               if path == root or root in path.parents):
+            raise ValueError(f"Installation source must not traverse symlinks: {source}")
+        if not source.is_file():
+            raise ValueError(f"Missing regular installation source file: {source}")
+    return files
 
 
 def source_receipt(snapshot: Path = ROOT) -> dict:
@@ -158,20 +154,28 @@ def file_entry(path: Path, prefix: Path) -> dict:
     return entry
 
 
+def is_user_data(path: Path, prefix: Path) -> bool:
+    relative = path.relative_to(prefix)
+    return relative == Path("config.yaml") or relative.parts[0] in {"state", "migrated-profile"}
+
+
 def write_manifest(prefix: Path) -> None:
-    # Installation begins in a new directory; runtime state is created only later.
+    # User configuration/state never becomes installer-owned, even during recovery.
     files = []
     directories = []
     for directory, children, names in os.walk(prefix, followlinks=False):
         parent = Path(directory)
         for name in list(children):
             path = parent / name
-            if path.is_symlink():
+            if is_user_data(path, prefix):
+                children.remove(name)
+            elif path.is_symlink():
                 files.append(file_entry(path, prefix))
                 children.remove(name)
             else:
                 directories.append(str(path.relative_to(prefix)))
-        files.extend(file_entry(parent / name, prefix) for name in names if parent / name != prefix / MANIFEST)
+        files.extend(file_entry(parent / name, prefix) for name in names
+                     if parent / name != prefix / MANIFEST and not is_user_data(parent / name, prefix))
     (prefix / MANIFEST).write_text(json.dumps({"format": 1, "files": files, "directories": directories}, indent=2) + "\n")
 
 
@@ -200,6 +204,9 @@ def uninstall(prefix: Path, *, dry_run: bool) -> None:
     preserved = []
     removable = []
     for entry, path in paths:
+        # Older format-1 manifests may claim user data; ownership never overrides it.
+        if is_user_data(path, prefix):
+            continue
         if not path.exists() and not path.is_symlink():
             continue
         matches = (path.is_symlink() and entry.get("symlink") == os.readlink(path)) if "symlink" in entry else (
@@ -222,6 +229,8 @@ def uninstall(prefix: Path, *, dry_run: bool) -> None:
         manifest.unlink()
     if not dry_run:
         for path in sorted(directories, key=lambda p: len(p.parts), reverse=True):
+            if is_user_data(path, prefix):
+                continue
             try:
                 path.rmdir()  # Only empty owned directories, never foreign/runtime files.
             except OSError:
@@ -230,10 +239,12 @@ def uninstall(prefix: Path, *, dry_run: bool) -> None:
             prefix.rmdir()
         except OSError:
             pass
-    print("Runtime state, unknown files, modified files, and any manually copied service unit are preserved.")
+    print("User data (config.yaml, state/, migrated-profile/), unknown files, modified files, "
+          "and any manually copied service unit are preserved.")
 
 
 def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require_alsa: bool) -> None:
+    prefix = checked_prefix(str(prefix))
     info = environment(require_mpv=not stage_only, require_alsa=require_alsa)
     config = user_config(prefix, port)
     if prefix.exists():
@@ -259,7 +270,10 @@ def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require
         # Hash the files actually copied, not a concurrently edited working tree.
         receipt["source"] = source_receipt(prefix / "source")
         # JSON is a YAML subset, readable by the renderer's existing YAML loader.
-        (prefix / "config.yaml").write_text(json.dumps(config, indent=2) + "\n")
+        config_bytes = (json.dumps(config, indent=2) + "\n").encode("utf-8")
+        (prefix / "config.yaml").write_bytes(config_bytes)
+        # Verification metadata only: runtime config is never manifest-owned.
+        receipt["initial_config_sha256"] = hashlib.sha256(config_bytes).hexdigest()
         (prefix / "open-room-renderer.service").write_text(user_unit(prefix))
         shutil.copyfile(__file__, prefix / "uninstall.py")
         if stage_only:
@@ -288,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--uninstall", action="store_true", help="remove only unchanged manifest-owned files; stop the service first")
     args = parser.parse_args(argv)
     try:
-        prefix = checked_prefix(args.prefix)
+        prefix = checked_prefix(args.prefix, for_install=not args.uninstall)
         if args.uninstall:
             uninstall(prefix, dry_run=args.dry_run)
         else:

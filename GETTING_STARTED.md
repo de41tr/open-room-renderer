@@ -3,6 +3,14 @@
 The default installation runs as your normal Linux user on **port 8080**. It
 keeps its identity across restarts and never automatically invokes sudo.
 
+## Browser controls
+
+After starting the service, open `http://<renderer-ip>:8080/ui/` in a browser on
+the trusted LAN. Use your configured API port if different. No Node runtime,
+frontend build or extra listener is required. The [Web controller guide](docs/WEB_UI.md)
+explains playback/queue/favorite/DSP controls, pending/unknown outcomes, security
+limits and the outstanding real-browser acceptance checklist.
+
 ## 1. Native Prerequisites
 
 Install these using your distribution's package manager:
@@ -56,7 +64,12 @@ python3 scripts/install-native.py
 
 The default prefix is `~/.local/share/open-room-renderer`. `--prefix /short/path`
 selects a new dedicated directory; existing directories are refused. Use a short
-path because Linux Unix sockets have a 108-byte path limit.
+path because Linux Unix sockets have a 108-byte path limit. New installation and
+offline-migration destination prefixes cannot contain literal single/double quotes
+or DEL: systemd rejects those executable paths even when escaped. Spaces and `%`
+remain supported. Manifest-aware uninstall still accepts older prefixes containing
+quotes or DEL; this destination restriction does not apply to migration source or
+config filenames.
 
 The installer checks Python, Linux architecture, mpv version, and optional ALSA
 access. It snapshots this checkout's application sources, creates `venv/`,
@@ -88,9 +101,103 @@ owned-file manifest for inspection/removal.
 
 ## 3. Start And Check
 
+Before starting the service, check an explicit configuration file without creating
+identity/state, reading saved settings, probing the network, or touching mpv/audio:
+
+```bash
+~/.local/share/open-room-renderer/venv/bin/open-room-renderer config check --config ~/.local/share/open-room-renderer/config.yaml
+```
+
+Exit **0** means only that the startup **input** checks below passed; exit **2**
+reports invalid arguments or unreadable/invalid input with a private-safe diagnostic.
+The command requires `--config` and has no implicit file/default fallback. It does
+not fully validate every runtime setting or verify saved state, backend, ports, or
+DAC availability. In particular, `channel_balance` is validated later at startup,
+after saved balance/active DSP precedence is applied. It does not configure logging
+or change any saved files. Once the check passes, start the service separately:
+
 ```bash
 ~/.local/share/open-room-renderer/venv/bin/open-room-renderer serve --config ~/.local/share/open-room-renderer/config.yaml
 ```
+
+An explicit `--config` must name a readable YAML file. A missing file, directory,
+unreadable file, invalid UTF-8, malformed YAML, or unsupported document/constructor
+structure exits with status **2** and a short diagnostic on stderr, before loading
+identity/state or constructing the backend/listeners. The diagnostic does not echo
+the path, YAML source, supplied values, URLs, or parser exception chain. Check the
+selected file locally and compare its structure with `examples/config.example.yaml`.
+
+The startup checks cover a mapping of known settings, preset/source entry
+construction, existing UUID/discovery/mute/staging constructor checks, and the
+logging-level/default-volume conversions used at startup. Unknown logging names
+still fall back to INFO; accepted numeric volume coercions and clamping are
+unchanged. Empty files, YAML null, and `{}` still mean default settings. Other
+scalars and sequences (including `false`, `0`, and `[]`) are rejected. This is not
+a complete field type/range schema or a backend, port, or saved-state health check.
+
+**Duplicate-setting compatibility change:** startup and `config check` reject a
+string setting explicitly written more than once at the top level, even if both
+values are the same or the later value is null. Previously YAML silently used the
+last value, which could clear an output choice or change the state directory or
+port. Keep one explicit value per setting. Rejection is before Config construction
+or identity/state/backend effects, with status **2** and fixed guidance that does
+not echo the key, values, source, or path. YAML aliases and merge defaults with a
+single explicit override keep their existing behavior; this is a root-only
+check, not recursive duplicate validation. The public `load_config()` loader
+retains its historical last-value behavior. This is an intentional input/error
+policy change, separate from diagnostic-only refactoring.
+
+An invalid `default_volume` now fails before saved gain is read, even when a valid
+saved gain would previously have masked that malformed setting. Fix the YAML;
+do not delete the saved gain. Valid startup settings still restore saved gain as
+before, and rejection leaves the existing state untouched.
+After YAML validation, expected failures while loading saved identity, gain,
+device name, active DSP, or legacy balance also stop startup with status
+**2** and a fixed, stage-specific stderr diagnostic that omits file contents,
+private paths, and exception chains. Check the named file locally and its permissions,
+or restore a known-good backup; do not delete saved sound settings to force startup.
+The active DSP read is checked again during API construction; failure still cleans
+up the acquired backend before any listeners start. Read order is unchanged:
+an identity may already have been published before a later failure, and no
+automatic reset or retry is added. Public readers and ordinary API construction
+keep their underlying exceptions rather than the CLI's private wrapper. Favorites'
+unavailable/config fallback remains. A separate saved-EQ protection now preserves
+failed-load storage and blocks saved-library writes while independent active DSP
+stays usable; see [preset recovery](docs/WEB_DSP_EDITOR.md#unavailable-saved-preset-storage).
+Saved gain, active DSP, legacy balance and device-name entries permit defaults
+only when genuinely absent. A dangling saved link or an inspection failure stops
+startup with the existing private diagnostic. Preserve the link and repair or
+restore its target, then explicitly start again. Valid saved links still load;
+valid active DSP still overrides legacy balance. This intentionally changes
+degraded-state read behavior, including public loaders, without automatic repair
+or reload. These are read-time checks under the existing single-writer assumption:
+do not edit state while serving. Later external changes are not fenced, and
+confirmed writes retain their existing atomic-replacement semantics.
+Invalid initial channel balance, selected from configuration or saved state, now
+also exits **2** with a fixed source-neutral startup diagnostic instead of an
+unhandled ValueError traceback (previously exit 1). Check `channel_balance` in
+configuration or saved state locally. Source precedence and numeric normalization
+are unchanged: saved balance overrides configuration, and valid active DSP
+overrides both. This check is **after backend acquisition and gain initialization**;
+existing teardown still runs, and identity may already have been published.
+Saved bytes are not reset or repaired. For invalid initial balance, public loaders
+and ordinary API construction retain their behavior. Backend availability,
+binding and unrelated cleanup diagnostics are unchanged.
+
+For compatibility, bare `serve` still selects `configs/config.example.yaml`
+relative to the current directory. Built-in defaults remain available when the
+failed read and a subsequent leaf inspection both report the selected path missing.
+A dangling link at that filename, an entry appearing after the failed read, or
+an inspection error stops startup with a private configuration error instead.
+This is a leaf-only check; it does not walk parent components. A fallback startup
+can still create identity/state and start normal services.
+Use an explicit `--config` for fail-closed operator startup, even when selecting
+that same example path. The library `load_config()` and the two `print-*` config
+commands keep their existing missing-file behavior. Checkout scripts always
+select a file; `ORR_CONFIG` uses the same private-safe reader before their existing
+mpv/socket/privileged-port preflight. That preflight creates no renderer identity
+and adds no new bind probes; the actual service reads the selected file again
+after exec.
 
 Leave the terminal open. In another terminal:
 
@@ -102,7 +209,7 @@ curl -fsS 'http://127.0.0.1:8080/description.xml'
 The API starting does not prove that sound works. Check your audio session/device:
 
 ```bash
-mpv --audio-device=help
+mpv --no-config --audio-device=help
 aplay -l
 mpv --no-video /path/to/your/local-test.wav
 ```
@@ -111,8 +218,60 @@ mpv --no-video /path/to/your/local-test.wav
 `--require-alsa` makes installation fail if no readable/writable ALSA PCM device
 exists under `/dev/snd`. Without that flag, absence is a warning, because session
 audio can work without direct ALSA access. Do not fix permissions with a broad
-`chmod`. Select the desired device in the service account's mpv configuration;
-see the [mpv audio-device documentation](https://mpv.io/manual/stable/#options-audio-device).
+`chmod`. Run discovery as the same user/session that runs the service: device
+names and access can differ between your desktop and a system service. Copy the
+quoted device name, not its description, into the renderer YAML, for example:
+
+```yaml
+auto_spawn_mpv: true
+mpv_audio_device: "alsa/dmix:default"
+```
+
+Use the exact name reported on your machine; this example does not establish
+that an ALSA device exists. Omit `mpv_audio_device` or set it to YAML `null` to
+retain existing mpv defaults and configuration. The quoted string `"auto"`
+explicitly requests mpv's normal device selection; it does not pin a DAC.
+Identifiers are preserved exactly, limited to 1024 UTF-8 bytes, and may not be
+blank, contain control characters, or use the special `help` value.
+
+Explicit selection takes effect on the next renderer restart. It is passed as
+one literal argument to the mpv child owned by that renderer, together with
+`--no-config`, `--load-scripts=no`, and `--audio-fallback-to-null=no`. This **opts
+out of ambient system/user mpv configuration**, including custom output, format,
+replaygain, and profile settings, and disables automatic script loading. These
+settings cannot override the selected driver or hide a failed device with silent
+null output. ORR's configured DSP and gain continue to apply. Leave this option
+unset if you rely on your own mpv profile. It requires `auto_spawn_mpv: true`,
+an unused private IPC socket at startup, and Linux peer
+credential verification. A preexisting, replaced, or unverifiable player/socket
+is refused before any control command is sent; ORR does not reconfigure or kill
+that foreign player. The API can remain available with backend errors so you
+can diagnose the problem. Choose an unused socket and restart; do not delete
+an unfamiliar socket. For an externally managed mpv, leave this setting unset
+and configure its output in its own service instead.
+
+This is startup configuration, not hot-switching or proof of audible output.
+To inspect the file's intent and a running player's two output properties
+without starting playback or changing settings, run on the renderer host:
+
+```bash
+open-room-renderer audio diagnose --config /path/to/renderer.yaml
+```
+
+It never starts an absent player. Run as the service user from its working
+directory. A missing socket, unavailable property and malformed/transport
+failure remain distinct. See [read-only audio diagnosis](docs/AUDIO_DIAGNOSTIC.md)
+for exit codes and the limits of this non-atomic observation.
+
+mpv's `audio-device` readback reports intent; `current-ao` identifies an active
+output driver, not a measured physical DAC. An audio server can still remap a
+logical device, and another local IPC client can alter player settings. ORR
+does not claim immutable hardware routing. Test a local file and the intended
+physical output after restart. See the official
+[audio-device](https://mpv.io/manual/stable/#options-audio-device),
+[configuration isolation](https://mpv.io/manual/stable/#options-no-config),
+and [null fallback](https://mpv.io/manual/stable/#options-audio-fallback-to-null)
+documentation.
 
 Stop with `Ctrl+C`. Restart uses the same `state/uuid`; do not copy that state
 between independent renderers. Each needs its own prefix, state directory and
@@ -294,16 +453,86 @@ python3 ~/.local/share/open-room-renderer/uninstall.py --uninstall
 ```
 
 Use the original `--prefix` for a custom installation. Uninstall removes only
-unchanged manifest-owned files and empty owned directories. It preserves runtime
-state, edits, unknown files, and any manually copied unit; review/remove that unit
-separately and reload the user manager. No recursive broad deletion is used.
+unchanged manifest-owned files and empty owned directories. The root `config.yaml`,
+`state/`, and `migrated-profile/` are user data: they are excluded from new manifests
+and preserved even if an older manifest lists them. Edits, unknown files, and any
+manually copied unit are also preserved; review/remove that unit separately and
+reload the user manager. Protected user data alone does not retain the manifest,
+receipt, or uninstall script; modified installer-owned files still retain the
+manifest and uninstall script for review. No recursive broad deletion is used.
 Stop all renderer/mpv processes first; a remaining IPC socket blocks removal.
+Older installations retain their original `uninstall.py`. To use the current
+preservation rules on those installations, run this checkout's
+`scripts/install-native.py --prefix /path/to/old-prefix --uninstall`, first adding
+`--dry-run` to review the proposed removal.
 
-For upgrades, install into a new prefix, stop the old instance, and migrate a
-backup of its state and chosen settings. Update state/socket paths and the user
-unit for the new prefix before starting. Do not run the old and new instances
-with the same identity at the same time. Keep the old receipt and installation
-until the new version's local playback/API/discovery checks pass.
+### Optional Offline Upgrade Profile
+
+Install the new version into a fresh prefix first. Stop every source/destination
+renderer and its mpv process yourself, including manually enabled units; keep them
+stopped throughout preparation. A missing IPC socket cannot prove they are stopped.
+The optional preparer does not contact, start, stop, install, enable or reload any
+service. It creates a separate profile for your review and leaves NEW/config.yaml
+and NEW/state untouched.
+
+Use the new installation's Python, an explicit old installation (or offline
+snapshot), and the actual config used by that old instance:
+
+```bash
+NEW="$HOME/.local/share/open-room-renderer-new"
+OLD="$HOME/.local/share/open-room-renderer"
+"$NEW/venv/bin/python" -I -m fake_linkplay.migration_profile \
+  --source "$OLD" --source-config "$OLD/config.yaml" --destination "$NEW" \
+  --acknowledge-offline --dry-run
+# Review the dry run, then repeat without --dry-run to prepare the profile.
+```
+
+This is a narrow same-user native workflow. Both prefixes must have complete
+native receipts; staged-only receipts are accepted for offline review but do not
+supply a runnable installation. NEW must be newly installed with initial-config
+digest metadata, unchanged default config, empty state/run, and no prior
+migrated-profile. Older destinations without that metadata need a fresh install.
+The config must be inside SOURCE and explicitly name an absolute state directory
+inside its original prefix, the native original-prefix/run/mpv.sock, and an owned
+(auto-spawn) mpv. A configured identity or existing nonempty state UUID is required.
+
+For a relocated offline backup, point --source and --source-config at its current
+location and add --original-prefix /absolute/original/installation. This rebases
+the original config's state and socket locations; it does not connect to the old
+host or establish whether any original instance is stopped. External state/socket
+layouts, symlink components, special files, hardlinks, other users' files, writable-
+by-others inputs, and unexpected state entries are refused. Prefix/state/run
+folders must be private (0700); existing ordinary 0644 input files are accepted
+inside those private roots. Reads are capped at one MiB per file. Use a deliberate
+manual migration for unsupported layouts; do not weaken ownership or permissions
+merely to bypass a refusal.
+
+Preparation copies existing uuid, device_name, channel_balance, gain.json,
+active_dsp.json, eq_presets.json and favorites.json byte-for-byte into
+NEW/migrated-profile/state. Absent optional files stay absent. It skips
+plex_client_id and plex_user_info.json without reading their contents; provider sign-in/session setup may need to be repeated separately by you. There is no persisted playback queue. All other parsed
+config settings, including audio output, discovery, ports, presets and URLs, are
+retained; only state_dir and mpv_socket are rebased. YAML comments/formatting are
+not retained, and duplicate keys, anchors/aliases and merges are refused. This is
+configuration-shape validation, not a guarantee that every saved state file is
+valid or that the selected audio device exists on the new machine.
+
+The output contains private config.yaml, state/ and an open-room-renderer.service
+review template. State and unit bytes are synced before config is published last
+with no overwrite. Errors before publication may leave a private incomplete
+migrated-profile without config.yaml. Keep it offline, inspect/remove only that
+partial profile manually, and use a fresh destination; automatic resume/merge is
+never attempted. Exit status 3 means config was committed but final directory
+sync failed: preserve and inspect it rather than retrying or treating it as absent.
+The source is never modified; observed source changes abort preparation.
+
+Review the separate config and unit. When you choose to activate, use its explicit
+config path and review/copy that unit through the normal user-service procedure;
+the default NEW/config.yaml is still the fresh default. Never run old and new
+instances with the same identity at once. Keep the old receipt, installation and
+backup until the new profile's local playback/API/discovery checks pass. Neither
+preparation nor these checks prove physical audio, login lingering or reboot
+behavior. Uninstall preserves both default and migrated user config/state.
 
 ## Discovery On A Chosen IPv4 Interface
 
@@ -387,6 +616,18 @@ The CLI reports `request_acknowledged`, not a claim that audio is still
 playing. A timeout leaves the outcome unconfirmed: check status before deciding
 whether to try again. The CLI never retries or follows a redirect.
 
+The browser also offers **Change URL** for managed favorites, with a blank private
+input and explicit keep/clear choice. Its redacted view reports ACKNOWLEDGED rather
+than proving the exact saved target; see [browser favorite repair](docs/WEB_UI.md#repair-a-saved-favorite).
+
+For a small managed library, the browser's **Backup JSON** and **Restore JSON**
+provide a private paired transfer. Restore requires an empty, healthy managed
+library; configured favorites may remain. Saved IDs, order, exact targets and
+metadata survive without affecting playback. The complete escaped Web request
+must fit 32,768 bytes; larger libraries and corrupt-library repair still require
+an offline preservation workflow. See [favorites backup and restore](docs/WEB_UI.md#back-up-and-restore-managed-favorites)
+for privacy, limits and uncertain-write handling.
+
 `favorites set-url ID URL --metadata keep|clear` repairs a managed favorite while
 preserving its stable ID, library name and position. The metadata choice is
 required: `keep` retains title, artist, album and artwork; `clear` empties all four.
@@ -453,9 +694,10 @@ An uncertain result may already have taken effect; inspect status before retryin
 
 ## Local DSP controls
 
-Use the existing renderer's channel balance and EQ bypass controls directly:
+Inspect the renderer's active DSP, or use its channel balance and EQ bypass controls:
 
 ```sh
+open-room-renderer dsp show
 open-room-renderer dsp balance get
 open-room-renderer dsp balance set -0.25
 open-room-renderer dsp balance set 0
@@ -478,7 +720,7 @@ playback. Enabling EQ can restore previously configured positive gain: keep the
 volume low when testing an unfamiliar configuration. Preset/band editing and
 source-context selection are not part of this small CLI.
 
-All four forms accept `--host` and `--port` after their final subcommand/value,
+All DSP forms accept `--host` and `--port` after their final subcommand/value,
 defaulting to `127.0.0.1:8080`. Use a trusted private renderer endpoint; the
 existing HTTP API is unauthenticated. The client makes one request, follows no
 redirect, ignores environment proxies/netrc credentials, and never retries a
@@ -490,10 +732,60 @@ its state is still current or that sound was heard. A rejected request and an
 **UNKNOWN** outcome are different. In particular, HTTP 502 can mean the DSP was
 already applied but saving it failed, so it does not prove the old state remains.
 A missing/malformed acknowledgement also leaves the outcome unknown. Inspect
-`dsp balance get` and the existing status/DSP interface before explicitly
-retrying; generic playback status alone does not report active EQ. Failure
+`dsp show` before explicitly retrying; generic playback status alone does not
+report active EQ. A current DSP read cannot prove a prior request succeeded or
+that its settings were durably saved. Failure
 returns nonzero, prints a fixed private-safe diagnostic, and prints no success
 JSON. A read failure never substitutes an assumed balance value.
+
+### Read active DSP over SSH
+
+`dsp show` makes one read-only GET to the same existing Web state route used by
+the browser. Its version-1 JSON contains only `status`, `balance`, `eq_enabled`,
+`source`, `channel_mode`, and `bands`, plus `version`, `observation_only: true`
+and `physical_output_verified: false`.
+
+- `CONFIRMED` exits **0** and supplies the renderer-reported normalized balance,
+  EQ boolean, `global` or `wifi` active DSP context, `Stereo` channel mode and
+  all 40 numeric parameter records (ten bands with frequency, gain, Q and mode).
+  Bypassed EQ still reports its configured bands; those bands are not applied
+  while `eq_enabled` is false.
+- `PENDING` or `UNKNOWN` exits **1** and prints valid JSON with all five value
+  fields (`balance`, `eq_enabled`, `source`, `channel_mode`, `bands`) set to null.
+  Successful HTTP delivery alone does not establish confirmed DSP.
+- A connection, admission, framing or validation failure exits **1**, prints only
+  a fixed diagnostic on stderr and prints no JSON. It never invents a fallback.
+
+The snapshot observes renderer-maintained confirmation. It does not request a
+fresh backend scan, prove a previous command's success or durable persistence,
+measure live physical output, establish silence or change settings. Existing
+Web readback can reconcile an already-matching cached backend DSP confirmation
+in memory. No backend command, playback action or persistence write is issued.
+Unavailable saved-preset storage does not by itself hide independently confirmed
+active DSP; preset-library information is deliberately omitted here.
+
+This read inherits the Web route's exact-host admission. Use the renderer's
+configured advertised/bind address or exact local listener address (`localhost`
+is accepted for a loopback listener). An arbitrary DNS alias that works for the
+legacy API can be rejected; the client never substitutes a Host header to bypass
+that check. The route is unauthenticated, so use a trusted private network.
+
+The whole Web response is capped at **2 MiB**, matching the browser's budget;
+a very large queue can therefore make this read fail safely. Only the validated
+DSP allowlist is printed. Device/media/queue data, preset names and IDs, plugin
+IDs, CSRF/session/revision identifiers, response bodies and endpoint URLs are
+never included in output or saved by the command. JSON is strict UTF-8 with no
+duplicate fields, non-finite numbers or excessive nesting. Unsupported contexts,
+incomplete bands, invalid types/bounds and contradictory unconfirmed values fail
+closed. The ten-second timeout bounds connect/read inactivity, **not total
+wall-clock time**; a steadily arriving slow response can take longer. There are
+no redirects, retries, environment proxy/netrc credentials or cookies sent.
+
+The bounded DSP, queue, current-playlist, favorite-play, favorite-target and
+transport clients reject redirects before Requests can prepare a next request
+or consume its body. Malformed redirect locations therefore use the existing
+private failure/uncertainty path. Their byte limits and inactivity timeouts are
+unchanged; this is not a new total-runtime guarantee.
 
 ## Legacy direct controls and endpoint syntax
 
@@ -503,6 +795,10 @@ ignoring environment proxies and netrc credentials. They never retry or follow r
 connect/read inactivity timeout is not a total elapsed-time deadline. Successful
 response text is printed unchanged, with a trailing newline; non-2xx responses
 fail without printing their bodies.
+The older status/favorites convenience helpers also skip hidden redirect-location
+parsing so malformed locations cannot escape as private-text tracebacks. Their
+existing non-streaming response reads remain **unbounded**; this privacy correction
+does not add a byte cap or a total deadline.
 
 Renderer hosts use the shared client grammar: ASCII letters, digits, dots and
 hyphens (up to 253 characters), or IPv6 literals with optional brackets. Scoped

@@ -54,7 +54,13 @@ def load_gain(state_dir: str | Path) -> tuple[int, bool] | None:
         with path.open("rb") as stream:
             encoded = stream.read(4097)
     except FileNotFoundError:
-        return None
+        # A dangling link is saved state that cannot be read, not first-run
+        # absence. Only a missing directory entry permits default gain.
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return None
+        raise
     if len(encoded) > 4096:
         raise ValueError("Persisted gain exceeds its size limit")
     def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -160,7 +166,13 @@ def load_active_dsp(state_dir: str | Path) -> dict[str, object] | None:
         with path.open("rb") as stream:
             encoded = stream.read(ACTIVE_DSP_MAX_BYTES + 1)
     except FileNotFoundError:
-        return None
+        # Preserve an existing unreadable link instead of selecting a default
+        # graph that a later confirmed write would publish over that link.
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return None
+        raise
     if len(encoded) > ACTIVE_DSP_MAX_BYTES:
         raise ValueError("Persisted active DSP exceeds its size limit")
     def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:

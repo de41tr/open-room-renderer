@@ -167,6 +167,25 @@ def write_null_wrapper(directory: Path, mpv: Path) -> Path:
     return wrapper
 
 
+def assert_web_assets(opener, base: str, assets: Path) -> list[str]:
+    # Source bytes are the test oracle only. The installed CLI runs from its own
+    # private cwd with PYTHONPATH/PYTHONHOME removed by child_environment().
+    routes = {"/ui/": ("index.html", "text/html"),
+              "/ui/index.html": ("index.html", "text/html"),
+              "/ui/style.css": ("style.css", "text/css"),
+              "/ui/controller.js": ("controller.js", "text/javascript"),
+              "/ui/app.js": ("app.js", "text/javascript")}
+    for route, (name, content_type) in routes.items():
+        expected = (assets / name).read_bytes()
+        assert expected, f"Empty Web asset: {name}"
+        with opener.open(base + route, timeout=3) as response:
+            body = response.read(1048577)
+            assert response.status == 200 and len(body) <= 1048576, route
+            assert response.headers.get_content_type() == content_type, route
+            assert body == expected, f"Web asset content mismatch: {route}"
+    return list(routes)
+
+
 def exercise(directory: Path, mpv: Path, *, owned: bool, cli: Path | None = None) -> dict:
     assert sys.platform == "linux" and Path("/proc/self/stat").is_file(), "Native CLI lane requires Linux /proc"
     native_preflight(directory)
@@ -237,6 +256,8 @@ def exercise(directory: Path, mpv: Path, *, owned: bool, cli: Path | None = None
                         description = ElementTree.fromstring(request("/description.xml", port))
                         udn = description.find(".//{urn:schemas-upnp-org:device-1-0}UDN")
                         assert udn is not None and udn.text == "uuid:" + uuid
+                    web_assets = assert_web_assets(opener, f"http://127.0.0.1:{ports[0]}",
+                                                   root / "fake_linkplay/web_assets")
                     version, native_pid = ipc(endpoint, ["get_property", "mpv-version"])
                     socket_identity = (endpoint.stat().st_dev, endpoint.stat().st_ino)
                     if owned:
@@ -301,7 +322,7 @@ def exercise(directory: Path, mpv: Path, *, owned: bool, cli: Path | None = None
                             ipc(endpoint, ["set_property", "mute", False])
                             ipc(endpoint, ["set_property", "af", []])
                     cycles.append({"signal": shutdown_signal.name, "exit_status": 0,
-                        "decoded_null_output": True, "http_ports_closed": True,
+                        "decoded_null_output": True, "http_ports_closed": True, "web_assets": web_assets,
                         "owned_child_reaped": owned, "external_peer_preserved": not owned})
                     service = None
         finally:

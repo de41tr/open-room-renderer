@@ -34,11 +34,18 @@ from aiohttp import ClientSession
 from aiohttp import ClientTimeout, TCPConnector
 from aiohttp import web
 
+from . import eq_presets
+from .eq_presets import DEFAULT_EQ_BAND_FREQS, DEFAULT_EQ_PLUGIN, EqPresetLibrary
 from .capabilities import capability_fields, configured_sources, service_capability
 from .eventing import EventSubscriber, EventSubscriptionManager
-from .favorites import FavoritesApi, FavoritesStore
+from .favorites import FavoriteError, FavoritesApi, FavoritesStore
 from .queue_playlist import QueuePlaylistApi
+from .web_audio_output import make_output_inspector
+from .web_playlists import PLAYLIST_ACTIONS
+from .web_ui import (WebAdmissionError, WebCommand, WebControlApi, WebDspCommandError,
+                     WebDspExport, WebRuntime, prepare_dsp_curve_export)
 from .config import Config
+from .device_name import DeviceNameCommittedError, validate_device_name
 from .log_safety import redact_media_urls
 from .metadata_formatting import metadata_with_art, metadata_with_duration, metadata_with_url
 from .mpv_backend import LIVE_STATION_HISTORY_OPTIONS, BackendError, MpvBackend
@@ -52,25 +59,13 @@ from .queue_policy import (NORMAL, ShuffleRandom, is_shuffle, natural_successor,
                            shuffle_exhausted, shuffle_step)
 from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
+from .startup_state import StartupStateError, _INITIAL_BALANCE_ERROR, _read_state
 from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, connection_manager_properties, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
 
 LOG = logging.getLogger(__name__)
 PLEX_CALLBACK_URL = "com.linkplay.wiimhome://callback?category=oauth&service=plex"
 PLEX_CALLBACK_URL_ENCODED = "com.linkplay.wiimhome%3A%2F%2Fcallback%3Fcategory%3Doauth%26service%3Dplex"
 
-DEFAULT_EQ_PLUGIN = "http://moddevices.com/plugins/caps/EqNp"
-DEFAULT_EQ_BAND_FREQS = {
-    "a": 30.0,
-    "b": 62.5,
-    "c": 125.0,
-    "d": 250.0,
-    "e": 500.0,
-    "f": 1000.0,
-    "g": 2000.0,
-    "h": 4000.0,
-    "i": 8000.0,
-    "j": 16000.0,
-}
 LOG_BODY_LIMIT = 5000
 
 
@@ -183,14 +178,15 @@ def parse_command(command: str) -> ParsedCommand:
 class HttpApi:
     """aiohttp control surface for HTTP API, UPnP stubs, and app events.
 
-    The class owns app-facing queue state, EQ presets, service capability
-    experiments. A dedicated manager owns event subscriptions and delivery.
+    The class owns app-facing queue state, active EQ context and service
+    capability experiments. Separate components own saved EQ presets and
+    event subscriptions/delivery.
     It delegates actual playback and DSP to
     ``MpvBackend`` and serializes visible state through ``RendererState``.
     """
 
     def __init__(self, cfg: Config, state: RendererState, mpv: MpvBackend, *, on_rename: Callable[[], Awaitable[None]] | None = None,
-                 shuffle_rng: ShuffleRandom | None = None) -> None:
+                 shuffle_rng: ShuffleRandom | None = None, _startup: bool = False) -> None:
         """Create an API handler bound to config, renderer state, and mpv."""
 
         self.cfg = cfg
@@ -267,14 +263,23 @@ class HttpApi:
         self.eq_active_plugin_uri = DEFAULT_EQ_PLUGIN
         self.eq_active_source_name = ""
         self.eq_enabled = True
-        self.eq_presets: dict[str, dict[str, list[dict[str, object]]]] = {}
+        self._eq_library = EqPresetLibrary()
         self.eq_current_preset = ""
         self._load_persisted_eq_presets()
         self._eventing = EventSubscriptionManager(lambda service: self._event_body(service))
-        self._pending_dsp_restore = load_active_dsp(cfg.state_dir)
+        # Only CLI startup opts into private diagnostics for this second read.
+        # Do not wrap construction: other components own their failure policies.
+        self._pending_dsp_restore = _read_state(
+            lambda: load_active_dsp(cfg.state_dir), "active_dsp", startup=_startup,
+        )
         desired_balance = (self._pending_dsp_restore["balance"]
                            if self._pending_dsp_restore is not None else cfg.channel_balance)
-        self.cfg.channel_balance = self._normalize_channel_balance(str(desired_balance))
+        try:
+            self.cfg.channel_balance = self._normalize_channel_balance(str(desired_balance))
+        except ValueError:
+            if _startup:
+                raise StartupStateError(_INITIAL_BALANCE_ERROR) from None
+            raise
         # Configuration is desired state until the startup transaction confirms it.
         self.channel_balance = "0.0"
         # Loading the library never activates it. A separate, strictly validated
@@ -291,12 +296,33 @@ class HttpApi:
         self.device_name_override = ""
         self.plex_client_id = self._load_or_create_plex_client_id()
         self.plex_user_info = self._load_plex_user_info()
+        self.web_api = WebControlApi(
+            current_state=lambda: self.state,
+            device_name=lambda: self.device_name_override or self.cfg.friendly_name,
+            runtime=self._web_runtime, dsp_snapshot=self._web_dsp_snapshot,
+            favorites=self.favorites, dispatch=self._web_dispatch,
+            export_dsp_curve=self._web_export_dsp_curve,
+            inspect_output=make_output_inspector(socket_path=cfg.mpv_socket,
+                configured_output=cfg.mpv_audio_device, auto_spawn=cfg.auto_spawn_mpv),
+            allowed_hosts=(self.cfg.advertise_ip or "", self.cfg.bind_address,
+                           self.cfg.mdns_hostname.rstrip(".") if self.cfg.enable_mdns else ""),
+        )
+
+    @property
+    def eq_presets(self) -> dict[str, dict[str, list[dict[str, object]]]]:
+        """Compatibility view of the single saved-library mapping."""
+        return self._eq_library.presets
+
+    @eq_presets.setter
+    def eq_presets(self, value: dict[str, dict[str, list[dict[str, object]]]]) -> None:
+        self._eq_library.presets = value
 
     def app(self) -> web.Application:
         """Build the aiohttp application and route table."""
 
         app = web.Application()
         app.cleanup_ctx.append(self._state_monitor_context)
+        app.add_routes(self.web_api.routes())
         app.add_routes(self.favorites_api.routes())
         app.add_routes(QueuePlaylistApi(lambda: self.state.queue).routes())
         app.add_routes(
@@ -324,6 +350,127 @@ class HttpApi:
             ]
         )
         return app
+
+    def _web_runtime(self) -> WebRuntime:
+        """Read the existing authority/locks; do not cache a browser owner."""
+        names = {"Play": "play", "Pause": "pause", "Stop": "stop", "Seek": "seek"}
+        actions = {names[name] for name in self._current_transport_actions().split(",") if name in names}
+        unknown = (self._native_output_uncertain
+                   or bool(self._native_stage is not None and self._native_stage.failed))
+        healthy = self.state.phase != PlaybackPhase.ERROR and not unknown
+        if healthy and self.state.phase != PlaybackPhase.PAUSED and self.state.intent != "pause":
+            for action, selection in (("next", "next"), ("previous", "previous")):
+                if self._queue_selection_available(self.state.queue, selection):
+                    actions.add(action)
+        if (self.state.queue.count <= 1 and not is_shuffle(self.state.queue.loop)
+                and "Previous" in self._current_transport_actions().split(",")):
+            actions.add("previous")
+        # Browser playlist edits deliberately require an already-confirmed
+        # stop. No queued replacement waits behind a hidden Stop or native
+        # operation. This is conservative admission, not a new queue owner.
+        playlist_stopped = (self.state.phase == PlaybackPhase.STOPPED
+            and self.state.intent == "stop" and not self.state.backend_url
+            and not self.state.backend_original_url and not self._backend_lock.locked()
+            and not unknown and not self._native_waiting_for_audio
+            and self._native_stage is None and self._native_current_id is None
+            and not self._native_owned_entries and not self._native_cleanup_tasks
+            and self._admitted_load_generation is None and self._pending_seek_target is None
+            and not any(not task.done() for task in self._seek_tasks)
+            and not self._station_recovery_loading
+            and not any(task is not None and not task.done() for task in
+                        (self._station_recovery_task, self._queue_advance_task)))
+        recovery = self._station_recovery
+        current_recovery = recovery is not None and self._station_recovery_is_current(recovery)
+        return WebRuntime(
+            station_recovery_pending=bool(current_recovery and self._station_recovery_task is not None
+                and not self._station_recovery_task.done()),
+            station_recovery_attempts=recovery.attempts if current_recovery else None,
+            station_recovery_limit=len(self._station_recovery_delays) if current_recovery else None,
+            playlist_stopped=playlist_stopped,
+            actions=frozenset(actions), transport_unknown=unknown,
+            transport_pending=self._native_waiting_for_audio or self._pending_seek_target is not None,
+            gain_pending=self._gain_operations > 0 or self._gain_command_lock.locked(),
+            backend_gain_confirmed=getattr(self.mpv, "gain_confirmed", True) is True,
+            queue_mode_locked=bool(self._native_stage is not None or self._native_current_id is not None
+                or self._native_owned_entries or self._native_cleanup_tasks or self._native_output_uncertain),
+        )
+
+    def _web_dsp_snapshot(self) -> dict[str, object]:
+        """Hide mutable DSP proposals; detach validated confirmed state atomically."""
+        unknown = {"status": "UNKNOWN", "balance": None, "eq_enabled": None, "name": "",
+                   "editor": None}
+        if self._dsp_command_lock.locked():
+            return {**unknown, "status": "PENDING"}
+        try:
+            self._require_dsp_readback()
+            if self._pending_dsp_restore is not None or not self._dsp_active_confirmed:
+                return unknown
+            snapshot = self._active_dsp_snapshot()
+            encode_active_dsp(snapshot)
+            return {"status": "CONFIRMED", "balance": snapshot["balance"],
+                    "eq_enabled": snapshot["enabled"], "name": snapshot["name"],
+                    "editor": self.web_api.dsp_editor(snapshot, self._eq_library)}
+        except (BackendError, ValueError, TypeError, UnicodeError):
+            return unknown
+
+    async def _web_dispatch(self, command: WebCommand) -> dict[str, object] | None:
+        """Translate only the browser's fixed typed vocabulary to existing owners."""
+        action = command.action
+        transport = {"play": "resume", "pause": "pause", "stop": "stop", "next": "next", "previous": "prev"}
+        if action in transport:
+            await self.execute(ParsedCommand(transport[action]), "")
+        elif action in PLAYLIST_ACTIONS:
+            # Admission and detached preparation ran synchronously immediately
+            # before dispatch. Its stopped/backend-empty guard means the
+            # existing replacement takes no await before installing this queue.
+            await self._replace_queue(command.prepared_queue)
+        elif action == "device_rename":
+            await self._rename_device(command.name, expected_device=command.expected_device)
+            return {"device_revision": self.web_api.device_revision(command.name)}
+        elif action == "seek":
+            await self._seek_command(command.seconds)
+        elif action == "volume":
+            await self._set_confirmed_gain(volume=command.value)
+        elif action == "mute":
+            await self._set_confirmed_gain(mute=command.value)
+        elif action == "queue_select":
+            await self._play_queue_index(command.index, self.state.queue.name)
+        elif action == "queue_mode":
+            from .queue_protocol import MODES
+            self._set_queue_loop_mode(MODES[command.mode], self.state.queue.name)
+        elif action == "balance":
+            await self._run_dsp_command("setChannelBalance:" + format(command.value, ".3f"))
+        elif action == "eq":
+            await self._run_dsp_command("EQOn" if command.enabled else "EQOff")
+        elif action == "dsp_preset_import":
+            await self._web_import_dsp_curve(command)
+        elif action.startswith("dsp_"):
+            await self._run_dsp_command("", web_command=command)
+        elif action == "favorite_restore":
+            try:
+                self.favorites.restore_empty(command.favorites_bytes)
+            except FavoriteError as exc:
+                if exc.code in {"library_not_empty", "library_unavailable"}:
+                    code = "favorites_not_empty" if exc.code == "library_not_empty" else "favorites_unavailable"
+                    raise WebAdmissionError(code, exc.status) from None
+                raise
+        elif action == "favorite_play":
+            await self._play_preset_snapshot(self.favorites.playback_snapshot(command.id))
+        elif action == "favorite_add":
+            record = self.favorites.add({"name": command.name, "url": command.url})
+            return {"favorite_id": record["id"]}
+        elif action == "favorite_current":
+            record = self.favorites.add_current(command.name, self.state.queue.current)
+            return {"favorite_id": record["id"]}
+        elif action == "favorite_rename":
+            self.favorites.rename(command.id, command.name)
+        elif action == "favorite_target":
+            self.favorites.set_url(command.id, command.url, command.metadata)
+        elif action == "favorite_delete":
+            self.favorites.delete(command.id)
+        else:
+            raise ValueError("Unsupported browser action")
+        return None
 
     async def _state_monitor_context(self, app):
         """Share one backend observer between all configured HTTP listeners."""
@@ -1630,9 +1777,7 @@ class HttpApi:
         if name in {"setTimezone", "setTuneinLocation"} or name.startswith("setTimezone:") or name.startswith("setTuneinLocation:"):
             return {"error": "Failed", "command": name}
         if name.startswith("setDeviceName:") or name.startswith("setHexDeviceName:"):
-            requested_name = self._decode_device_name_command(name)
-            if not requested_name or len(requested_name) > 128 or re.search(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]", requested_name):
-                raise ValueError("Invalid device name")
+            requested_name = validate_device_name(self._decode_device_name_command(name))
             await self._rename_device(requested_name)
             return "OK"
         if name == "getbtstatus":
@@ -1927,10 +2072,127 @@ class HttpApi:
             self._require_dsp_readback()
             atomic_write_text(Path(self.cfg.state_dir) / "active_dsp.json", encode_active_dsp(self._active_dsp_snapshot()))
 
-    async def _run_dsp_command(self, name: str) -> dict[str, object] | str:
+    def _web_curve_context(self, expected_dsp: str) -> dict[str, object]:
+        """Read-only admission while the existing DSP lock is held.
+
+        Unlike active DSP commands this path must not reconcile/publish staged
+        active state. Saved transfer refuses pending or uncertain DSP instead.
+        """
+        if self._eq_library.unavailable:
+            raise WebAdmissionError("preset_library_unavailable", 409)
+        if (self._pending_dsp_restore is not None or not self._dsp_active_confirmed
+                or self._dsp_state_uncertain or getattr(self.mpv, "confirmed_dsp", False) is None):
+            raise WebAdmissionError("unavailable", 409)
+        try:
+            active = self._active_dsp_snapshot()
+            encode_active_dsp(active)
+        except (ValueError, TypeError, UnicodeError):
+            raise WebAdmissionError("unavailable", 409) from None
+        if expected_dsp != self.web_api.dsp_revision(active, self._eq_library):
+            raise WebAdmissionError("stale_dsp", 409)
+        return active
+
+    async def _web_export_dsp_curve(self, request: WebDspExport) -> tuple[bytes, bool]:
+        async with self._dsp_command_lock:
+            active = self._web_curve_context(request.expected_dsp)
+            plugin = active["plugin"]
+            name = self.web_api.dsp_preset_name(request.preset_id, plugin, self._eq_library)
+            contexts = self.eq_presets.get(name, {})
+            if plugin not in contexts:
+                raise WebAdmissionError("curve_export_unavailable", 409)
+            return prepare_dsp_curve_export(name, plugin, contexts[plugin]), len(contexts) > 1
+
+    async def _web_import_dsp_curve(self, command: WebCommand) -> None:
+        """Add one detached saved curve, with zero active/backend effects.
+
+        No await occurs between validation, proposal, durable write and rollback.
+        Never route through EQSave or _persist_eq_presets: both touch active DSP.
+        """
+        async with self._dsp_command_lock:
+            active = self._web_curve_context(command.expected_dsp)
+            curve = command.curve
+            if curve is None:
+                raise WebAdmissionError()
+            if curve.plugin != active["plugin"]:
+                raise WebAdmissionError("curve_context_mismatch", 409)
+            if curve.name in self.eq_presets:
+                raise WebAdmissionError("preset_conflict", 409)
+            before = deepcopy(self.eq_presets)
+            self._eq_library.save(curve.name, curve.plugin, curve.bands)
+            try:
+                # A restored orphan active name may match a newly imported
+                # name/curve. Refuse rather than silently change its display.
+                if self._active_dsp_snapshot() != active:
+                    raise WebAdmissionError("preset_conflict", 409)
+                self._eq_library.persist(self.cfg.state_dir, write_text=atomic_write_text)
+            except AtomicWriteCommittedError:
+                raise WebDspCommandError("LIBRARY_COMMITTED_DURABILITY_UNKNOWN") from None
+            except BaseException as exc:
+                self.eq_presets = before
+                if isinstance(exc, ValueError) and not isinstance(exc, WebAdmissionError):
+                    raise WebAdmissionError("curve_library_full", 409) from None
+                if isinstance(exc, OSError):
+                    raise WebDspCommandError("UNKNOWN") from None
+                raise
+
+    def _prepare_web_dsp_command(self, command: WebCommand) -> str:
+        """Locked compare-and-translate; no browser-controlled source or plugin.
+
+        Waiting for the existing lock can make a previously observed curve or
+        library stale. Check after that wait, before creating any proposal or
+        transaction task. Legacy callers never enter this admission path.
+        """
+        if self._pending_dsp_restore is not None or not self._dsp_active_confirmed:
+            raise WebAdmissionError("unavailable", 409)
+        try:
+            self._require_dsp_readback()
+            active = self._active_dsp_snapshot()
+            encode_active_dsp(active)
+        except (BackendError, ValueError, TypeError, UnicodeError):
+            raise WebAdmissionError("unavailable", 409) from None
+        if command.expected_dsp != self.web_api.dsp_revision(active, self._eq_library):
+            raise WebAdmissionError("stale_dsp", 409)
+        if (self._eq_library.unavailable
+                and command.action in {"dsp_preset_save", "dsp_preset_rename", "dsp_preset_delete"}):
+            raise WebAdmissionError("preset_library_unavailable", 409)
+        plugin, source = active["plugin"], active["source"]
+        payload = {"pluginURI": plugin}
+        if source:
+            payload["source_name"] = source
+        if command.action == "dsp_bands":
+            prefix = "EQSetLV2SourceBand:" if source else "EQSetLV2Band:"
+            payload["EQBand"] = command.bands
+        elif command.action == "dsp_preset_save":
+            if command.name in self.eq_presets:
+                raise WebAdmissionError("preset_conflict", 409)
+            return "EQSave:" + quote(command.name, safe="")
+        else:
+            name = self.web_api.dsp_preset_name(command.preset_id, plugin, self._eq_library)
+            payload["Name"] = name
+            if command.action == "dsp_preset_load":
+                prefix = "EQv2SourceLoad:" if source else "EQv2Load:"
+            elif command.action in {"dsp_preset_delete", "dsp_preset_rename"}:
+                if plugin not in self.eq_presets.get(name, {}):
+                    raise WebAdmissionError("unavailable", 409)
+                if command.action == "dsp_preset_rename":
+                    if command.name != name and command.name in self.eq_presets:
+                        raise WebAdmissionError("preset_conflict", 409)
+                    payload["newName"] = command.name
+                    prefix = "EQv2Rename:"
+                else:
+                    prefix = "EQv2Delete:"
+            else:
+                raise WebAdmissionError()
+        # The existing legacy parser unquotes once. Quote the complete JSON so
+        # literal percent sequences in saved names/plugin IDs are not re-read.
+        return prefix + quote(json.dumps(payload, separators=(",", ":")), safe="")
+
+    async def _run_dsp_command(self, name: str, *, web_command: WebCommand | None = None) -> dict[str, object] | str:
         """Serialize DSP reads/writes and hide unconfirmed proposals from clients."""
         async with self._dsp_command_lock:
             self._refresh_restored_dsp()
+            if web_command is not None:
+                name = self._prepare_web_dsp_command(web_command)
             fields = (
                 "eq_bands_by_plugin", "eq_source_bands_by_plugin", "eq_names_by_plugin",
                 "eq_channel_by_plugin", "eq_active_plugin_uri", "eq_active_source_name",
@@ -1956,6 +2218,22 @@ class HttpApi:
                         for field, value in before.items():
                             setattr(self, field, value)
                         self.cfg.channel_balance = old_balance
+                    if web_command is not None and isinstance(exc, Exception):
+                        if self._dsp_backend_confirmed:
+                            # In the fixed Web band/load paths, owned persistence
+                            # is the only post-confirmation OSError source. Revisit
+                            # this classification if those paths gain other I/O.
+                            effect = ("BACKEND_APPLIED_PERSISTENCE_FAILED" if isinstance(exc, OSError)
+                                      else "BACKEND_APPLIED_FOLLOWUP_UNKNOWN")
+                        elif (web_command.action in {"dsp_preset_save", "dsp_preset_rename", "dsp_preset_delete"}
+                              and self._dsp_library_committed):
+                            effect = "LIBRARY_COMMITTED_ACTIVE_PERSISTENCE_FAILED"
+                        elif (web_command.action in {"dsp_preset_save", "dsp_preset_rename", "dsp_preset_delete"}
+                              and isinstance(exc, AtomicWriteCommittedError)):
+                            effect = "LIBRARY_COMMITTED_DURABILITY_UNKNOWN"
+                        else:
+                            effect = "UNKNOWN"
+                        raise WebDspCommandError(effect) from None
                     raise
 
             task = asyncio.create_task(transaction())
@@ -2045,7 +2323,7 @@ class HttpApi:
                 bands = self.eq_source_bands_by_plugin.get(self.eq_active_source_name, {}).get(plugin, self._default_eq_bands())
             else:
                 bands = self.eq_bands_by_plugin.get(plugin, self._default_eq_bands())
-            self.eq_presets.setdefault(preset_name, {})[plugin] = deepcopy(bands)
+            self._eq_library.save(preset_name, plugin, bands)
             self.eq_current_preset = preset_name
             self.eq_names_by_plugin[plugin] = preset_name
             self._persist_eq_presets()
@@ -2136,10 +2414,14 @@ class HttpApi:
         except BackendError as exc:
             raise ValueError("Invalid EQ parameters") from exc
 
-    async def _rename_device(self, requested_name: str) -> None:
+    async def _rename_device(self, requested_name: str, *, expected_device: str | None = None) -> None:
         """Commit locally before refresh; never roll back an already-replaced name."""
 
         async with self._rename_lock:
+            # Browser drafts compare after waiting for the transaction lock.
+            # Legacy callers keep the exact existing decoding and semantics.
+            if expected_device is not None and expected_device != self.web_api.device_revision():
+                raise WebAdmissionError("stale_device", 409)
             durability_error: AtomicWriteCommittedError | None = None
             try:
                 atomic_write_text(Path(self.cfg.state_dir) / "device_name", requested_name + "\n")
@@ -2163,12 +2445,12 @@ class HttpApi:
                 # A failed refresh may already have withdrawn old advertisements.
                 # A same-name retry must run refresh again, not pretend to undo it.
                 LOG.warning("Device name applied; discovery refresh failed")
-                raise OSError("Device name applied; discovery refresh failed") from exc
+                raise DeviceNameCommittedError("Device name applied; discovery refresh failed") from exc
             finally:
                 self._schedule_event_notify()
             if durability_error is not None:
                 raise durability_error
-            LOG.info("Persisted WiiM Home device rename request name=%s", requested_name)
+            LOG.info("Persisted WiiM Home device rename request")
 
     @staticmethod
     def _decode_device_name_command(command: str) -> str:
@@ -2277,8 +2559,7 @@ class HttpApi:
             plugin_uri = str(payload.get("pluginURI") or payload.get("plugin") or self.eq_active_plugin_uri or DEFAULT_EQ_PLUGIN)
         else:
             plugin_uri = raw or self.eq_active_plugin_uri or DEFAULT_EQ_PLUGIN
-        names = [self._normalize_eq_preset_name(name) for name in sorted(self.eq_presets)
-                 if plugin_uri in self.eq_presets[name]]
+        names = self._eq_library.names(plugin_uri)
         if plugin_uri.endswith("/Eq4p") or plugin_uri.endswith("/Eq10HP"):
             return {"status": "OK", "preset": ["Flat", "Bass Boost", "Treble Boost"], "custom": names, "pluginURI": plugin_uri}
         presets = [self._eq_list_item(name, "preset") for name in ("Flat", "Bass Boost", "Treble Boost")]
@@ -2295,7 +2576,7 @@ class HttpApi:
             bands = self.eq_source_bands_by_plugin.get(source_name, {}).get(plugin_uri, self._default_eq_bands())
         else:
             bands = self.eq_bands_by_plugin.get(plugin_uri, self._default_eq_bands())
-        self.eq_presets.setdefault(name, {})[plugin_uri] = deepcopy(bands)
+        self._eq_library.save(name, plugin_uri, bands)
         if plugin_uri == self.eq_active_plugin_uri and source_name == self.eq_active_source_name:
             self.eq_current_preset = name
             self.eq_names_by_plugin[plugin_uri] = name
@@ -2314,17 +2595,7 @@ class HttpApi:
         else:
             self.eq_active_source_name = ""
         self.eq_current_preset = name
-        if name in self.eq_presets and plugin_uri in self.eq_presets[name]:
-            bands = [dict(band) for band in self.eq_presets[name][plugin_uri]]
-        elif name == "Flat":
-            bands = self._default_eq_bands()
-        elif name == "Bass Boost":
-            bands = self._preset_eq_bands({"a_gain": 5.0, "b_gain": 3.0})
-        elif name == "Treble Boost":
-            bands = self._preset_eq_bands({"i_gain": 3.0, "j_gain": 5.0})
-        else:
-            raise ValueError("Unknown EQ preset for plugin")
-        bands = self._merge_eq_bands(None, bands)
+        bands = self._eq_library.bands(name, plugin_uri)
         if source_specific:
             self.eq_source_bands_by_plugin.setdefault(source_name, {})[plugin_uri] = bands
         else:
@@ -2351,57 +2622,19 @@ class HttpApi:
 
     @staticmethod
     def _normalize_eq_preset_name(name: str) -> str:
-        if any(ord(char) < 32 for char in name):
-            raise ValueError("Invalid EQ preset name")
-        name = name.strip()
-        if name.startswith("{") and name.endswith("}") and "Name=" in name:
-            match = re.search(r"(?:^|\{|,\s*)Name=([^,}]+)", name)
-            if match:
-                return match.group(1).strip() or "Custom"
-        return name or "Custom"
+        return eq_presets.normalize_eq_preset_name(name)
 
     def _load_persisted_eq_presets(self) -> None:
         """Load a validated preset library, never claim it is already applied."""
         try:
-            path = Path(self.cfg.state_dir) / "eq_presets.json"
-            with path.open("rb") as stream:
-                encoded = stream.read(1024 * 1024 + 1)
-            if len(encoded) > 1024 * 1024:
-                raise ValueError("EQ preset document is too large")
-            payload = json.loads(encoded, parse_constant=self._reject_eq_constant,
-                                 object_pairs_hook=self._unique_eq_object)
-            if (not isinstance(payload, dict) or type(payload.get("version", 1)) is not int
-                    or payload.get("version", 1) != 1):
-                raise ValueError("Unsupported EQ preset document")
-            presets = payload.get("presets")
-            if not isinstance(presets, dict):
-                raise ValueError("Invalid EQ preset library")
-            loaded: dict[str, dict[str, list[dict[str, object]]]] = {}
-            for name, plugins in presets.items():
-                if not isinstance(name, str) or not isinstance(plugins, dict):
-                    raise ValueError("Invalid EQ preset")
-                clean_name = self._normalize_eq_preset_name(name)
-                if clean_name in loaded:
-                    raise ValueError("Duplicate EQ preset name")
-                loaded[clean_name] = {}
-                for plugin_uri, bands in plugins.items():
-                    if not isinstance(plugin_uri, str) or not plugin_uri:
-                        raise ValueError("Invalid EQ plugin")
-                    loaded[clean_name][plugin_uri] = self._merge_eq_bands(None, bands)
-            self.eq_presets = loaded
-        except FileNotFoundError:
-            return
-        except (OSError, ValueError, TypeError, UnicodeError, RecursionError) as exc:
-            LOG.warning("could not load EQ preset library: %s", exc)
+            self._eq_library.load(self.cfg.state_dir)
+        except (OSError, ValueError, TypeError, UnicodeError, RecursionError):
+            LOG.warning(eq_presets.PRESET_LIBRARY_UNAVAILABLE_MESSAGE)
 
     def _persist_eq_presets(self) -> None:
-        # This document is a library, not a claim that a preset is active after
-        # restart. Active DSP replay requires separate backend confirmation.
-        payload = {"version": 1, "presets": self.eq_presets}
-        encoded = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
-        if len(encoded.encode("utf-8")) > 1024 * 1024:
-            raise ValueError("EQ preset library exceeds its persisted size limit")
-        atomic_write_text(Path(self.cfg.state_dir) / "eq_presets.json", encoded)
+        # The library commit and active metadata commit stay in this transaction.
+        # A failed second write must not roll back the already-committed library.
+        self._eq_library.persist(self.cfg.state_dir, write_text=atomic_write_text)
         self._dsp_library_committed = True
         self._persist_active_dsp()
 
@@ -2410,7 +2643,7 @@ class HttpApi:
         raw_name = str(payload.get("Name") or payload.get("name") or "")
         name = self._normalize_eq_preset_name(raw_name) if raw_name else ""
         if name:
-            self.eq_presets.pop(name, None)
+            self._eq_library.delete(name)
             if self.eq_current_preset == name:
                 self.eq_current_preset = ""
             for plugin, preset_name in list(self.eq_names_by_plugin.items()):
@@ -2425,11 +2658,7 @@ class HttpApi:
             raise ValueError("EQ rename requires both preset names")
         old_name = self._normalize_eq_preset_name(raw_old)
         new_name = self._normalize_eq_preset_name(raw_new)
-        if old_name not in self.eq_presets:
-            raise ValueError("Unknown EQ preset")
-        if new_name != old_name and new_name in self.eq_presets:
-            raise ValueError("EQ preset name already exists")
-        self.eq_presets[new_name] = self.eq_presets.pop(old_name)
+        self._eq_library.rename(old_name, new_name)
         if self.eq_current_preset == old_name:
             self.eq_current_preset = new_name
         for plugin, preset_name in list(self.eq_names_by_plugin.items()):
@@ -2456,50 +2685,17 @@ class HttpApi:
 
     @staticmethod
     def _default_eq_bands() -> list[dict[str, object]]:
-        bands: list[dict[str, object]] = []
-        for letter, freq in DEFAULT_EQ_BAND_FREQS.items():
-            bands.extend(
-                [
-                    {"param_name": f"{letter}_freq", "value": freq},
-                    {"param_name": f"{letter}_gain", "value": 0.0},
-                    {"param_name": f"{letter}_q", "value": 0.25},
-                    {"param_name": f"{letter}_mode", "value": 1},
-                ]
-            )
-        return bands
+        return eq_presets.default_eq_bands()
 
     def _preset_eq_bands(self, updates: dict[str, float]) -> list[dict[str, object]]:
-        bands = self._default_eq_bands()
-        for item in bands:
-            param_name = item.get("param_name")
-            if isinstance(param_name, str) and param_name in updates:
-                item["value"] = updates[param_name]
-        return bands
+        return eq_presets.preset_eq_bands(updates)
 
     @staticmethod
     def _is_flat_eq_bands(bands: list[dict[str, object]]) -> bool:
-        for item in bands:
-            param_name = item.get("param_name")
-            if not isinstance(param_name, str):
-                continue
-            try:
-                value = float(item.get("value", 0.0))
-            except (TypeError, ValueError):
-                continue
-            if param_name.endswith("_gain") and abs(value) >= 0.01:
-                return False
-            if param_name.endswith("_mode") and value not in {-1.0, 1.0}:
-                return False
-        return True
+        return eq_presets.is_flat_eq_bands(bands)
 
     def _merge_eq_bands(self, current: list[dict[str, object]] | None, updates: list[object]) -> list[dict[str, object]]:
-        """Validate partial changes and retain exactly forty canonical records."""
-        base = self._validated_eq_records(current if current is not None else self._default_eq_bands(), require_complete=True)
-        changed = self._validated_eq_records(updates)
-        merged = {str(item["param_name"]): item for item in base}
-        merged.update({str(item["param_name"]): item for item in changed})
-        return [merged[f"{letter}_{suffix}"] for letter in DEFAULT_EQ_BAND_FREQS
-                for suffix in ("freq", "gain", "q", "mode")]
+        return eq_presets.merge_eq_bands(current, updates)
 
     @staticmethod
     def _validated_eq_records(bands: object, *, require_complete: bool = False) -> list[dict[str, object]]:
@@ -2507,42 +2703,15 @@ class HttpApi:
 
     @staticmethod
     def _reject_eq_constant(value: str) -> object:
-        raise ValueError("Non-finite EQ JSON value")
+        return eq_presets.reject_eq_constant(value)
 
     @staticmethod
     def _unique_eq_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
-        """Reject ambiguous fields before selecting any DSP value or preset."""
-        result: dict[str, object] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError("Duplicate EQ field")
-            result[key] = value
-        return result
+        return eq_presets.unique_eq_object(pairs)
 
     @classmethod
     def _eq_payload(cls, command: str, prefix: str) -> dict[str, object]:
-        raw = unquote(command.removeprefix(prefix))
-        if len(raw) > 128 * 1024:
-            raise ValueError("EQ request is too large")
-        try:
-            payload = json.loads(raw, parse_constant=cls._reject_eq_constant,
-                                 object_pairs_hook=cls._unique_eq_object)
-        except RecursionError as exc:
-            raise ValueError("EQ request nesting is too deep") from exc
-        if not isinstance(payload, dict):
-            raise ValueError("EQ request must be an object")
-        for field in ("source_name", "source"):
-            if field in payload and payload[field] != "wifi":
-                raise ValueError("Only wifi EQ is supported")
-        if "channelMode" in payload and payload["channelMode"] != "Stereo":
-            raise ValueError("Only Stereo EQ is supported")
-        for field in ("pluginURI", "plugin", "Name", "name", "newName", "NewName"):
-            if field in payload and not isinstance(payload[field], str):
-                raise ValueError("EQ identifier must be text")
-        for field in ("EQBandL", "EQBandR"):
-            if field in payload and payload[field] != []:
-                raise ValueError("Per-channel EQ is unsupported")
-        return payload
+        return eq_presets.eq_payload(command, prefix)
 
     def _require_dsp_readback(self) -> None:
         self._refresh_restored_dsp()
@@ -2550,14 +2719,7 @@ class HttpApi:
             raise BackendError("Backend DSP state is unconfirmed")
 
     def _eq_display_name(self, plugin: str, bands: list[dict[str, object]]) -> str:
-        name = self.eq_names_by_plugin.get(plugin, "")
-        if name and self.eq_presets.get(name, {}).get(plugin) == bands:
-            return name
-        if name in {"Bass Boost", "Treble Boost"}:
-            expected = self._preset_eq_bands({"a_gain": 5.0, "b_gain": 3.0} if name == "Bass Boost" else {"i_gain": 3.0, "j_gain": 5.0})
-            if bands == expected:
-                return name
-        return "Flat" if self._is_flat_eq_bands(bands) else "Custom"
+        return self._eq_library.display_name(plugin, bands, self.eq_names_by_plugin.get(plugin, ""))
 
     def _enabled_experimental_sources(self) -> list[dict[str, object]]:
         """Return enabled configured source experiments as app-facing records."""

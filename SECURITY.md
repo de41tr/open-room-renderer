@@ -53,3 +53,18 @@ redirects and socket timeouts. Proxy mode needs the HTTP listener to accept
 loopback connections (the default wildcard bind does). Tests use only synthetic
 addresses and local fixtures; no cloud metadata or internal-admin endpoints
 are contacted by the test suite.
+
+## Local browser controller boundary
+
+New `/orr/v1/web/*` controls add strict admitted Host/listener-port and Origin
+checks, custom-header CSRF, bounded typed JSON and safe state projection. Static
+assets are an exact local package map with CSP, no-referrer, no-store and nosniff.
+Media/backend URLs, raw protocol metadata and provider account fields are not
+part of browser state. Known URL-derived title fallbacks and credential-bearing
+artwork query/userinfo/fragment forms are withheld; this is not general DLP.
+
+These protections apply to the new browser routes only. Legacy unauthenticated
+HTTP GET mutations, SOAP and favorites routes remain reachable and can still
+permit cross-site requests/control on an untrusted network. No whole-service
+authentication or Internet-safe deployment claim is made. Use a trusted isolated
+LAN and do not expose the listener publicly. See [Web security scope](docs/WEB_UI.md#browser-security-and-privacy-scope).

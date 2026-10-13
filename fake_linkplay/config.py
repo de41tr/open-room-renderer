@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import logging
 import os
 import tempfile
 import uuid as uuidlib
@@ -18,8 +19,10 @@ from typing import Any
 
 import yaml
 
+from .audio_device import validate_audio_device
 from .utils import detect_lan_ip, ensure_dir
 from .persistence import load_active_dsp, load_gain
+from .startup_state import _read_state
 
 
 @dataclass(slots=True)
@@ -75,6 +78,8 @@ class Config:
     advertise_ip: str | None = None
     mpv_socket: str = "/tmp/open-room-renderer-mpv.sock"
     auto_spawn_mpv: bool = True
+    # Startup-only; None preserves mpv's existing configuration/defaults.
+    mpv_audio_device: str | None = field(default=None, kw_only=True)
     default_volume: int = 50
     default_mute: bool = False
     log_level: str = "INFO"
@@ -120,6 +125,7 @@ class Config:
     def __post_init__(self) -> None:
         """Normalize configured IDs without replacing their identity."""
 
+        self.mpv_audio_device = validate_audio_device(self.mpv_audio_device, auto_spawn=self.auto_spawn_mpv)
         if type(self.native_queue_staging) is not bool:
             raise ValueError("native_queue_staging must be boolean")
         if type(self.default_mute) is not bool:
@@ -225,6 +231,145 @@ class Config:
         return f"{self.friendly_name}-{suffix}"
 
 
+class StartupConfigError(ValueError):
+    """An operator-safe startup diagnostic, containing no supplied values."""
+
+
+CONFIG_YAML_ERROR = "Configuration YAML could not be parsed. Check syntax and indentation."
+CONFIG_STRUCTURE_ERROR = (
+    "Configuration structure is invalid. Compare supported settings and preset/source "
+    "entries with the example YAML."
+)
+CONFIG_DUPLICATE_ERROR = (
+    "Configuration contains duplicate top-level settings. "
+    "Keep only one explicit value for each setting."
+)
+
+
+class _StartupSafeLoader(yaml.SafeLoader):
+    """Reject repeated explicit root settings before constructing YAML values."""
+
+    def construct_document(self, node: yaml.Node) -> Any:
+        if isinstance(node, yaml.MappingNode):
+            seen: set[str] = set()
+            # Inspect the original root pairs before SafeLoader flattens merges.
+            # A merged default plus one explicit override is not a duplicate;
+            # nested mappings retain their existing SafeLoader behavior.
+            for key, _value in node.value:
+                # SafeLoader also normalizes YAML's value-tag mapping keys to
+                # strings while flattening; include that spelling here too.
+                if isinstance(key, yaml.ScalarNode) and key.tag in {
+                    "tag:yaml.org,2002:str", "tag:yaml.org,2002:value",
+                }:
+                    if key.value in seen:
+                        raise StartupConfigError(CONFIG_DUPLICATE_ERROR)
+                    seen.add(key.value)
+        return super().construct_document(node)
+
+
+def parse_startup_yaml(source: str) -> Any:
+    """Reject duplicate root settings and keep parser diagnostics private."""
+
+    try:
+        return yaml.load(source, Loader=_StartupSafeLoader)
+    except StartupConfigError:
+        raise
+    except (yaml.YAMLError, ValueError, TypeError, AttributeError, KeyError, IndexError,
+            OverflowError, RecursionError):
+        # Explicit !!int/!!bool/!!timestamp tags can raise ordinary Python
+        # exceptions containing raw values rather than yaml.YAMLError.
+        raise StartupConfigError(CONFIG_YAML_ERROR) from None
+
+
+def read_startup_config(
+    path: str | Path, *, missing_ok: bool = False, captured_text: str | None = None,
+) -> Config:
+    """Read startup input without creating identity/state or probing resources.
+
+    Offline tools may supply securely bounded captured_text to validate that exact
+    snapshot without reopening a pathname. No state or resources are accessed.
+
+    Only the implicit CLI default may use the historical missing-file fallback.
+    Error text is owned here: YAML exceptions can include raw source lines,
+    unknown setting names, file paths, and credential-bearing URLs.
+
+    This checks document/construction shape and the two synchronous logging/gain
+    conversions used at startup, not a comprehensive field type/range schema.
+    """
+
+    try:
+        source = (Path(path).read_text(encoding="utf-8")
+                  if captured_text is None else captured_text)
+    except FileNotFoundError:
+        if not missing_ok:
+            raise StartupConfigError(
+                "Configuration file not found. Check --config or ORR_CONFIG."
+            ) from None
+        # A missing target may still have a selected leaf (for example, a
+        # dangling symlink). Fall back only when lstat also reports it missing.
+        try:
+            Path(path).lstat()
+        except FileNotFoundError:
+            source = ""
+        except OSError:
+            raise StartupConfigError(
+                "Configuration file could not be read. Check the path and read permissions."
+            ) from None
+        else:
+            raise StartupConfigError(
+                "Configuration file could not be read. Check the path and read permissions."
+            ) from None
+    except IsADirectoryError:
+        raise StartupConfigError(
+            "Configuration path is a directory. Select a YAML file."
+        ) from None
+    except OSError:
+        raise StartupConfigError(
+            "Configuration file could not be read. Check the path and read permissions."
+        ) from None
+    except UnicodeError:
+        raise StartupConfigError(
+            "Configuration text could not be decoded. Save the YAML file as UTF-8."
+        ) from None
+    raw = parse_startup_yaml(source)
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise StartupConfigError(CONFIG_STRUCTURE_ERROR)
+    try:
+        cfg = _config_from_mapping(raw)
+        # Match setup_logging's unknown-name fallback and RendererState's int
+        # coercion, without configuring logging or reading/writing saved state.
+        level = getattr(logging, cfg.log_level.upper(), logging.INFO)
+        if not isinstance(level, int):
+            raise ValueError
+        int(cfg.default_volume)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        raise StartupConfigError(CONFIG_STRUCTURE_ERROR) from None
+    return cfg
+
+
+def load_startup_config(path: str | Path, *, missing_ok: bool = False) -> Config:
+    """Validate startup input before applying the existing persisted state path."""
+
+    return _load_config_state(read_startup_config(path, missing_ok=missing_ok), _startup=True)
+
+
+def _config_from_mapping(raw: dict[str, Any]) -> Config:
+    presets = [PodcastPreset(**item) for item in raw.pop("podcast_presets", [])]
+    experimental_sources = [ExperimentalSource(**item) for item in raw.pop("experimental_sources", [])]
+    return Config(**raw, podcast_presets=presets, experimental_sources=experimental_sources)
+
+
+def _load_config_state(cfg: Config, *, _startup: bool = False) -> Config:
+    cfg.uuid = cfg.uuid or _read_state(
+        lambda: load_or_create_uuid(cfg.state_dir, wiim_home_profile=cfg.wiim_home_profile),
+        "identity", startup=_startup,
+    )
+    load_persistent_runtime_state(cfg, _startup=_startup)
+    return cfg
+
+
 def load_config(path: str | Path) -> Config:
     """Load YAML configuration and persisted local runtime overrides.
 
@@ -242,12 +387,7 @@ def load_config(path: str | Path) -> Config:
     p = Path(path)
     if p.exists():
         raw = yaml.safe_load(p.read_text()) or {}
-    presets = [PodcastPreset(**item) for item in raw.pop("podcast_presets", [])]
-    experimental_sources = [ExperimentalSource(**item) for item in raw.pop("experimental_sources", [])]
-    cfg = Config(**raw, podcast_presets=presets, experimental_sources=experimental_sources)
-    cfg.uuid = cfg.uuid or load_or_create_uuid(cfg.state_dir, wiim_home_profile=cfg.wiim_home_profile)
-    load_persistent_runtime_state(cfg)
-    return cfg
+    return _load_config_state(_config_from_mapping(raw))
 
 
 def normalize_uuid(value: str | None) -> str:
@@ -333,7 +473,7 @@ def _read_uuid(path: Path) -> str:
     return value
 
 
-def load_persistent_runtime_state(cfg: Config) -> None:
+def load_persistent_runtime_state(cfg: Config, *, _startup: bool = False) -> None:
     """Apply safe user-visible settings persisted by app controls.
 
     Args:
@@ -343,22 +483,43 @@ def load_persistent_runtime_state(cfg: Config) -> None:
         Reads small text files from ``cfg.state_dir``.
     """
 
-    directory = ensure_dir(cfg.state_dir)
-    gain = load_gain(directory)
+    directory = _read_state(lambda: ensure_dir(cfg.state_dir), "directory", startup=_startup)
+    gain = _read_state(lambda: load_gain(directory), "gain", startup=_startup)
     if gain is not None:
         cfg.default_volume, cfg.default_mute = gain
     device_name_path = directory / "device_name"
-    if device_name_path.exists():
-        device_name = sanitize_persistent_text(device_name_path.read_text())
+    device_name = _read_state(
+        lambda: _read_optional_persistent_text(device_name_path), "device_name", startup=_startup,
+    )
+    if device_name is not None:
+        device_name = sanitize_persistent_text(device_name)
         if device_name:
             cfg.friendly_name = device_name
             cfg.mdns_instance_name = device_name
     channel_balance_path = directory / "channel_balance"
-    active_dsp = load_active_dsp(directory)
+    active_dsp = _read_state(lambda: load_active_dsp(directory), "active_dsp", startup=_startup)
     if active_dsp is not None:
         cfg.channel_balance = str(active_dsp["balance"])
-    elif channel_balance_path.exists():
-        cfg.channel_balance = sanitize_persistent_text(channel_balance_path.read_text()) or "0.0"
+    else:
+        channel_balance = _read_state(
+            lambda: _read_optional_persistent_text(channel_balance_path),
+            "channel_balance", startup=_startup,
+        )
+        if channel_balance is not None:
+            cfg.channel_balance = sanitize_persistent_text(channel_balance) or "0.0"
+
+
+def _read_optional_persistent_text(path: Path) -> str | None:
+    try:
+        return path.read_text()
+    except FileNotFoundError:
+        # exists() follows links and would treat a saved dangling link as absent.
+        # An uncertain inspection must also fail rather than select defaults.
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return None
+        raise
 
 
 def sanitize_persistent_text(value: str) -> str:
