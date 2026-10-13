@@ -14,7 +14,7 @@ from .upnp_schema import scpd_xml as _declared_scpd
 
 
 from .capabilities import (PLEX_STREAMS_BIT, add_plex_stream_service, add_stream_service_sentinels,
-    capability_fields, configured_sources, new_tunein_stream_service, plex_stream_service,
+    capability_fields, configured_presets, configured_sources, new_tunein_stream_service, plex_stream_service,
     service_capability, stream_mask_with_plex, stream_service_item, stream_services_capability)
 
 
@@ -116,6 +116,8 @@ def control_device_info_json(cfg: Config, ip: str, state: Any | None = None) -> 
     mute = getattr(state, "mute", False)
     status = getattr(state, "status", "stop")
     stream_url = getattr(state, "current_url", "")
+    preset_view = getattr(state, "effective_presets", None)
+    presets = preset_view() if callable(preset_view) else configured_presets(cfg)
     payload = {
         "uuid": cfg.upnp_uuid,
         "upnp_uuid": f"uuid:{cfg.upnp_uuid}",
@@ -129,6 +131,7 @@ def control_device_info_json(cfg: Config, ip: str, state: Any | None = None) -> 
         "FW_Release_version": "0.1.0",
         "NewVer": "0.1.0",
         "service_version": "1.4",
+        "preset_key": str(len(presets)),
         "security": cfg.security,
         "MAC": cfg.wiim_mac,
         "mac": cfg.wiim_mac,
