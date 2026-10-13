@@ -190,6 +190,9 @@ def api_get(host: str, port: int, command: str) -> int:
         # Use only the explicit endpoint, without ambient proxy/netrc credentials.
         # Default Requests adapters do not retry; redirects remain disabled.
         with requests.Session() as session:
+            # Skip hidden Location parsing despite allow_redirects=False, keeping
+            # errors private. Existing non-streaming body reads remain unbounded.
+            session.resolve_redirects = lambda *_args, **_kwargs: iter(())
             session.trust_env = False
             with session.get(url, timeout=10, allow_redirects=False) as response:
                 if not 200 <= response.status_code < 300:
@@ -229,6 +232,9 @@ def favorites_request(
     try:
         kwargs = {"json": payload} if payload is not None else {}
         with requests.Session() as session:
+            # Skip hidden Location parsing despite allow_redirects=False, keeping
+            # errors private. Existing non-streaming body reads remain unbounded.
+            session.resolve_redirects = lambda *_args, **_kwargs: iter(())
             session.trust_env = False
             with session.request(method, url, timeout=10, allow_redirects=False, **kwargs) as response:
                 if not 200 <= response.status_code < 300:
