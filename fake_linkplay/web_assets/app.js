@@ -85,6 +85,8 @@
     $("volume").disabled = !ready || gain.status !== "CONFIRMED";
     $("volume").hidden = gain.status !== "CONFIRMED";
     $("volume-submit").disabled = !ready;
+    $("volume-recovery").hidden = gain.status !== "UNKNOWN";
+    $("volume-zero").disabled = gain.status !== "UNKNOWN" || !control.canMutate("volume");
     const gainKnown = gain.status === "CONFIRMED" && gain.volume !== null && gain.mute !== null;
     text("volume-current", gainKnown ? `${gain.volume}%${gain.mute ? " · muted" : ""}${control.fresh ? "" : " · stale"}` : gain.status);
     if (!working("volume") && gainKnown) $("volume").value = String(gain.volume);
@@ -300,7 +302,6 @@
   ["playlist-close", "playlist-cancel"].forEach(id => $(id).addEventListener("click", closePlaylist));
   // Native close events are queued: an old event must not erase a reopened draft.
   $("playlist-dialog").addEventListener("close", () => { if (!$("playlist-dialog").open) clearPlaylist(); });
-  window.addEventListener("pagehide", closePlaylist); // Scrub input before back/forward caching.
   $("playlist-dialog").addEventListener("cancel", event => { event.preventDefault(); closePlaylist(); });
   $("playlist-format").addEventListener("change", () => {
     if (!playlistDraft || playlistDraft.sent || playlistDraft.stale || playlistDraft.action !== "playlist_replace") return;
@@ -369,6 +370,10 @@
   function command(action, values = {}) { return guardedAction(snapshot, action, values); }
   ["play", "pause", "stop", "next", "previous"].forEach(action => $(action).addEventListener("click", () => run(command(action), action[0].toUpperCase() + action.slice(1))));
   $("mute").addEventListener("click", () => run(command("mute", {value: !snapshot.gain.mute}), snapshot.gain.mute ? "Unmute" : "Mute"));
+  $("volume-zero").addEventListener("click", () => {
+    if (snapshot?.gain.status !== "UNKNOWN" || !control.canMutate("volume")) return;
+    return run(command("volume", {value: 0}), "Set volume to 0");
+  });
   $("eq").addEventListener("click", () => run(command("eq", {enabled: !snapshot.dsp.eq_enabled}), snapshot.dsp.eq_enabled ? "Bypass EQ" : "Enable EQ"));
   const inputLabel = {seek: value => formatTime(Number(value)), volume: value => value, balance: value => balanceLabel(Number(value))};
   ["seek", "volume", "mode", "balance"].forEach(key => {
@@ -412,7 +417,7 @@
     $("favorite-form").reset();
     $("favorite-url").value = "";
     $("favorite-name").value = "";
-    text("favorite-dialog-status", "");
+    text("favorite-delete-name", ""); text("favorite-dialog-status", "");
   }
   function closeFavorite() { $("favorite-dialog").close(); clearFavoriteForm(); }
   // Closing the dialog clears local input only. An in-flight command continues
@@ -490,7 +495,7 @@
     $("dsp-preset-submit").classList.toggle("destructive", mode === "delete");
     renderSoundEditor(); $("dsp-dialog").showModal(); (mode === "delete" ? $("dsp-cancel") : $("dsp-name")).focus();
   }
-  function clearPresetForm() { presetContext = null; $("dsp-name").value = ""; $("dsp-shared-confirm").checked = false; text("dsp-dialog-status", ""); }
+  function clearPresetForm() { presetContext = null; $("dsp-name").value = ""; $("dsp-shared-confirm").checked = false; text("dsp-preset-name", ""); text("dsp-dialog-status", ""); }
   function closePreset() { $("dsp-dialog").close(); clearPresetForm(); }
   ["save", "rename", "delete"].forEach(mode => $("dsp-" + mode).addEventListener("click", () => openPreset(mode)));
   ["dsp-close", "dsp-cancel"].forEach(id => $(id).addEventListener("click", closePreset));
@@ -527,6 +532,9 @@
   async function poll() { const run = ++pollRun; window.clearTimeout(pollTimer); await control.refresh(); if (run === pollRun) pollTimer = window.setTimeout(poll, document.hidden ? 10000 : 2000); }
   $("refresh").addEventListener("click", () => { poll(); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+  // Scrub private dialog input before navigation/BFCache, even if already closed.
+  // Only local drafts are dismissed; sent commands and their outcomes stay live.
+  window.addEventListener("pagehide", () => { closePlaylist(); closeFavorite(); closePreset(); });
   window.addEventListener("online", () => poll());
   window.addEventListener("offline", () => { control.fresh = false; control.favoritesFresh = false; render(); });
   poll();

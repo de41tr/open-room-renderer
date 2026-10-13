@@ -154,7 +154,7 @@ async function appHarness() {
   let current = state(), library = favorites([favorite()]), revision = 0, postHook = null;
   const requests = [], events = new Map(), timers = new Map(); let timerId = 0;
   class Element {
-    constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attributes = {}; this.listeners = new Map(); this.textContent = ''; this.value = ''; this.hidden = false; this.disabled = false; this.classList = {toggle() {}}; this.open = false; }
+    constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attributes = {}; this.listeners = new Map(); this.textContent = ''; this.value = ''; this.hidden = false; this.disabled = false; this.checked = false; this.classList = {toggle() {}}; this.open = false; }
     get value() {return this._value || '';}
     set value(value) {this._value = value; if (this.type === 'file' && value === '') this.files = [];}
     setAttribute(key, value) {this.attributes[key] = value; if (key === 'src') this.src = value;}
@@ -190,7 +190,7 @@ async function appHarness() {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/app.js'), 'utf8'), {window, document, fetch, AbortController, TextEncoder, TextDecoder, Uint8Array, URL, Date, console});
   async function settle() {for (let i = 0; i < 10; i += 1) await tick();}
   await settle();
-  return {ids, timers, requests, pagehide: () => events.get('pagehide')?.(), setState: value => {current = value;}, setFavorites: value => {library = value;}, setPost: fn => {postHook = fn;}, settle, refresh: async () => {await ids.get('refresh').fire('click'); await settle();}, posts: () => requests.filter(item => item.options.method === 'POST').map(item => JSON.parse(item.options.body))};
+  return {ids, timers, requests, pagehide: (persisted = true) => events.get('pagehide')?.({type: 'pagehide', persisted}), pageshow: () => events.get('pageshow')?.({type: 'pageshow', persisted: true}), setState: value => {current = value;}, setFavorites: value => {library = value;}, setPost: fn => {postHook = fn;}, settle, refresh: async () => {await ids.get('refresh').fire('click'); await settle();}, posts: () => requests.filter(item => item.options.method === 'POST').map(item => JSON.parse(item.options.body))};
 }
 test('app renders metadata as text, and polling preserves favorite form edits', async () => {
   const h = await appHarness();
@@ -667,4 +667,222 @@ test('a delayed preset close event cannot clear a reopened preset draft', async 
   await h.ids.get('dsp-preset-form').fire('submit');
   assert.equal(h.posts().length, 1);
   assert.equal(h.posts()[0].name, 'New');
+});
+
+
+/* Synthetic page lifecycle events retain this document/JS instance. They check
+ * cleanup and late continuations, not actual browser BFCache eligibility. */
+const privateDialogs = [
+  {dialog: 'favorite-dialog', open: 'add-favorite', form: 'favorite-form', name: 'favorite-name', status: 'favorite-dialog-status', action: 'favorite_add'},
+  {dialog: 'dsp-dialog', open: 'dsp-save', form: 'dsp-preset-form', name: 'dsp-name', status: 'dsp-dialog-status', action: 'dsp_preset_save'},
+  {dialog: 'playlist-dialog', open: 'playlist-add', form: 'playlist-form', name: 'playlist-name', status: 'playlist-dialog-status', action: 'playlist_append'}
+];
+async function privateDraft(h, kind, name) {
+  await h.ids.get(kind.open).fire('click'); h.ids.get(kind.name).value = name;
+  if (kind.action === 'favorite_add') h.ids.get('favorite-url').value = 'https://example.test/audio?signature=' + name;
+  if (kind.action === 'playlist_append') await sourceURLs(h, 'https://example.test/audio?signature=' + name);
+}
+function assertPrivateDialogsCleared(h) {
+  for (const kind of privateDialogs) {
+    assert.equal(h.ids.get(kind.dialog).open, false, kind.dialog);
+    assert.equal(h.ids.get(kind.name).value, '', kind.name);
+    assert.equal(h.ids.get(kind.status).textContent, '', kind.status);
+  }
+  for (const id of ['favorite-url', 'playlist-urls', 'playlist-file']) assert.equal(h.ids.get(id).value, '', id);
+  for (const id of ['favorite-delete-name', 'dsp-preset-name', 'playlist-preview', 'playlist-size']) assert.equal(h.ids.get(id).textContent, '', id);
+  for (const id of ['dsp-shared-confirm', 'playlist-confirm']) assert.equal(h.ids.get(id).checked, false, id);
+  assert.equal(h.ids.get('playlist-file').files.length, 0);
+}
+test('pagehide immediately scrubs every private dialog even when closed or awaiting queued close, and restoration cannot submit old intent', async () => {
+  for (const persisted of [false, true]) for (const closed of [false, true]) {
+    const h = await appHarness();
+    for (const kind of privateDialogs) {
+      // Native close is asynchronous and is a no-op on an already closed dialog.
+      h.ids.get(kind.dialog).close = function () {this.open = false;};
+      await privateDraft(h, kind, 'private-draft');
+      h.ids.get(kind.dialog).open = !closed;
+    }
+    h.ids.get('favorite-delete-name').textContent = 'Private favorite';
+    h.ids.get('dsp-preset-name').textContent = 'Private preset';
+    h.ids.get('dsp-shared-confirm').checked = true; h.ids.get('playlist-confirm').checked = true;
+    h.ids.get('playlist-file').files = [localFile('private file')]; h.ids.get('playlist-file').value = 'C:\\fakepath\\private.json';
+    const before = h.requests.length;
+    h.pagehide(persisted); assertPrivateDialogsCleared(h); assert.equal(h.requests.length, before);
+    h.pageshow(); await h.refresh(); assertPrivateDialogsCleared(h);
+    assert.equal(h.ids.get('track-title').textContent, state().media.title);
+    assert.equal(h.ids.get('playback-state').textContent, 'STOPPED'); assert.equal(h.ids.get('volume-current').textContent, '20%');
+    for (const kind of privateDialogs) {
+      // Even if autofill/new typing restores values, dismissed context is gone.
+      h.ids.get(kind.name).value = 'replacement-text';
+      h.ids.get('favorite-url').value = 'https://example.test/new';
+      await h.ids.get(kind.form).fire('submit');
+    }
+    assert.equal(h.posts().length, 0);
+  }
+});
+test('navigation preserves sent commands and late UNKNOWN outcomes without repopulating cleared dialogs or retrying', async () => {
+  for (const kind of privateDialogs) {
+    const h = await appHarness(), pending = deferred(); h.setPost(() => pending.promise);
+    await privateDraft(h, kind, 'private-draft');
+    const saving = h.ids.get(kind.form).fire('submit'); await h.settle();
+    const sent = h.requests.find(request => request.options.method === 'POST');
+    assert.equal(h.posts().length, 1); assert.equal(h.ids.get('notice-kind').textContent, 'PENDING');
+    h.pagehide(); h.pageshow(); assertPrivateDialogsCleared(h);
+    assert.equal(sent.options.signal.aborted, false); assert.equal(h.ids.get('notice-kind').textContent, 'PENDING');
+    assert.equal(h.ids.get('stop').disabled, false);
+    await h.ids.get(kind.form).fire('submit'); assert.equal(h.posts().length, 1);
+    pending.reject(new Error('lost private-draft')); await saving; await h.refresh();
+    assertPrivateDialogsCleared(h); assert.equal(h.posts().length, 1);
+    assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN'); assert.match(h.ids.get('notice-text').textContent, /No retry was sent/);
+    assert.doesNotMatch(h.ids.get('notice-text').textContent, /private-draft/);
+    h.pagehide(); h.pageshow(); await h.refresh(); assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN');
+  }
+});
+test('late responses after navigation preserve a newer Stop outcome and queued close cannot wipe a later reopened draft', async () => {
+  for (const kind of privateDialogs) for (const lost of [false, true]) {
+    const h = await appHarness(), pending = deferred(), dialog = h.ids.get(kind.dialog);
+    dialog.close = () => {dialog.open = false;};
+    h.setPost(body => body.action === kind.action ? pending.promise : {request_acknowledged: true});
+    await privateDraft(h, kind, 'old'); const saving = h.ids.get(kind.form).fire('submit'); await h.settle();
+    h.pagehide(); h.pageshow(); assertPrivateDialogsCleared(h);
+    await h.ids.get('stop').fire('click');
+    assert.equal(h.ids.get(kind.open).disabled, true); // The earlier request is still in flight.
+    if (lost) pending.reject(new Error('lost')); else pending.resolve({request_acknowledged: true});
+    await saving; await h.refresh(); assertPrivateDialogsCleared(h);
+    await privateDraft(h, kind, 'new'); const status = h.ids.get(kind.status).textContent;
+    await dialog.fire('close'); await h.refresh();
+    assert.equal(dialog.open, true); assert.equal(h.ids.get(kind.name).value, 'new'); assert.equal(h.ids.get(kind.status).textContent, status);
+    if (kind.action === 'favorite_add') assert.equal(h.ids.get('favorite-url').value, 'https://example.test/audio?signature=new');
+    if (kind.action === 'playlist_append') assert.equal(h.ids.get('playlist-urls').value, 'https://example.test/audio?signature=new');
+    assert.deepEqual(h.posts().map(body => body.action), [kind.action, 'stop']);
+    assert.match(h.ids.get('notice-text').textContent, /^Stop:/);
+    if (lost) assert.match(h.ids.get('notice-text').textContent, /Earlier request outcome unknown/);
+  }
+});
+test('late file read after navigation cannot restore cached input or replace a reopened playlist draft', async () => {
+  for (const reopen of [false, true]) {
+    const h = await appHarness(), late = deferred(); await h.ids.get('playlist-load').fire('click');
+    const reading = chooseFile(h, {name: 'private.json', size: 3, arrayBuffer: () => late.promise}); await h.settle();
+    h.pagehide(); h.pageshow(); assertPrivateDialogsCleared(h);
+    if (reopen) {await h.ids.get('playlist-add').fire('click'); await sourceURLs(h, 'https://example.test/new');}
+    late.resolve(new TextEncoder().encode('old').buffer); await reading; await h.refresh();
+    if (reopen) {assert.equal(h.ids.get('playlist-dialog').open, true); assert.equal(h.ids.get('playlist-urls').value, 'https://example.test/new');}
+    else assertPrivateDialogsCleared(h);
+    assert.equal(h.posts().length, 0);
+  }
+});
+
+const unknownGain = (changes = {}) => state({gain: {status: 'UNKNOWN', volume: null, mute: null, last_confirmed: null}, ...changes});
+const zeroGain = (changes = {}) => state({gain: {status: 'CONFIRMED', volume: 0, mute: false, last_confirmed: {volume: 0, mute: false}}, ...changes});
+test('failed gain followed by Stop offers explicit zero recovery without changing Play', async () => {
+  const h = await appHarness();
+  h.ids.get('volume').value = '35'; await h.ids.get('volume').fire('input');
+  h.setPost(body => {
+    if (body.action === 'volume') {
+      h.setState(unknownGain({transport: {phase: 'ERROR', intent: 'stop', status: 'ERROR', message: 'Gain confirmation failed; actual output unknown'}}));
+      return {__status: 502, outcome: 'UNKNOWN', message: 'Gain confirmation failed'};
+    }
+    h.setState(unknownGain()); return {request_acknowledged: true};
+  });
+  await h.ids.get('volume-form').fire('submit');
+  assert.equal(h.ids.get('volume-current').textContent, 'UNKNOWN');
+  assert.equal(h.ids.get('volume').hidden, true); assert.equal(h.ids.get('mute').disabled, true);
+  await h.ids.get('stop').fire('click');
+  assert.equal(h.ids.get('playback-state').textContent, 'STOPPED');
+  assert.equal(h.ids.get('play').disabled, false); assert.equal(h.ids.get('volume-zero').disabled, false);
+  assert.equal(h.ids.get('volume-recovery').hidden, false);
+  h.setPost(body => {assert.deepEqual(body, {action: 'volume', value: 0}); h.setState(zeroGain()); return {request_acknowledged: true};});
+  await h.ids.get('volume-zero').fire('click');
+  assert.deepEqual(h.posts(), [{action: 'volume', value: 35}, {action: 'stop'}, {action: 'volume', value: 0}]);
+  assert.equal(h.ids.get('playback-state').textContent, 'STOPPED'); assert.equal(h.ids.get('play').disabled, false);
+  assert.equal(h.ids.get('volume-current').textContent, '0%'); assert.equal(h.ids.get('volume').hidden, false);
+  assert.equal(h.ids.get('volume-recovery').hidden, true); assert.equal(h.ids.get('mute').disabled, false);
+  assert.match(h.ids.get('notice-text').textContent, /Earlier request outcome unknown/);
+});
+test('zero recovery has no optimistic gain, suppresses pending clicks, and keeps Stop available', async () => {
+  const h = await appHarness(), pending = deferred(); h.setState(unknownGain()); await h.refresh();
+  h.setPost(body => body.action === 'volume' ? pending.promise : {request_acknowledged: true});
+  const applying = h.ids.get('volume-zero').fire('click'); await h.settle();
+  assert.equal(h.ids.get('volume-current').textContent, 'UNKNOWN'); assert.equal(h.ids.get('volume').hidden, true);
+  assert.equal(h.ids.get('volume-zero').disabled, true); assert.equal(h.ids.get('stop').disabled, false);
+  assert.equal(h.ids.get('notice-kind').textContent, 'PENDING');
+  await h.ids.get('volume-zero').fire('click'); assert.deepEqual(h.posts(), [{action: 'volume', value: 0}]);
+  await h.ids.get('stop').fire('click');
+  pending.resolve({request_acknowledged: true}); await applying;
+  assert.deepEqual(h.posts(), [{action: 'volume', value: 0}, {action: 'stop'}]);
+  assert.match(h.ids.get('notice-text').textContent, /^Stop:/);
+  assert.equal(h.ids.get('volume-current').textContent, 'UNKNOWN'); assert.equal(h.ids.get('volume-zero').disabled, false);
+  await h.refresh(); assert.equal(h.posts().length, 2);
+});
+test('zero recovery UNKNOWN or rejected outcomes stay honest and never retry during polls', async () => {
+  for (const outcome of ['lost', 'UNKNOWN', 'REJECTED']) {
+    const h = await appHarness(); h.setState(unknownGain()); await h.refresh();
+    h.setPost(() => {if (outcome === 'lost') throw new Error('lost response'); return {__status: outcome === 'UNKNOWN' ? 502 : 409, outcome, message: 'Request could not be confirmed'};});
+    await h.ids.get('volume-zero').fire('click'); await h.refresh(); await h.refresh();
+    assert.deepEqual(h.posts(), [{action: 'volume', value: 0}]);
+    assert.equal(h.ids.get('volume-current').textContent, 'UNKNOWN'); assert.equal(h.ids.get('mute').disabled, true);
+    assert.equal(h.ids.get('notice-kind').textContent, outcome === 'REJECTED' ? 'ERROR' : 'UNKNOWN');
+    assert.equal(h.ids.get('volume-zero').disabled, false);
+    // A fresh explicit idempotent recovery remains possible; polling never sends it.
+    await h.ids.get('volume-zero').fire('click'); assert.equal(h.posts().length, 2);
+  }
+});
+test('zero acknowledgement cannot fabricate readback or enable recovery for PENDING gain', async () => {
+  const h = await appHarness(); h.setState(unknownGain()); await h.refresh();
+  h.setPost(() => {h.setState(state({gain: {status: 'PENDING', volume: null, mute: null, last_confirmed: null}})); return {request_acknowledged: true};});
+  await h.ids.get('volume-zero').fire('click');
+  assert.equal(h.ids.get('volume-current').textContent, 'PENDING'); assert.equal(h.ids.get('volume').hidden, true);
+  assert.equal(h.ids.get('volume-recovery').hidden, true); assert.equal(h.ids.get('volume-zero').disabled, true);
+  await h.ids.get('volume-zero').fire('click'); assert.equal(h.posts().length, 1);
+  h.setState(unknownGain()); await h.refresh();
+  assert.equal(h.ids.get('volume-recovery').hidden, false); assert.equal(h.ids.get('volume-zero').disabled, false);
+  assert.equal(h.posts().length, 1);
+  h.setState(zeroGain()); await h.refresh();
+  assert.equal(h.ids.get('volume-current').textContent, '0%'); assert.equal(h.ids.get('volume-recovery').hidden, true);
+  await h.ids.get('volume-zero').fire('click'); assert.equal(h.posts().length, 1);
+});
+test('zero recovery refuses stale state and uses the reconnected session token', async () => {
+  const h = await appHarness(); h.setState(unknownGain()); await h.refresh();
+  h.setState({}); await h.refresh();
+  assert.equal(h.ids.get('volume-zero').disabled, true); assert.equal(h.ids.get('stop').disabled, false);
+  await h.ids.get('volume-zero').fire('click'); assert.equal(h.posts().length, 0);
+  h.setState(unknownGain({session_id: 'session-two', csrf_token: 'new-token'})); await h.refresh();
+  assert.equal(h.ids.get('volume-zero').disabled, false); await h.ids.get('volume-zero').fire('click');
+  assert.deepEqual(h.posts(), [{action: 'volume', value: 0}]);
+  assert.equal(h.requests.find(item => item.options.method === 'POST').options.headers['X-ORR-CSRF'], 'new-token');
+});
+test('late zero responses cannot overwrite new-session gain or erase an unknown outcome', async () => {
+  for (const outcome of ['acknowledged', 'lost']) {
+    const h = await appHarness(), pending = deferred(); h.setState(unknownGain()); await h.refresh();
+    h.setPost(() => pending.promise); const applying = h.ids.get('volume-zero').fire('click'); await h.settle();
+    h.setState(state({session_id: 'session-two', csrf_token: 'new-token'})); await h.refresh();
+    if (outcome === 'lost') pending.reject(new Error('lost old-session response'));
+    else pending.resolve({request_acknowledged: true});
+    await applying; await h.refresh();
+    assert.equal(h.ids.get('volume-current').textContent, '20%'); assert.equal(h.ids.get('volume').value, '20');
+    assert.equal(h.ids.get('volume-recovery').hidden, true); assert.equal(h.ids.get('volume-zero').disabled, true);
+    assert.deepEqual(h.posts(), [{action: 'volume', value: 0}]);
+    if (outcome === 'lost') assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN');
+  }
+});
+test('zero recovery preserves ordinary volume drafts without implicitly sending them', async () => {
+  const h = await appHarness(), slider = h.ids.get('volume'); slider.value = '42'; await slider.fire('input');
+  h.setState(unknownGain()); await h.refresh();
+  assert.equal(slider.value, '42'); assert.equal(h.ids.get('volume-draft').hidden, false);
+  h.setPost(() => {h.setState(zeroGain()); return {request_acknowledged: true};});
+  await h.ids.get('volume-zero').fire('click'); await h.refresh();
+  assert.deepEqual(h.posts(), [{action: 'volume', value: 0}]);
+  assert.equal(slider.value, '42'); assert.equal(h.ids.get('volume-target').textContent, '42');
+  assert.equal(h.ids.get('volume-draft').hidden, false); assert.equal(h.ids.get('volume-current').textContent, '0%');
+  assert.equal(h.ids.get('playback-state').textContent, 'STOPPED');
+});
+
+test('lost zero response stays UNKNOWN even when fresh canonical gain later confirms zero', async () => {
+  const h = await appHarness(); h.setState(unknownGain()); await h.refresh();
+  h.setPost(() => {h.setState(zeroGain()); throw new Error('response lost after application');});
+  await h.ids.get('volume-zero').fire('click'); await h.refresh();
+  assert.deepEqual(h.posts(), [{action: 'volume', value: 0}]);
+  assert.equal(h.ids.get('volume-current').textContent, '0%'); assert.equal(h.ids.get('volume-recovery').hidden, true);
+  assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN'); assert.match(h.ids.get('notice-text').textContent, /outcome unknown/);
+  assert.equal(h.ids.get('playback-state').textContent, 'STOPPED');
 });
