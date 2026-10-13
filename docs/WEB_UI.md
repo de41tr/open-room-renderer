@@ -296,6 +296,24 @@ Favorites and M3U export are not included. Export neither stops playback nor
 fetches media. Close/Cancel/Escape/navigation discards private browser references;
 it cannot retract an already downloaded file. See [the private export contract](WEB_PLAYLIST_EXPORT.md).
 
+## Move one saved DSP curve between rooms
+
+In Sound, select a saved preset and choose **Export this context’s curve**.
+Review the redacted scope/size summary, consent to the private name and plugin
+contents, prepare the file, then click **Download JSON**. A shared preset exports
+only its current-plugin curve. Rename an unsafe legacy name explicitly first.
+
+In the other room, choose **Import saved curve**, select the file and consent
+to sending it to that renderer. Its existing name must be new and Web-safe, and
+its plugin must exactly match the current context. Import writes only the saved
+library; active sound remains unchanged. Select and **Load** separately to apply
+it. There is no automatic rename, overwrite, remapping or retry.
+
+The complete escaped import request remains limited to 32,768 bytes and the
+saved library to 1 MiB. Stale sessions, unavailable storage and malformed files
+fail closed. See [the exact saved-curve transfer contract](WEB_DSP_CURVE_TRANSFER.md)
+for scope, privacy, limits and durability uncertainty.
+
 ## Browser security and privacy scope
 
 New `/orr/v1/web/*` mutations require the exact admitted Host/listener port,

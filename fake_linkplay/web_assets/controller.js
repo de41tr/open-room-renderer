@@ -16,7 +16,7 @@
   const DSP_MODES = Object.freeze({"-1": "Bypass band", "0": "Low shelf", "1": "Peak", "2": "High shelf", "3": "Low pass", "5": "High pass"});
   const DSP_FIELDS = Object.freeze({freq: {label: "Frequency (Hz)", min: 10, max: 24000}, gain: {label: "Gain (dB)", min: -24, max: 24}, q: {label: "Q", min: 0.1, max: 30}, mode: {label: "Filter"}});
   const DSP_KEYS = Object.freeze(Array.from("abcdefghij", band => Object.keys(DSP_FIELDS).map(field => `${band}_${field}`)).flat());
-  const DSP_LIBRARY_ACTIONS = Object.freeze(["dsp_preset_save", "dsp_preset_rename", "dsp_preset_delete"]);
+  const DSP_LIBRARY_ACTIONS = Object.freeze(["dsp_preset_save", "dsp_preset_rename", "dsp_preset_delete", "dsp_preset_import"]);
   const DSP_LIBRARY_UNAVAILABLE_MESSAGE = "Saved EQ presets could not be loaded. Stop the renderer service, repair or restore its saved EQ preset library, then restart it.";
   const opaqueID = value => string(value) && /^[a-f0-9]{64}$/.test(value);
   function validBandValue(key, value) {
@@ -110,7 +110,7 @@
     }
     return "Could not prepare the private export. Close this dialog and review current state before trying again. No download was started.";
   }
-  async function readExportResponse(response, signal, expectedSize) {
+  async function readExportResponse(response, signal, expectedSize, filename = EXPORT_FILENAME) {
     let reader = null, complete = false, onAbort;
     const aborted = new Promise((_, reject) => {
       onAbort = () => reject(new Error("Export cancelled"));
@@ -123,7 +123,7 @@
       if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(type) || !/^(0|[1-9][0-9]*)$/.test(length || "")) throw new Error("Invalid export response");
       const size = Number(length);
       if (!integer(size) || size < 1 || size > MAX_REQUEST_BYTES) throw new Error("Invalid export size");
-      if (response.status === 200 && expectedSize !== undefined && (size !== expectedSize || response.headers.get("Content-Disposition") !== `attachment; filename="${EXPORT_FILENAME}"`)) throw new Error("Invalid export attachment");
+      if (response.status === 200 && expectedSize !== undefined && (size !== expectedSize || response.headers.get("Content-Disposition") !== `attachment; filename="${filename}"`)) throw new Error("Invalid export attachment");
       reader = response.body.getReader();
       let total = 0;
       while (true) {
@@ -147,6 +147,95 @@
         else if (response.body) response.body.cancel().catch(() => {});
       }
       chunks.length = 0;
+    }
+  }
+  const CURVE_EXPORT_FILENAME = "open-room-renderer-eq-curve.json";
+  const CURVE_TRANSFER_CHANGED = "Sound settings, saved presets or renderer availability changed. Close this dialog and review current state before starting again.";
+  function curveImportBody(revision, source) {
+    return {action: "dsp_preset_import", expected_dsp: revision, text: source, private_import_confirmed: true};
+  }
+  function validateCurveExportSummary(value, revision, preset) {
+    if (!exactFields(value, ["version", "dsp_revision", "preset_id", "revision", "size_bytes", "filename", "scope", "shared", "band_count"]) || value.version !== 1 || value.dsp_revision !== revision || value.preset_id !== preset.id || !opaqueID(value.revision) || !integer(value.size_bytes) || value.size_bytes < 1 || value.size_bytes > MAX_REQUEST_BYTES || value.filename !== CURVE_EXPORT_FILENAME || value.scope !== "current_plugin" || value.shared !== preset.shared || value.band_count !== 40) throw new Error("Invalid saved curve summary");
+    return value;
+  }
+  function validateCurveDocument(bytes) {
+    if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > MAX_REQUEST_BYTES) throw new Error("Invalid saved curve file");
+    const source = new TextDecoder("utf-8", {fatal: true, ignoreBOM: true}).decode(bytes);
+    const value = JSON.parse(source);
+    // JSON.parse validates syntax; these per-object key sets also reject
+    // duplicate keys, including escaped spellings, before trusting a preview.
+    // Bound nesting independently of JSON.parse and never project private text.
+    const tokens = source.match(/"(?:\\.|[^"\\])*"|[{}\[\],:]|[^ \t\r\n{}\[\],:]+/g), stack = [];
+    tokens.forEach((token, index) => {
+      if (token === "{") stack.push(new Set());
+      else if (token === "[") stack.push(null);
+      else if (token === "}" || token === "]") stack.pop();
+      else if (tokens[index + 1] === ":") {
+        const key = JSON.parse(token), keys = stack[stack.length - 1];
+        if (!keys || keys.has(key)) throw new Error("Invalid saved curve file");
+        keys.add(key);
+        if (stack.length === 1 && key === "version" && tokens[index + 2] !== "1") throw new Error("Invalid saved curve version");
+      }
+      if (stack.length > 5) throw new Error("Invalid saved curve nesting");
+    });
+    if (!exactFields(value, ["version", "presets"]) || value.version !== 1 || !isObject(value.presets) || Object.keys(value.presets).length !== 1) throw new Error("Invalid saved curve file");
+    const name = Object.keys(value.presets)[0], plugins = value.presets[name];
+    const validText = (item, limit) => string(item) && Boolean(item.trim()) && !/[\x00-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]/u.test(item) && new TextEncoder().encode(item).length <= limit;
+    if (!validText(name, 256) || !isObject(plugins) || Object.keys(plugins).length !== 1) throw new Error("Invalid saved curve file");
+    const plugin = Object.keys(plugins)[0], bands = plugins[plugin], keys = new Set();
+    if (!validText(plugin, 8192) || !Array.isArray(bands) || bands.length !== 40) throw new Error("Invalid saved curve file");
+    bands.forEach(band => {
+      if (!exactFields(band, ["param_name", "value"]) || !DSP_KEYS.includes(band.param_name) || keys.has(band.param_name) || !validBandValue(band.param_name, band.value)) throw new Error("Invalid saved curve file");
+      keys.add(band.param_name);
+    });
+    // The renderer alone authorizes the literal name and exact current plugin.
+    // Preserve original source bytes; do not rename, remap, normalize or apply.
+    return source;
+  }
+  function validateCurveExportDocument(bytes, summary) {
+    const source = validateCurveDocument(bytes);
+    if (bytes.length !== summary.size_bytes || requestBytes(curveImportBody(summary.dsp_revision, source)) > MAX_REQUEST_BYTES) throw new Error("Invalid saved curve attachment");
+    return bytes;
+  }
+  function curveTransferFailure(code) {
+    const messages = {
+      curve_export_unavailable: "This saved curve cannot be exported here. An unsupported or private legacy name may need renaming first. Review the saved preset before starting again.",
+      curve_context_mismatch: "The file does not match the current sound context. No plugin remapping is performed.",
+      preset_conflict: "That preset name is already in use. Import cannot overwrite or rename an existing preset.",
+      preset_library_unavailable: DSP_LIBRARY_UNAVAILABLE_MESSAGE,
+      curve_library_full: "The saved preset library cannot fit this curve. Review the library before another import.",
+      stale_dsp: CURVE_TRANSFER_CHANGED
+    };
+    return Object.hasOwn(messages, code) ? messages[code] : "The saved curve request was rejected. Review the file and current saved presets before starting again.";
+  }
+  class CurveImportDraft {
+    constructor(state) {
+      this.session = state.session_id; this.revision = state.dsp.editor.revision;
+      this.serial = 0; this.text = ""; this.size = 0; this.reading = false; this.error = "";
+      this.sent = false; this.stale = false; this.cancelled = false; this.status = "";
+    }
+    clearSource() { this.serial += 1; this.text = ""; this.size = 0; this.reading = false; this.error = ""; }
+    cancel() { this.clearSource(); this.cancelled = true; }
+    async readFile(file) {
+      if (this.sent || this.stale || this.cancelled) return;
+      this.clearSource(); const serial = this.serial; this.reading = true;
+      let bytes;
+      try {
+        if (!file || !integer(file.size) || !file.size || file.size > MAX_REQUEST_BYTES) throw new Error();
+        const size = file.size, reading = file.arrayBuffer(); file = null;
+        const buffer = await reading;
+        bytes = new Uint8Array(buffer);
+        if (this.serial !== serial || this.cancelled) return;
+        if (bytes.length !== size) throw new Error();
+        const source = validateCurveDocument(bytes);
+        if (requestBytes(curveImportBody(this.revision, source)) > MAX_REQUEST_BYTES) throw new Error();
+        this.text = source; this.size = size;
+      } catch (_) {
+        if (this.serial === serial && !this.cancelled) this.error = "Choose a UTF-8 v1 JSON file containing one named curve, one plugin and all 40 band parameters. The complete escaped request must fit 32,768 bytes.";
+      } finally {
+        if (bytes) bytes.fill(0);
+        if (this.serial === serial && !this.cancelled) this.reading = false;
+      }
     }
   }
   function playlistAvailable(state, action) {
@@ -426,12 +515,26 @@
         const response = await this.request("/orr/v1/web/command", {method: "POST", headers: {"X-ORR-CSRF": this.state.csrf_token}, body});
         if (response.status === 200 && isObject(response.body) && response.body.request_acknowledged === true) result = {kind: "acknowledged", text: `${label}: request acknowledged. Reading the current state…`, id, favoriteId: response.body.favorite_id || null, deviceRevision: response.body.device_revision};
         else result = {...commandError(response), id};
+        if (body.action === "dsp_preset_import" && result.kind === "unknown" && response.status === 502 && response.body?.error === "command_failed" && response.body.outcome === "UNKNOWN" && response.body.effect === "LIBRARY_COMMITTED_DURABILITY_UNKNOWN") {
+          result.curveLibraryDurabilityUnknown = true; result.committed = true;
+        }
       } catch (_) {
         result = {kind: "unknown", text: `${label}: outcome unknown because the response was lost. The command may have taken effect. No retry was sent.`, id};
       }
       if (body.action.startsWith("playlist_") && result.kind !== "acknowledged") {
         // Never echo a server error that could contain private source text.
         result.text = result.kind === "error" ? "Playlist request rejected. Review the source, current queue and stopped state before starting again." : "Playlist request outcome unknown. It may have taken effect. Check the current queue before starting again. No retry was sent.";
+      }
+      if (body.action === "dsp_preset_import") {
+        // Import errors must never disclose a local filename, name, plugin or
+        // file content. An ACK is distinct from durable saved-library readback.
+        result.text = result.kind === "acknowledged"
+          ? "Saved curve import acknowledged. Review the saved presets; loading is a separate action."
+          : result.kind === "error"
+            ? curveTransferFailure(result.code)
+            : result.curveLibraryDurabilityUnknown
+              ? "The saved preset library was replaced, but disk durability is unconfirmed. Matching readback cannot confirm durability. No retry was sent."
+              : "Saved curve import outcome unknown. The library may have changed. Review saved presets before another import. No retry was sent.";
       }
       if (body.action === "favorite_target") {
         // The redacted library cannot verify the exact URL, even with a fresh
@@ -455,7 +558,7 @@
       }
       this.active.delete(id);
       this.fresh = false;
-      if (result.kind === "unknown") this.unknownOutcomes = this.unknownOutcomes.concat({id, label: body.action === "device_rename" ? "Rename room (persistence/discovery unconfirmed)" : label, committed: result.committed === true}).slice(-20);
+      if (result.kind === "unknown") this.unknownOutcomes = this.unknownOutcomes.concat({id, label: body.action === "device_rename" ? "Rename room (persistence/discovery unconfirmed)" : result.curveLibraryDurabilityUnknown ? "Import saved EQ curve (library replaced; durability unconfirmed)" : label, committed: result.committed === true}).slice(-20);
       if (id === this.operation) this.notice = {...result, kind: result.kind === "acknowledged" ? "pending" : result.kind};
       this.changed();
       await this.refresh();
@@ -487,5 +590,5 @@
       return result;
     }
   }
-  return {OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
+  return {CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveDocument, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
 });

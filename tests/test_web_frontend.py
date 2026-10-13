@@ -65,5 +65,5 @@ def test_web_frontend_control_flow_node():
     version = subprocess.run([node, "--version"], check=True, capture_output=True, text=True).stdout
     if int(re.match(r"v(\d+)", version).group(1)) < 18:
         pytest.skip("Optional Node 18+ is required for dependency-free UI unit tests")
-    result = subprocess.run([node, "--test", str(ROOT / "tests" / "web_frontend.test.cjs")], capture_output=True, text=True, timeout=60)
+    result = subprocess.run([node, "--test", str(ROOT / "tests" / "web_frontend.test.cjs"), str(ROOT / "tests" / "web_curve_transfer.test.cjs")], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr

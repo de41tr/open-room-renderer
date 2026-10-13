@@ -21,3 +21,6 @@
 #rename-room{margin-top:8px}#room-dialog{max-height:calc(100dvh - 36px);overflow:auto}#room-dialog .dialog-actions{flex-wrap:wrap}
 
 .output-inspection-card .section-heading{flex-wrap:wrap}.output-inspection-card li+li{margin-top:7px}.output-inspection-card ul{padding-left:19px}.output-inspection-card #dismiss-output-inspection{margin-top:10px}
+
+/* Saved curve transfers share the existing scrollable, privacy-scoped dialogs. */
+#curve-export-dialog,#curve-import-dialog{max-width:560px;max-height:calc(100dvh - 36px);overflow:auto}#curve-export-dialog .dialog-actions,#curve-import-dialog .dialog-actions{flex-wrap:wrap}#curve-export-download{display:inline-flex;align-items:center;text-decoration:none}#curve-export-summary:empty,#curve-import-summary:empty{display:none}#curve-import-file{width:100%;min-height:42px;border:1px solid #d8dfd1;border-radius:8px;padding:9px 11px;background:var(--paper);color:var(--ink);font-size:12px;overflow:hidden}.curve-transfer-actions .button{text-align:left}@media(max-width:430px){#curve-export-dialog,#curve-import-dialog{padding:19px}}

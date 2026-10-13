@@ -1,13 +1,13 @@
 /* Same-origin UI. Canonical snapshots are the only source of displayed state. */
 (function () {
   "use strict";
-  const {OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
+  const {CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
   const $ = id => document.getElementById(id);
   const drafts = {seek: false, volume: false, mode: false, balance: false};
   let snapshot = null, queueSignature = "", favoritesSignature = "", artworkURL = null;
   let dialogContext = null, dialogSerial = 0, pollTimer = null, pollRun = 0;
   const soundDraft = new DspDraft();
-  let playlistDraft = null, queueEditing = null, exportContext = null, roomContext = null;
+  let playlistDraft = null, queueEditing = null, exportContext = null, roomContext = null, curveExportContext = null, curveImportDraft = null;
   const queueIntents = new WeakMap();
   let presetSignature = "", presetContext = null, presetSerial = 0, soundSubmission = null;
   const text = (id, value) => { const element = $(id); if (element.textContent !== value) element.textContent = value; };
@@ -24,7 +24,7 @@
       clear();
       if (!wasOpen) return;
       dialog.close();
-      if (restore === false || !target || ["favorite-dialog", "dsp-dialog", "playlist-dialog", "export-dialog", "room-dialog"].some(other => $(other).open)) return;
+      if (restore === false || !target || ["favorite-dialog", "dsp-dialog", "playlist-dialog", "export-dialog", "room-dialog", "curve-export-dialog", "curve-import-dialog"].some(other => $(other).open)) return;
       const available = item => item?.isConnected && !item.disabled && !item.closest("[hidden], [inert], details:not([open])");
       const replacement = target.favoriteKey && target.session === snapshot?.session_id
         ? Array.from($("favorites-list").querySelectorAll("button")).find(button => button.dataset.favoriteKey === target.favoriteKey) : null;
@@ -47,6 +47,8 @@
   const presetDialog = dialogLifecycle("dsp-dialog", clearPresetForm, "dsp-preset");
   const playlistDialog = dialogLifecycle("playlist-dialog", clearPlaylist);
   const exportDialog = dialogLifecycle("export-dialog", clearExport);
+  const curveExportDialog = dialogLifecycle("curve-export-dialog", clearCurveExport, "dsp-export");
+  const curveImportDialog = dialogLifecycle("curve-import-dialog", clearCurveImport, "dsp-import");
   const roomDialog = dialogLifecycle("room-dialog", clearRoomForm, "rename-room");
   async function request(path, options) {
     const abort = new AbortController();
@@ -216,6 +218,7 @@
     const clean = !soundDraft.dirty && !soundDraft.stale && !soundDraft.pending && !soundDraft.review;
     const libraryUnavailable = editor?.library_unavailable === true;
     const libraryWritable = control.canMutate("dsp_preset_save");
+    renderCurveTransfer();
     $("dsp-preset").disabled = !available || !clean;
     $("dsp-load").disabled = !available || !clean || !selected;
     $("dsp-save").disabled = !libraryWritable || !clean;
@@ -427,7 +430,7 @@
     if (downloadable) $("export-download").setAttribute("href", context.url);
     else $("export-download").removeAttribute("href");
   }
-  async function fetchExport(context, body, expectedSize) {
+  async function fetchExport(context, body, expectedSize, endpoint = "/orr/v1/web/playlist/export", filename = EXPORT_FILENAME) {
     const abort = new AbortController(); context.abort = abort;
     const timer = window.setTimeout(() => abort.abort(), 20000);
     let onAbort;
@@ -436,7 +439,7 @@
       abort.signal.addEventListener("abort", onAbort, {once: true});
     });
     try {
-      const fetching = fetch("/orr/v1/web/playlist/export", {
+      const fetching = fetch(endpoint, {
         method: "POST", credentials: "same-origin", mode: "same-origin", redirect: "error", cache: "no-store", referrerPolicy: "no-referrer",
         headers: {"Accept": "application/json", "Content-Type": "application/json", "X-ORR-CSRF": context.state.csrf_token},
         body: JSON.stringify(body), signal: abort.signal
@@ -446,7 +449,7 @@
         return response;
       });
       const response = await Promise.race([fetching, aborted]);
-      return await readExportResponse(response, abort.signal, expectedSize);
+      return await readExportResponse(response, abort.signal, expectedSize, filename);
     } finally {
       abort.signal.removeEventListener("abort", onAbort); window.clearTimeout(timer);
       if (context.abort === abort) context.abort = null;
@@ -510,6 +513,169 @@
     // response never clicks it, and a click does not prove a durable save.
     context.status = "Download requested; check your browser’s downloads. Keep the private file safe.";
     renderExport();
+  });
+  // Curve transfer is saved-library only. Neither dialog applies sound settings.
+  function cleanSoundDraft() { return !soundDraft.dirty && !soundDraft.stale && !soundDraft.pending && !soundDraft.review; }
+  function curveTransferAvailable() { return control.canMutate("dsp_preset_import") && cleanSoundDraft(); }
+  function curveContextCurrent(context) {
+    return Boolean(context && curveTransferAvailable() && snapshot.session_id === context.session && currentEditor()?.revision === context.revision);
+  }
+  function releaseCurveExport(context) {
+    if (context?.url) { URL.revokeObjectURL(context.url); context.url = null; }
+    $("curve-export-download").removeAttribute("href"); $("curve-export-download").hidden = true;
+  }
+  function clearCurveExport() {
+    const context = curveExportContext; curveExportContext = null;
+    context?.abort?.abort(); releaseCurveExport(context);
+    $("curve-export-confirm").checked = false; $("curve-export-confirm").disabled = true;
+    $("curve-export-prepare").disabled = true;
+    text("curve-export-summary", ""); text("curve-export-status", "");
+  }
+  function clearCurveImport() {
+    curveImportDraft?.cancel(); curveImportDraft = null;
+    $("curve-import-file").value = ""; $("curve-import-confirm").checked = false;
+    $("curve-import-file").disabled = true; $("curve-import-confirm").disabled = true; $("curve-import-submit").disabled = true;
+    text("curve-import-summary", ""); text("curve-import-status", "");
+  }
+  function currentCurveExport(context) {
+    return curveExportContext === context && $("curve-export-dialog").open && !context.stale && !context.failed && curveContextCurrent(context);
+  }
+  function renderCurveTransfer() {
+    const available = curveTransferAvailable(), selected = currentEditor()?.presets.find(item => item.id === $("dsp-preset").value);
+    $("dsp-export").disabled = !available || selected?.kind !== "saved";
+    $("dsp-import").disabled = !available;
+    const context = curveExportContext;
+    if (context) {
+      if (!context.stale && !curveContextCurrent(context)) {
+        context.stale = true; context.summary = null; context.abort?.abort(); releaseCurveExport(context);
+        $("curve-export-confirm").checked = false; context.status = CURVE_TRANSFER_CHANGED;
+      }
+      const ready = currentCurveExport(context), summary = context.summary;
+      text("curve-export-summary", summary ? `1 saved curve · Current plugin only · ${summary.band_count} band parameters · ${summary.size_bytes.toLocaleString()} UTF-8 file bytes. ${summary.shared ? "Shared preset: other stored contexts are deliberately omitted." : "One stored context included."}` : "");
+      text("curve-export-status", context.status);
+      $("curve-export-confirm").disabled = !ready || !summary || context.pending;
+      $("curve-export-prepare").disabled = !ready || !summary || context.pending || context.sent || !$("curve-export-confirm").checked;
+      const downloadable = ready && context.url && $("curve-export-confirm").checked;
+      $("curve-export-download").hidden = !downloadable;
+      if (downloadable) $("curve-export-download").setAttribute("href", context.url);
+      else $("curve-export-download").removeAttribute("href");
+    }
+    const draft = curveImportDraft;
+    if (draft) {
+      if (!draft.sent && !draft.stale && !curveContextCurrent(draft)) {
+        draft.stale = true; draft.clearSource(); $("curve-import-file").value = "";
+        $("curve-import-confirm").checked = false; draft.status = CURVE_TRANSFER_CHANGED;
+      }
+      const ready = !draft.sent && !draft.stale && !draft.cancelled && curveContextCurrent(draft);
+      $("curve-import-file").disabled = !ready;
+      $("curve-import-confirm").disabled = !ready || draft.reading || !draft.text;
+      $("curve-import-submit").disabled = !ready || draft.reading || !draft.text || Boolean(draft.error) || !$("curve-import-confirm").checked;
+      text("curve-import-summary", draft.text ? `1 named curve · 1 plugin · 40 band parameters · ${draft.size.toLocaleString()} UTF-8 file bytes · ${requestBytes(curveImportBody(draft.revision, draft.text)).toLocaleString()} / 32,768 escaped request bytes. Local structural preview only; the renderer validates the name and current plugin.` : "");
+      text("curve-import-status", draft.sent || draft.stale ? draft.status : draft.error || (draft.reading ? "Reading the local file. Nothing has been sent." : draft.status));
+    }
+  }
+  async function prepareCurveExport(context, download) {
+    context.pending = true; if (download) context.sent = true;
+    context.status = download ? "Preparing the private saved curve file…" : "Reading a private-detail-free summary…";
+    renderCurveTransfer();
+    const body = {action: download ? "download" : "prepare", expected_dsp: context.revision, preset_id: context.preset.id};
+    if (download) { body.expected_export = context.summary.revision; body.private_export_confirmed = true; }
+    let bytes;
+    try {
+      const response = await fetchExport(context, body, download ? context.summary.size_bytes : undefined, "/orr/v1/web/dsp/export", CURVE_EXPORT_FILENAME);
+      bytes = response.bytes;
+      if (!currentCurveExport(context) || download && !$("curve-export-confirm").checked) throw new Error("Curve context changed");
+      if (response.status !== 200) {
+        const error = exportObject(bytes);
+        context.failed = true;
+        context.status = response.status === 409 && error.outcome === "REJECTED" ? curveTransferFailure(error.error) : "Could not prepare the saved curve export. Close this dialog and review current state. No download was started.";
+      } else if (download) {
+        validateCurveExportDocument(bytes, context.summary);
+        context.url = URL.createObjectURL(new Blob([bytes], {type: "application/json"}));
+        context.status = "Private curve file ready. Choose Download JSON to request a browser download.";
+      } else {
+        context.summary = validateCurveExportSummary(exportObject(bytes), context.revision, context.preset);
+        context.status = "Review the current-context scope and privacy warning before preparing the file.";
+      }
+    } catch (_) {
+      if (curveExportContext === context && !context.stale && !context.failed) {
+        context.failed = true; context.status = "Could not prepare the saved curve export. Close this dialog and review current state. No download was started.";
+      }
+    } finally {
+      if (bytes) bytes.fill(0);
+      context.pending = false; if (curveExportContext === context) renderCurveTransfer();
+    }
+  }
+  $("dsp-export").addEventListener("click", () => {
+    const editor = currentEditor(), preset = editor?.presets.find(item => item.id === $("dsp-preset").value);
+    if (!curveTransferAvailable() || preset?.kind !== "saved" || $("curve-export-dialog").open) return;
+    clearCurveExport();
+    curveExportContext = {state: snapshot, session: snapshot.session_id, revision: editor.revision, preset: {id: preset.id, shared: preset.shared}, summary: null, pending: false, sent: false, stale: false, failed: false, url: null, abort: null, status: ""};
+    curveExportDialog.open($("dsp-export")); $("curve-export-close").focus();
+    return prepareCurveExport(curveExportContext, false);
+  });
+  ["curve-export-close", "curve-export-cancel"].forEach(id => $(id).addEventListener("click", () => curveExportDialog.close()));
+  $("curve-export-confirm").addEventListener("change", () => {
+    const context = curveExportContext;
+    if (context && !$("curve-export-confirm").checked) {
+      releaseCurveExport(context);
+      if (context.sent) { context.failed = true; context.abort?.abort(); context.status = "Consent cleared. Close this dialog and review the export again if needed."; }
+    }
+    renderCurveTransfer();
+  });
+  $("curve-export-form").addEventListener("submit", event => {
+    event.preventDefault(); renderCurveTransfer();
+    const context = curveExportContext;
+    if (!context || !currentCurveExport(context) || context.pending || context.sent || !context.summary || !$("curve-export-confirm").checked) return;
+    return prepareCurveExport(context, true);
+  });
+  $("curve-export-download").addEventListener("click", event => {
+    const context = curveExportContext;
+    if (!context || !currentCurveExport(context) || !context.url || !$("curve-export-confirm").checked) { event.preventDefault(); renderCurveTransfer(); return; }
+    context.status = "Download requested; check your browser’s downloads. Keep the private curve file safe.";
+    renderCurveTransfer();
+  });
+  $("dsp-import").addEventListener("click", () => {
+    if (!curveTransferAvailable() || $("curve-import-dialog").open) return;
+    clearCurveImport(); curveImportDraft = new CurveImportDraft(snapshot);
+    curveImportDialog.open($("dsp-import")); renderCurveTransfer(); $("curve-import-file").focus();
+  });
+  ["curve-import-close", "curve-import-cancel"].forEach(id => $(id).addEventListener("click", () => curveImportDialog.close()));
+  $("curve-import-file").addEventListener("change", async () => {
+    const draft = curveImportDraft; let file = $("curve-import-file").files?.[0];
+    $("curve-import-file").value = ""; $("curve-import-confirm").checked = false;
+    if (!draft || draft.sent || draft.stale || !curveContextCurrent(draft)) { renderCurveTransfer(); return; }
+    draft.status = "";
+    const reading = draft.readFile(file); file = null; renderCurveTransfer(); await reading;
+    if (curveImportDraft === draft) renderCurveTransfer();
+  });
+  $("curve-import-confirm").addEventListener("change", () => {
+    const draft = curveImportDraft;
+    if (draft && !$("curve-import-confirm").checked) {
+      draft.clearSource(); $("curve-import-file").value = "";
+      if (!draft.sent) draft.status = "Consent cleared. Choose the file again to review a new import.";
+    }
+    renderCurveTransfer();
+  });
+  $("curve-import-form").addEventListener("submit", async event => {
+    event.preventDefault(); renderCurveTransfer();
+    const draft = curveImportDraft;
+    if (!draft || draft.sent || draft.stale || draft.cancelled || draft.reading || !draft.text || draft.error || !curveContextCurrent(draft) || !$("curve-import-confirm").checked) return;
+    const body = curveImportBody(draft.revision, draft.text);
+    if (requestBytes(body) > MAX_REQUEST_BYTES) return;
+    draft.sent = true; draft.clearSource(); $("curve-import-file").value = ""; $("curve-import-confirm").checked = false;
+    draft.status = "PENDING · Saving the curve to the preset library. Active sound settings are not applied.";
+    renderCurveTransfer();
+    const waiting = run(body, "Import saved EQ curve"); body.text = "";
+    const result = await waiting;
+    if (curveImportDraft !== draft) return;
+    draft.status = result.kind === "acknowledged"
+      ? "Import acknowledged. Review the saved preset list. Select and Load separately to apply a saved curve."
+      : `${result.kind.toUpperCase()} · ${result.text}`;
+    if (!control.fresh) draft.status += " Current renderer state is unavailable.";
+    else if (snapshot.session_id !== draft.session) draft.status += " The renderer restarted; review its current saved presets.";
+    else if (currentEditor()?.library_unavailable === true) draft.status += " " + DSP_LIBRARY_UNAVAILABLE_MESSAGE;
+    renderCurveTransfer();
   });
   function renderFavorites(ready) {
     text("favorites-count", String(control.favorites.length));
@@ -802,7 +968,7 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
   // Scrub private dialog input before navigation/BFCache, even if already closed.
   // Only local drafts are dismissed; sent commands and their outcomes stay live.
-  window.addEventListener("pagehide", () => { outputInspection.dismiss(); renderOutputInspection(); closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); });
+  window.addEventListener("pagehide", () => { outputInspection.dismiss(); renderOutputInspection(); closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); curveExportDialog.close(false); curveImportDialog.close(false); });
   window.addEventListener("online", () => poll());
   window.addEventListener("offline", () => { control.fresh = false; control.favoritesFresh = false; control.favoritesReadFailure = null; render(); });
   poll();

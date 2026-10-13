@@ -67,6 +67,8 @@
               <div class="preset-select-line"><select id="dsp-preset" disabled aria-describedby="dsp-preset-hint"><option value="">Choose a preset…</option></select><button id="dsp-load" type="button" class="button small" disabled>Load</button></div>
               <p id="dsp-preset-hint" class="field-hint">Loading a preset enables EQ. Built-in presets are read-only.</p>
               <div class="preset-actions"><button id="dsp-save" type="button" class="button small" disabled>Save active curve</button><button id="dsp-rename" type="button" class="button subtle small" disabled>Rename</button><button id="dsp-delete" type="button" class="button subtle small" disabled>Delete</button></div>
+              <div class="preset-actions curve-transfer-actions"><button id="dsp-export" type="button" class="button subtle small" disabled>Export this context’s curve</button><button id="dsp-import" type="button" class="button subtle small" disabled>Import saved curve</button></div>
+              <p class="field-hint">Export requires a selected saved preset. Shared presets export only the current plugin; other contexts are omitted. Import saves to the library without loading.</p>
               <p id="dsp-save-hint" class="field-hint">Saves only the confirmed active curve.</p>
             </div>
             <form id="dsp-band-form" hidden>
@@ -97,6 +99,25 @@
     </div>
     <footer class="footer"><span class="footer-brand">open room renderer <span class="alpha">ALPHA</span></span><p>Trusted LAN only. Anyone on your network with access to this renderer can control playback. Do not expose this service to the internet.</p><p id="freshness" class="freshness">No state received yet.</p></footer>
   </main>
+  <dialog id="curve-export-dialog" aria-labelledby="curve-export-heading" aria-describedby="curve-export-hint"><form id="curve-export-form" autocomplete="off">
+    <div class="section-heading"><h2 id="curve-export-heading">Export this context’s curve</h2><button id="curve-export-close" class="button subtle small" type="button" aria-label="Close saved curve export">Close</button></div>
+    <p id="curve-export-hint" class="field-hint">Export exactly one deliberately saved preset’s current-plugin curve. This excludes unsaved active changes. For a shared preset, all other stored contexts are deliberately omitted. Active sound settings stay unchanged.</p>
+    <p id="curve-export-summary" class="playlist-preview" role="status" aria-live="polite"></p>
+    <div class="shared-warning"><p>The private JSON file includes the original saved preset name and exact plugin identifier, which may contain private details. Keep this file private.</p><label for="curve-export-confirm" class="confirm-line"><input id="curve-export-confirm" type="checkbox" disabled><span>I understand and want the private preset name and plugin details sent to this browser.</span></label></div>
+    <p class="field-hint">Only one v1 curve with 40 band parameters is included. The complete escaped re-import request must fit 32,768 bytes. Close this dialog to reach playback controls, including Stop.</p>
+    <p id="curve-export-status" class="dialog-status" role="status" aria-live="polite"></p>
+    <div class="dialog-actions"><button id="curve-export-cancel" class="button" type="button">Cancel</button><button id="curve-export-prepare" class="button primary" type="submit" disabled>Prepare private curve file</button><a id="curve-export-download" class="button primary" download="open-room-renderer-eq-curve.json" hidden>Download JSON</a></div>
+  </form></dialog>
+  <dialog id="curve-import-dialog" aria-labelledby="curve-import-heading" aria-describedby="curve-import-hint"><form id="curve-import-form" autocomplete="off">
+    <div class="section-heading"><h2 id="curve-import-heading">Import saved curve</h2><button id="curve-import-close" class="button subtle small" type="button" aria-label="Close saved curve import">Close</button></div>
+    <p id="curve-import-hint" class="field-hint">Save one curve to the preset library only. Import never loads it or changes active bands, EQ enable/bypass or balance. Select and Load separately when you want to apply it.</p>
+    <div class="form-field"><label for="curve-import-file">Local v1 curve JSON file</label><input id="curve-import-file" type="file" accept=".json,application/json" aria-describedby="curve-import-file-hint" disabled><p id="curve-import-file-hint" class="field-hint">Exactly one named curve, one plugin and 40 band parameters. The name inside the file is preserved and must be a new, Web-safe, non-built-in name. Its plugin must exactly match the current context. No renaming, overwriting or remapping is performed.</p></div>
+    <p id="curve-import-summary" class="playlist-preview" role="status" aria-live="polite"></p>
+    <div class="shared-warning"><p>This sends the file’s original private preset name, exact plugin identifier and complete curve contents to this renderer. File details are not shown in this preview.</p><label for="curve-import-confirm" class="confirm-line"><input id="curve-import-confirm" type="checkbox" disabled><span>I understand and want this private curve file sent to this renderer to save in its library.</span></label></div>
+    <p class="field-hint">File and complete escaped request must each fit 32,768 UTF-8 bytes. Close this dialog to reach playback controls, including Stop.</p>
+    <p id="curve-import-status" class="dialog-status" role="status" aria-live="polite"></p>
+    <div class="dialog-actions"><button id="curve-import-cancel" class="button" type="button">Cancel</button><button id="curve-import-submit" class="button primary" type="submit" disabled>Import to library only</button></div>
+  </form></dialog>
   <dialog id="room-dialog" aria-labelledby="room-dialog-heading" aria-describedby="room-dialog-hint">
     <form id="room-form">
       <div class="section-heading"><h2 id="room-dialog-heading">Rename room</h2><button id="room-close" class="button subtle small" type="button" aria-label="Close rename room">Close</button></div>
