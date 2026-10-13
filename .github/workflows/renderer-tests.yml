@@ -68,6 +68,57 @@ jobs:
             tests/test_startup_config.py tests/test_startup_state.py tests/test_web_ui.py \
             tests/test_native_group_runner.py tests/test_cli_commands.py tests/test_favorites_cli.py
 
+  browser-smoke:
+    name: Real Chrome / desktop and mobile smoke
+    # Independent short lane: never take time from either existing native job.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      PYTHONPATH: .
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out contribution without saved credentials
+        timeout-minutes: 1
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python for the browser smoke
+        timeout-minutes: 2
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          architecture: x64
+
+      - name: Check installed browser and install the null-output renderer fixture
+        timeout-minutes: 3
+        run: |
+          test "$(id -u)" -ne 0
+          command -v google-chrome
+          command -v chromedriver
+          google-chrome --version
+          chromedriver --version
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y mpv
+          python -m pip --isolated install --index-url https://pypi.org/simple --disable-pip-version-check --no-cache-dir -e . 'pytest>=8'
+          python -m pip check
+
+      - name: Exercise genuine Chrome against production HTTP and mpv Unix IPC
+        timeout-minutes: 3
+        # Normal Chrome sandbox, existing runner browser/driver, no accounts.
+        # The script has 120s work / 150s process-tree watchdog bounds.
+        run: python tools/browser_smoke.py --artifacts "$RUNNER_TEMP/orr-browser-smoke"
+
+      - name: Retain synthetic browser evidence and failure diagnostics
+        if: ${{ always() }}
+        timeout-minutes: 1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-smoke-${{ github.sha }}
+          path: ${{ runner.temp }}/orr-browser-smoke
+          if-no-files-found: warn
+          retention-days: 7
+
   renderer-tests:
     name: Renderer / ${{ matrix.runner }}
     strategy:
