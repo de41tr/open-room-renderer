@@ -19,6 +19,7 @@ from typing import Any
 
 import yaml
 
+from .audio_device import validate_audio_device
 from .utils import detect_lan_ip, ensure_dir
 from .persistence import load_active_dsp, load_gain
 from .startup_state import _read_state
@@ -77,6 +78,8 @@ class Config:
     advertise_ip: str | None = None
     mpv_socket: str = "/tmp/open-room-renderer-mpv.sock"
     auto_spawn_mpv: bool = True
+    # Startup-only; None preserves mpv's existing configuration/defaults.
+    mpv_audio_device: str | None = field(default=None, kw_only=True)
     default_volume: int = 50
     default_mute: bool = False
     log_level: str = "INFO"
@@ -122,6 +125,7 @@ class Config:
     def __post_init__(self) -> None:
         """Normalize configured IDs without replacing their identity."""
 
+        self.mpv_audio_device = validate_audio_device(self.mpv_audio_device, auto_spawn=self.auto_spawn_mpv)
         if type(self.native_queue_staging) is not bool:
             raise ValueError("native_queue_staging must be boolean")
         if type(self.default_mute) is not bool:

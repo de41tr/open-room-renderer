@@ -60,6 +60,7 @@ async def serve(config_path: str | None = None) -> None:
     mpv = MpvBackend(
         cfg.mpv_socket, cfg.auto_spawn_mpv,
         initial_volume=state.volume, initial_mute=state.mute,
+        audio_device=cfg.mpv_audio_device,
     )
     runners: list[web.AppRunner] = []
     ssdp: SsdpServer | None = None

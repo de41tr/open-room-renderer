@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .audio_device import validate_audio_device
 from .log_safety import redact_media_urls
 
 # A finite history preserves mpv's timed ICY transitions. Zero can prune an
@@ -76,6 +77,7 @@ class MpvBackend:
     _dsp_managed: bool = field(default=False, init=False, repr=False)
     initial_volume: int = field(default=50, kw_only=True)
     initial_mute: bool = field(default=False, kw_only=True)
+    audio_device: str | None = field(default=None, kw_only=True)
 
     # Desired gain starts with configuration and advances only after confirmed
     # writes. A failed/cancelled write may have reached mpv, so the next load
@@ -127,6 +129,7 @@ class MpvBackend:
 
 
     def __post_init__(self) -> None:
+        self.audio_device = validate_audio_device(self.audio_device, auto_spawn=self.auto_spawn)
         self._desired_volume = max(0, min(100, int(self.initial_volume)))
         self._desired_mute = bool(self.initial_mute)
 
@@ -141,7 +144,8 @@ class MpvBackend:
 
         Foreign paths are never removed and failed attempts never respawn on
         each status poll. Restart the renderer to retry spawning; an external socket
-        that becomes available can still be used without restarting.
+        that becomes available can still be used without restarting, unless
+        explicit audio-device configuration requires our own verified child.
         """
         if self._closed:
             raise BackendError("mpv backend is shut down")
@@ -171,6 +175,22 @@ class MpvBackend:
     def _socket_exists(self) -> bool:
         return self._socket_identity() is not None
 
+    def _owns_audio_device_socket(self) -> bool:
+        """Explicit output configuration is meaningful only on our live child."""
+        return (self._owned_process is not None
+                and self._owned_process.returncode is None
+                and self._owned_socket_identity is not None
+                and self._socket_identity() == self._owned_socket_identity)
+
+    def _require_audio_device_peer(self, peer_pid: int | None) -> None:
+        if self.audio_device is not None and (
+                not self._owns_audio_device_socket()
+                or peer_pid is None or peer_pid != self._owned_process.pid):
+            raise BackendError(
+                "Explicit mpv_audio_device requires an owned, peer-verified mpv socket; "
+                "choose an unused private socket and restart the renderer"
+            )
+
     async def _start_once(self) -> None:
         ready = False
         try:
@@ -178,7 +198,10 @@ class MpvBackend:
                 if self._socket_exists():
                     # A refused preexisting socket is not evidence of ownership.
                     # In particular do not launch mpv, which could replace it.
-                    await self._probe_socket()
+                    if self.audio_device is not None and not self._owns_audio_device_socket():
+                        self._require_audio_device_peer(None)
+                    peer_pid = await self._probe_socket()
+                    self._require_audio_device_peer(peer_pid)
                     ready = True
                     return
                 if not self.auto_spawn:
@@ -186,11 +209,18 @@ class MpvBackend:
                 if self._spawn_attempted:
                     raise BackendError(self._startup_error)
                 self._spawn_attempted = True
+                # Explicit routing opts into isolation: ambient ao/profiles
+                # must not silently override it or turn a failed DAC into null.
+                audio_options = [] if self.audio_device is None else [
+                    "--no-config", "--load-scripts=no", "--audio-fallback-to-null=no",
+                    f"--audio-device={self.audio_device}",
+                ]
                 self.process = await asyncio.create_subprocess_exec(
                     "mpv",
                     "--no-video",
                     "--idle=yes",
                     f"--input-ipc-server={self.socket_path}",
+                    *audio_options,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
@@ -209,6 +239,7 @@ class MpvBackend:
                                     and peer_pid == self.process.pid
                                     and self._socket_identity() == identity):
                                 self._owned_socket_identity = identity
+                            self._require_audio_device_peer(peer_pid)
                             ready = True
                             LOG.info("mpv IPC ready at %s", self.socket_path)
                             return
@@ -235,9 +266,7 @@ class MpvBackend:
         """Check readiness and, on Linux, identify the connected peer process."""
         _, writer = await asyncio.open_unix_connection(self.socket_path)
         try:
-            ipc_socket = writer.get_extra_info("socket")
-            credentials = ipc_socket.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-            peer_pid = struct.unpack("3i", credentials)[0]
+            peer_pid = self._peer_pid(writer)
             # Record verified ownership before awaiting transport close, so a
             # shutdown signal during that await can still clean our socket.
             if (owned_identity is not None and self._owned_process is not None
@@ -246,11 +275,21 @@ class MpvBackend:
                 self._owned_socket_identity = owned_identity
             return peer_pid
         except (AttributeError, OSError, TypeError, struct.error):
-            # Without trustworthy peer credentials, connection is usable but
-            # the path is never ours to remove automatically.
             return None
         finally:
             await self._close_writer(writer, asyncio.get_running_loop().time() + 0.1)
+
+    @staticmethod
+    def _peer_pid(writer: asyncio.StreamWriter) -> int | None:
+        """Read Linux peer credentials from this exact connected transport."""
+        try:
+            ipc_socket = writer.get_extra_info("socket")
+            credentials = ipc_socket.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+            return struct.unpack("3i", credentials)[0]
+        except (AttributeError, OSError, TypeError, struct.error):
+            # Without trustworthy peer credentials, connection is usable but
+            # the path is never ours to remove automatically.
+            return None
 
     @staticmethod
     async def _close_writer(writer: asyncio.StreamWriter, deadline: float) -> None:
@@ -356,6 +395,10 @@ class MpvBackend:
                 reader, writer = await asyncio.open_unix_connection(self.socket_path)
                 if self._closed:
                     raise BackendError("mpv backend is shut down")
+                # Opt-in routing may never fall through to a replacement or
+                # unverifiable player between readiness and this connection.
+                if self.audio_device is not None:
+                    self._require_audio_device_peer(self._peer_pid(writer))
                 self._request_id += 1
                 request_id = self._request_id
                 payload = {"command": args, "request_id": request_id}

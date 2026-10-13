@@ -291,7 +291,7 @@ def test_real_process_accepts_minimal_yaml_before_stubbed_service_boundary(tmp_p
             pass
         def backend(*args, **kwargs):
             assert Path('.state/uuid').is_file()
-            assert kwargs == {'initial_volume': 50, 'initial_mute': False}
+            assert kwargs == {'initial_volume': 50, 'initial_mute': False, 'audio_device': None}
             raise ServiceBoundary
         cli.MpvBackend = backend
         try:

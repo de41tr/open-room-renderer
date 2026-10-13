@@ -566,10 +566,12 @@ async def test_cli_initializes_configured_gain_after_stopping_backend(monkeypatc
     harness = ServiceHarness(monkeypatch)
     harness.cfg.default_volume = 37
     harness.cfg.default_mute = muted
+    harness.cfg.mpv_audio_device = "alsa/dmix:default" if muted else None
     await cli.serve("synthetic.yaml")
     harness.backend_factory.assert_called_once_with(
         harness.cfg.mpv_socket, harness.cfg.auto_spawn_mpv,
         initial_volume=37, initial_mute=muted,
+        audio_device=harness.cfg.mpv_audio_device,
     )
     assert harness.events[:3] == ["backend.start", "backend.stop", "backend.initialize_gain"]
     harness.backend.initialize_gain.assert_awaited_once()

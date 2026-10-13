@@ -9,6 +9,9 @@ bind_address: "0.0.0.0"
 advertise_ip: null
 mpv_socket: ".state/mpv.sock"
 auto_spawn_mpv: true
+# Optional exact mpv device name; needs an unused, private IPC socket at startup.
+# List as the service user: mpv --no-config --audio-device=help
+mpv_audio_device: null
 default_volume: 50
 default_mute: false
 log_level: "INFO"
