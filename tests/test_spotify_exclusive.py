@@ -235,6 +235,67 @@ def test_rejects_ancestor_symlink_and_special_input(profile, tmp_path):
         invoke(profile)
 
 
+@pytest.mark.parametrize("target", [
+    "config.yaml", exclusive.RENDERER_SERVICE, "installation-receipt.json",
+    "venv/bin/open-room-renderer", "go-librespot",
+])
+@pytest.mark.parametrize("kind", [
+    stat.S_IFIFO, stat.S_IFSOCK, stat.S_IFCHR, stat.S_IFBLK, stat.S_IFDIR, stat.S_IFLNK,
+])
+def test_refuses_existing_special_input_before_open(profile, monkeypatch, target, kind):
+    # Synthetic metadata only: never create or open a real device or socket.
+    path = (Path(profile["go_librespot_binary"]) if target == "go-librespot"
+            else Path(profile["renderer_prefix"]) / target)
+    real_stat, real_open = os.stat, os.open
+    values = list(real_stat(path))
+    values[0] = kind | 0o600
+    synthetic = os.stat_result(values)
+    checked = []
+
+    def metadata(name, *args, **kwargs):
+        if name == path.name and kwargs.get("dir_fd") is not None:
+            assert kwargs.get("follow_symlinks") is False
+            checked.append(name)
+            return synthetic
+        return real_stat(name, *args, **kwargs)
+
+    def guarded_open(name, flags, *args, **kwargs):
+        if name == path.name and kwargs.get("dir_fd") is not None:
+            pytest.fail("non-regular input was opened before rejection")
+        return real_open(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", metadata)
+    monkeypatch.setattr(os, "open", guarded_open)
+    with pytest.raises(exclusive.ExclusiveProfileError) as error:
+        invoke(profile)
+    assert str(error.value) == "Inputs must be owned regular files, without group/other write access or symlinks."
+    assert checked == [path.name]
+    assert not Path(profile["output_dir"]).exists()
+
+
+@pytest.mark.parametrize("binary", [False, True])
+@pytest.mark.parametrize("mode", [stat.S_IFIFO | 0o600, stat.S_IFREG | 0o666])
+def test_rechecks_opened_input_type_and_permissions(tmp_path, monkeypatch, binary, mode):
+    path = tmp_path / "inert-input"
+    path.write_bytes(b"\x7fELF")
+    path.chmod(0o700)
+    real_fstat = os.fstat
+    opened = []
+
+    def changed_metadata(fd):
+        opened.append(fd)
+        values = list(real_fstat(fd))
+        values[0] = mode
+        return os.stat_result(values)
+
+    monkeypatch.setattr(os, "fstat", changed_metadata)
+    with pytest.raises(exclusive.ExclusiveProfileError, match="regular files"):
+        exclusive._read(path, binary=binary)
+    assert len(opened) == 1
+    with pytest.raises(OSError):
+        real_fstat(opened[0])  # The rejected descriptor is still closed.
+
+
 def test_rejects_custom_units_uninstalled_profiles_and_wrappers(profile):
     unit = Path(profile["renderer_unit"])
     original = unit.read_text()

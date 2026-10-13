@@ -42,6 +42,12 @@ absolute and normalized; controls, backslashes, dollar expansion and parent
 traversal are rejected. Paths into the renderer prefix and client executable
 cannot overlap the new package.
 
+Each input leaf is checked without following symlinks before it is opened;
+existing FIFOs, sockets, devices and other non-regular entries are refused
+without opening them. The opened descriptor is checked again. These checks
+are not an atomic defense against a same-user process replacing an input
+between the metadata check and open; keep inputs stable during preparation.
+
 Example, using an already independently installed client and already configured
 native direct-ALSA profile (these paths are placeholders to replace):
 

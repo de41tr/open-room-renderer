@@ -69,6 +69,11 @@ def _directory(path: Path):
 
 def _read(path: Path, *, binary: bool = False) -> bytes:
     with _directory(path.parent) as parent:
+        # Refuse existing special entries without opening them. A same-user
+        # replacement can still race this check; retain descriptor validation.
+        entry = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISREG(entry.st_mode):
+            _fail("Inputs must be owned regular files, without group/other write access or symlinks.")
         fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
         try:
             info = os.fstat(fd)
