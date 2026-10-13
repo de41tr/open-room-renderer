@@ -1,142 +1,80 @@
-# Resume the new next-phase task
+# Resume the next-phase task
 
-## Managed-favorite repair checkpoint
+## Active authorization and checkpoint
 
-The browser now exposes the existing managed-favorite target repair: blank
-private URL input, explicit keep/clear metadata choice, retained name/ID/order,
-and no audio fetch or change to the current detached playback. Each opening
-admits one send, clears its private input, and keeps ACKNOWLEDGED/UNKNOWN visible.
-The redacted view never claims exact-URL verification. Observed Rename/Delete/
-unsent Change URL conflicts require reopening; this is not atomic concurrency.
-No server/store/API contract changed. Architecture/developer navigation now
-reflects the completed extractions and shipped browser workflows.
+The current window is **2026-10-12 22:12:31 UTC → 2026-10-13 18:00 UTC**
+(13 October, 20:00 Europe/Berlin). Stop active work at the hard deadline and
+report unfinished CI as PENDING. Start no large/risky new work after **16:30 UTC**;
+stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 
-Independent reviews and focused frontend/HTTP checks pass; actual libmpv 0.37/
-0.40 keep and clear flows pass in 4.32s/4.19s with no native/media side effects.
-All prior native assertions and caps remain. Exact new-head CI remains PENDING.
-Preceding head `5534c4d` passes all three jobs/every step in run 38332263993,
-verified 01:42 UTC; its complete default coverage is 5322/74. No redundant full
-local replay is claimed for this frontend-only extension. Browser/physical and
-provider-account acceptance remain pending. Next value review: 02:42–03:12 UTC.
+Work exclusively on `dot/renderer-next-phase-20261013` in
+[Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
+`ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
+Latest CI-verified checkpoint **`8c7df63b0619d2dd728e6f721fcb964adadf2f2e`** passes all three
+jobs/every step in **run 38334412981**, verified **02:08 UTC**. Its hosted floor
+passes **4774+550 /74 opt-in skips** in **140.96s/118.60s**, for **5324/74** overall.
+Verify the actual branch/head on resumption; any newer edit needs separate CI.
 
+## What is already delivered
 
-## Current operator follow-through
+The bounded architecture extractions, functional local Web controller,
+ten-band DSP/preset editing, managed favorites including target repair,
+stopped-only playlist loading/editing, private queue JSON export, startup
+privacy diagnostics, logical dialog focus/cleanup, quiet-gain recovery and
+native asset packaging are implemented and independently reviewed. Do not
+restart the original architecture/Web/Spotify sequence. [STATUS.md](STATUS.md)
+contains the compact checkpoint history; [TESTING.md](docs/TESTING.md) preserves
+detailed evidence and limits.
 
-Export head `1dfd642` is fully green in run 38330676949 (all three jobs/every
-step), verified 01:22 UTC. The next independently reviewed correction keeps
-expected saved-state startup errors private and restores logical keyboard focus
-after dialog dismissal when an opener disappears or becomes unavailable.
-Known reader errors now produce fixed exit-2 guidance; no reset/default fallback,
-public exception change or library failure-policy change is introduced. A second
-active-DSP read failure still cleans up the backend before listeners. Later
-legacy-balance normalization remains outside this diagnostic guard.
+For the latest favorite-repair delta, local checks pass **149 Node/DOM cases**,
+**159 focused Web/frontend cases on each Python 3.12 and 3.11**, and **195 root
+Web/frontend/installation cases**. Actual libmpv 0.37/0.40 keep/clear flows pass
+in **4.32s/4.19s** with no native/media side effects and unchanged prior assertions
+and caps. No full local replay was added; the earlier **5322/74** complete local
+result belongs to `5534c4d`. Redacted favorite readback remains ACKNOWLEDGED,
+not proof of exact URL; UNKNOWN and observed conflict/reopen rules stay explicit.
 
-Final combined local defaults pass **5322 /74 opt-in skips** on Python 3.12
-and 3.11; 128 Node/DOM checks and 39 frontend/installation checks pass. Exact
-new-head CI is PENDING until separately verified. Real browser focus/download,
-physical hardware and provider-account acceptance remain pending. The 01:12
-value/risk review is recorded in docs/STRATEGIC_REVIEW.md; next review is due
-02:42–03:12 UTC. No more timing changes or redundant endurance campaigns.
+The following saved-favorites diagnostic correction has independent review,
+246 focused Python checks on each interpreter and 156 Node checks, but its own
+exact-head CI is initially PENDING. It changes only an admitted Web read failure
+and its fixed browser advice; legacy routes, storage policies and dispatched
+UNKNOWN outcomes stay unchanged. The historical suffixes below are byte-identical
+following consolidation of these current instructions.
 
+## Immediate priorities
 
-## Private queue export checkpoint
+1. **Keep evidence exact-source.** Recheck the current published head and its
+   own CI before declaring a later checkpoint green. The `8c7df63` run is complete;
+   old pending export/scheduling instructions are superseded. Retain existing
+   native, Unix IPC, installation, PCM, discovery and Snapcast gates and all caps.
+2. **Verify the diagnostic checkpoint**, then finish the separately scoped
+   preset-library protection. The failed-load overwrite is reproduced; fence
+   unavailable storage without changing valid-storage responses, active DSP,
+   locks or committed-write uncertainty. This is an explicit failure-policy fix,
+   not a neutral extraction; it is not implemented in this checkpoint.
+3. **Review value/risk at 02:42–03:12 UTC**, then every 90–120 minutes within the
+   authorized window. Prefer concrete user workflow gaps; stop architecture,
+   timing and redundant soak/full-suite campaigns unless new evidence justifies
+   work. Use [PLAN.md](PLAN.md) and [STRATEGIC_REVIEW.md](docs/STRATEGIC_REVIEW.md)
+   for constraints and prior assessments, not superseded next-step sentences.
+4. **Keep acceptance gaps explicit.** Genuine browser layout/focus/download,
+   physical ARMv7/XU4/DAC/original-app and provider-account acceptance are pending.
+   Use [the browser checklist](docs/WEB_BROWSER_ACCEPTANCE.md) only when a supported
+   route is available; do not retry known-blocked routes or bypass security warnings.
+   [ADR 001](docs/adr/001-spotify-sidecar.md) defers integrated Spotify on policy
+   and all-entry audio arbitration; standalone official Soloist DIY is supported.
+   No provider-account login, credentials, OEM identity, proprietary redistribution
+   or private firmware/traces. No provider code or client/key was added.
+   Favorites/M3U export remains deferred.
+5. **Stabilize and hand over by the deadline.** No large/risky work after 16:30 UTC;
+   final stabilization begins at 17:00 UTC and active work stops at 18:00 UTC.
+   Preserve the single queue/playback authority, lock/generation ordering, exact
+   protocols/errors and private-state boundaries. Keep behavior-neutral extraction
+   commits separate from features, leave the PR in draft, and report remaining
+   acceptance limits and the final head's actual CI status.
 
-Private current-queue JSON export is implemented and independently reviewed.
-It reuses the authored codec, strict Web admission and unchanged 32 KiB import
-bound. Redacted preparation, explicit private-URL consent and a user-clicked
-Blob download remain separate from ordinary polling and playback commands.
-Session/generation plus an exact-byte HMAC reject stale reviews. No queue,
-backend, metadata, provider-account or durable storage authority is added.
-Favorites/M3U export remain deferred. See docs/WEB_PLAYLIST_EXPORT.md.
-
-Final combined local defaults pass **5257 tests / 74 opt-in skips** on both
-Python 3.12 and 3.11; 112 frontend checks and 508 focused Web checks pass.
-Actual libmpv 0.37/0.40 export/recovery flows pass in 4.43s/3.98s with zero
-export-induced native mutations or media requests. All original native assertions
-and caps remain. New export-head hosted CI remains PENDING until separately
-verified. Genuine browser/download-to-disk acceptance remains pending.
-
-The preceding workflow/docs head `59726d5` passes all three jobs/every step in
-run 38328911125, verified 01:02 UTC. Hosted floor groups take 145.49s/138.67s
-under the unchanged 165s watchdog. No more scheduling changes unless a gate fails.
-
-
-Current explicit authorization: **2026-10-12 22:12:31 UTC → 2026-10-13 18:00 UTC**
-(13 October, 20:00 Europe/Berlin). Stop active work at that hard deadline; report
-unfinished CI as PENDING. From 16:30 UTC start no large/risky change; stabilize
-from 17:00 UTC. Older task deadlines below are historical only.
-
-Work exclusively on `dot/renderer-next-phase-20261013`, based on remote main
-`ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Create/maintain a new Draft PR; never
-push main, merge or release. Verify actual branch, head and exact-head CI.
-
-Priority order: bounded architecture (DSP preset library and shared pure
-contracts; ~3–4 hours maximum), functional responsive local Web UI, <=1 hour
-Spotify feasibility, justified optional separate-client integration, highest-value
-backlog, stabilization. Preserve one queue/playback authority, generation/lock
-order, exact protocol/error semantics and all existing native acceptance gates.
-Keep behavior-neutral extraction commits separate from feature commits.
-
-UI must be implemented even if genuine browser QA is unavailable; label that
-BROWSER_ACCEPTANCE_PENDING. No security-warning bypass or repeated known-blocked
-browser routes. No provider-account login, credentials, OEM identity, proprietary
-redistribution or private firmware/traces. Hardware/app gaps do not block software.
-Review value/risk every 90–120 minutes, report meaningful milestones, and pivot
-away from diminishing-return tests/refactoring. See PLAN.md and STATUS.md.
-
-Published Draft PR #2: https://github.com/de41tr/open-room-renderer/pull/2 .
-Architecture head `5b86bdd` passed all three jobs in run 38317217424; first Web
-head `81a3d72` passed all three in run 38319222442, including 67 native checks.
-These are scoped checkpoints, not evidence for later changes.
-
-The ten-band/preset Web editor is integrated and independently reviewed. Full
-local defaults pass 4551+250 /74 on both 3.12 and 3.11 after the final
-dialog/installation corrections. Actual 0.37/0.40
-Web+PCM tests pass; guarded Web -12 dB applies measure -12.0387 dB at 1 kHz.
-DSP feature, native acceptance, same-runner default-suite scheduling, native
-asset packaging and documentation are separate commits. Exact head `7d68d79`
-passed all three jobs/every step in run 38323337010.
-The scheduling change preserves exact node/skip coverage and the 15-minute job
-cap; its 139.519s local grouped replay is not a hosted timing claim.
-
-Spotify feasibility is complete: see docs/adr/001-spotify-sidecar.md and the
-pinned source comparison. Integration is deferred on explicit policy-scope and
-all-entry output-arbitration gates; standalone Soloist DIY use is supported.
-No account, key, client download or provider code was added.
-
-Native installation now includes the exact four Web assets in its source
-snapshot/provenance. Independent staged-wheel/isolated HTTP checks and hosted
-installed-CLI lifecycle on x86_64/ARM64 confirm the new route assertions. Shared
-favorite/preset delayed-close races are fixed; final Node checks pass 50/50.
-
-Stopped-only playlist loading/editing and private-safe explicit-config startup
-are published at `f7c6ed7`, fully green in run 38325071508 (all three jobs/every
-step). Combined local defaults pass 5047/74 on both 3.12/3.11; 75 Node checks and
-actual native Web flows pass. Full validation retains per-call bounds and no
-cache. Final group rebalance preserves all 5,121 nodes/skips; the documented
-local selector-order finding is closed by focused correction and hosted success.
-Floor groups pass 4538+509 /74 in 149.89s/105.22s under the unchanged 165s cap.
-Keep subsequent private recovery changes distinct from that green checkpoint.
-
-Operator follow-through is published at `0668209`, fully green in run
-38326558265: pagehide scrubs private dialogs, and UNKNOWN gain has explicit
-checked volume=0 recovery. Both native architectures confirm actual readback
-and cleanup. Browser and physical-silence acceptance remain separate.
-
-The following workflow/docs-only checkpoint moves two measured independent test
-modules into the existing second process; all 5,121 nodes/skip metadata and caps
-are unchanged. Final selectors have independent review and 13 focused checks on
-both Python versions; exact new-head hosted scheduling must still pass. This is
-the last timing change unless a gate fails, not an optimization loop. Modal docs
-now tell users to Close/Cancel/Escape before using background Stop; sent requests
-continue and outcomes remain visible.
-
-Next: verify exact export-head CI, then choose the next practical usability gap
-through the scheduled value/risk review. Do not repeat timing or blocked-browser
-work without new evidence. Spotify remains deferred on existing gates.
-Next value assessment is due around 01:12–01:42 UTC.
-Do not repeat old soak tests or known blocked browser routes. Genuine browser,
-physical ARMv7/DAC/original-app and account acceptance remain pending.
+The historical handovers below are retained verbatim for evidence only. They do
+not reopen completed tasks or authorize work beyond this phase's hard stop.
 
 ---
 

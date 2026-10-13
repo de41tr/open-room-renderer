@@ -114,3 +114,14 @@ Record browser/version, viewport, server revision, passes/failures, and screensh
   another controller. Fresh observation must preserve the draft but disable its
   stale submission. Changing it back must not silently re-enable it. Reopen to
   review. This does not prove atomic protection against unobserved URL changes.
+
+## Saved-favorites failure guidance
+
+- Use disposable test state, never corrupt a real library. Start with a malformed
+  or unreadable managed test library. Verify specific failed-read/restart guidance,
+  stale or empty rows and disabled favorite controls; ordinary playback controls
+  should retain their normal availability. No private contents/path may appear.
+- Disconnect networking and verify the generic stale-read message replaces the
+  repair hint. Stop the test renderer service, restore known-good test state and
+  restart: valid matching reads should clear the hint and restore controls.
+  A browser Refresh alone must not pretend to repair or reload saved state.

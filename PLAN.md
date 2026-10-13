@@ -72,6 +72,12 @@ protection. No new server contract or playback authority. Independent review,
 focused checks and short actual native no-mutation evidence precede publication.
 Developer maps are updated to remove obsolete next-extraction/UI-priority claims.
 
+**Bounded diagnostics:** an unavailable saved-favorites read now has actionable,
+private-safe service-restart guidance without new routes or storage policies.
+Verify its independent checkpoint. Current status/resume instructions are
+consolidated without altering historical evidence; assess any further storage
+concern read-only before choosing a policy change.
+
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
 and independent review precede milestone publication. Full native CI follows
 cohesive milestones; unchanged older endurance evidence is not rerun without

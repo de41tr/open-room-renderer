@@ -27,6 +27,16 @@ explicit metadata choice and single-use private draft. Observed conflict guards
 are local safeguards, not a new revision framework. No server contract or audio
 engine is added. The next formal review remains due 02:42–03:12 UTC.
 
+The favorite repair checkpoint is fully green at `8c7df63` (run 38334412981).
+A reproduced saved-library read failure justifies a narrow fixed diagnostic,
+not a dashboard or relaxed storage policy. It preserves stale-list gates and
+mutation UNKNOWN. Current handover text is consolidated while retaining exact
+historical evidence. A separate read-only preset assessment reproduced destructive overwrites after
+failed loading, including legacy no-op Delete. Proceed with a narrow, separately
+documented failed-load write fence, preserving healthy responses and active DSP.
+It is a failure-policy correction, not a behavior-neutral extraction; no repair,
+reset, migration or external-file concurrency framework is added.
+
 ## 23:42 UTC value/risk assessment (first 90 minutes)
 
 1. **CONTINUE:** integrate stopped-only local playlist loading/editing and verify

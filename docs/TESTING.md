@@ -1,5 +1,37 @@
 # Test evidence and limits
 
+## Saved-favorites read diagnostics checkpoint
+
+Exact preceding head `8c7df63` passed all three jobs/every step in
+[run 38334412981](https://github.com/de41tr/open-room-renderer/actions/runs/38334412981),
+verified 02:08 UTC. Hosted default groups total **5324/74**, with the floor's
+4774+550 /74 in 140.96s/118.60s. Both native logs report keep and clear exact
+persistence, unchanged detached playback/DSP/gain, zero media/native mutations
+and complete cleanup. That result does not cover the later diagnostic change.
+
+The new read-only correction passes **246 focused Python tests** on each 3.11
+and 3.12 and **156 Node/DOM tests**. Root integrated replay passes 246 in 16.69s
+and 156 in 1.45s. The first root Python command named a nonexistent target-test
+file and collected nothing; the corrected command is the reported pass. All five
+production/test file hashes match the independently reviewed candidate.
+
+Thirty-three new loopback/synthetic-backend cases cover malformed/unreadable
+startup, unchanged bytes/no partial payload, admission, exact private-safe 503
+ERROR envelope, generic/other/state failure passthrough, unchanged mutation
+UNKNOWN, unrelated playback and configured legacy recall. Seven new JS cases
+cover strict known-response classification, stale rows/gates, fixed local text,
+invalid/private/mixed/superseded reads, unchanged poll timing and recovery.
+Baseline-only code fails the three startup diagnostic probes and all seven new
+JS probes as expected. Independent review reran the 33/7 focused cases and found
+no blocker. No native/full/local-browser or long campaign was added; exact
+new-head hosted CI remains PENDING. This changes one admitted Web read failure,
+not the library, storage or mutation error contract.
+
+Current STATUS/RESUME sections are consolidated; their historical suffixes and
+delimiters remain byte-identical. Current instructions no longer retain obsolete
+pending export/scheduling steps. Detailed older checkpoint evidence stays below.
+
+
 ## Browser favorite target repair checkpoint
 
 Exact preceding head `5534c4d` passed all three jobs/every step in

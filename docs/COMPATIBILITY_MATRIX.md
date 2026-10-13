@@ -50,6 +50,12 @@ target-repair workflow uses the unchanged typed API and keeps ACK distinct from
 exact saved-URL verification. Focused HTTP/DOM and actual native keep/clear checks
 pass without playback effects; exact new-head CI remains separate. Observed
 favorite conflicts are guarded locally, not atomically.
+Head `8c7df63` is fully green in run 38334412981 (5324/74 hosted defaults).
+The following Web favorites-read diagnostic intentionally distinguishes known
+managed-library unavailability with a fixed 503/ERROR envelope and local failed-
+read hint. Generic reads, storage policy and dispatched mutation UNKNOWN remain
+unchanged. Focused 246 Python cases per interpreter/156 Node checks pass; new-head
+CI and genuine browser behavior remain separate.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.

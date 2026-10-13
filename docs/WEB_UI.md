@@ -117,6 +117,27 @@ This is a browser safeguard only: favorites still use last-writer-wins updates,
 so changes after the last read or URL-only repairs hidden by the redacted listing
 may not be detected. It is not an atomic concurrency precondition.
 
+### If the saved favorites library cannot be read
+
+For the specific managed-library load failure, the favorites note now reports
+that a read found the library unavailable, rather than implying the whole
+renderer state failed. Previously displayed rows may be stale and all favorite
+controls remain disabled; unrelated playback controls retain their normal gates.
+No partial configured/managed list is presented as a healthy library.
+
+Stop the renderer **service** (not just audio playback), repair or restore its
+saved favorites library from a known-good backup, then restart the service.
+Do not delete/reset the library to force startup. The renderer preserves the
+unavailable file and does not automatically repair or reload it. An ordinary
+network failure still uses the generic stale-read message. Successful matching
+state/favorites recovery clears the advice. The hint describes a failed read,
+not a canonical snapshot of a newer server session.
+
+The admitted `GET /orr/v1/web/favorites` now returns the fixed three-field
+503 / ERROR envelope with `error: favorites_unavailable` for this one condition.
+No raw exception, filename, path or URL is copied into it. Other reads and all
+mutating error/UNKNOWN classifications retain their existing behavior.
+
 ## Ten-band EQ and presets
 
 Open **Sound → Edit bands** to change frequency, gain, Q and filter type in the
