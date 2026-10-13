@@ -7,7 +7,7 @@ unavailable Unix IPC, or failed native playback is a failure, never a skip or a
 fallback transport. No production backend method is replaced or overridden.
 
 Only generated low-amplitude local WAV files and literal loopback HTTP are
-used. Every mpv process has ao=null, config/scripts/ytdl disabled, and bounded
+used. Every mpv process selects null output, config/scripts/ytdl disabled, and bounded
 startup/teardown. This validates control, readback, queue/EOF, and owned process
 lifecycle, not physical audio, audible gain, ARMv7, or Raspberry Pi hardware.
 """
@@ -459,6 +459,58 @@ async def test_real_unix_ipc_owned_start_shutdown_cleanup_and_restart(native_wor
         "owned_spawn_cycles": 2, "peer_pid_verified": True, "same_socket_restart": True,
         "cleanup": {"all_children_reaped": True, "owned_socket_removed": True,
                     "lifecycle_tasks_done": True, "closed_backend_did_not_respawn": True},
+    }, sort_keys=True))
+
+
+@pytest.mark.asyncio
+async def test_real_unix_ipc_explicit_audio_device_selects_null(native_workspace, monkeypatch) -> None:
+    """Use the production option, never --ao=null which would mask its effect."""
+    directory, executable = native_workspace
+    bin_directory = directory / "bin"
+    bin_directory.mkdir()
+    wrapper = bin_directory / "mpv"
+    options = tuple(option for option in _NULL_OPTIONS
+                    if option not in {"--ao=null", "--no-config", "--load-scripts=no"})
+    wrapper.write_text(
+        # Require the production null option before starting; do not insert it
+        # or a replacement --ao which could disguise a missing implementation.
+        "#!/bin/sh\nselected=0\nfor arg do\n"
+        '  [ "$arg" != "--audio-device=null" ] || selected=1\ndone\n'
+        '[ "$selected" = 1 ] || exit 99\nexec ' + shlex.quote(executable) + ' "$@" '
+        + " ".join(shlex.quote(option) for option in options) + "\n"
+    )
+    wrapper.chmod(0o700)
+    monkeypatch.setenv("PATH", str(bin_directory) + os.pathsep + os.environ.get("PATH", ""))
+    mpv_home = directory / "mpv-home"
+    mpv_home.mkdir()
+    (mpv_home / "mpv.conf").write_text("ao=orr-test-unavailable\naudio-fallback-to-null=yes\n")
+    monkeypatch.setenv("MPV_HOME", str(mpv_home))
+    endpoint = directory / "explicit-output.sock"
+    track = directory / "output-440.wav"
+    _write_tone(track, 440)
+    backend = MpvBackend(str(endpoint), audio_device="null", initial_volume=1, initial_mute=True)
+    process = None
+    try:
+        async with asyncio.timeout(15):
+            await backend.start()
+            process = backend.process
+            assert process is not None and process.returncode is None
+            assert await _property(backend, "audio-device") == "null"  # intent only
+            assert await _property(backend, "audio-fallback-to-null") is False
+            assert await _property(backend, "load-scripts") is False
+            assert (await backend.loadfile(str(track)))["error"] == "success"
+            await _eventually("explicit null output active", lambda: _matches(backend, "current-ao", "null"))
+            assert await _property(backend, "path") == str(track)
+            await backend.stop()
+    finally:
+        await _stop_owned(backend)
+    assert process is not None and process.returncode is not None
+    assert not endpoint.exists()
+    print(json.dumps({
+        "lane": "PRODUCTION_UNIX_IPC/explicit-audio-device/null", "intent_readback": "null",
+        "active_output_driver": "null", "ao_override_used": False, "child_reaped": True,
+        "ambient_config_ignored": True, "null_fallback_disabled": True,
+        "physical_output_verified": False,
     }, sort_keys=True))
 
 
