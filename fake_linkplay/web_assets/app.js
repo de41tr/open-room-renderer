@@ -491,7 +491,10 @@
   function renderFavorites(ready) {
     text("favorites-count", String(control.favorites.length));
     $("favorites-empty").hidden = control.favorites.length > 0;
-    text("favorites-note", control.favoritesFresh ? "Saved on this renderer. Configuration favorites are read-only." : "Favorites could not be refreshed. This list may be stale.");
+    text("favorites-note", control.favoritesFresh ? "Saved on this renderer. Configuration favorites are read-only."
+      : control.favoritesReadFailure === "favorites_unavailable"
+        ? "A favorites read reported that the managed library could not be loaded. This list may be stale. Stop the renderer service, repair or restore its saved favorites library, then restart it."
+        : "Favorites could not be refreshed. This list may be stale.");
     const signature = JSON.stringify([snapshot.session_id, control.favorites]);
     if (signature !== favoritesSignature) {
       favoritesSignature = signature;
@@ -733,6 +736,6 @@
   // Only local drafts are dismissed; sent commands and their outcomes stay live.
   window.addEventListener("pagehide", () => { closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); });
   window.addEventListener("online", () => poll());
-  window.addEventListener("offline", () => { control.fresh = false; control.favoritesFresh = false; render(); });
+  window.addEventListener("offline", () => { control.fresh = false; control.favoritesFresh = false; control.favoritesReadFailure = null; render(); });
   poll();
 })();

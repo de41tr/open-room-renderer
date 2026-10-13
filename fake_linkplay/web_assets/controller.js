@@ -228,6 +228,16 @@
     }
     return payload.favorites;
   }
+  function favoritesReadFailure(response) {
+    const body = response && response.body;
+    // This is a read-failure hint, never a canonical library snapshot. Accept
+    // only the fixed Web envelope and retain neither server text nor records.
+    return response?.status === 503 && isObject(body)
+      && Object.keys(body).sort().join(",") === "error,message,outcome"
+      && body.error === "favorites_unavailable" && body.outcome === "ERROR"
+      && body.message === "Managed favorites could not be loaded. Stop the renderer service, repair or restore its saved favorites library, then restart it."
+      ? "favorites_unavailable" : null;
+  }
   function safeAudioURL(value) {
     // Validate protocol and credentials without changing the submitted audio URL.
     if (!string(value) || !/^https?:\/\//i.test(value) || /[\s\\<>\x00-\x1f\x7f]/.test(value)) return null;
@@ -269,6 +279,7 @@
       this.favorites = [];
       this.fresh = false;
       this.favoritesFresh = false;
+      this.favoritesReadFailure = null;
       this.lastReadAt = null;
       this.notice = {kind: "pending", text: "Connecting to your renderer…"};
       this.active = new Map();
@@ -316,11 +327,15 @@
           this.fresh = false;
           if (!this.busy && !this.operation) this.notice = {kind: "unknown", text: "Cannot read the renderer. Last received values may be stale. Refresh to reconnect."};
         }
+        this.favoritesReadFailure = null;
         try {
           if (!acceptedState || favoriteResult.status !== "fulfilled" || favoriteResult.value.status !== 200) throw new Error();
           this.favorites = validateFavorites(favoriteResult.value.body, this.state.session_id);
           this.favoritesFresh = true;
-        } catch (_) { this.favoritesFresh = false; }
+        } catch (_) {
+          this.favoritesFresh = false;
+          if (acceptedState && favoriteResult.status === "fulfilled") this.favoritesReadFailure = favoritesReadFailure(favoriteResult.value);
+        }
         this.changed();
       } while (this.readAgain);
       return this.fresh;
@@ -331,6 +346,7 @@
       const id = ++this.operation;
       this.epoch += 1;
       this.fresh = false;
+      this.favoritesReadFailure = null;
       if (body.action.startsWith("favorite_")) this.favoritesFresh = false;
       this.active.set(id, {action: body.action, label});
       this.notice = {kind: "pending", text: `${label}: waiting for the renderer.`, id};

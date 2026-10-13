@@ -25,6 +25,7 @@ function state(overrides = {}) {
 }
 const favorites = (items = [], session_id = 'session-one') => ({version: 1, session_id, favorites: items});
 const favorite = () => ({id: 'favorite-id', editable: true, name: 'Radio', title: '', artist: '', album: '', artwork: null, target_label: 'example.com'});
+const favoritesUnavailable = () => ({status: 503, body: {error: 'favorites_unavailable', message: 'Managed favorites could not be loaded. Stop the renderer service, repair or restore its saved favorites library, then restart it.', outcome: 'ERROR'}});
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => {resolve = yes; reject = no;}); return {promise, resolve, reject}; }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function harness() {
@@ -191,7 +192,7 @@ async function appHarness() {
     requests.push({url, options}); let payload;
     if (url.endsWith('/playlist/export')) return exportHook ? exportHook(JSON.parse(options.body), options) : exportResponse(JSON.parse(options.body).action === 'prepare' ? exportSummary(current) : privateJSON(), {attachment: JSON.parse(options.body).action === 'download'});
     if (options.method === 'POST') payload = postHook ? await postHook(JSON.parse(options.body)) : {request_acknowledged: true};
-    else if (url.endsWith('/favorites')) payload = library;
+    else if (url.endsWith('/favorites')) payload = typeof library === 'function' ? await library() : clone(library);
     else payload = {...clone(current), revision: ++revision};
     const status = payload.__status || 200; delete payload.__status;
     return new Response(JSON.stringify(payload), {status, headers: {'Content-Type': 'application/json'}});
@@ -203,7 +204,7 @@ async function appHarness() {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/app.js'), 'utf8'), {window, document, fetch, AbortController, TextEncoder, TextDecoder, Uint8Array, URL: TestURL, Blob, Date, console});
   async function settle() {for (let i = 0; i < 10; i += 1) await tick();}
   await settle();
-  return {ids, timers, requests, blobs, created, revoked, syntheticClicks, focusCalls, focused: () => document.activeElement, setExport: fn => {exportHook = fn;}, exports: () => requests.filter(item => item.url.endsWith('/playlist/export')), pagehide: (persisted = true) => events.get('pagehide')?.({type: 'pagehide', persisted}), pageshow: () => events.get('pageshow')?.({type: 'pageshow', persisted: true}), setState: value => {current = value;}, setFavorites: value => {library = value;}, setPost: fn => {postHook = fn;}, settle, refresh: async () => {await ids.get('refresh').fire('click'); await settle();}, posts: () => requests.filter(item => item.options.method === 'POST').map(item => JSON.parse(item.options.body))};
+  return {ids, timers, requests, blobs, created, revoked, syntheticClicks, focusCalls, focused: () => document.activeElement, setExport: fn => {exportHook = fn;}, exports: () => requests.filter(item => item.url.endsWith('/playlist/export')), pagehide: (persisted = true) => events.get('pagehide')?.({type: 'pagehide', persisted}), pageshow: () => events.get('pageshow')?.({type: 'pageshow', persisted: true}), offline: () => events.get('offline')?.({type: 'offline'}), setState: value => {current = value;}, setFavorites: value => {library = value;}, setPost: fn => {postHook = fn;}, settle, refresh: async () => {await ids.get('refresh').fire('click'); await settle();}, posts: () => requests.filter(item => item.options.method === 'POST').map(item => JSON.parse(item.options.body))};
 }
 test('app renders metadata as text, and polling preserves favorite form edits', async () => {
   const h = await appHarness();
@@ -1626,4 +1627,110 @@ test('Change URL pending outcome cannot replace or resend a reopened draft after
   await dialog.fire('close'); await h.refresh();
   assert.equal(h.focusCalls.length, before); assert.equal(dialog.open, true); assert.equal(h.ids.get('favorite-url').value, 'https://example.com/new?new=private');
   assert.equal(h.ids.get('favorite-metadata').value, 'clear'); assert.equal(h.ids.get('favorite-dialog-status').textContent, ''); assert.equal(h.posts().length, 1);
+});
+
+test('saved-favorites diagnostic retains stale rows without changing transport, freshness or read timing', async () => {
+  const h = harness(); h.setFavorites(favorites([favorite()])); await h.controller.refresh();
+  const rows = h.controller.favorites, calls = h.calls.length;
+  h.hooks.favorites = favoritesUnavailable; await h.controller.refresh();
+  assert.equal(h.controller.favoritesReadFailure, 'favorites_unavailable');
+  assert.equal(h.controller.favorites, rows); assert.equal(h.controller.favoritesFresh, false);
+  assert.equal(h.controller.fresh, true); assert.equal(h.controller.canMutate('play'), true); assert.equal(h.controller.canMutate('stop'), true);
+  for (const action of ['favorite_add', 'favorite_current', 'favorite_play', 'favorite_rename', 'favorite_target', 'favorite_delete']) assert.equal(h.controller.canMutate(action), false);
+  assert.deepEqual(h.calls.slice(calls).map(call => [call.path, call.options.method]), [['/orr/v1/web/state', 'GET'], ['/orr/v1/web/favorites', 'GET']]);
+  assert.equal(h.posts().length, 0);
+  h.hooks.favorites = undefined; await h.controller.refresh();
+  assert.equal(h.controller.favoritesReadFailure, null); assert.equal(h.controller.favoritesFresh, true);
+});
+test('saved-favorites diagnostic requires the exact status, envelope and fixed message, and clears on other failures', async () => {
+  const good = favoritesUnavailable();
+  const invalid = [
+    ...[200, 400, 500, 502, '503'].map(status => ({...good, status})),
+    ...['REJECTED', 'UNKNOWN', 'error', null].map(outcome => ({...good, body: {...good.body, outcome}})),
+    ...['library_unavailable', 'read_failed', '', null].map(error => ({...good, body: {...good.body, error}})),
+    ...['https://example.test/private?token=secret /private/favorites.json', '', null].map(message => ({...good, body: {...good.body, message}})),
+    ...[null, [], {}, {error: 'favorites_unavailable', outcome: 'ERROR'}].map(body => ({...good, body})),
+    ...[{favorites: [favorite()]}, {session_id: 'mixed-session'}, {version: 1}, {committed: true}, {effect: 'LIBRARY_COMMITTED_DURABILITY_UNKNOWN'}].map(extra => ({...good, body: {...good.body, ...extra}})),
+    {status: 200, body: favorites([favorite()], 'mixed-session')}
+  ];
+  for (const response of invalid) {
+    const h = harness(); h.setFavorites(favorites([favorite()])); await h.controller.refresh();
+    h.hooks.favorites = favoritesUnavailable; await h.controller.refresh(); assert.equal(h.controller.favoritesReadFailure, 'favorites_unavailable');
+    h.hooks.favorites = () => clone(response); await h.controller.refresh();
+    assert.equal(h.controller.favoritesReadFailure, null, JSON.stringify(response)); assert.equal(h.controller.favoritesFresh, false);
+    assert.deepEqual(h.controller.favorites, [favorite()]); assert.equal(h.controller.fresh, true);
+  }
+  const h = harness(); h.hooks.favorites = favoritesUnavailable; await h.controller.refresh();
+  h.hooks.favorites = () => {throw new Error('private network failure');}; await h.controller.refresh();
+  assert.equal(h.controller.favoritesReadFailure, null); assert.equal(h.controller.favoritesFresh, false);
+});
+test('saved-favorites diagnostic cannot survive invalid or older state reads', async () => {
+  for (const failure of [() => ({status: 200, body: {}}), () => ({status: 503, body: favoritesUnavailable().body}), () => ({status: 200, body: state({revision: 0})}), () => {throw new Error('offline');}]) {
+    const h = harness(); h.hooks.favorites = favoritesUnavailable; await h.controller.refresh();
+    assert.equal(h.controller.favoritesReadFailure, 'favorites_unavailable');
+    h.hooks.state = failure; await h.controller.refresh();
+    assert.equal(h.controller.favoritesReadFailure, null); assert.equal(h.controller.favoritesFresh, false); assert.equal(h.controller.fresh, false);
+  }
+});
+test('superseded saved-favorites diagnostic never resurfaces after a command or successful recovery', async () => {
+  const h = harness(); h.setFavorites(favorites([favorite()])); await h.controller.refresh();
+  const late = deferred(); let reads = 0; const observed = [];
+  h.controller.onChange = control => observed.push(control.favoritesReadFailure);
+  h.hooks.favorites = () => ++reads === 1 ? late.promise : {status: 200, body: favorites([favorite()])};
+  const reading = h.controller.refresh(); await tick();
+  const stopping = h.controller.mutate({action: 'stop'}, 'Stop'); await tick();
+  late.resolve(favoritesUnavailable()); await Promise.all([reading, stopping]);
+  assert.equal(h.controller.favoritesReadFailure, null); assert.equal(h.controller.favoritesFresh, true);
+  assert.ok(observed.every(value => value === null)); assert.equal(h.posts().length, 1); assert.equal(reads, 2);
+});
+test('saved-favorites diagnostic stays read-only and does not turn mutation uncertainty into rejection', async () => {
+  const h = harness(); await h.controller.refresh();
+  h.hooks.post = () => ({status: 502, body: {error: 'command_failed', outcome: 'UNKNOWN', message: 'Command outcome is unknown. Refresh before any explicit retry.'}});
+  h.hooks.favorites = favoritesUnavailable;
+  const result = await h.controller.mutate({action: 'favorite_add', name: 'Radio', url: 'https://example.test/live'}, 'Add favorite');
+  assert.equal(result.kind, 'unknown'); assert.equal(h.controller.notice.kind, 'unknown'); assert.equal(h.controller.unknownOutcomes.length, 1);
+  assert.equal(h.controller.favoritesReadFailure, 'favorites_unavailable'); assert.equal(h.posts().length, 1);
+});
+test('app gives fixed saved-favorites read guidance while stale rows and ordinary playback controls stay intact', async () => {
+  const h = await appHarness(), rows = h.ids.get('favorites-list').children.slice(), before = h.requests.length;
+  h.setFavorites({__status: 503, ...favoritesUnavailable().body}); await h.refresh();
+  assert.equal(h.ids.get('favorites-note').textContent, 'A favorites read reported that the managed library could not be loaded. This list may be stale. Stop the renderer service, repair or restore its saved favorites library, then restart it.');
+  assert.deepEqual(h.ids.get('favorites-list').children, rows); assert.equal(h.ids.get('favorites-count').textContent, '1'); assert.equal(h.ids.get('favorites-empty').hidden, true);
+  for (const button of h.ids.get('favorites-list').querySelectorAll('button')) assert.equal(button.disabled, true);
+  for (const id of ['add-favorite', 'save-current']) assert.equal(h.ids.get(id).disabled, true);
+  for (const id of ['play', 'stop', 'volume', 'mute']) assert.equal(h.ids.get(id).disabled, false);
+  assert.equal(h.ids.get('connection-label').textContent, 'Connected'); assert.equal(h.posts().length, 0);
+  assert.deepEqual(h.requests.slice(before).map(item => [item.url, item.options.method]), [['/orr/v1/web/state', 'GET'], ['/orr/v1/web/favorites', 'GET']]);
+  assert.deepEqual([...h.timers.values()].map(timer => timer.delay), [2000]);
+  h.setState(state({session_id: 'restarted'})); await h.refresh();
+  // The error envelope has no session identity: wording reports the failed read,
+  // while fresh library controls still require a matching successful snapshot.
+  assert.match(h.ids.get('favorites-note').textContent, /^A favorites read reported/); assert.equal(h.ids.get('add-favorite').disabled, true);
+  h.setFavorites(favorites([{...favorite(), name: 'Recovered'}], 'restarted')); await h.refresh();
+  assert.equal(h.ids.get('favorites-note').textContent, 'Saved on this renderer. Configuration favorites are read-only.');
+  assert.equal(h.ids.get('add-favorite').disabled, false); assert.equal(h.ids.get('save-current').disabled, false);
+  for (const button of h.ids.get('favorites-list').querySelectorAll('button')) assert.equal(button.disabled, false);
+});
+test('app clears saved-favorites advice on network, malformed, private-message, mixed-session and offline failures', async () => {
+  const privateText = 'private /local/favorites.json https://example.test/?token=secret';
+  const variants = [
+    () => {throw new Error(privateText);}, {}, [],
+    {__status: 502, ...favoritesUnavailable().body},
+    {__status: 503, ...favoritesUnavailable().body, outcome: 'UNKNOWN'},
+    {__status: 503, ...favoritesUnavailable().body, message: privateText},
+    {__status: 503, ...favoritesUnavailable().body, favorites: [favorite()]},
+    {__status: 503, ...favoritesUnavailable().body, session_id: 'mixed-session'},
+    favorites([favorite()], 'mixed-session')
+  ];
+  for (const response of variants) {
+    const h = await appHarness(); h.setFavorites({__status: 503, ...favoritesUnavailable().body}); await h.refresh();
+    assert.match(h.ids.get('favorites-note').textContent, /repair or restore/);
+    h.setFavorites(response); await h.refresh();
+    assert.equal(h.ids.get('favorites-note').textContent, 'Favorites could not be refreshed. This list may be stale.');
+    assert.equal(h.ids.get('add-favorite').disabled, true); assert.equal(h.ids.get('play').disabled, false); assert.equal(h.posts().length, 0);
+    for (const element of h.ids.values()) assert.doesNotMatch(element.textContent, /private|token=secret|local\/favorites/);
+  }
+  const h = await appHarness(); h.setFavorites({__status: 503, ...favoritesUnavailable().body}); await h.refresh(); h.offline();
+  assert.equal(h.ids.get('favorites-note').textContent, 'Favorites could not be refreshed. This list may be stale.');
+  assert.equal(h.ids.get('play').disabled, true); assert.equal(h.ids.get('stop').disabled, false);
 });

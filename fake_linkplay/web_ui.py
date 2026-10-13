@@ -453,6 +453,7 @@ class WebControlApi:
             "forbidden": "Browser request was not admitted.",
             "unavailable": "Requested operation is currently unavailable.",
             "read_failed": "Renderer state could not be read.",
+            "favorites_unavailable": "Managed favorites could not be loaded. Stop the renderer service, repair or restore its saved favorites library, then restart it.",
             "command_failed": "Command outcome is unknown. Refresh before any explicit retry.",
         }
         payload = {"error": code, "message": messages.get(code, "Browser request was not admitted."),
@@ -693,7 +694,17 @@ class WebControlApi:
                 if request.method != "GET":
                     raise WebAdmissionError("method_not_allowed", 405)
                 self._bodyless(request)
-                value = self.snapshot() if path.endswith("/state") else self.favorites_snapshot()
+                if path.endswith("/state"):
+                    value = self.snapshot()
+                else:
+                    try:
+                        value = self.favorites_snapshot()
+                    except FavoriteError as exc:
+                        # Only this admitted read receives repair guidance;
+                        # dispatched mutations retain their UNKNOWN outcome.
+                        if exc.code == "library_unavailable":
+                            return self._error("favorites_unavailable", 503, "ERROR")
+                        raise
                 return web.json_response(value, headers=_HEADERS)
             if path not in {PREFIX + "/command", PREFIX + "/playlist/export"}:
                 raise WebAdmissionError("not_found", 404)
