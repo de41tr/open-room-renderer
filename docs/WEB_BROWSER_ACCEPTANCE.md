@@ -61,15 +61,20 @@ Play/Pause through production HTTP/Unix IPC to mpv/null passed before the smoke
 failed on an overly strict Tab-wrap assertion. A native modal may move focus to
 browser controls before returning to the dialog; this is allowed by
 [HTML sequential-focus navigation](https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation).
-The corrected smoke records exact focus state, permits only the unfocused BODY
-browser-chrome boundary, requires subsequent Tab re-entry, rejects background
-page controls and verifies a real background click is intercepted.
+The second run (`97ce1f6`, run 38354874024) recorded a noninteractive BODY
+boundary while `document.hasFocus()` remained true. That observation is not
+proof of browser-chrome focus. The corrected smoke records the value without
+inference, permits only document.body with no tabindex/contentEditable, requires
+subsequent real Tab re-entry, rejects every background element and verifies a
+real background click is intercepted.
 
 The captured console also proved a product defect: the empty `data:,` favicon
 violated the shipped image CSP. It is now an explicit same-origin empty 204
 response at `/ui/favicon.ico`, through the existing guarded static handler.
 The four packaged assets and CSP are unchanged; no error is filtered out.
-The first run remains failed. A later successful exact-head job is required for
+The second run's captured console is empty, confirming the favicon CSP error is
+removed for its desktop flow. Both early runs remain failed on their documented
+focus assertions. A later successful exact-head job is required for
 mobile, keyboard and downloaded-file acceptance; no unrun check is inferred.
 
 ## Visual and keyboard checks
