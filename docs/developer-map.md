@@ -142,7 +142,8 @@ PYTHONPATH=. .venv/bin/pytest -q
 - The package directory is still named `fake_linkplay` for compatibility with the current code. Public docs use `Open Room Renderer`.
 - Some config values are compatibility knobs and may look vendor-specific. Do not rename them casually unless tests and app behavior are checked.
 - `http_api.py` is large because it grew from compatibility experiments. Prefer small extractions with tests over broad rewrites.
-- Port 80 is the default because some controller apps probe plain `http://device-ip/` during discovery or setup.
+- Default HTTP uses port 8080 and SOAP/UPnP uses 59152. Port 80 is an explicit
+  option for controller apps that probe plain `http://device-ip/`.
 - `logs/`, `.state/`, and local notes are private working artifacts and should not be published.
 
 ## Glossary

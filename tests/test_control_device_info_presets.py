@@ -9,14 +9,14 @@ from fake_linkplay.state import RendererState
 from fake_linkplay.upnp_description import get_control_device_info_response_fields, soap_response
 
 
-def status_from_soap(cfg, state=None):
+def status_from_soap(cfg: Config, state: RendererState | None = None) -> dict[str, object]:
     fields = get_control_device_info_response_fields(cfg, '192.0.2.10', state)
     root = ET.fromstring(soap_response('GetControlDeviceInfo', 'rendercontrol1', fields))
     return json.loads(root.find('.//Status').text)
 
 
 @pytest.mark.parametrize('count', [0, 2])
-def test_configured_preset_count_is_available_without_runtime_state(count):
+def test_configured_preset_count_is_available_without_runtime_state(count: int) -> None:
     cfg = Config(uuid='00000000-0000-4000-8000-000000000001',
                  podcast_presets=[PodcastPreset(name=f'Favorite {index}',
                                 url=f'https://media.example.test/{index}.wav')
@@ -24,7 +24,7 @@ def test_configured_preset_count_is_available_without_runtime_state(count):
     assert status_from_soap(cfg)['preset_key'] == str(count)
 
 
-def test_managed_favorites_count_matches_http_status_and_tracks_changes():
+def test_managed_favorites_count_matches_http_status_and_tracks_changes() -> None:
     cfg = Config(uuid='00000000-0000-4000-8000-000000000001',
                  wiim_home_profile=True,
                  podcast_presets=[PodcastPreset(name='Configured', url='https://media.example.test/config.wav')])

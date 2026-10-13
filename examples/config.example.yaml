@@ -4,8 +4,11 @@ friendly_name: "Open Room Renderer"
 manufacturer: "Independent"
 model_name: "Linux Room Renderer"
 uuid: null
+# WiiM-compatible discovery is enabled by default; false selects neutral metadata.
+wiim_home_profile: true
+mirror_http_on_upnp_port: true
 http_api_port: 8080
-upnp_port: 8080
+upnp_port: 59152
 mirror_port_80: false
 bind_address: "0.0.0.0"
 advertise_ip: null

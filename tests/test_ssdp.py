@@ -7,7 +7,7 @@ def test_ssdp_supports_wiimu_search_target() -> None:
 
 
 def test_wiimu_response_points_to_description() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1")
+    cfg = Config(wiim_home_profile=False, upnp_port=8080, uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1")
     packet = response_packet(cfg, "ssdp:wiimudevice").decode()
     assert "ST: ssdp:wiimudevice" in packet
     assert "USN: uuid:00000000-0000-4000-8000-000000000000::ssdp:wiimudevice" in packet
@@ -54,7 +54,7 @@ def test_wiimu_search_target_also_returns_media_renderer_target() -> None:
 def test_rootdevice_usn_has_required_suffix_for_responses_and_notifies() -> None:
     from fake_linkplay.ssdp import notify_packet
 
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000001", advertise_ip="192.0.2.10")
+    cfg = Config(wiim_home_profile=False, upnp_port=8080, uuid="00000000-0000-4000-8000-000000000001", advertise_ip="192.0.2.10")
     expected = "USN: uuid:00000000-0000-4000-8000-000000000001::upnp:rootdevice\r\n"
     assert expected in response_packet(cfg, "upnp:rootdevice").decode()
     assert expected in notify_packet(cfg, "upnp:rootdevice").decode()
@@ -77,7 +77,7 @@ def test_all_search_includes_own_uuid_and_all_description_services() -> None:
     from xml.etree import ElementTree
     from fake_linkplay.upnp_description import description_xml
 
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000001", advertise_ip="192.0.2.10")
+    cfg = Config(wiim_home_profile=False, upnp_port=8080, uuid="00000000-0000-4000-8000-000000000001", advertise_ip="192.0.2.10")
     server = SsdpServer(cfg)
     targets = server._targets_for_search("ssdp:all")
     assert f"uuid:{cfg.upnp_uuid}" in targets
@@ -111,7 +111,7 @@ def test_compatibility_service_name_is_marked_utf8_hex() -> None:
 
 
 def test_neutral_response_has_independent_server_identity() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000001", advertise_ip="192.0.2.10")
+    cfg = Config(wiim_home_profile=False, upnp_port=8080, uuid="00000000-0000-4000-8000-000000000001", advertise_ip="192.0.2.10")
     packet = response_packet(cfg, "urn:schemas-upnp-org:device:MediaRenderer:1").decode()
     assert "OpenRoomRenderer/0.1" in packet
     assert "ServiceName:" not in packet

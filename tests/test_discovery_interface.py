@@ -110,7 +110,7 @@ async def test_generic_zeroconf_uses_only_selected_ipv4_interface(monkeypatch, i
     async_factory = MagicMock()
     monkeypatch.setattr("zeroconf.Zeroconf", factory)
     monkeypatch.setattr("zeroconf.asyncio.AsyncZeroconf", async_factory)
-    advertiser = MdnsAdvertiser(Config(enable_mdns=True, discovery_interface=interface))
+    advertiser = MdnsAdvertiser(Config(wiim_home_profile=False, enable_mdns=True, discovery_interface=interface))
     monkeypatch.setattr(advertiser, "_register_services", AsyncMock())
     configure = AsyncMock()
     monkeypatch.setattr(advertiser, "_configure_selected_interface", configure)
@@ -179,7 +179,7 @@ async def test_generic_explicit_mode_isolates_owned_sockets_before_registering(m
     sock, wrapper, engine, zc, azc = fake_zeroconf()
     monkeypatch.setattr("zeroconf.Zeroconf", MagicMock(return_value=zc))
     monkeypatch.setattr("zeroconf.asyncio.AsyncZeroconf", MagicMock(return_value=azc))
-    advertiser = MdnsAdvertiser(Config(enable_mdns=True, discovery_interface="127.0.0.1"))
+    advertiser = MdnsAdvertiser(Config(wiim_home_profile=False, enable_mdns=True, discovery_interface="127.0.0.1"))
     async def register():
         zc.async_wait_for_start.assert_awaited_once()
         if sys.platform.startswith("linux"):
@@ -219,7 +219,7 @@ async def test_generic_explicit_mode_fails_closed_and_cleans_up(monkeypatch, fau
         zc.async_wait_for_start.side_effect = TimeoutError("synthetic startup failure")
     monkeypatch.setattr("zeroconf.Zeroconf", MagicMock(return_value=zc))
     monkeypatch.setattr("zeroconf.asyncio.AsyncZeroconf", MagicMock(return_value=azc))
-    advertiser = MdnsAdvertiser(Config(enable_mdns=True, discovery_interface="127.0.0.1"))
+    advertiser = MdnsAdvertiser(Config(wiim_home_profile=False, enable_mdns=True, discovery_interface="127.0.0.1"))
     register = AsyncMock()
     monkeypatch.setattr(advertiser, "_register_services", register)
     with pytest.raises(RuntimeError, match="zeroconf"):

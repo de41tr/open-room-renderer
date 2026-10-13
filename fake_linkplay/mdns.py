@@ -1,8 +1,7 @@
 """Optional mDNS/DNS-SD discovery support.
 
-mDNS is off by default in the safe example config. The custom responder exists
-for compatibility experiments where zeroconf's generic service publication is
-not close enough to client expectations.
+mDNS and the WiiM-compatible custom responder are enabled by default.
+Explicit neutral profiles use zeroconf service publication instead.
 """
 
 from __future__ import annotations

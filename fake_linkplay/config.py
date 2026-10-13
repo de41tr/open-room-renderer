@@ -72,7 +72,7 @@ class Config:
     model_url: str = ""
     uuid: str | None = None
     http_api_port: int = 8080
-    upnp_port: int = 8080
+    upnp_port: int = 59152
     mirror_port_80: bool = False
     bind_address: str = "0.0.0.0"
     advertise_ip: str | None = None
@@ -84,16 +84,15 @@ class Config:
     default_mute: bool = False
     log_level: str = "INFO"
     state_dir: str = ".state"
-    enable_mdns: bool = False
+    enable_mdns: bool = True
     enable_ssdp: bool = True
     # Local IPv4 address for multicast membership/output; None keeps OS routing.
     # HTTP binding and advertised URLs do not select a multicast interface.
     discovery_interface: str | None = None
-    # The WiiM Home profile intentionally changes identity, ports, and service
-    # metadata to match behavior observed in app captures. Keep the normal
-    # pywiim/dev path separate so the portable acceptance gate stays simple.
-    wiim_home_profile: bool = False
-    mirror_http_on_upnp_port: bool = False
+    # Publish app-compatible SSDP/mDNS by default. Explicit false retains
+    # standard UUID/discovery metadata for clients needing the neutral profile.
+    wiim_home_profile: bool = True
+    mirror_http_on_upnp_port: bool = True
     mdns_instance_name: str | None = None
     discovery_uuid: str | None = None
     bootid: str = "000000000000000000000000000000000000"

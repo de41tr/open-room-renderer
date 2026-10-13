@@ -97,7 +97,8 @@ def user_config(prefix: Path, port: int) -> dict:
     return {
         "friendly_name": "Open Room Renderer", "manufacturer": "Independent",
         "model_name": "Linux Room Renderer", "uuid": None,
-        "http_api_port": port, "upnp_port": port, "mirror_port_80": False,
+        "http_api_port": port, "upnp_port": 59152 if port == 8080 else port,
+        "wiim_home_profile": True, "mirror_http_on_upnp_port": True, "mirror_port_80": False,
         "bind_address": "0.0.0.0", "advertise_ip": None,
         "mpv_socket": str(prefix / "run/mpv.sock"), "auto_spawn_mpv": True,
         "state_dir": str(prefix / "state"), "default_volume": 50,
@@ -252,7 +253,7 @@ def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require
     print(json.dumps(info, indent=2))
     if not info["alsa_pcm_accessible"]:
         print("WARNING: no accessible ALSA PCM device detected; physical sound is unverified (session audio may still work).")
-    print(f"{'Stage files only' if stage_only else 'Install native package'} at {prefix}; HTTP/UPnP port {port}")
+    print(f"{'Stage files only' if stage_only else 'Install native package'} at {prefix}; HTTP port {port}; SOAP/UPnP port {config['upnp_port']}")
     if dry_run:
         print("Dry run: no files written, packages installed, services changed, or ports opened.")
         return

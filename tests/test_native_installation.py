@@ -30,6 +30,7 @@ def installer(monkeypatch):
     module = load_script("install-native")
     monkeypatch.setattr(module.platform, "system", lambda: "Linux")
     monkeypatch.setattr(module.platform, "machine", lambda: "aarch64")
+    monkeypatch.setattr(module.sys, "maxsize", 2**63 - 1)
     monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/bin/mpv")
     monkeypatch.setattr(module, "run", lambda *args: "mpv v0.37.0")
     # Unit boundaries below must not depend on the host's optional venv package.
@@ -141,7 +142,8 @@ def test_stage_load_restart_distinct_identity_and_safe_uninstall(installer, tmp_
             assert (assets / name).read_bytes() == body
             assert entries[f"source/fake_linkplay/web_assets/{name}"]["sha256"] == hashlib.sha256(body).hexdigest()
     config = load_config(first / "config.yaml")
-    assert config.http_api_port == config.upnp_port == 8080
+    assert config.http_api_port == 8080 and config.upnp_port == 59152
+    assert config.wiim_home_profile and config.enable_mdns and config.enable_ssdp
     assert not config.mirror_port_80
     assert config.uuid == load_config(first / "config.yaml").uuid
     assert config.uuid != load_config(second / "config.yaml").uuid
@@ -343,18 +345,18 @@ def test_protected_subtrees_still_reject_symlink_traversal_before_deletion(insta
 def test_portable_and_compat_runners_keep_identity(runner, monkeypatch):
     portable_path = runner.prepare("portable")
     portable = load_config(portable_path)
-    assert portable.http_api_port == portable.upnp_port == 8080
-    assert not portable.wiim_home_profile
+    assert portable.http_api_port == 8080 and portable.upnp_port == 59152
+    assert portable.wiim_home_profile and portable.enable_mdns and portable.enable_ssdp
     assert portable.uuid == load_config(runner.prepare("portable")).uuid
     compat = load_config(runner.prepare("app-compat"))
-    assert compat.http_api_port == compat.upnp_port == 8080
+    assert compat.http_api_port == 8080 and compat.upnp_port == 59152
     assert not compat.mirror_port_80
     assert compat.wiim_home_profile
     assert compat.uuid == load_config(runner.prepare("app-compat")).uuid
     assert compat.uuid != portable.uuid
     monkeypatch.setenv("APP_COMPAT_PORT80", "1")
     port80 = load_config(runner.prepare("app-compat"))
-    assert port80.http_api_port == port80.upnp_port == 80
+    assert port80.http_api_port == 80 and port80.upnp_port == 59152
     assert port80.uuid == compat.uuid
     monkeypatch.setenv("APP_COMPAT_FRESH", "1")
     assert load_config(runner.prepare("app-compat")).uuid != compat.uuid
@@ -556,11 +558,11 @@ def test_native_requires_venv_support_before_writing(installer, monkeypatch, tmp
 def test_core_and_cli_defaults_high_port_with_explicit_port80_preserved(tmp_path):
     from fake_linkplay.cli import build_parser
     from fake_linkplay.config import Config
-    assert Config().http_api_port == Config().upnp_port == 8080
+    assert Config().http_api_port == 8080 and Config().upnp_port == 59152
     assert Config(http_api_port=80, upnp_port=80).http_api_port == 80
     path = tmp_path / "minimal.yaml"
     path.write_text(f"state_dir: {tmp_path / 'state'}\n")
-    assert load_config(path).http_api_port == load_config(path).upnp_port == 8080
+    assert load_config(path).http_api_port == 8080 and load_config(path).upnp_port == 59152
     path.write_text(path.read_text() + "http_api_port: 80\nupnp_port: 80\n")
     explicit = load_config(path)
     assert explicit.http_api_port == explicit.upnp_port == 80

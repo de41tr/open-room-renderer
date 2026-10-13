@@ -2,6 +2,8 @@
 
 The default installation runs as your normal Linux user on **port 8080**. It
 keeps its identity across restarts and never automatically invokes sudo.
+WiiM-compatible SSDP and mDNS discovery are enabled by default; SOAP/UPnP
+control is also available on **port 59152**. Port 80 remains an explicit option.
 
 ## Browser controls
 
@@ -355,9 +357,10 @@ audio behavior have not been verified here. No low-port capability is required.
 ## 5. Network And DHCP
 
 The API has no authentication. Use a trusted LAN and do not forward its ports to
-the internet. The neutral checkout profile enables SSDP; native installation and
-app-compat additionally enable mDNS. Controllers need the same reachable network:
-TCP 8080 (or the chosen port), SSDP UDP 1900, and mDNS UDP 5353 where enabled.
+the internet. Default checkout and native profiles enable WiiM-compatible SSDP
+and mDNS. Controllers need the same reachable network: TCP 8080 for the API/Web
+controller, TCP 59152 for SOAP/UPnP control, SSDP UDP 1900, and mDNS UDP 5353.
+A custom installer `--port` selects that port for both HTTP and SOAP/UPnP.
 Check existing firewall and AP isolation policy rather than disabling it broadly.
 
 `bind_address` controls HTTP listeners; `advertise_ip: null` chooses an address
@@ -384,11 +387,18 @@ Setup selects `python3` and verifies Python 3.11+. Override with
 extras; the native installation deliberately omits them. Curl alone is diagnostic;
 the acceptance helper uses a real open-source client and local SSDP.
 
-`run.sh` / `run-dev.sh` use the neutral YAML, high ports, and persistent `.state`.
-`./scripts/run-app-compat.sh` explicitly selects app-shaped discovery and only the
-implemented TuneIn-style service surface, also on port 8080 with stable
+`run.sh` / `run-dev.sh` enable WiiM-compatible discovery, high ports, and persistent
+`.state`. `./scripts/run-app-compat.sh` additionally selects the implemented
+TuneIn-style service surface, with HTTP 8080, SOAP/UPnP 59152, and stable
 `.state/app-compat`. Some proprietary controllers insist on TCP 80 despite the
 advertised discovery port; their acceptance remains untested.
+
+### Explicit Neutral Discovery
+
+Set `wiim_home_profile: false` in a custom YAML file to select neutral UUID and
+discovery metadata. `enable_mdns: false` disables mDNS separately. Explicit
+configuration and existing saved identity are retained; no identity file is
+reset when changing profiles.
 
 ### Optional App-Compatible Port-80 Service
 
@@ -425,7 +435,7 @@ both profiles on the same port.
 ### Migrating Earlier Checkout Runners
 
 Earlier `run.sh` used app-compat, port 80, and a newly generated identity every
-start. It now uses the neutral stable 8080 profile. An explicit `APP_COMPAT_*`
+start. It now uses stable WiiM-compatible discovery with HTTP 8080 and SOAP/UPnP 59152. An explicit `APP_COMPAT_*`
 variable still routes `run.sh` to the app runner, but fresh identity is opt-in:
 `APP_COMPAT_FRESH=1`. Port 80 is separately opt-in: `APP_COMPAT_PORT80=1`.
 
@@ -584,6 +594,8 @@ explicit owner control succeeds. Keep the option false where that boundary is
 unacceptable. No synchronized multiroom capability follows from staging.
 
 ## Editable local favorites
+
+The `preset_key` field is the effective local favorites count as a string. Both HTTP `getStatusEx` and the JSON `Status` inside SOAP `GetControlDeviceInfo` expose it, including the service-owned favorites view. This field is a count, not the currently selected favorite; clients may require it while initializing a discovered renderer.
 
 With the renderer running, manage its own local library through the CLI:
 

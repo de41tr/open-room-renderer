@@ -25,8 +25,8 @@ def config_file(tmp_path: Path, **values: object) -> Path:
     return path
 
 
-def test_builtin_identity_is_neutral() -> None:
-    cfg = Config()
+def test_explicit_neutral_profile_keeps_independent_metadata() -> None:
+    cfg = Config(wiim_home_profile=False)
     assert cfg.friendly_name == "Open Room Renderer"
     assert cfg.manufacturer == "Independent"
     assert cfg.model_name == "Linux Room Renderer"
@@ -37,7 +37,7 @@ def test_builtin_identity_is_neutral() -> None:
 
 def test_new_neutral_install_retains_standard_uuid_entropy(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("fake_linkplay.config.uuidlib.uuid4", lambda: UUID(NATIVE_UUID))
-    path = config_file(tmp_path)
+    path = config_file(tmp_path, wiim_home_profile=False)
     cfg = load_config(path)
     assert cfg.uuid == NATIVE_UUID
     assert cfg.upnp_uuid == NATIVE_UUID
