@@ -1,5 +1,27 @@
 # Resume the new next-phase task
 
+## Private queue export checkpoint
+
+Private current-queue JSON export is implemented and independently reviewed.
+It reuses the authored codec, strict Web admission and unchanged 32 KiB import
+bound. Redacted preparation, explicit private-URL consent and a user-clicked
+Blob download remain separate from ordinary polling and playback commands.
+Session/generation plus an exact-byte HMAC reject stale reviews. No queue,
+backend, metadata, provider-account or durable storage authority is added.
+Favorites/M3U export remain deferred. See docs/WEB_PLAYLIST_EXPORT.md.
+
+Final combined local defaults pass **5257 tests / 74 opt-in skips** on both
+Python 3.12 and 3.11; 112 frontend checks and 508 focused Web checks pass.
+Actual libmpv 0.37/0.40 export/recovery flows pass in 4.43s/3.98s with zero
+export-induced native mutations or media requests. All original native assertions
+and caps remain. New export-head hosted CI remains PENDING until separately
+verified. Genuine browser/download-to-disk acceptance remains pending.
+
+The preceding workflow/docs head `59726d5` passes all three jobs/every step in
+run 38328911125, verified 01:02 UTC. Hosted floor groups take 145.49s/138.67s
+under the unchanged 165s watchdog. No more scheduling changes unless a gate fails.
+
+
 Current explicit authorization: **2026-10-12 22:12:31 UTC → 2026-10-13 18:00 UTC**
 (13 October, 20:00 Europe/Berlin). Stop active work at that hard deadline; report
 unfinished CI as PENDING. From 16:30 UTC start no large/risky change; stabilize
@@ -70,11 +92,9 @@ the last timing change unless a gate fails, not an optimization loop. Modal docs
 now tell users to Close/Cancel/Escape before using background Stop; sent requests
 continue and outcomes remain visible.
 
-Next: assess a bounded explicit private-file playlist/favorites export workflow
-against existing offline contracts. Keep ordinary polling/errors redacted,
-require an informed download choice, and do not imply durable save completion or
-new authentication. No implementation is justified if private-data handling or
-scope costs outweigh usefulness. Spotify remains deferred on existing gates.
+Next: verify exact export-head CI, then choose the next practical usability gap
+through the scheduled value/risk review. Do not repeat timing or blocked-browser
+work without new evidence. Spotify remains deferred on existing gates.
 Next value assessment is due around 01:12–01:42 UTC.
 Do not repeat old soak tests or known blocked browser routes. Genuine browser,
 physical ARMv7/DAC/original-app and account acceptance remain pending.

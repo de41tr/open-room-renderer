@@ -1,5 +1,27 @@
 # Next-phase status — 13 October 2026
 
+## Private queue export checkpoint
+
+Private current-queue JSON export is implemented and independently reviewed.
+It reuses the authored codec, strict Web admission and unchanged 32 KiB import
+bound. Redacted preparation, explicit private-URL consent and a user-clicked
+Blob download remain separate from ordinary polling and playback commands.
+Session/generation plus an exact-byte HMAC reject stale reviews. No queue,
+backend, metadata, provider-account or durable storage authority is added.
+Favorites/M3U export remain deferred. See docs/WEB_PLAYLIST_EXPORT.md.
+
+Final combined local defaults pass **5257 tests / 74 opt-in skips** on both
+Python 3.12 and 3.11; 112 frontend checks and 508 focused Web checks pass.
+Actual libmpv 0.37/0.40 export/recovery flows pass in 4.43s/3.98s with zero
+export-induced native mutations or media requests. All original native assertions
+and caps remain. New export-head hosted CI remains PENDING until separately
+verified. Genuine browser/download-to-disk acceptance remains pending.
+
+The preceding workflow/docs head `59726d5` passes all three jobs/every step in
+run 38328911125, verified 01:02 UTC. Hosted floor groups take 145.49s/138.67s
+under the unchanged 165s watchdog. No more scheduling changes unless a gate fails.
+
+
 **IN PROGRESS:** new explicit development window, 2026-10-12 22:12:31 UTC through
 2026-10-13 18:00 UTC (20:00 Berlin), on `dot/renderer-next-phase-20261013`.
 Remote main verified at `ad21bd4972d4af81dd29d1d952e38313dbe491d9`; PR #1 was

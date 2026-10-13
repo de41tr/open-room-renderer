@@ -71,3 +71,21 @@ Record browser/version, viewport, server revision, passes/failures, and screensh
   back/forward-cache restoration.
 - Lose the mutation response and verify sticky UNKNOWN with no automatic POST
   retry; inspect canonical state before making a new explicit choice.
+
+## Private queue JSON download
+
+- In a real browser, open Export JSON at desktop/mobile widths and 200% zoom.
+  Verify focus, wrapping and initially unchecked privacy consent. The summary
+  must not reveal source URLs or a URL-derived queue name.
+- Prepare a file only after consent. Verify no automatic download occurs and
+  the genuine Download JSON link works under the shipped CSP. Check the actual
+  downloaded filename and bytes, then load that JSON while stopped; order,
+  duplicate selection and mode must match. Keep the test file private.
+- Check Cancel/Escape/Close, page navigation/back-forward restoration, restart,
+  queue changes and delayed responses. Owned Blob URLs must be revoked and old
+  files/consent must not reappear; no playback command outcome may be overwritten.
+- Interrupt the private read and try unsupported/oversized queues. Fixed errors
+  must not reveal sources; no automatic retry or truncation may occur. Playback
+  and Stop remain independent (close the modal before choosing Stop).
+- A Blob/link click is not evidence of a filesystem save. Record actual browser
+  version, downloaded bytes and interaction results before closing this gate.

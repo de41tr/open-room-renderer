@@ -55,6 +55,10 @@ and verify complete exact-head CI before describing a new checkpoint as green. R
 One final evidence-led same-process selector balance and modal-use clarification
 follow; no more timing changes without a failed gate. Next assess an explicit
 private-file export workflow, retaining ordinary URL redaction and existing limits.
+That bounded queue-only JSON workflow is now implemented with independent review,
+complete local suites and short native no-mutation checks. Publish separate
+admission/feature/native/docs commits, verify exact-head CI, then reassess value.
+Favorites/M3U export and genuine browser download acceptance remain separate.
 
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
 and independent review precede milestone publication. Full native CI follows

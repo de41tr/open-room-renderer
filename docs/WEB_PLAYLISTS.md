@@ -2,7 +2,9 @@
 
 The browser uses the existing guarded `POST /orr/v1/web/command` endpoint. The
 renderer remains the sole owner of the canonical in-memory queue. This feature
-adds no queue store, resolver, backend, export endpoint, or persistent queue.
+adds no queue store, resolver, backend or persistent queue. The separate
+[private JSON export](WEB_PLAYLIST_EXPORT.md) is a guarded read, not an editing
+intermediate.
 An import or edit does not resolve or fetch a media URL, and never starts playback.
 Only an explicit subsequent Play can do that.
 
@@ -81,7 +83,8 @@ than 1,000 items; remove/move require more than one.
 `queue.playlist_edit_reason` is a structural-only enum, independent of transport:
 `"supported"`, `"empty_queue"`, or `"unsupported_queue"`. These fields disclose no
 source URLs, file text, private metadata or resolver identity. State retains its
-existing safe display projection; requests and responses never export sources.
+existing safe display projection; editing responses never export sources. Private source disclosure is restricted
+to the separate explicitly consented JSON download.
 
 Success returns only `{"request_acknowledged":true}`. Schema/preparation failures,
 unavailability, and stale generations return a fixed `REJECTED` response before

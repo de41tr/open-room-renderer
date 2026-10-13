@@ -29,7 +29,9 @@ include the four static assets.
 - Confirmed channel balance, EQ enable/bypass, all ten EQ bands and preset
   load/save/rename/delete.
 - Stopped-only local JSON/M3U playlist loading or direct URL entry, plus append,
-  remove and move for ordinary explicit queues. No browser export endpoint.
+  remove and move for ordinary explicit queues.
+- Private current-queue JSON export with a redacted review, explicit consent and
+  a user-clicked download link; no automatic download or durable-save claim.
 
 Sliders show a local draft and require an explicit Apply/Set/Seek action. Cancel
 sends nothing. Polling does not overwrite an unfinished edit. The supported
@@ -137,6 +139,21 @@ Review fresh state and reopen the dialog; the UI does not silently rebase an old
 edit, chain it after Stop, or retry an unknown response. Cancel, Escape and page
 navigation clear private file/URL drafts. Closing cannot retract a sent command.
 See [the bounded playlist contract](WEB_PLAYLISTS.md) for exact formats/admission.
+
+## Export a private queue file
+
+Choose **Export JSON**, review the redacted queue summary, and explicitly accept
+that the file contains original source URLs and the queue name. Select **Prepare
+private file**, then the **Download JSON** link. Check your browser's downloads;
+a ready file/link does not prove a durable or private filesystem save.
+
+The unchanged authored JSON codec preserves order, duplicates, selected index
+and mode, but omits metadata, playback/shuffle history and provider/account state.
+The exact file must also fit the existing Web import envelope. Some valid CLI
+queues cannot fit; use `playlist save-current FILE` rather than expect truncation.
+Favorites and M3U export are not included. Export neither stops playback nor
+fetches media. Close/Cancel/Escape/navigation discards private browser references;
+it cannot retract an already downloaded file. See [the private export contract](WEB_PLAYLIST_EXPORT.md).
 
 ## Browser security and privacy scope
 

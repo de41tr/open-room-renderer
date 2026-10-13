@@ -1,5 +1,37 @@
 # Test evidence and limits
 
+## Private queue export local checkpoint (13 October, 01:02 UTC)
+
+The final combined default groups pass **4709 + 548 / 74 opt-in skips** on both
+Python 3.12 (117.00s/102.29s) and 3.11 (119.87s/101.59s). The floor replay uses
+the unchanged 165s watchdog and final existing two-process selectors. No native
+opt-in skips are reclassified as native passes. Focused Web checks pass 508 in
+9.80s; dependency-free Node/DOM-double checks pass 112. The server adds 210
+cases. The behavior-neutral admission helper separately passed 154 existing
+checks before the private export feature was integrated.
+
+The extended existing native Web flow passes actual libmpv/null 0.37 in 4.43s
+and 0.40 in 3.98s. Six guarded HTTP export requests verify exact codec round
+trips while playing/stopped, duplicate order, consent rejection and same-generation
+mode staleness. Queue identity/value, generation, DSP, gain and native properties
+are retained with zero export-induced native mutation or media request. All 178
+original assertions remain (208 total), and the 30s/35s caps are unchanged.
+This is real HTTP/ctypes/native evidence, not browser download, physical audio,
+production Unix, WAN or provider-account evidence. Radio provenance is synthetic.
+
+Independent server/browser reviews found no remaining blocker. The frontend
+retains unchanged bytes rather than reject server-valid scoped IPv6 URLs through
+WHATWG URL parsing. Source and exact file limits remain server-authoritative.
+BROWSER_ACCEPTANCE_PENDING includes actual Blob navigation/CSP, filename, focus,
+cancellation and download-to-disk checks; see WEB_BROWSER_ACCEPTANCE.md.
+Exact export-head hosted CI is separate and initially PENDING.
+
+The preceding exact head `59726d5` passed all three jobs/every step in
+[run 38328911125](https://github.com/de41tr/open-room-renderer/actions/runs/38328911125),
+verified 01:02 UTC. Its floor reports 4499+548 /74 in 145.49s/138.67s; this proves
+the final scheduling checkpoint, not the later export changes.
+
+
 ## Recovery checkpoint and bounded final scheduling balance
 
 Exact head `0668209` passed all three jobs/every step in

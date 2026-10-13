@@ -42,6 +42,15 @@ actually fails. Assess deliberate private-file export next as a practical
 workflow, with redacted ordinary state and explicit disclosure, rather than
 reopening the blocked Spotify integration or inventing another status panel.
 
+The final scheduling head `59726d5` is fully green in run 38328911125. The
+bounded queue-only export is implemented/reviewed with complete local suites
+and short native no-mutation checks. It exposes private source bytes after
+explicit consent and Prepare private file; saving additionally requires the
+user-clicked Download JSON link. It enforces existing Web round-trip limits
+and leaves ordinary polling redacted. Favorites export lacks a matching
+existing restore contract and is deferred; no new library format is justified.
+Next formal value/risk assessment remains due 01:12–01:42 UTC.
+
 ## Architecture checkpoint and pivot
 
 Two bounded, cohesive extractions remove saved-DSP-library ownership and pure

@@ -32,6 +32,13 @@ and exposes explicit checked volume=0 for UNKNOWN gain. Focused/native readback
 checks and exact-head hosted CI pass at `0668209` (run 38326558265); physical
 silence and genuine browser lifecycle remain unverified. Subsequent selector/docs
 changes require their own CI while retaining identical tests and caps.
+Private queue JSON export adds a guarded explicit private read and user-clicked
+download, with unchanged codec/queue authority and Web round-trip bounds. Local
+5257/74 defaults on both interpreters, 112 frontend checks and short actual native
+0.37/0.40 no-mutation flows pass; exact export-head CI and real browser/download
+acceptance remain separate. The earlier scheduling head `59726d5` is fully green
+in run 38328911125. Favorites/M3U export and durable browser-file guarantees are
+outside scope.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.
