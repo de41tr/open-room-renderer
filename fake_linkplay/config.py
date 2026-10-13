@@ -254,8 +254,13 @@ def parse_startup_yaml(source: str) -> Any:
         raise StartupConfigError(CONFIG_YAML_ERROR) from None
 
 
-def read_startup_config(path: str | Path, *, missing_ok: bool = False) -> Config:
+def read_startup_config(
+    path: str | Path, *, missing_ok: bool = False, captured_text: str | None = None,
+) -> Config:
     """Read startup input without creating identity/state or probing resources.
+
+    Offline tools may supply securely bounded captured_text to validate that exact
+    snapshot without reopening a pathname. No state or resources are accessed.
 
     Only the implicit CLI default may use the historical missing-file fallback.
     Error text is owned here: YAML exceptions can include raw source lines,
@@ -266,7 +271,8 @@ def read_startup_config(path: str | Path, *, missing_ok: bool = False) -> Config
     """
 
     try:
-        source = Path(path).read_text(encoding="utf-8")
+        source = (Path(path).read_text(encoding="utf-8")
+                  if captured_text is None else captured_text)
     except FileNotFoundError:
         if not missing_ok:
             raise StartupConfigError(
