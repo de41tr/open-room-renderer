@@ -1,29 +1,29 @@
 # Next-phase strategic review
 
-## 08:40 value review: CONTINUE preservation and saved-curve workflows
+## 10:10 value review: CONTINUE bounded preservation and recovery
 
-1. **KEEP COMPLETED EVIDENCE EXACT:** browser acceptance finished within budget.
-   Web/operator head `884de2f` is fully green, including installed migration and the
-   unchanged Snapcast gate. Keep `70d9308` failed with unresolved zero-run cause;
-   do not start a retries-until-green or new long-test campaign.
-2. **CLOSE SMALL DATA-PRESERVATION FIX:** `a38674a` is fully CI green. A dangling favorites link was treated
-   as new empty storage and lost during save. Six synthetic reproductions confirm
-   it. Reuse the existing unavailable latch; preserve healthy/missing behavior,
-   exact link/target bytes and existing private errors. No automatic repair.
-3. **TRANSFER ONE SAVED CURVE:** copying a deliberate curve between existing rooms
-   is distinct from whole-installation migration. Reuse the v1 preset shape for
-   one current-context curve, reject collisions/ambiguity/overflow, and commit only
-   the saved library under the existing DSP lock. No active metadata/audio changes.
-   Implementation and independent review now pass 840 focused cases per Python;
-   exact-head CI is the next acceptance step, with dedicated browser QA separate.
-4. **DEFER BROADER RESTORE:** whole-library DSP transfer adds hidden contexts and
-   size/conflict policy. Favorites backup/restore needs an atomic bulk contract;
-   export alone is not a supported restore workflow. These remain ranked real
-   gaps, but do not justify automatic merging, overwriting or format expansion now.
-5. **BOUND NEXT REVIEW:** finish exact-head CI and the two bounded packages above,
-   then reassess **10:10–10:40 UTC**. Spotify remains optional passive diagnosis and
-   offline proposals, with provider/account/hardware/arbitration gates pending.
-   No new large/risky work after 16:30; stabilize 17:00; hard stop 18:00 UTC.
+1. **KEEP EXACT EVIDENCE:** `52ccf01` is fully green, all four jobs/every step.
+   Genuine browser smoke remains scoped to its original flows; new dialogs have
+   synthetic coverage. Keep `70d9308` FAILED with unresolved silence insertion.
+   No new browser/endurance/timing campaign or relaxed acceptance gate.
+2. **FINISH PRIVATE FAVORITES TRANSFER:** the paired managed-only backup and
+   restore into healthy empty storage is independently reviewed. Preserve exact
+   values/IDs/order, configured rows, existing limits and one atomic commit.
+   No merge, overwrite, reset, corrupt-library repair or external-writer promise.
+3. **CLOSE DEMONSTRATED RECOVERY DEFECTS:** dangling saved-audio entries must fail
+   instead of choosing defaults; exact pre-effect queue-edit rejection permits
+   explicit Refresh and a separate new click. Preserve valid behavior, UNKNOWN,
+   private diagnostics and independent Stop. Publish separate correction commits.
+4. **RANK NEXT VALUE:** finish combined integration/CI first; assess critical
+   startup/configuration gaps only from concrete evidence; review practical
+   operator reproduction/handover gaps. Existing mute validation and intentional
+   volume coercions are not reasons to invent a broad schema: 85 guarded pure
+   probes confirm those existing protections, so further gain validation is
+   DEFERRED. Spotify account,
+   provider, physical-output and effective-unit acceptance remain pending.
+5. **BOUND:** next value review **11:40–12:10 UTC**. Continue independent useful
+   work during CI, but do not manufacture features or test counts. No new large/
+   risky work after 16:30; stabilize 17:00; hard stop 18:00 UTC.
 
 ## 04:12 UTC value/risk assessment
 

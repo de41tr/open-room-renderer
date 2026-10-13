@@ -1,5 +1,53 @@
 # Test evidence and limits
 
+## Managed-favorites transfer and bounded recovery corrections
+
+The paired private favorites workflow exports only managed records and restores
+only into healthy empty managed storage. Exact IDs/order/URLs/metadata, duplicate
+names/URLs, configured-prefix preservation and restart are covered. One existing
+lock spans validation, fresh bounded disk inspection and one atomic commit;
+pre-replace failures preserve bytes, while post-replace fsync uncertainty retains
+the new tuple with UNKNOWN/committed. No partial add loop, merge or overwrite.
+Strict nested keys/IDs/targets and complete escaped envelopes keep existing limits:
+a 32,310-byte synthetic file becomes a 64,496-byte request and is rejected whole.
+Private summaries, fresh consent, deliberate downloads and late-response/dismissal
+cleanup are covered without rendering private names, filenames or targets.
+
+Worker Python 3.11/3.12 and fresh ordered replay each pass **838** focused cases;
+root affected transfer/preservation/export/frontend integration passes **514** on
+each (**4.69s/5.02s**). All 13 reviewed file hashes matched before the subsequent
+queue recovery merge. Independent review found no blockers. The new transfer
+suite is synthetic/in-memory; existing selected adjacent tests use established
+local TCP fixtures. No dedicated new-dialog real-browser download/layout claim.
+
+The saved-state correction changes only degraded read policy in three readers:
+gain.json, active_dsp.json and optional device_name/channel_balance text now require
+verified absence before defaults. Eighteen baseline controls proved silent fallback
+and later loss of a dangling reference. New regressions fail on baseline; corrected
+root gain/DSP/startup integration passes **333** on each Python (**10.97s/10.75s**).
+Independent review passes the 68 new cases on both and 12 additional link/error
+controls. Valid/missing files and links, writers, UUID and active-DSP precedence
+remain unchanged. Private CLI/second-API-read behavior uses guarded fake startup;
+no actual audio, socket or service was started. Later external writes are not fenced.
+
+A real legacy status-read coroutine/admission proof over a yielding mock snapshot
+establishes a transient 409 unavailable/REJECTED with no queue/generation/backend
+mutation. Its actual response bytes drive the three row-action DOM regressions.
+Only that exact flat raw envelope permits explicit Refresh to review/re-arm a
+completed rejection; a subsequent separate click sends the next edit. Duplicate
+raw keys, contradictory fields, UNKNOWN/ERROR/lost/malformed/ACK and pending or
+superseded review stay latched. Independent review and combined **270 Node** cases
+pass, including 13 new recovery cases. Browser smoke is unchanged, not a dedicated
+acceptance claim for this new recovery interaction.
+Final merged frontend/docs/favorites/playlist checks pass **261** on each Python
+(**4.94s/5.12s**). A separate integration reviewer confirms the exact source union
+and passes 26 focused overlap controls; no dropped cleanup or uncertainty branch.
+
+The latest preceding exact head **52ccf01** passes all four jobs/every step in
+**38376589573**, verified **09:44 UTC**: floor **6413/76**, groups
+**130.07s/106.97s**, native defaults **6414/75**, unchanged caps. The combined
+successor requires its own CI; do not infer green from these local checks.
+
 ## Single saved DSP curve transfer
 
 The strict codec, saved-only adapter and consent-bound UI are separate commits.
@@ -23,7 +71,8 @@ and Python 3.11 in **12.57s**, including both Node suites (**219 cases**, 32 new
 All reviewed code/test hashes match; only documentation incorporates the subsequent
 favorites correction. Independent review and clean replay pass. These are pure,
 in-memory HTTP/mock and DOM-double checks; no new native socket/browser campaign
-or physical-audio claim. New source requires its own hosted CI.
+or physical-audio claim. Exact source `52ccf01` is now fully CI green in run
+38376589573; that does not add dedicated new-dialog browser coverage.
 
 Preceding favorites-preservation head **a38674a** is fully green in run
 **38373082322**, all four jobs/every step, verified **09:18 UTC**. Floor

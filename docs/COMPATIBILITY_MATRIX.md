@@ -2,13 +2,26 @@
 
 ## Current next-phase scope
 
+Managed-favorites private backup/restore uses the existing v1 seven-field format
+and preserves exact logical values/IDs/order. Only healthy empty managed storage
+can receive it; configured rows are untouched. No merge/overwrite/reset, larger
+limits or external-writer guarantee. Saved-audio readers now intentionally reject
+dangling/uninspectable entries instead of choosing defaults, including public
+loader calls; healthy/absent state, writers, UUID and precedence stay unchanged.
+Exact no-effect queue-row rejection gains explicit Refresh review and a separate
+new click, without re-arming uncertain outcomes or retrying from polls. Focused
+root checks and independent reviews pass; combined exact-head CI remains pending.
+New transfer/recovery interactions have synthetic coverage, not dedicated browser
+or physical-device acceptance.
+
 Single saved-DSP-curve transfer uses the existing v1 representation with a strict
 transfer-only decoder, current plugin and new safe name. It commits only saved
 library data under the existing DSP lock, leaving active state/files/backend calls
 untouched. Consent, exact bounds, stale ownership and durability UNKNOWN are
 explicit. Root 840-case checks pass on both Python versions; dedicated transfer
-browser/native/physical acceptance is not claimed. Whole-library transfer and
-private favorites bulk restore remain outside this bounded workflow.
+browser/native/physical acceptance is not claimed. Its exact `52ccf01` CI is
+fully green. Whole-library DSP transfer and general favorites merge/overwrite
+remain deferred; the separately scoped favorites workflow is empty-only.
 
 An observed dangling favorites.json link now triggers the existing unavailable-
 storage policy instead of being replaced by a save. This intentional error-policy

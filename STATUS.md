@@ -8,14 +8,15 @@
 based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
 squash-merged. No main push, merge or release is authorized for this phase.
 
-Latest fully CI-verified checkpoint **`a38674acf6808fd2e704027dc734718c0e8f04bd`**
-passes **all four jobs/every step** in **run 38373082322**, verified **09:18 UTC**.
-Floor groups **5399+708 /76 skips** pass **155.09s/143.27s** under 165s:
-**6107 passed /76 skipped**. Standard Chrome and all native/Unix, installed,
-discovery and Snapcast gates pass. This includes favorites-link preservation.
-Prior `70d9308` run 38362764862 stays FAILED with unresolved zero-run cause.
-The subsequent saved-curve transfer package still requires exact-head CI and
-has no dedicated new-workflow browser or physical-audio acceptance claim.
+Latest fully CI-verified checkpoint **`52ccf01f904ab50ccb5ae0d8a0565007c1ba580a`**
+passes **all four jobs/every step** in **run 38376589573**, verified **09:44 UTC**.
+Floor groups **5705+708 /76 skips** pass **130.07s/106.97s** under 165s:
+**6413 passed /76 skipped**; native defaults **6414/75** on both architectures.
+Standard Chrome and all native/Unix, installed, discovery and Snapcast gates pass.
+This includes saved-curve transfer. Prior `70d9308` run 38362764862 stays FAILED
+with unresolved zero-run cause. The subsequent favorites-transfer, saved-state
+preservation and rejected-queue recovery package requires its own exact-head CI.
+New workflow dialogs have no dedicated browser or physical-audio acceptance claim.
 
 ## Active corrected work
 
@@ -136,6 +137,23 @@ software work; no report/CI wait is used instead of useful independent work.
   Python version, including both frontend suites (219 Node cases). Review fixed
   decimal rounding/underflow acceptance before freeze. Dedicated browser/native
   transfer acceptance remains pending; broader whole-library restore is deferred.
+
+- **Managed favorites transfer:** private Backup JSON and Restore JSON preserve
+  IDs/order/exact values, with configured favorites excluded. Restore requires
+  healthy empty managed storage and commits once under its existing lock.
+  Explicit consent, full escaped-request limits and durability UNKNOWN remain.
+  Root transfer checks pass 514 on each Python; worker/replay checks pass 838.
+  Dedicated new-dialog browser acceptance remains pending.
+- **Saved audio state:** dangling gain, active-DSP, legacy-balance or device-name
+  entries now stop startup instead of silently selecting defaults. Public readers
+  intentionally fail for these degraded entries; valid/missing storage, writers,
+  UUID and precedence remain unchanged. Root checks pass 333 per Python, with
+  independent review. No automatic repair or later external-writer guarantee.
+- **Rejected queue edits:** the exact pre-effect 409 unavailable/REJECTED response
+  permits explicit Refresh to review/re-arm Move/Remove; a separate click sends
+  the new edit. Polls never retry, and UNKNOWN/ERROR/lost/malformed/committed
+  responses stay latched. Raw duplicate fields fail closed. Merged Node checks
+  pass 270; source/DOM proofs do not establish a new browser interaction check.
 
 ## Implemented scope
 
@@ -285,11 +303,12 @@ read-only diagnostic first. Productive receiver/lifecycle/output mode still has
 An explicit exclusive whole-service mode is a valid later boundary; a universal
 multi-provider framework and shared DSP are not prerequisites for safe components.
 
-Next ranked packages: publish/verify the reviewed operator features, verify
-read-only output diagnosis, then complete the Web room-name workflow. The
-bounded genuine-browser package is complete. New-prefix migration is a lower-priority convenience
-candidate, not an excuse for an unsafe in-place updater. Next value review:
-**07:05–07:35 UTC**. Retain 16:30 risk cutoff, 17:00 stabilization and 18:00 hard stop.
+Next ranked packages: finish exact-head verification of the three bounded
+preservation/recovery packages; assess any demonstrated startup/configuration
+recovery gap; check operator reproduction instructions for remaining concrete
+handover gaps. No speculative schema, merge/overwrite or engine expansion.
+**10:10 value review: CONTINUE**; next review **11:40–12:10 UTC**.
+Retain 16:30 risk cutoff, 17:00 stabilization and 18:00 hard stop.
 See [RESUME.md](RESUME.md) for the bounded next steps and [PLAN.md](PLAN.md) for
 this phase's full constraints. The historical reports below retain their own
 exact-source scope, deadlines and failures.

@@ -31,16 +31,19 @@ independent work while CI, hardware or provider prerequisites are pending.
    usability gaps. Retain the prior Snapcast failure without weakening gates.
    All service activation remains explicit operator work.
 
-The Web operator/input-safety package is published at `884de2f`. The next
-small correction preserves observed dangling favorites storage and is fully
-green at `a38674a`. One saved-DSP-curve transfer between existing rooms is now
-reviewed and integrated using the existing v1 shape; verify its own CI while
-keeping active DSP/backend state unchanged. Whole-library transfer and private
-favorites bulk restore are deferred for their larger conflict/privacy contract.
+The Web operator/input-safety and dangling-favorites corrections are fully green.
+Single saved-DSP-curve transfer is fully green at `52ccf01`. The assessed private
+managed-favorites backup/empty-only restore is now reviewed and integrated,
+alongside two demonstrated corrections: unavailable saved-audio entries must not
+select defaults, and a no-effect queue-edit rejection needs an explicit review
+path. Publish these separately and verify their combined exact-head CI. Preserve
+all UNKNOWN, privacy, atomicity and single-writer limits.
 
 Do not grow a universal engine framework, broad E2E suite, or timing campaign.
-08:40 value decision: continue the bounded preservation and saved-curve workflows;
-next review **10:10–10:40 UTC**. The original hard deadline remains.
+**10:10 value decision: CONTINUE** these bounded packages, then assess only real
+startup/configuration or operator-handover gaps; next review **11:40–12:10 UTC**.
+General favorites merge/overwrite and whole-library DSP transfer stay deferred.
+The original hard deadline remains.
 
 ## Earlier phase plan and checkpoint history
 

@@ -10,14 +10,15 @@ stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 Work exclusively on `dot/renderer-next-phase-20261013` in
 [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
 `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest fully CI-verified checkpoint **`a38674acf6808fd2e704027dc734718c0e8f04bd`**
-passes **all four jobs/every step** in **run 38373082322**, verified **09:18 UTC**.
-Floor groups **5399+708 /76 skips** pass **155.09s/143.27s** under 165s:
-**6107 passed /76 skipped**. Standard Chrome and all native/Unix, installed,
-discovery and Snapcast gates pass. This includes favorites-link preservation.
-Prior `70d9308` run 38362764862 stays FAILED with unresolved zero-run cause.
-The subsequent saved-curve transfer package still requires exact-head CI and
-has no dedicated new-workflow browser or physical-audio acceptance claim.
+Latest fully CI-verified checkpoint **`52ccf01f904ab50ccb5ae0d8a0565007c1ba580a`**
+passes **all four jobs/every step** in **run 38376589573**, verified **09:44 UTC**.
+Floor groups **5705+708 /76 skips** pass **130.07s/106.97s** under 165s:
+**6413 passed /76 skipped**; native defaults **6414/75** on both architectures.
+Standard Chrome and all native/Unix, installed, discovery and Snapcast gates pass.
+This includes saved-curve transfer. Prior `70d9308` run 38362764862 stays FAILED
+with unresolved zero-run cause. The subsequent favorites-transfer, saved-state
+preservation and rejected-queue recovery package requires its own exact-head CI.
+New workflow dialogs have no dedicated browser or physical-audio acceptance claim.
 
 ## What is already delivered
 
@@ -63,19 +64,19 @@ Maintain three useful potential packages and work independently during CI.
    output selection, pure config checking and no-start output diagnosis are
    published and fully green at `4fd1607`. Native output/null proof passes on both
    architectures. No provider-account, shared-DSP or physical-output claim.
-3. **Next ranked packages:** verify the Web operator and favorites-preservation
-   checkpoints; verify the reviewed single saved-DSP-curve transfer between existing rooms
-   without touching active state/audio; defer private favorites bulk restore until
-   its atomic empty-destination/conflict/privacy contract justifies the cost.
-   Whole-library DSP transfer is also deferred. No format or cap expansion merely
-   to create work. The next value review is **10:10–10:40 UTC**.
+3. **Next ranked packages:** verify the reviewed managed-favorites private
+   backup/empty-only restore, saved-audio-state absence fence and explicit rejected
+   queue-edit recovery. Keep one-shot uncertainty and all existing gates. Then
+   assess only demonstrated startup/configuration or operator-handover gaps.
+   Whole-library DSP transfer and general favorites merge/overwrite stay deferred.
+   No format/cap expansion merely to create work.
 4. **Honor the corrected Spotify choice.** [ADR001](docs/adr/001-spotify-sidecar.md)
    ranks go-librespot 76 / librespot 69 / Soloist 61. Build expiry is not key renewal.
    No actual account/client/provider operation occurred. A separately accepted
    exclusive whole-service mode is possible without shared DSP, but foreign mpv,
    uncertain shutdown, provider terms and physical output remain real boundaries.
-5. **08:40 value decision: CONTINUE** the bounded preservation/transfer work;
-   review again around 10:10–10:40 UTC, without waiting
+5. **10:10 value decision: CONTINUE** the bounded preservation/recovery work;
+   review again around 11:40–12:10 UTC, without waiting
    just for reporting, CI or unavailable hardware/accounts. No large/risky work
    after 16:30; stabilize 17:00; stop 18:00 UTC even if CI is pending. Remain on the
    existing branch/Draft PR #2, no main push, merge or release.
