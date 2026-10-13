@@ -269,13 +269,16 @@ review, dependency-free JavaScript/DOM-test-double control-flow checks, and a
 short actual libmpv/null Web control flow. The existing digital-PCM DSP gates
 remain separate. The native Web flow does not operate a real browser or a DAC.
 
-**BROWSER_ACCEPTANCE_PENDING:** actual responsive layout, keyboard/focus behavior,
-image loading and browser interruption flows have not been accepted in a real
-browser. A supported browser cannot reach the current development fixture; this
-is not a failed product-browser test and is not disguised as a pass. The complete
-implemented controller can be reproduced locally using the URL above. Follow
-[the manual acceptance checklist](WEB_BROWSER_ACCEPTANCE.md) and record browser,
-viewport and exact server revision when performing it.
+A separate [real-Chrome CI smoke](WEB_BROWSER_ACCEPTANCE.md#reproducible-real-browser-smoke)
+now exercises desktop/mobile-emulated rendering, navigation, export-dialog
+keyboard/focus behavior, actual JSON download bytes and UI Play/Pause through
+production HTTP/Unix IPC to mpv/null. Its exact-revision CI result and artifacts,
+not these test descriptions, establish whether that bounded smoke passed.
+
+**BROWSER_ACCEPTANCE_PENDING:** the broader manual matrix, including image
+loading, screen readers, zoom, other browser engines and interruption scenarios,
+remains separate. Follow [the acceptance checklist](WEB_BROWSER_ACCEPTANCE.md)
+and record browser, viewport and exact server revision when performing it.
 
 **HARDWARE_PENDING:** physical ARMv7/Odroid XU4, DAC/acoustic sound, physical LAN
 and original WiiM Home app remain untested. See [testing scope](TESTING.md) and

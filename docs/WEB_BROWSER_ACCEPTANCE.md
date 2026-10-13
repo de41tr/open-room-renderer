@@ -1,6 +1,55 @@
-# Open Room Renderer: manual browser acceptance
+# Open Room Renderer: browser acceptance
 
-Status: **BROWSER_ACCEPTANCE_PENDING**. Automated checks cover JavaScript control flow and DOM-test-double event wiring; they do not establish real browser behavior, responsive layout, accessibility, audio output, or image loading.
+Status: **BROWSER_ACCEPTANCE_PENDING** for the full manual matrix below. A small
+real-Chrome smoke now has its own CI job; treat it as passed only when the
+**Real Chrome / desktop and mobile smoke** job succeeds for the exact revision.
+The older JavaScript/DOM-double tests remain separate and cannot satisfy it.
+
+## Reproducible real-browser smoke
+
+On an unprivileged Linux environment with working loopback/Unix sockets, installed
+Google Chrome, a matching ChromeDriver, mpv, and the project's Python dependencies
+plus pytest:
+
+```sh
+PYTHONPATH=. python tools/browser_smoke.py --artifacts /tmp/orr-browser-evidence-NEW
+```
+
+The output directory must not already exist. No browser/framework download,
+account, external media, relaxed sandbox, CORS change or public listener is used.
+CI uses the preinstalled Chrome/ChromeDriver on `ubuntu-24.04`; a missing browser,
+unavailable sandbox or failed native playback is a failure, never a skipped or
+mocked pass. The isolated job has an eight-minute cap; the smoke has a 120-second
+work deadline and the existing 150-second process-tree guard. Existing native
+jobs and their budgets/assertions are unchanged.
+
+The smoke drives genuine W3C element clicks and keyboard actions through existing
+`aiohttp`, with no Selenium/Playwright dependency. It checks:
+
+- Desktop 1280-pixel and mobile-emulated 390-pixel rendering, actual column geometry
+  and page overflow, plus home-link navigation and browser Back/Forward.
+- The export dialog's Tab/Shift+Tab/Escape handling, opener focus restoration,
+  fresh unchecked consent, and cleanup on close and navigation/history restore.
+- UI Play/Pause through the real HTTP handler and unchanged production Unix IPC
+  backend; real mpv reports selected PCM audio, advancing time, `ao=null`, and
+  paused readback. The UI must display the renderer-confirmed phase.
+- The actual browser-generated download, including filename, complete disk bytes,
+  canonical JSON contents and equality to the renderer response hash. Opening or
+  preparing the export must leave the download directory empty until Download;
+  exporting must not send playback commands or request more media.
+- Browser severe console errors (including CSP failures) as failures.
+
+The `browser-smoke-<revision>` artifact retains desktop/mobile PNGs, downloaded
+synthetic JSON, source hashes, browser/driver/mpv versions, native readback and
+HTTP evidence on success. Failure also attempts a current screenshot, DOM and
+console capture and retains diagnostic logs. Only disposable generated fixture
+state is used. Profiles, account data and real user playlists are not uploaded.
+
+This is Chromium-based Chrome desktop/mobile emulation, not Firefox, physical
+mobile hardware, audible output, a DAC, or a complete accessibility/visual matrix.
+The generated 30-second local WAVs are synthetic media; the browser, HTTP server,
+production IPC backend and mpv are real. The following manual checks, especially
+320-pixel/zoom/screen-reader/interruption coverage, remain outstanding.
 
 Use the running renderer's existing HTTP port and open `/ui/` in a real browser on its trusted LAN. Do not expose the service to the internet. Use test audio and low volume for playback changes. No additional web server, framework, extension, or browser installation is required.
 

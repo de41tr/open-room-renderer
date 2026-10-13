@@ -148,7 +148,9 @@ Existing Web admission and playlist tests also cover the reused boundary and
 codec. Browser controller/DOM-double tests cover the interaction's request and
 Blob lifecycle; those are not real browser acceptance.
 
-**BROWSER_ACCEPTANCE_PENDING:** real-browser Blob/download behavior, filename,
-focus and keyboard behavior, cancellation and CSP acceptance still require the
-separate browser acceptance pass. No successful save or browser acceptance is
-implied by server or DOM-double tests.
+The separate [real-Chrome smoke](WEB_BROWSER_ACCEPTANCE.md#reproducible-real-browser-smoke)
+checks Blob preparation, explicit browser download and file bytes/filename,
+export-dialog keyboard/focus, close cleanup, and severe browser/CSP errors on
+desktop and mobile emulation. A successful exact-revision CI job and its artifacts
+are required evidence; server or DOM-double tests never imply a successful save.
+**BROWSER_ACCEPTANCE_PENDING** still applies to the wider manual matrix.
