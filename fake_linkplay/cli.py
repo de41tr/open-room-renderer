@@ -19,6 +19,7 @@ import requests
 from aiohttp import web
 
 from .config import StartupConfigError, load_config, load_startup_config
+from .config_check import add_config_parser, run_config_check
 from .discovery_client import add_discovery_parser, run_discovery
 from .dsp_client import add_dsp_parser, run_dsp_command
 from .favorites_client import favorite_play_id, play_favorite
@@ -261,6 +262,7 @@ def build_parser(*, private_client_errors: bool = False) -> argparse.ArgumentPar
     sub = parser.add_subparsers(dest="cmd", required=True)
     serve_p = sub.add_parser("serve")
     serve_p.add_argument("--config", help="YAML file (default: configs/config.example.yaml)")
+    add_config_parser(sub)
     for name in ("status", "pause", "resume", "stop"):
         p = sub.add_parser(name)
         p.add_argument("--host", default="127.0.0.1")
@@ -320,18 +322,21 @@ def main(argv: list[str] | None = None) -> int:
     legacy_favorite = (len(argv) > 1 and argv[0] == "favorites"
                        and argv[1] in {"list", "add", "save-current", "rename", "delete"})
     # There are no global CLI options. Preserve existing diagnostics when a
-    # legacy command uses "discover" as a name/value, while keeping malformed
-    # discovery invocations (including leading flags) private.
+    # legacy command uses a new command name as a value, while keeping malformed
+    # standalone discovery/config/Spotify invocations (including leading flags) private.
     legacy_command = bool(argv) and argv[0] in {
         "serve", "status", "pause", "resume", "stop", "play", "volume", "queue",
         "playlist", "favorites", "dsp", "print-description", "print-discovery-info", *COMMANDS,
     }
     private_discovery = "discover" in argv and not legacy_command
     private_spotify = "spotify" in argv and not legacy_command
-    private_errors = (private_discovery or private_spotify or any(arg in {"queue", "playlist", "dsp", *COMMANDS} for arg in argv)
+    private_config = "config" in argv and not legacy_command
+    private_errors = (private_discovery or private_spotify or private_config or any(arg in {"queue", "playlist", "dsp", *COMMANDS} for arg in argv)
                       or {"favorites", "play"} <= set(argv)
                       or ({"favorites", "set-url"} <= set(argv) and not legacy_favorite))
     args = build_parser(private_client_errors=private_errors).parse_args(argv)
+    if args.cmd == "config":
+        return run_config_check(args)
     if args.cmd == "discover":
         return run_discovery(args)
     if args.cmd == "spotify":
