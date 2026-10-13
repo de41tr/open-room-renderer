@@ -60,6 +60,12 @@ complete local suites and short native no-mutation checks. Publish separate
 admission/feature/native/docs commits, verify exact-head CI, then reassess value.
 Favorites/M3U export and genuine browser download acceptance remain separate.
 
+**01:12 value review:** two reproduced operator gaps justify bounded fixes:
+private-safe known saved-state startup errors and logical dialog focus return.
+Both have independent review and complete local coverage; verify exact-head
+hosted CI, without expanding persistence, playback or browser claims. Export
+head `1dfd642` is already fully green in run 38330676949.
+
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
 and independent review precede milestone publication. Full native CI follows
 cohesive milestones; unchanged older endurance evidence is not rerun without

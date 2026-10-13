@@ -1,5 +1,24 @@
 # Next-phase strategic review
 
+## 01:12 UTC value/risk assessment
+
+1. **CONTINUE:** verify exact export head `1dfd642` in hosted CI. Its complete
+   local suites, independent reviews and native no-mutation checks already pass;
+   earlier `59726d5` CI does not certify this new feature.
+2. **CONTINUE, BOUNDED:** investigate the reproduced malformed saved-DSP startup
+   traceback and keep its diagnostic private without resetting state, weakening
+   fail-closed behavior or changing public loader/library recovery contracts.
+3. **CONTINUE, BOUNDED:** restore a logical keyboard return target when favorites
+   are rebuilt while a dialog is open. Static/DOM evidence establishes a detached
+   opener; actual browser focus behavior remains a separate acceptance gate.
+4. **DEFER:** favorites/M3U export, provider integration, physical ARMv7/DAC and
+   real browser acceptance. No speculative new format/engine, repeated blocked
+   browser route or unsupported download-to-disk claim.
+5. **STOP LOW-RETURN WORK:** scheduling is green with unchanged gates; make no
+   further timing changes without a failed gate. Retain existing endurance
+   evidence. Reassess practical value in 90–120 minutes, by 03:12 UTC.
+
+
 ## 23:42 UTC value/risk assessment (first 90 minutes)
 
 1. **CONTINUE:** integrate stopped-only local playlist loading/editing and verify

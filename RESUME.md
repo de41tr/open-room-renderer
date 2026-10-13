@@ -1,5 +1,24 @@
 # Resume the new next-phase task
 
+## Current operator follow-through
+
+Export head `1dfd642` is fully green in run 38330676949 (all three jobs/every
+step), verified 01:22 UTC. The next independently reviewed correction keeps
+expected saved-state startup errors private and restores logical keyboard focus
+after dialog dismissal when an opener disappears or becomes unavailable.
+Known reader errors now produce fixed exit-2 guidance; no reset/default fallback,
+public exception change or library failure-policy change is introduced. A second
+active-DSP read failure still cleans up the backend before listeners. Later
+legacy-balance normalization remains outside this diagnostic guard.
+
+Final combined local defaults pass **5322 /74 opt-in skips** on Python 3.12
+and 3.11; 128 Node/DOM checks and 39 frontend/installation checks pass. Exact
+new-head CI is PENDING until separately verified. Real browser focus/download,
+physical hardware and provider-account acceptance remain pending. The 01:12
+value/risk review is recorded in docs/STRATEGIC_REVIEW.md; next review is due
+02:42–03:12 UTC. No more timing changes or redundant endurance campaigns.
+
+
 ## Private queue export checkpoint
 
 Private current-queue JSON export is implemented and independently reviewed.

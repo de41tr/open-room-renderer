@@ -1,5 +1,42 @@
 # Test evidence and limits
 
+## Saved-state diagnostics and logical focus follow-through
+
+Exact export head `1dfd642` passed all three jobs/every step in
+[run 38330676949](https://github.com/de41tr/open-room-renderer/actions/runs/38330676949),
+verified 01:22 UTC. Both native architectures report the six private export
+requests, zero export-induced native/media mutations and complete cleanup;
+all production Unix, installed lifecycle, discovery and Snapcast gates pass.
+The floor passes 4709+548 /74 in 136.54s/115.50s. That result does not certify
+subsequent saved-state/focus changes.
+
+A synthetic malformed active_dsp.json numeric value reproduced a raw credential-
+bearing traceback at startup: baseline exit 1, candidate exit 2 with one fixed
+150-byte DSP diagnostic, identical persisted bytes. Known startup reader errors
+are now narrowly translated; programming/cancellation exceptions propagate,
+public loader/persistence/ordinary API exceptions stay unchanged, and second-read
+failure still cleans up the acquired backend before listeners. No reset/default
+fallback is added. Independent review and 505 distinct focused cases pass on
+each Python version; the root integration replay passes 159 startup/lifecycle
+cases in 10.61s. A first root invocation named a nonexistent installer test and
+collected no tests; the corrected focused replay is the stated result.
+
+Logical dialog-return tests establish detached/disabled opener conditions and
+application focus choices, not native browser focus or next-Tab behavior. Final
+Node/DOM checks pass 128, with 16 new regressions (13 fail against original app).
+The helper rejects hidden/inert/collapsed targets, resolves favorite replacements
+only in the same session, restores synchronously for dismissal/success, and does
+no application focus work on pagehide or queued close events. Late responses and
+reopened/other dialogs retain focus isolation. Independent review found no
+blocker. Root frontend/installation checks pass 39 in 1.60s; all four assets and
+the new Python module remain included by existing package/source enumeration.
+BROWSER_ACCEPTANCE_PENDING remains; no new physical or native-audio claim.
+
+Final combined defaults pass **4774 + 548 /74 opt-in skips** on Python 3.12
+(126.67s/106.08s) and 3.11 (128.75s/105.72s), with unchanged selectors and the
+165s floor watchdog. Exact new-head hosted CI remains a separate pending gate.
+
+
 ## Private queue export local checkpoint (13 October, 01:02 UTC)
 
 The final combined default groups pass **4709 + 548 / 74 opt-in skips** on both

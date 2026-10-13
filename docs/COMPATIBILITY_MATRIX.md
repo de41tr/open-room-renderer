@@ -39,6 +39,12 @@ download, with unchanged codec/queue authority and Web round-trip bounds. Local
 acceptance remain separate. The earlier scheduling head `59726d5` is fully green
 in run 38328911125. Favorites/M3U export and durable browser-file guarantees are
 outside scope.
+Export head `1dfd642` is fully green in run 38330676949. Subsequent startup
+reader diagnostics intentionally change expected CLI failures from traceback/exit
+1 to fixed private guidance/exit 2 while public APIs and state policies remain.
+Logical dialog focus return is covered by DOM doubles, with genuine browser
+acceptance still pending. Combined local defaults pass 5322/74 on both Python
+versions and 128 frontend checks; exact subsequent-head CI is separately pending.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.

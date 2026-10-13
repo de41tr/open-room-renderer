@@ -59,6 +59,8 @@ Stop remains enabled during another pending request and does not require a
 current queue generation. If a favorite, preset or playlist dialog is open,
 first choose **Close** or **Cancel**, or press **Escape**, then choose **Stop**.
 A native modal dialog makes background controls inert while it is open.
+On dismissal, the controller returns keyboard focus to the usable opening
+control or its current logical replacement, with Add/Presets/Refresh fallbacks.
 Dismissing it clears the local draft without cancelling an already-sent request
 or hiding its later outcome. Stop still requires backend acknowledgement/readback;
 choosing it does not itself confirm silence.

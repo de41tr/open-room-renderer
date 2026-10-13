@@ -9,6 +9,13 @@ Use the running renderer's existing HTTP port and open `/ui/` in a real browser 
 - At desktop width (about 1280 px), check the player/queue/favorites two-column layout. At 390 px and 320 px, check the stacked layout, readable text, touch controls, and absence of horizontal overflow.
 - Tab from the skip link through controls. Confirm visible focus, native range arrow-key adjustment, labels, and status announcements without position updates flooding a screen reader.
 - Open Add, Rename, and Delete dialogs. Confirm focus enters the dialog, Escape/Cancel closes it without sending a command, and Delete initially focuses Cancel. Check focus returns to the opening control.
+- Rename a favorite and confirm focus returns to its rebuilt Rename action;
+  delete one and confirm focus returns to Add. Repeat Cancel/Escape after another
+  controller redraws the list. Preset rename/delete should return to Presets when
+  the original action becomes disabled. If a playlist/export opener becomes
+  unavailable, dismissal should return to Refresh. Hidden/inert/collapsed targets
+  must not be selected. Immediate reopen, navigation and late responses must not
+  steal newer focus. These are real-browser checks, not inferred from DOM doubles.
 - Load long titles and markup-like text; they must appear as text and wrap without creating markup. Missing/broken artwork must leave the record fallback. Artwork must send no referrer and must not fetch query/fragment-bearing URLs.
 
 ## Live controls
