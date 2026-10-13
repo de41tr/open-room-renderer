@@ -103,32 +103,13 @@ def user_config(prefix: Path, port: int) -> dict:
     }
 
 
-def systemd_quote(value: Path) -> str:
-    # systemd specifier expansion applies even inside quotes.
-    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
-
-
 def user_unit(prefix: Path) -> str:
-    return f"""# Copy to ~/.config/systemd/user/open-room-renderer.service after review.
-# Generated unit does not install, enable, start, or configure login lingering.
-[Unit]
-Description=Open Room Renderer (unprivileged native profile)
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory={str(prefix).replace("%", "%%")}
-ExecStart={systemd_quote(prefix / 'venv/bin/open-room-renderer')} serve --config {systemd_quote(prefix / 'config.yaml')}
-Restart=on-failure
-RestartSec=5
-TimeoutStopSec=45
-UMask=0077
-NoNewPrivileges=yes
-Environment=PYTHONUNBUFFERED=1
-
-[Install]
-WantedBy=default.target
-"""
+    # Load this dependency-free helper from the trusted installer checkout.
+    # The copied uninstall tool does not call the template generator.
+    spec = importlib.util.spec_from_file_location("native_profile", ROOT / "fake_linkplay/native_profile.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.user_unit(prefix)
 
 
 def source_files(root: Path = ROOT) -> list[Path]:
