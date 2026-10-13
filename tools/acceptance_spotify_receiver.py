@@ -9,6 +9,7 @@ replaced with explicit synthetic equivalents. Never run on a production host.
 from __future__ import annotations
 
 import fcntl
+import argparse
 import json
 import os
 from pathlib import Path
@@ -48,6 +49,19 @@ def fixture(root):
     receiver.probe_alsa = lambda _route: output_probe(root)
 
     class FixtureServices(receiver.UserServices):
+        def command(self, *args, **kwargs):
+            try:
+                return super().command(*args, **kwargs)
+            except receiver.ExclusiveProfileError:
+                # These are explicitly synthetic units, never provider logs or
+                # private product units. Keep bounded failure diagnostics.
+                for unit in receiver.UNITS.values():
+                    info = subprocess.run(['/usr/bin/systemctl', '--user', 'show', unit,
+                        '--property=LoadState,ActiveState,SubState,Result,MainPID,ControlGroup'],
+                        capture_output=True, timeout=3)
+                    print('FIXTURE STATE', unit, info.stdout[:4096].decode(errors='replace'), file=sys.stderr)
+                raise
+
         def validate(self):
             result = {mode: self.show(mode) for mode in receiver.UNITS}
             for mode, info in result.items():
@@ -130,11 +144,83 @@ def invoke(root, mode, expect=0):
     return process
 
 
+def production_install_acceptance(root):
+    """Real install/admission/removal with an inert native-prefix fixture."""
+    manager = receiver.UserServices(root, {})
+    assert all(manager.show(mode)['LoadState'] == 'not-found' for mode in receiver.UNITS), 'Refuse an existing ORR installation.'
+    prefix, client, setup = [root / name for name in ('native-prefix', 'client-fixture', 'managed-setup')]
+    for path in (prefix, client):
+        path.mkdir(mode=0o700)
+    for name in ('run', 'state', 'venv', 'venv/bin'):
+        (prefix / name).mkdir(mode=0o700)
+    launcher = prefix / 'venv/bin/open-room-renderer'
+    launcher.write_text('#!/bin/sh\nexit 99\n')
+    launcher.chmod(0o700)
+    (prefix / 'installation-receipt.json').write_text('{"format":1,"mode":"installed"}')
+    cfg = {'auto_spawn_mpv': True, 'mpv_socket': str(prefix / 'run/mpv.sock'),
+           'state_dir': str(prefix / 'state'), 'mpv_audio_device': 'alsa/hw:CARD=SYNTHETIC,DEV=0',
+           'http_api_port': 8080, 'upnp_port': 8080}
+    (prefix / 'config.yaml').write_text(json.dumps(cfg))
+    native = prefix / receiver.RENDERER_SERVICE
+    native.write_text(receiver.user_unit(prefix))
+    # Only the native package/client admission is inert. The actual production
+    # setup, filesystem transaction, effective-unit checks and removal run here.
+    old_mpv, old_client = receiver._check_mpv, receiver.verify_client
+    receiver._check_mpv = lambda: None
+    receiver.verify_client = lambda _path: (client / 'go-librespot',
+                                           {'version': 'synthetic', 'binary_sha256': '0' * 64})
+    units = receiver._user_units()
+    native_link = units / receiver.RENDERER_SERVICE
+    try:
+        args = argparse.Namespace(directory=str(setup), renderer_prefix=str(prefix),
+            renderer_config=str(prefix / 'config.yaml'), renderer_unit=str(native),
+            client_dir=str(client), host='127.0.0.1', port=3678)
+        receiver.setup(args)
+        assert receiver.install(str(setup))['installation'] == 'INSTALLED'
+        managed_root, profile = receiver.load_profile(setup)
+        owned = receiver.UserServices(managed_root, profile)
+        states = owned.validate()
+        assert all(owned.stopped(info) for info in states.values())
+        assert states['renderer']['Restart'] == states['spotify']['Restart'] == 'no'
+        assert receiver.uninstall(str(setup))['installation'] == 'UNINSTALLED'
+        restored = owned.show('renderer')
+        assert restored['DropInPaths'] == '' and restored['Restart'] == 'on-failure'
+        assert owned.stopped(restored)
+        assert owned.show('spotify')['LoadState'] == 'not-found'
+        assert (setup / 'sidecar/config.yml').exists()
+        assert native_link.is_symlink() and native_link.resolve() == native
+        print('PASS: production setup/install/effective-unit/uninstall against real manager; no service activation', flush=True)
+    finally:
+        receiver._check_mpv, receiver.verify_client = old_mpv, old_client
+        # All target names were proved absent before this isolated fixture.
+        # Preserve anything that no longer exactly matches our recorded links.
+        targets = {units / receiver.SPOTIFY_SERVICE: setup / receiver.SPOTIFY_SERVICE,
+                   units / (receiver.RENDERER_SERVICE + '.d') / receiver.DROPIN:
+                       setup / (receiver.RENDERER_SERVICE + '.d') / receiver.DROPIN,
+                   native_link: native}
+        to_stop = []
+        for mode, unit in receiver.UNITS.items():
+            info = manager.show(mode)
+            expected = native if mode == 'renderer' else setup / receiver.SPOTIFY_SERVICE
+            if info['LoadState'] == 'loaded' and Path(info['FragmentPath']).resolve() == expected:
+                to_stop.append(unit)
+        if to_stop:
+            manager.command('stop', *to_stop, timeout=12)
+        for path, target in targets.items():
+            if receiver._exact_link(path, target):
+                path.unlink()
+        dropdir = units / (receiver.RENDERER_SERVICE + '.d')
+        if dropdir.exists():
+            dropdir.rmdir()
+        manager.command('daemon-reload')
+
+
 def main():
     assert os.geteuid() != 0, 'Run as the disposable CI user, never root.'
     assert (Path('/sys/fs/cgroup') / 'cgroup.controllers').is_file(), 'Real cgroup v2 is required.'
     root = Path(tempfile.mkdtemp(prefix='orr-receiver-'))
     root.chmod(0o700)
+    production_install_acceptance(root)
     names = {mode: f'orr-receiver-test-{os.getpid()}-{mode}.service' for mode in ('renderer', 'spotify')}
     (root / 'fixture.json').write_text(json.dumps({'units': names}))
     (root / 'run').mkdir()
@@ -220,7 +306,10 @@ StandardError=journal
     finally:
         try:
             services.command('stop', *names.values(), timeout=12)
-            services.command('reset-failed', *names.values())
+            failed = [unit for mode, unit in names.items()
+                      if services.show(mode)['ActiveState'] == 'failed']
+            if failed:
+                services.command('reset-failed', *failed)
         finally:
             for link in links:
                 if link.is_symlink() and os.readlink(link) == str(root / link.name):

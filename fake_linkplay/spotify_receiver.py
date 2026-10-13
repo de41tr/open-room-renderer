@@ -218,6 +218,8 @@ class UserServices:
         return result
 
     def cgroup_empty(self, group: str) -> bool:
+        if type(group) is not str:
+            fail("An owned cgroup record is malformed; output ownership is unknown.")
         if not group:
             return True
         prefix = f"/user.slice/user-{os.geteuid()}.slice/user@{os.geteuid()}.service/"
@@ -252,7 +254,12 @@ class UserServices:
                 and info["Job"] in {"", "0"})
 
     def stop_all(self, before: dict[str, dict]) -> None:
-        saved = {mode: info["ControlGroup"] for mode, info in before.items()}
+        prior_path = self.root / "last-cgroups.json"
+        prior = _json(prior_path) if prior_path.exists() else {}
+        # systemd may clear ControlGroup on a later inactive observation. Never
+        # discard an earlier owned path before checking that its descendants
+        # really disappeared, including after a previous uncertain stop.
+        saved = {mode: info["ControlGroup"] or prior.get(mode, "") for mode, info in before.items()}
         _write(self.root / "last-cgroups.json", saved)
         self.command("stop", *UNITS.values(), timeout=STOP_TIMEOUT)
         after = self.validate()
@@ -414,17 +421,39 @@ def recover(directory: str) -> dict:
     with _lock(root, "control.lock"):
         services = UserServices(root, profile)
         before = services.validate()
+        saved_path = root / "last-cgroups.json"
+        saved = _json(saved_path) if saved_path.exists() else {}
         services.command("stop", *UNITS.values(), timeout=STOP_TIMEOUT)
         after = services.validate()
         for mode, info in after.items():
             if (info["ActiveState"] not in {"inactive", "failed"} or info["MainPID"] != "0"
                     or info["ControlPID"] != "0" or info["Job"] not in {"", "0"}
                     or not services.cgroup_empty(before[mode]["ControlGroup"])
+                    or not services.cgroup_empty(saved.get(mode, ""))
                     or not services.cgroup_empty(info["ControlGroup"])):
                 fail("Recovery cannot prove both complete cgroups stopped; no restart was issued.")
-        services.command("reset-failed", *UNITS.values())
+        failed = [UNITS[mode] for mode, info in after.items()
+                  if info["ActiveState"] == "failed" or info["Result"] != "success"]
+        if failed:
+            try:
+                services.command("reset-failed", *failed)
+            except ExclusiveProfileError:
+                # A failed unit can be cleared/collected by another operator
+                # between observation and ResetFailedUnit. Only the complete
+                # observed postcondition below can establish recovery.
+                states = services.validate()
+                if not all(services.stopped(info) and info["Result"] == "success"
+                           and services.cgroup_empty(info["ControlGroup"])
+                           and services.cgroup_empty(saved.get(mode, ""))
+                           and services.cgroup_empty(before[mode]["ControlGroup"])
+                           for mode, info in states.items()):
+                    raise
         states = services.validate()
-        if not all(services.stopped(info) and info["Result"] == "success" for info in states.values()):
+        if not all(services.stopped(info) and info["Result"] == "success"
+                   and services.cgroup_empty(info["ControlGroup"])
+                   and services.cgroup_empty(saved.get(mode, ""))
+                   and services.cgroup_empty(before[mode]["ControlGroup"])
+                   for mode, info in states.items()):
             fail("The failed service state could not be reconciled; no restart was issued.")
         result = {"service_state": "STOPPED", "recovery": "OFF_ONLY", "services_started": False}
         _write(root / "last-operation.json", result)
@@ -484,6 +513,25 @@ def _user_units() -> Path:
     return _path(base) / "systemd/user"
 
 
+def _ensure_user_directory(path: Path) -> None:
+    """Create only missing path components without following ancestor links."""
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        for part in path.parts[1:]:
+            try:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            except FileNotFoundError:
+                os.mkdir(part, 0o700, dir_fd=fd)
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        info = os.fstat(fd)
+        if info.st_uid != os.geteuid() or info.st_mode & 0o022:
+            fail("The user unit directory must be owned by you and not writable by other users.")
+    finally:
+        os.close(fd)
+
+
 def _exact_link(path: Path, target: Path) -> bool:
     return path.is_symlink() and os.readlink(path) == str(target)
 
@@ -500,7 +548,7 @@ def install(directory: str) -> dict:
         services = UserServices(root, profile)
         services.command("show", "--property=Version")
         units = _user_units()
-        units.mkdir(parents=True, exist_ok=True, mode=0o700)
+        _ensure_user_directory(units)
         with _directory(units):
             pass
         native = units / RENDERER_SERVICE

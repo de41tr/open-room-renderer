@@ -189,3 +189,97 @@ def test_receiver_dispatch_does_not_contact_renderer_http(ready, monkeypatch):
     monkeypatch.setattr(cli, 'api_get', lambda *_args: pytest.fail('receiver depends on stopped renderer HTTP'))
     assert cli.main(['spotify', 'receiver', '--directory', str(ready), 'switch', 'renderer']) == 0
     assert called == [(str(ready), 'renderer')]
+
+
+def test_exec_readiness_requires_the_selected_target_and_returns_invocation(ready, monkeypatch):
+    root, profile = receiver.load_profile(ready)
+    services = receiver.UserServices(root, profile)
+    identity = {'ActiveState': 'active', 'MainPID': '12345', 'InvocationID': 'a' * 32}
+    monkeypatch.setattr(services, 'show', lambda _mode: identity)
+    argv = receiver._target(root, profile, 'spotify')
+    original = Path.read_bytes
+    monkeypatch.setattr(Path, 'read_bytes', lambda path: b'\0'.join(os.fsencode(v) for v in argv) + b'\0'
+                        if str(path) == '/proc/12345/cmdline' else original(path))
+    assert services.wait_started('spotify') == ('a' * 32, '12345')
+    # Type=simple can be active while the old Python guard is still running.
+    argv[:] = [str(Path(profile['renderer_prefix']) / 'venv/bin/open-room-renderer'),
+               'spotify', 'receiver', '--directory', str(root), 'run', 'spotify']
+    ticks = iter([0, 0, 6])
+    monkeypatch.setattr(receiver.time, 'monotonic', lambda: next(ticks))
+    monkeypatch.setattr(receiver.time, 'sleep', lambda _n: None)
+    with pytest.raises(ExclusiveProfileError, match='exec was not confirmed'):
+        services.wait_started('spotify')
+
+
+def test_uninstall_resumes_only_recorded_absent_links(ready, monkeypatch, tmp_path):
+    units = tmp_path / 'user-units'
+    units.mkdir()
+    monkeypatch.setattr(receiver, '_user_units', lambda: units)
+    root, profile = receiver.load_profile(ready)
+    links = receiver._install_links(root, profile)
+    (units / (receiver.RENDERER_SERVICE + '.d')).mkdir()
+    for path, target in links.items():
+        path.symlink_to(target)
+    receiver._write(root / 'installation.json', {'format': 1, 'state': 'INSTALLED',
+        'links': {str(p): str(t) for p, t in links.items()}})
+    class Manager:
+        def __init__(self, *_args): pass
+        stopped = receiver.UserServices.stopped
+        def command(self, *_args, **_kwargs): return ''
+        def show(self, mode): return stopped() | {'LoadState': 'loaded'}
+        def validate(self): return {mode: self.show(mode) for mode in receiver.UNITS}
+        def stop_all(self, _before): receiver._write(root / 'last-cgroups.json', dict.fromkeys(receiver.UNITS, ''))
+        def cgroup_empty(self, _group): return True
+    monkeypatch.setattr(receiver, 'UserServices', Manager)
+    original = Path.unlink
+    second = list(links)[1]
+    injected = False
+    def unlink(path, *args, **kwargs):
+        nonlocal injected
+        if path == second and not injected:
+            injected = True
+            raise OSError('injected second unlink failure')
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'unlink', unlink)
+    with pytest.raises(OSError):
+        receiver.uninstall(str(root))
+    assert json.loads((root / 'installation.json').read_text())['state'] == 'UNINSTALLING'
+    assert receiver.uninstall(str(root))['installation'] == 'UNINSTALLED'
+    assert not any(os.path.lexists(path) for path in links)
+    assert (root / 'sidecar/config.yml').exists()
+
+
+def test_stop_retains_and_checks_previously_known_cgroup(ready, monkeypatch):
+    root, profile = receiver.load_profile(ready)
+    services = receiver.UserServices(root, profile)
+    previous = f'/user.slice/user-{os.geteuid()}.slice/user@{os.geteuid()}.service/app.slice/{receiver.SPOTIFY_SERVICE}'
+    receiver._write(root / 'last-cgroups.json', {'renderer': '', 'spotify': previous})
+    calls = []
+    monkeypatch.setattr(services, 'command', lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(services, 'validate', lambda: dict.fromkeys(receiver.UNITS, stopped()))
+    monkeypatch.setattr(services, 'cgroup_empty', lambda group: group != previous)
+    with pytest.raises(ExclusiveProfileError, match='cgroup release'):
+        services.stop_all(dict.fromkeys(receiver.UNITS, stopped()))
+    assert calls == [('stop', *receiver.UNITS.values())]
+    assert json.loads((root / 'last-cgroups.json').read_text())['spotify'] == previous
+
+
+def test_recovery_does_not_reset_successful_inactive_peer(ready, monkeypatch):
+    calls = []
+    failed = True
+    class Manager:
+        def __init__(self, *_args): pass
+        stopped = receiver.UserServices.stopped
+        def validate(self):
+            return {'renderer': stopped() | ({'ActiveState': 'failed', 'SubState': 'failed', 'Result': 'timeout'} if failed else {}),
+                    'spotify': stopped()}
+        def cgroup_empty(self, _group): return True
+        def command(self, *args, **_kwargs):
+            nonlocal failed
+            calls.append(args)
+            if args[0] == 'reset-failed':
+                assert args == ('reset-failed', receiver.RENDERER_SERVICE)
+                failed = False
+    monkeypatch.setattr(receiver, 'UserServices', Manager)
+    assert receiver.recover(str(ready))['recovery'] == 'OFF_ONLY'
+    assert calls == [('stop', *receiver.UNITS.values()), ('reset-failed', receiver.RENDERER_SERVICE)]

@@ -41,6 +41,9 @@ def fail(message: str) -> None:
 
 def _binary(path: Path) -> bytes:
     with _directory(path.parent) as parent:
+        entry = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISREG(entry.st_mode):
+            fail("Client inputs must be regular files, not links or special devices.")
         fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=parent)
         with os.fdopen(fd, "rb") as handle:
             info = os.fstat(handle.fileno())

@@ -220,6 +220,9 @@ and re-review the provider/target gates; no automatic binary updates are install
   delayed/stubborn descendant cleanup and off-only recovery. Its admission,
   client exec target, readiness and output probe are explicitly synthetic. A
   successful run establishes that defined lifecycle integration scope only.
+  Its first phase also runs the production setup/install/effective-unit/uninstall
+  code against the real user manager, using an inert native/client fixture and
+  never activating either product service. Client/DAC admission remains distinct.
 - `ACCOUNT_PENDING`, `HARDWARE_PENDING`, `PROVIDER_POLICY_PENDING` remain open.
   No live Spotify music, XU4/KA17, full production profile or reboot claim follows.
   Exact-commit CI results must be checked separately; this document does not
