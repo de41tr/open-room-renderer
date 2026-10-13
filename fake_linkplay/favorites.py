@@ -212,6 +212,35 @@ class FavoritesStore:
             raise
         self._records = records
 
+    def backup_bytes(self) -> bytes:
+        """Snapshot only owned records, never the configured presentation prefix."""
+        with self._lock:
+            self._require_available()
+            return encode_favorites_document(self._records)
+
+    def restore_empty(self, encoded: bytes) -> None:
+        """Restore one complete document only into healthy, empty owned storage.
+
+        One lock covers validation, the fresh disk check and the single commit.
+        The disk check fences observable external changes, not filesystem races:
+        this remains a single-writer store; do not edit its file while serving.
+        """
+        with self._lock:
+            self._require_available()
+            records = decode_favorites_document(encoded)
+            if self._records:
+                raise FavoriteError("library_not_empty", "Managed favorites must be empty before restoring", 409)
+            try:
+                persisted = self._load()
+            except (ValueError, OSError):
+                raise FavoriteError("library_unavailable",
+                    "Managed favorites storage could not be verified. Stop the renderer, repair or restore its saved library, then restart.", 503) from None
+            if persisted:
+                raise FavoriteError("library_not_empty", "Managed favorites must be empty before restoring", 409)
+            # Empty input is a no-write no-op, never a way to clear a library.
+            if records:
+                self._commit(records)
+
     def effective_presets(self) -> list[dict[str, object]]:
         """Configured prefix stays unchanged; managed entries receive dense slots."""
         with self._lock:
