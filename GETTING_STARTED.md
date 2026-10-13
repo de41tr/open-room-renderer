@@ -64,7 +64,12 @@ python3 scripts/install-native.py
 
 The default prefix is `~/.local/share/open-room-renderer`. `--prefix /short/path`
 selects a new dedicated directory; existing directories are refused. Use a short
-path because Linux Unix sockets have a 108-byte path limit.
+path because Linux Unix sockets have a 108-byte path limit. New installation and
+offline-migration destination prefixes cannot contain literal single/double quotes
+or DEL: systemd rejects those executable paths even when escaped. Spaces and `%`
+remain supported. Manifest-aware uninstall still accepts older prefixes containing
+quotes or DEL; this destination restriction does not apply to migration source or
+config filenames.
 
 The installer checks Python, Linux architecture, mpv version, and optional ALSA
 access. It snapshots this checkout's application sources, creates `venv/`,

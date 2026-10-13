@@ -246,6 +246,10 @@ def prepare_profile(*, source: str | Path, source_config: str | Path,
         if offline_acknowledged is not True:
             raise PreparationError("Explicit offline acknowledgment is required; socket absence cannot prove that instances are stopped.")
         source, source_config, destination = _path(source), _path(source_config), _path(destination)
+        # Only the destination becomes an ExecStart executable. systemd rejects
+        # literal quotes and DEL even after unquoting; source/config names need not.
+        if any(char in str(destination) for char in ("'", '"', "\x7f")):
+            raise PreparationError("Destination executable path must not contain quotes or DEL (systemd restriction).")
         original = source if original_prefix is None else _path(original_prefix)
         if not _disjoint(source, destination) or not _disjoint(original, destination):
             raise PreparationError("Source, original installation, and destination must be disjoint native prefixes.")

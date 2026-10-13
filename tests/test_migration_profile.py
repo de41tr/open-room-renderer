@@ -114,6 +114,36 @@ def test_dry_run_never_writes_or_loads_runtime_state(pair, monkeypatch):
     assert [_snapshot(p) for p in pair] == before
 
 
+@pytest.mark.parametrize("character", ["'", '"', "\x7f"])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_destination_executable_path_rejected_before_reads_or_writes(pair, monkeypatch, character, dry_run):
+    old, new = pair
+    destination = new.with_name(f"new{character}path")
+    new.rename(destination)
+    before = [_snapshot(p) for p in (old, destination)]
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid destination executable must fail before opening either tree")
+    monkeypatch.setattr(migration, "_Tree", forbidden)
+    with pytest.raises(migration.PreparationError, match="Destination executable path.*quotes or DEL"):
+        _prepare((old, destination), dry_run=dry_run)
+    assert [_snapshot(p) for p in (old, destination)] == before
+    assert not (destination / migration.PROFILE).exists()
+
+
+@pytest.mark.parametrize("character", ["'", '"', "\x7f"])
+def test_source_and_config_names_need_not_be_executable_paths(pair, character):
+    old, new = pair
+    source = old.with_name(f"old{character}path")
+    old.rename(source)
+    _edit_config(source, state_dir=str(source / "state"), mpv_socket=str(source / "run/mpv.sock"))
+    config = source / f"config{character}name.yaml"
+    (source / "config.yaml").rename(config)
+    before = _snapshot(source)
+    assert _prepare((source, new), source_config=config)["status"] == "prepared"
+    assert _snapshot(source) == before
+    assert (new / migration.PROFILE / "state/uuid").read_bytes() == (source / "state/uuid").read_bytes()
+
+
 def test_relocated_snapshot_uses_explicit_original_prefix(pair, tmp_path):
     old, new = pair
     original = tmp_path / "original"

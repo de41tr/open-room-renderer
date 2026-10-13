@@ -456,7 +456,66 @@ def test_generated_unit_quotes_spaces_and_specifiers(installer):
     assert 'ExecStart="/tmp/test name%%value/venv/bin/open-room-renderer"' in text
 
 
-def test_generated_user_unit_passes_systemd_static_verification(tmp_path):
+@pytest.mark.parametrize("character", ["'", '"', "\x7f"])
+@pytest.mark.parametrize("stage_only,dry_run", [(False, False), (False, True), (True, False), (True, True)])
+def test_native_executable_path_rejected_before_effects(installer, tmp_path, monkeypatch, character, stage_only, dry_run):
+    prefix = tmp_path / f"native{character}path"
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid executable prefixes must fail before environment probes or installation")
+    monkeypatch.setattr(installer, "environment", forbidden)
+    with pytest.raises(ValueError, match="executable path.*quotes or DEL"):
+        installer.checked_prefix(str(prefix))
+    with pytest.raises(ValueError, match="executable path.*quotes or DEL"):
+        installer.install(prefix, port=8080, stage_only=stage_only, dry_run=dry_run, require_alsa=False)
+    args = ["--prefix", str(prefix)]
+    if stage_only:
+        args.append("--stage-only")
+    if dry_run:
+        args.append("--dry-run")
+    assert installer.main(args) == 2
+    assert not prefix.exists()
+
+
+@pytest.mark.parametrize("character", ["'", '"', "\x7f"])
+@pytest.mark.parametrize("standalone", [False, True])
+def test_old_executable_path_can_still_be_uninstalled(installer, tmp_path, monkeypatch, character, standalone):
+    prefix = tmp_path / f"old{character}path"
+    prefix.mkdir()
+    (prefix / "state").mkdir()
+    (prefix / "state/uuid").write_text("keep identity")
+    (prefix / "config.yaml").write_text("keep config")
+    (prefix / "owned").write_text("remove owned file")
+    copied = prefix / "uninstall.py"
+    copied.write_text((ROOT / "scripts/install-native.py").read_text())
+    installer.write_manifest(prefix)
+    if standalone:
+        # The copied tool has no checkout-relative native_profile helper.
+        monkeypatch.setattr(sys, "dont_write_bytecode", True)
+        spec = importlib.util.spec_from_file_location("standalone_uninstaller", copied)
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("uninstall must not probe or execute renderer binaries")
+    monkeypatch.setattr(installer, "environment", forbidden)
+    before = {path.name: path.read_bytes() for path in prefix.iterdir() if path.is_file()}
+    args = ["--prefix", str(prefix), "--uninstall"]
+    assert installer.main([*args, "--dry-run"]) == 0
+    assert {path.name: path.read_bytes() for path in prefix.iterdir() if path.is_file()} == before
+    assert installer.main(args) == 0
+    assert {path.name for path in prefix.iterdir()} == {"config.yaml", "state"}
+    assert (prefix / "config.yaml").read_text() == "keep config"
+    assert (prefix / "state/uuid").read_text() == "keep identity"
+
+
+def test_native_executable_path_keeps_supported_characters(installer, tmp_path):
+    prefix = tmp_path / "space %;`*?[]()#&é"
+    assert installer.checked_prefix(str(prefix)) == prefix
+    installer.install(prefix, port=8080, stage_only=True, dry_run=False, require_alsa=False)
+    assert (prefix / "open-room-renderer.service").read_text() == installer.user_unit(prefix)
+
+
+@pytest.mark.parametrize("quoted_config", [False, True])
+def test_generated_user_unit_passes_systemd_static_verification(tmp_path, quoted_config):
     installer = load_script("install-native")
     import shutil
     analyzer = shutil.which("systemd-analyze")
@@ -466,7 +525,14 @@ def test_generated_user_unit_passes_systemd_static_verification(tmp_path):
     (prefix / "venv/bin").mkdir(parents=True)
     (prefix / "venv/bin/open-room-renderer").symlink_to(sys.executable)
     unit = tmp_path / "open-room-renderer.service"
-    unit.write_text(installer.user_unit(prefix))
+    if quoted_config:
+        from fake_linkplay.native_profile import systemd_quote, user_unit
+        config = tmp_path / 'config \'"%name.yaml'
+        text = user_unit(prefix, config=config)
+        assert f" --config {systemd_quote(config)}\n" in text
+        unit.write_text(text)
+    else:
+        unit.write_text(installer.user_unit(prefix))
     runtime = tmp_path / "xdg"
     runtime.mkdir(mode=0o700)
     result = subprocess.run([analyzer, "--user", "verify", str(unit)], env={**os.environ, "XDG_RUNTIME_DIR": str(runtime)}, text=True, capture_output=True)

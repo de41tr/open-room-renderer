@@ -68,7 +68,7 @@ def environment(*, require_mpv: bool = True, require_alsa: bool = False) -> dict
     }
 
 
-def checked_prefix(value: str) -> Path:
+def checked_prefix(value: str, *, for_install: bool = True) -> Path:
     prefix = Path(value).expanduser().absolute()
     if str(prefix) != str(prefix).rstrip():
         raise ValueError("Installation path must not end with whitespace (systemd strips it).")
@@ -76,6 +76,10 @@ def checked_prefix(value: str) -> Path:
         raise ValueError("Installation path must not contain parent-directory traversal (..).")
     if any(ord(char) < 32 for char in str(prefix)) or any(char in str(prefix) for char in ("$", "\\")):
         raise ValueError("Installation path must not contain control characters, backslashes, or $ (systemd expansion).")
+    # systemd checks the unquoted executable with string_is_safe(); escaping
+    # cannot make literal quotes or DEL valid. Keep old-prefix cleanup possible.
+    if for_install and any(char in str(prefix) for char in ("'", '"', "\x7f")):
+        raise ValueError("Installation executable path must not contain quotes or DEL (systemd restriction).")
     if prefix == Path("/") or prefix == Path.home():
         raise ValueError("Choose a dedicated installation directory, not / or your home directory.")
     for path in (prefix, *prefix.parents):
@@ -240,6 +244,7 @@ def uninstall(prefix: Path, *, dry_run: bool) -> None:
 
 
 def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require_alsa: bool) -> None:
+    prefix = checked_prefix(str(prefix))
     info = environment(require_mpv=not stage_only, require_alsa=require_alsa)
     config = user_config(prefix, port)
     if prefix.exists():
@@ -297,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--uninstall", action="store_true", help="remove only unchanged manifest-owned files; stop the service first")
     args = parser.parse_args(argv)
     try:
-        prefix = checked_prefix(args.prefix)
+        prefix = checked_prefix(args.prefix, for_install=not args.uninstall)
         if args.uninstall:
             uninstall(prefix, dry_run=args.dry_run)
         else:
