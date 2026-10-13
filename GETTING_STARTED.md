@@ -118,8 +118,19 @@ An invalid `default_volume` now fails before saved gain is read, even when a val
 saved gain would previously have masked that malformed setting. Fix the YAML;
 do not delete the saved gain. Valid startup settings still restore saved gain as
 before, and rejection leaves the existing state untouched.
-Saved-state, backend availability, binding, and cleanup retain their existing
-behavior and diagnostics.
+After YAML validation, expected failures while loading saved identity, gain,
+device name, active DSP, or legacy balance also stop startup with status
+**2** and a fixed, stage-specific stderr diagnostic that omits file contents,
+private paths, and exception chains. Check the named file locally and its permissions,
+or restore a known-good backup; do not delete saved sound settings to force startup.
+The active DSP read is checked again during API construction; failure still cleans
+up the acquired backend before any listeners start. Existing state rules and read
+order are unchanged: an identity may already have been published before a later
+failure, and no automatic reset or retry is added. The public configuration/state
+readers and ordinary API construction retain their original exceptions. Favorites'
+unavailable/config fallback and the EQ preset library's warn-and-empty policy are
+unchanged, as are later legacy-balance normalization, backend availability, binding,
+and cleanup diagnostics.
 
 For compatibility, bare `serve` still selects `configs/config.example.yaml`
 relative to the current directory and uses built-in defaults if that implicit

@@ -485,7 +485,8 @@ class ServiceHarness:
             await self.step("api.initialize_balance")
             if backend_error == "balance":
                 raise BackendError("synthetic rejected balance")
-        def api_factory(_cfg, state, _backend):
+        def api_factory(_cfg, state, _backend, **kwargs):
+            assert kwargs == {"_startup": True}
             self.state = state
             self.api = SimpleNamespace(app=lambda: object(), initialize_channel_balance=AsyncMock(side_effect=initialize_balance))
             return self.api
@@ -588,7 +589,7 @@ async def test_cli_rejects_duplicate_saved_gain_before_creating_backend(tmp_path
     backend_factory = Mock(side_effect=AssertionError('Backend must not be constructed'))
     monkeypatch.setattr(cli, 'MpvBackend', backend_factory)
 
-    with pytest.raises(ValueError, match='Invalid persisted gain document'):
+    with pytest.raises(ValueError, match='Saved gain settings could not be loaded'):
         await cli.serve(str(config))
 
     backend_factory.assert_not_called()
@@ -919,7 +920,7 @@ def test_real_process_signals_cannot_abandon_startup_or_teardown(phase, signal_n
         cli.load_startup_config = lambda _: Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", enable_ssdp=False)
         cli.setup_logging = lambda _: None
         cli.MpvBackend = lambda *args, **kwargs: SimpleNamespace(start=start_backend, stop=noop, initialize_gain=noop, stop_process=stop_backend)
-        cli.HttpApi = lambda *args: SimpleNamespace(app=lambda: object(), initialize_channel_balance=noop)
+        cli.HttpApi = lambda *args, **kwargs: SimpleNamespace(app=lambda: object(), initialize_channel_balance=noop)
         cli.web.AppRunner = lambda *args: SimpleNamespace(setup=noop, cleanup=noop)
         cli.web.TCPSite = lambda *args: SimpleNamespace(start=noop)
         cli.MdnsAdvertiser = lambda *args: SimpleNamespace(start=start_mdns, stop=stop_mdns, refresh=noop)

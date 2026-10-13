@@ -21,6 +21,7 @@ import yaml
 
 from .utils import detect_lan_ip, ensure_dir
 from .persistence import load_active_dsp, load_gain
+from .startup_state import _read_state
 
 
 @dataclass(slots=True)
@@ -301,7 +302,7 @@ def read_startup_config(path: str | Path, *, missing_ok: bool = False) -> Config
 def load_startup_config(path: str | Path, *, missing_ok: bool = False) -> Config:
     """Validate startup input before applying the existing persisted state path."""
 
-    return _load_config_state(read_startup_config(path, missing_ok=missing_ok))
+    return _load_config_state(read_startup_config(path, missing_ok=missing_ok), _startup=True)
 
 
 def _config_from_mapping(raw: dict[str, Any]) -> Config:
@@ -310,9 +311,12 @@ def _config_from_mapping(raw: dict[str, Any]) -> Config:
     return Config(**raw, podcast_presets=presets, experimental_sources=experimental_sources)
 
 
-def _load_config_state(cfg: Config) -> Config:
-    cfg.uuid = cfg.uuid or load_or_create_uuid(cfg.state_dir, wiim_home_profile=cfg.wiim_home_profile)
-    load_persistent_runtime_state(cfg)
+def _load_config_state(cfg: Config, *, _startup: bool = False) -> Config:
+    cfg.uuid = cfg.uuid or _read_state(
+        lambda: load_or_create_uuid(cfg.state_dir, wiim_home_profile=cfg.wiim_home_profile),
+        "identity", startup=_startup,
+    )
+    load_persistent_runtime_state(cfg, _startup=_startup)
     return cfg
 
 
@@ -419,7 +423,7 @@ def _read_uuid(path: Path) -> str:
     return value
 
 
-def load_persistent_runtime_state(cfg: Config) -> None:
+def load_persistent_runtime_state(cfg: Config, *, _startup: bool = False) -> None:
     """Apply safe user-visible settings persisted by app controls.
 
     Args:
@@ -429,22 +433,34 @@ def load_persistent_runtime_state(cfg: Config) -> None:
         Reads small text files from ``cfg.state_dir``.
     """
 
-    directory = ensure_dir(cfg.state_dir)
-    gain = load_gain(directory)
+    directory = _read_state(lambda: ensure_dir(cfg.state_dir), "directory", startup=_startup)
+    gain = _read_state(lambda: load_gain(directory), "gain", startup=_startup)
     if gain is not None:
         cfg.default_volume, cfg.default_mute = gain
     device_name_path = directory / "device_name"
-    if device_name_path.exists():
-        device_name = sanitize_persistent_text(device_name_path.read_text())
+    device_name = _read_state(
+        lambda: _read_optional_persistent_text(device_name_path), "device_name", startup=_startup,
+    )
+    if device_name is not None:
+        device_name = sanitize_persistent_text(device_name)
         if device_name:
             cfg.friendly_name = device_name
             cfg.mdns_instance_name = device_name
     channel_balance_path = directory / "channel_balance"
-    active_dsp = load_active_dsp(directory)
+    active_dsp = _read_state(lambda: load_active_dsp(directory), "active_dsp", startup=_startup)
     if active_dsp is not None:
         cfg.channel_balance = str(active_dsp["balance"])
-    elif channel_balance_path.exists():
-        cfg.channel_balance = sanitize_persistent_text(channel_balance_path.read_text()) or "0.0"
+    else:
+        channel_balance = _read_state(
+            lambda: _read_optional_persistent_text(channel_balance_path),
+            "channel_balance", startup=_startup,
+        )
+        if channel_balance is not None:
+            cfg.channel_balance = sanitize_persistent_text(channel_balance) or "0.0"
+
+
+def _read_optional_persistent_text(path: Path) -> str | None:
+    return path.read_text() if path.exists() else None
 
 
 def sanitize_persistent_text(value: str) -> str:

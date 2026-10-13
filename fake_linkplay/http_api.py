@@ -57,6 +57,7 @@ from .queue_policy import (NORMAL, ShuffleRandom, is_shuffle, natural_successor,
                            shuffle_exhausted, shuffle_step)
 from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
+from .startup_state import _read_state
 from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, connection_manager_properties, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
 
 LOG = logging.getLogger(__name__)
@@ -183,7 +184,7 @@ class HttpApi:
     """
 
     def __init__(self, cfg: Config, state: RendererState, mpv: MpvBackend, *, on_rename: Callable[[], Awaitable[None]] | None = None,
-                 shuffle_rng: ShuffleRandom | None = None) -> None:
+                 shuffle_rng: ShuffleRandom | None = None, _startup: bool = False) -> None:
         """Create an API handler bound to config, renderer state, and mpv."""
 
         self.cfg = cfg
@@ -264,7 +265,11 @@ class HttpApi:
         self.eq_current_preset = ""
         self._load_persisted_eq_presets()
         self._eventing = EventSubscriptionManager(lambda service: self._event_body(service))
-        self._pending_dsp_restore = load_active_dsp(cfg.state_dir)
+        # Only CLI startup opts into private diagnostics for this second read.
+        # Do not wrap construction: other components own their failure policies.
+        self._pending_dsp_restore = _read_state(
+            lambda: load_active_dsp(cfg.state_dir), "active_dsp", startup=_startup,
+        )
         desired_balance = (self._pending_dsp_restore["balance"]
                            if self._pending_dsp_restore is not None else cfg.channel_balance)
         self.cfg.channel_balance = self._normalize_channel_balance(str(desired_balance))

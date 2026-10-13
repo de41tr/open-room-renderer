@@ -31,6 +31,7 @@ from .queue_client import (PrivateClientArgumentParser, QueueClientError, _endpo
                            add_queue_commands, run_queue_command)
 from .ssdp import SsdpServer
 from .state import RendererState
+from .startup_state import StartupStateError
 from .transport_client import COMMANDS, add_transport_commands, run_transport_command
 from .upnp_description import description_xml
 from .utils import setup_logging
@@ -111,7 +112,7 @@ async def serve(config_path: str | None = None) -> None:
         except BackendError as exc:
             state.mark_error()
             LOG.warning("backend unavailable at startup; control API will report failures: %s", exc)
-        api = HttpApi(cfg, state, mpv)
+        api = HttpApi(cfg, state, mpv, _startup=True)
         try:
             # Restore the complete active EQ/balance graph, including bypass,
             # before listeners. Backend load/resume will retry this desired
@@ -340,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "serve":
         try:
             asyncio.run(serve(args.config))
-        except StartupConfigError as exc:
+        except (StartupConfigError, StartupStateError) as exc:
             print(f"Startup error: {exc}", file=sys.stderr)
             return 2
         return 0
