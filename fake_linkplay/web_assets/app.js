@@ -147,7 +147,7 @@
     text("freshness", control.lastReadAt ? `${control.fresh ? "State received" : "Last state received"} ${new Date(control.lastReadAt).toLocaleTimeString()}. Playback status comes from the renderer.` : "No state received yet.");
     $("add-favorite").disabled = !ready || !control.favoritesFresh;
     $("save-current").disabled = !ready || !control.favoritesFresh || !snapshot.actions.save_current;
-    if (dialogContext) $("favorite-submit").disabled = !ready || !control.favoritesFresh;
+    renderFavoriteDraft(ready);
   }
   function element(tag, className, value) { const item = document.createElement(tag); if (className) item.className = className; if (value !== undefined) item.textContent = value; return item; }
   function currentEditor() { return control.fresh && snapshot?.dsp.status === "CONFIRMED" ? snapshot.dsp.editor : null; }
@@ -547,9 +547,26 @@
       if (result.kind === "acknowledged") { drafts[key] = false; $(key + "-draft").hidden = true; $(key).blur(); render(); }
     });
   });
+  function favoriteRecord(favorite) {
+    // Compare only the redacted record, independently of response property order.
+    return favorite && JSON.stringify([favorite.id, favorite.editable, favorite.name, favorite.title, favorite.artist, favorite.album, favorite.artwork, favorite.target_label]);
+  }
+  function renderFavoriteDraft(ready) {
+    const context = dialogContext;
+    if (!context) return;
+    // This detects observed changes, not an atomic server-side precondition.
+    // Latch changes even while pending, but let own successful readback reach
+    // outcome verification before displaying review guidance.
+    if (control.fresh && control.favoritesFresh && ["rename", "delete"].includes(context.mode)) {
+      const current = control.favorites.find(item => item.id === context.favorite.id);
+      if (favoriteRecord(current) !== context.record) context.stale = true;
+    }
+    $("favorite-submit").disabled = !ready || !control.favoritesFresh || context.pending || context.stale;
+    if (context.stale && !context.pending) text("favorite-dialog-status", (context.resultText ? context.resultText + " " : "") + "This favorite changed or is no longer available. Close this dialog and review the favorites list before reopening Rename or Delete.");
+  }
   function openFavorite(mode, favorite = null, opener = $(mode === "current" ? "save-current" : "add-favorite")) {
     if (!control.canMutate("favorite_add") || !control.favoritesFresh) return;
-    dialogContext = {mode, favorite, generation: snapshot.generation, session: snapshot.session_id, serial: ++dialogSerial};
+    dialogContext = {mode, favorite, record: favoriteRecord(favorite), stale: false, pending: false, generation: snapshot.generation, session: snapshot.session_id, serial: ++dialogSerial};
     $("favorite-form").reset(); text("favorite-dialog-status", "");
     const labels = {add: "Add favorite", current: "Save current as favorite", rename: "Rename favorite", delete: "Delete favorite"};
     text("favorite-dialog-heading", labels[mode]); text("favorite-submit", mode === "delete" ? "Delete favorite" : mode === "rename" ? "Save name" : "Save favorite");
@@ -579,7 +596,9 @@
   $("favorite-form").addEventListener("submit", async event => {
     event.preventDefault();
     const context = dialogContext;
-    if (!context || !control.canMutate("favorite_add")) return;
+    if (!context) return;
+    renderFavoriteDraft(control.canMutate("play"));
+    if (context.stale || context.pending || !control.canMutate("favorite_add")) return;
     if (context.mode === "current" && context.session !== snapshot.session_id) { text("favorite-dialog-status", "The renderer restarted. Close this dialog and choose Save current again."); return; }
     const name = $("favorite-name").value;
     const url = $("favorite-url").value;
@@ -590,13 +609,19 @@
     else if (context.mode === "current") body = {action: "favorite_current", name, expected_generation: context.generation};
     else if (context.mode === "rename") body = {action: "favorite_rename", id: context.favorite.id, name};
     else body = {action: "favorite_delete", id: context.favorite.id};
+    context.pending = true;
     text("favorite-dialog-status", "PENDING · Waiting for the renderer…");
     const result = await run(body, {add: "Add favorite", current: "Save current", rename: "Rename favorite", delete: "Delete favorite"}[context.mode]);
     if (!dialogContext || dialogContext.serial !== context.serial) return;
+    context.pending = false;
     const favorites = control.favorites;
     const verified = control.favoritesFresh && result.kind === "acknowledged" && (context.mode === "delete" ? !favorites.some(item => item.id === context.favorite.id) : context.mode === "rename" ? favorites.some(item => item.id === context.favorite.id && item.name === name) : result.favoriteId && favorites.some(item => item.id === result.favoriteId && item.name === name));
     if (verified) closeFavorite();
-    else text("favorite-dialog-status", result.kind === "acknowledged" ? "Request acknowledged. The saved change has not yet been verified in the favorites list. Check the list before submitting again." : `${result.kind.toUpperCase()} · ${result.text}`);
+    else {
+      context.resultText = result.kind === "acknowledged" ? "Request acknowledged. The saved change has not yet been verified in the favorites list. Check the list before submitting again." : `${result.kind.toUpperCase()} · ${result.text}`;
+      text("favorite-dialog-status", context.resultText);
+      renderFavoriteDraft(control.canMutate("play"));
+    }
   });
   DSP_KEYS.forEach(key => $("dsp-" + key).addEventListener("input", () => {
     if (!currentEditor() || !control.canMutate("dsp_bands") || soundDraft.stale) return;

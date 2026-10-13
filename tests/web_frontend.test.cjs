@@ -213,6 +213,122 @@ test('app renders metadata as text, and polling preserves favorite form edits', 
   assert.equal(h.ids.get('favorite-name').value, 'My unsaved name'); assert.equal(h.ids.get('favorite-url').value, 'https://example.com/private?token=abc');
   assert.equal(h.ids.get('favorite-dialog').open, true);
 });
+test('favorite Rename and Delete preserve drafts but reject an observed external change or removal', async () => {
+  for (const mode of ['rename', 'delete']) for (const removed of [false, true]) for (const restart of [false, true]) {
+    const h = await appHarness(); await favoriteAction(h, mode).fire('click');
+    const session = restart ? 'restarted' : 'session-one';
+    if (restart) h.setState(state({session_id: session}));
+    h.ids.get('favorite-name').value = 'My unsent name';
+    h.setFavorites(favorites(removed ? [] : [{...favorite(), name: 'Changed remotely'}], session)); await h.refresh();
+    assert.equal(h.ids.get('favorite-dialog').open, true);
+    assert.equal(h.ids.get('favorite-name').value, 'My unsent name');
+    assert.equal(h.ids.get('favorite-delete-name').textContent, 'Radio');
+    assert.equal(h.ids.get('favorite-submit').disabled, true);
+    const message = h.ids.get('favorite-dialog-status').textContent;
+    assert.equal(message, 'This favorite changed or is no longer available. Close this dialog and review the favorites list before reopening Rename or Delete.');
+    // Calling the handler directly must be safe even without the disabled button.
+    h.ids.get('favorite-submit').disabled = false; await h.ids.get('favorite-form').fire('submit');
+    assert.equal(h.posts().length, 0); assert.equal(h.ids.get('favorite-submit').disabled, true);
+    assert.equal(h.ids.get('favorite-dialog-status').textContent, message);
+    h.setFavorites(favorites([favorite()], session)); await h.refresh();
+    assert.equal(h.ids.get('favorite-submit').disabled, true); // No silent rebase after restoration.
+    await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 0);
+    const dialog = h.ids.get('favorite-dialog'); dialog.close = () => {dialog.open = false;};
+    await h.ids.get('favorite-cancel').fire('click'); await favoriteAction(h, mode).fire('click');
+    await dialog.fire('close'); // A queued old dismissal cannot restore the stale draft.
+    assert.equal(dialog.open, true); assert.equal(h.ids.get('favorite-name').value, 'Radio');
+    assert.equal(h.ids.get('favorite-submit').disabled, false); assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+  }
+});
+test('favorite drafts observe the full redacted record rather than only its name', async () => {
+  for (const change of [{editable: false}, {title: 'New title'}, {artist: 'New artist'}, {album: 'New album'}, {artwork: 'https://example.test/new.jpg'}, {target_label: 'example.test'}]) {
+    const h = await appHarness(); await favoriteAction(h, 'rename').fire('click');
+    h.ids.get('favorite-name').value = 'My unsent name'; h.setFavorites(favorites([{...favorite(), ...change}])); await h.refresh();
+    assert.equal(h.ids.get('favorite-submit').disabled, true, JSON.stringify(change));
+    assert.equal(h.ids.get('favorite-name').value, 'My unsent name');
+    await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 0);
+  }
+});
+test('unchanged favorite observations and unrelated rows preserve an editable draft across restart', async () => {
+  for (const mode of ['rename', 'delete']) {
+    const h = await appHarness(); await favoriteAction(h, mode).fire('click'); h.ids.get('favorite-name').value = 'My unsent name';
+    // Property order and other rows are not a change to the selected record.
+    const reordered = Object.fromEntries(Object.entries(favorite()).reverse());
+    h.setFavorites(favorites([{...favorite(), id: 'other-id', name: 'Other station'}, reordered])); await h.refresh();
+    assert.equal(h.ids.get('favorite-submit').disabled, false); assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+    h.setState(state({session_id: 'restarted'})); h.setFavorites(favorites([reordered], 'restarted')); await h.refresh();
+    assert.equal(h.ids.get('favorite-submit').disabled, false); assert.equal(h.ids.get('favorite-name').value, 'My unsent name');
+    await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 1); assert.equal(h.posts()[0].id, 'favorite-id');
+  }
+});
+test('favorite drafts ignore unaccepted and mixed-session observations until fresh matching readback', async () => {
+  for (const mode of ['rename', 'delete']) {
+    const h = await appHarness(); await favoriteAction(h, mode).fire('click');
+    h.setFavorites(favorites([{...favorite(), name: 'Unaccepted change'}], 'wrong-session')); await h.refresh();
+    assert.equal(h.ids.get('favorite-submit').disabled, true); assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+    await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 0);
+    h.setState({}); h.setFavorites(favorites([])); await h.refresh();
+    assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+    h.setState(state()); h.setFavorites(favorites([favorite()])); await h.refresh();
+    assert.equal(h.ids.get('favorite-submit').disabled, false); assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+    h.setFavorites(favorites([{...favorite(), name: 'Accepted change'}])); await h.refresh();
+    assert.equal(h.ids.get('favorite-submit').disabled, true); assert.match(h.ids.get('favorite-dialog-status').textContent, /review the favorites list/);
+  }
+});
+test('Add stays self-contained across a renderer restart and changed favorites', async () => {
+  const h = await appHarness(); await h.ids.get('add-favorite').fire('click');
+  h.ids.get('favorite-name').value = 'My new station'; h.ids.get('favorite-url').value = 'https://example.test/audio?signature=private';
+  h.setState(state({session_id: 'restarted'})); h.setFavorites(favorites([], 'restarted')); await h.refresh();
+  assert.equal(h.ids.get('favorite-submit').disabled, false); assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+  await h.ids.get('favorite-form').fire('submit');
+  assert.deepEqual(h.posts(), [{action: 'favorite_add', name: 'My new station', url: 'https://example.test/audio?signature=private'}]);
+  assert.doesNotMatch(h.ids.get('favorite-dialog-status').textContent, /signature|private/);
+});
+test('own in-flight favorite rename or deletion preserves pending status and verified closure', async () => {
+  for (const mode of ['rename', 'delete']) {
+    const h = await appHarness(), pending = deferred(); h.setPost(() => pending.promise);
+    await favoriteAction(h, mode).fire('click'); h.ids.get('favorite-name').value = 'My saved name';
+    const saving = h.ids.get('favorite-form').fire('submit'); await h.settle();
+    h.setFavorites(favorites(mode === 'rename' ? [{...favorite(), name: 'My saved name'}] : [])); await h.refresh();
+    assert.equal(h.ids.get('favorite-submit').disabled, true); assert.match(h.ids.get('favorite-dialog-status').textContent, /^PENDING/);
+    assert.doesNotMatch(h.ids.get('favorite-dialog-status').textContent, /review the favorites list/);
+    await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 1);
+    pending.resolve({request_acknowledged: true}); await saving;
+    assert.equal(h.ids.get('favorite-dialog').open, false); assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+    assert.equal(h.posts().length, 1);
+  }
+});
+test('a changed-then-restored observation during an unsuccessful or unverified favorite request stays stale', async () => {
+  for (const mode of ['rename', 'delete']) for (const result of ['rejected', 'unknown', 'acknowledged']) {
+    const h = await appHarness(), pending = deferred(); h.setPost(() => pending.promise);
+    await favoriteAction(h, mode).fire('click'); h.ids.get('favorite-name').value = 'My saved name';
+    const saving = h.ids.get('favorite-form').fire('submit'); await h.settle();
+    h.setFavorites(favorites([{...favorite(), name: 'Changed while waiting'}])); await h.refresh();
+    h.setFavorites(favorites([favorite()])); await h.refresh();
+    assert.match(h.ids.get('favorite-dialog-status').textContent, /^PENDING/);
+    if (result === 'rejected') pending.resolve({__status: 409, outcome: 'REJECTED', message: 'Request rejected.'});
+    else if (result === 'acknowledged') pending.resolve({request_acknowledged: true});
+    else pending.reject(new Error('lost response'));
+    await saving; await h.refresh();
+    assert.match(h.ids.get('favorite-dialog-status').textContent, result === 'rejected' ? /^ERROR.*Request rejected/ : result === 'acknowledged' ? /Request acknowledged.*not yet been verified/ : /^UNKNOWN.*No retry was sent/);
+    assert.match(h.ids.get('favorite-dialog-status').textContent, /review the favorites list/);
+    assert.equal(h.ids.get('favorite-submit').disabled, true); assert.equal(h.ids.get('favorite-name').value, 'My saved name');
+    await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 1);
+  }
+});
+test('changed favorite readback retains unknown or unverified submission outcomes alongside review guidance', async () => {
+  for (const acknowledged of [false, true]) {
+    const h = await appHarness(); await favoriteAction(h, 'rename').fire('click'); h.ids.get('favorite-name').value = 'My saved name';
+    h.setPost(() => {h.setFavorites(favorites([{...favorite(), name: 'Another name'}])); if (!acknowledged) throw new Error('lost response'); return {request_acknowledged: true};});
+    await h.ids.get('favorite-form').fire('submit'); await h.refresh();
+    assert.equal(h.ids.get('favorite-dialog').open, true); assert.equal(h.ids.get('favorite-name').value, 'My saved name');
+    assert.match(h.ids.get('favorite-dialog-status').textContent, acknowledged ? /Request acknowledged.*not yet been verified/ : /^UNKNOWN.*No retry was sent/);
+    assert.match(h.ids.get('favorite-dialog-status').textContent, /Close this dialog and review the favorites list/);
+    assert.equal(h.ids.get('favorite-submit').disabled, true);
+    await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 1);
+  }
+});
+
 test('app preserves slider draft across polls and submits explicit value once', async () => {
   const h = await appHarness(); const slider = h.ids.get('volume'); slider.value = '42'; await slider.fire('input');
   await h.refresh(); assert.equal(slider.value, '42'); assert.equal(h.ids.get('volume-draft').hidden, false);
