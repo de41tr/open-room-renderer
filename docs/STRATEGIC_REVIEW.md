@@ -1,5 +1,39 @@
 # Next-phase strategic review
 
+## Current decision: verified correction; useful handover, no feature expansion
+
+1. **CLOSE THE DEMONSTRATED CORRECTION.** `53f4831` is fully green in run
+   38394821007, all four jobs/every step, verified 12:21 UTC. Floor **7260/76**
+   passes in **149.62s /94.67s /89.85s** under the unchanged shared 165s limit;
+   native defaults **7261/75** pass on both architectures. No more scheduling,
+   broad native/browser or soak work is justified without a concrete failure.
+2. **RETAIN THE DEBT AND LIMITS.** `0ea93ec` remains FAILED on its floor timeout;
+   `70d9308` remains FAILED with unexplained ARM Snapcast 431-frame zero-runs.
+   Later unchanged-gate passes explain neither historical failure away. Original
+   Chrome smoke and native/null/PCM proof do not close new-dialog, wider-browser,
+   physical ARMv7/DAC, effective-service, original-app or provider-account gates.
+3. **KEEP THE HANDOVER DURABLE.** The six required docs separate pinned runtime
+   evidence from handover-only PR checks, reduce repeated STATUS/RESUME prose
+   and retain frozen history verbatim. The next user decisions are PR review/merge,
+   authorized hardware/service acceptance and optional go-librespot setup. Verify
+   each published revision's exact-head checks without a follow-on timestamp
+   commit or an inherited CI claim.
+4. **DEFER UNJUSTIFIED EXPANSION.** Whole-product and metadata-only reviews found
+   no independent GO feature. Rich bookmarks/metadata require cross-consumer and
+   versioning policy, title provenance, and duration/seek semantics. Effective
+   service rehearsal needs an authorized target. General restore/merge, a new
+   format or a universal audio framework would add risk without closing the
+   present acceptance gaps. Spotify remains passive/offline; direct exclusive
+   audio bypasses ORR DSP and still needs manual terms/account/output acceptance.
+5. **HOLD THE ORIGINAL BOUNDARY.** Respond to concrete new evidence and complete
+   exact-source verification within the authorized window. No large/risky starts
+   after **16:30 UTC**; stabilize from **17:00**; hard stop **18:00**, with any
+   unfinished gate reported PENDING. Do not fill quiet time with speculative code,
+   redundant test campaigns or timestamp-only commits.
+
+The assessments below are historical decisions, not current instructions to
+reopen completed work or revive superseded acceptance claims.
+
 ## 11:40 value review: CONTINUE the demonstrated gate correction
 
 1. **RETAIN FAILURES:** `20bff6c` is fully green. Successor `0ea93ec` passes
@@ -321,7 +355,7 @@ not authorize unattended work, merge, release or provider-account access later.
    controller may select the legacy schema. Changing this compromise requires
    explicit controller/profile acceptance, not a claim of universal UPnP support.
 
-See [the target architecture](architecture.md#bounded-extraction-and-target-responsibilities)
+See [the target architecture](architecture.md)
 for protocol, player, queue, eventing, DSP and service-adapter boundaries.
 
 ### Three high-value missing features

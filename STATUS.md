@@ -1,356 +1,135 @@
-# Next-phase status — 13 October 2026
+# Next-phase status and handover — 13 October 2026
 
-## Current checkpoint
+## Verified checkpoint
 
-**IN PROGRESS:** the authorized window is 2026-10-12 22:12:31 UTC through
-**2026-10-13 18:00 UTC (20:00 Europe/Berlin)**. Work remains on
-`dot/renderer-next-phase-20261013` in [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2),
-based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
-squash-merged. No main push, merge or release is authorized for this phase.
+**Software checkpoint verified; target acceptance remains open.**
+`53f4831bd469735e13c1448a91abdeba838dc1cf` passes **all four jobs/every step** in
+[run 38394821007](https://github.com/de41tr/open-room-renderer/actions/runs/38394821007),
+verified **12:21 UTC**. Python 3.11 floor: **7260 passed /76 skipped**, three
+same-runner groups **149.62s /94.67s /89.85s** under the unchanged **165s shared
+watchdog**. Native defaults: **7261/75** on Linux x86_64 and ARM64; the existing
+Chrome, libmpv/null/PCM, production Unix IPC, installed-package, discovery,
+lifecycle and Snapcast gates pass. Native opt-in lanes remain two-group;
+assertions, skips, shared deadlines and job/step caps are unchanged.
 
-Latest fully CI-verified checkpoint **`20bff6c7911631480392f1363ef7ef65627bf986`**
-passes **all four jobs/every step** in **run 38388607430**, verified **11:27 UTC**.
-Floor groups **6267+708 /76 skips** pass **163.24s/140.10s** under 165s:
-**6975 passed /76 skipped**; native defaults **6976/75** on both architectures.
-Both installed native packages execute `dsp show --help`; that is packaging proof,
-not a physical DSP read. Standard Chrome and every existing native gate pass.
-Prior `70d9308` remains FAILED with unresolved zero-run cause. The subsequent
-redirect/privacy corrections require their own exact-head CI. Caps and scheduling
-remain unchanged; do not infer successor success from focused local checks.
+Work remains on `dot/renderer-next-phase-20261013` in
+[Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), open and unmerged.
+Main remains `ad21bd4972d4af81dd29d1d952e38313dbe491d9`; PR #1 was already
+squash-merged. No main push, merge or release is authorized. The active window
+ends **2026-10-13 18:00 UTC (20:00 Europe/Berlin)**: no large/risky starts after
+**16:30**, stabilization from **17:00**. Runtime acceptance stays pinned to
+this source. Documentation-only handover revisions receive their own PR checks;
+no pass for them is inferred here.
 
-Redirect head **`0ea93ec`** is retained **FAILED** in run **38391477130**: floor
-group 1 reached the shared 165s watchdog (exit 124); group 2 passed 708 in
-157.96s. Chrome and both native hosts passed every step (native defaults 7228/75).
-The reviewed successor uses three explicit default groups under the same shared
-watchdogs; native opt-in lanes remain two-group. Every old node/skip is retained.
-Its exact-head CI remains PENDING; local candidate timing does not certify margin.
+## What is delivered
 
-## Active corrected work
+- **Cohesive architecture:** `EqPresetLibrary` owns saved-curve validation/storage;
+  `queue_protocol` owns pure authored-queue/request contracts. Playback retains
+  one queue authority; active DSP, lock order and error semantics stay in their
+  existing owners. No universal player framework was added. See
+  [architecture](docs/architecture.md#saved-dsp-library-and-authored-queue-contracts).
+- **Responsive local controller:** the existing listener serves `/ui/`, with
+  playback/seek/volume/mute, queue selection and all five supported modes,
+  managed favorites and URL repair, ten-band/saved-preset DSP, balance/bypass,
+  stopped-only playlist loading/editing, room rename and explicit output
+  inspection. Canonical state, private-safe failures, stale drafts and sticky
+  UNKNOWN outcomes remain visible. See [Web controls](docs/WEB_UI.md).
+- **Private file workflows:** current-queue JSON export uses redacted review,
+  explicit private-URL consent and a user-clicked download. One saved DSP curve
+  can transfer under a new safe name, without changing active DSP. Managed
+  favorites backup/restore preserves IDs/order/exact values and restores only
+  into healthy empty managed storage; configured rows are excluded. No durable
+  queue, general merge/overwrite or whole-library DSP restore is implied. See
+  [queue export](docs/WEB_PLAYLIST_EXPORT.md),
+  [curve transfer](docs/WEB_DSP_CURVE_TRANSFER.md) and
+  [favorites transfer](docs/WEB_UI.md#back-up-and-restore-managed-favorites).
+- **Operator checks:** pure `config check`, explicit owned-player audio-device
+  selection, no-start `audio diagnose`, and Web output inspection distinguish
+  configuration intent, live option and active driver without claiming sound.
+  `dsp show` reports only validated active status, balance, bypass, source/context
+  and bands. CONFIRMED exits 0; PENDING/UNKNOWN exits 1 with null values. It omits
+  private fields and does not prove an earlier write's success/durability or
+  physical output. See [DSP recovery](GETTING_STARTED.md#read-active-dsp-over-ssh)
+  and [output diagnosis](docs/AUDIO_DIAGNOSTIC.md).
+- **Safer state and startup handling:** observed unavailable saved libraries are
+  fenced against destructive writes; dangling saved-audio/config entries and
+  known malformed input fail privately rather than silently selecting defaults.
+  No automatic repair/reset, external-writer guarantee or new queue authority
+  was added. Exact no-effect queue-edit rejection permits explicit review and
+  a separate new click; uncertain outcomes are never automatically replayed.
+- **Native retention and offline upgrade:** config.yaml, state/ and
+  migrated-profile/ are retained even against older manifest claims. Old installed
+  uninstallers need the documented updated-checkout invocation. A fresh-prefix
+  offline preparer preserves seven state files, omits Plex session/identity
+  files, rebases only state/socket config paths and publishes a separate private
+  profile. Installed/native/socket proof passes; no user migration or effective
+  user-service activation occurred. See
+  [upgrade and recovery](GETTING_STARTED.md#uninstall-or-upgrade).
+- **Optional Spotify preparation:** the reviewed ranking is go-librespot **76**,
+  librespot **69**, Soloist **61**. Passive `spotify diagnose` has bounded local
+  REST/WS contracts; `spotify prepare-exclusive` generates credential-free
+  offline config/unit/drop-in proposals and manual guidance. No client was
+  installed/activated, account accessed or provider audio played. The proposed
+  direct-ALSA exclusive mode has separate status/volume and bypasses ORR DSP.
+  See [ADR 001](docs/adr/001-spotify-sidecar.md),
+  [diagnosis](docs/SPOTIFY_DIAGNOSTIC.md) and
+  [exclusive-mode gates](docs/SPOTIFY_EXCLUSIVE.md#required-manual-gates).
 
-The explicit 05:35/05:56 priorities supersede the earlier review/wait decision.
-The branch is active: real-browser acceptance, a concrete read-only Spotify
-integration, explicit output selection and safe configuration checking are
-separate reviewed packages. No account/hardware prerequisite prevents their
-software work; no report/CI wait is used instead of useful independent work.
+## Evidence boundaries and retained debt
 
-- **Browser:** Chrome 154.0.8037.97 actually rendered desktop layout/navigation
-  and drove Play/Pause through production HTTP/Unix IPC to mpv/null. Runs
-  38353544786 (`fc5e4a5`) and 38354874024 (`97ce1f6`) failed on documented native
-  Tab-boundary assumptions, not fabricated browser unavailability. Exact focus
-  state is now recorded; noninteractive BODY fallback must re-enter the modal
-  and background interaction remains forbidden. A real favicon CSP defect is
-  fixed by a guarded same-origin empty 204; second-run console is empty.
-  **REAL_CHROME_SMOKE_PASSED** at `66cbe158`, run 38356723243/job 115161233008:
-  desktop 1280/mobile 390, keyboard/focus, real control and both downloaded JSON
-  files passed; console logs are empty and all 48 source hashes match. Artifact
-  11792544975 is verified. Finished 06:29, within the 07:05:39 cutoff, without
-  relaxing CSP/sandbox or hiding errors. Broader manual/hardware scope is pending.
-- **Spotify:** revised ranking is go-librespot **76**, librespot **69**, Soloist
-  **61**. Soloist's binary expiry is distinct from key lifetime. The new optional
-  `spotify diagnose --port PORT [--watch-seconds 0..30]` uses read-only numeric-
-  loopback REST/WS, private allowlisted observations, explicit NO_SESSION, bounded
-  reads/events and no application retry loop. Independent synthetic tests pass;
-  no client/account/login/playback/lifecycle/shared-DSP claim. See
-  [the CLI](docs/SPOTIFY_DIAGNOSTIC.md) and [corrected ADR](docs/adr/001-spotify-sidecar.md).
-- **Output selection:** optional `mpv_audio_device` config starts only a verified
-  owned mpv with no ambient config/scripts or null fallback. Unset behavior is
-  unchanged; foreign/replaced/unverified sockets refuse commands. Exact device
-  discovery/configuration is documented. Focused tests pass; the new bounded
-  production-Unix/null proof passes on both hosted architectures. Physical DAC remains pending.
-- **Output diagnosis:** `audio diagnose --config PATH` makes only two bounded
-  read-only IPC property requests, without starting/stopping a player or calling
-  playback/status reconciliation. It separates disk intent, live option and
-  active driver; null/unavailable/errors and sequential/non-atomic observations
-  stay explicit. Root final CLI/output integration passes **208** on both Python
-  versions; the attached native slice passes on both hosted architectures.
-- **Config preflight:** `config check --config PATH` uses the existing pure
-  startup-input reader without state/UUID creation, saved-state reads, network
-  or backend access. Fixed success explicitly excludes full runtime validation.
-  The merged config/Spotify/legacy CLI suite passes **56 tests**; combined
-  output/startup/Spotify checks pass **416** on each Python 3.11/3.12. No redundant
-  full local suite was run; the exact operator head is fully CI green.
+- **Real browser:** the original Chrome 154 smoke actually rendered desktop
+  1280/mobile-emulated 390 layouts, checked modal keyboard/focus, drove Play/Pause
+  through production HTTP/Unix IPC to mpv/null and downloaded both queue JSON
+  files. It first passed at `66cbe158`; the unchanged smoke passes at `53f4831`.
+  Room-name, output-inspection and transfer/recovery additions have automated
+  contract coverage but no dedicated genuine-browser acceptance. Firefox,
+  physical mobile, screen readers and the wider interruption/accessibility matrix
+  remain open. See [browser evidence/checklist](docs/WEB_BROWSER_ACCEPTANCE.md).
+- **Native versus hardware:** Linux x86_64/ARM64 and native mpv 0.37 acceptance
+  are software/null/digital-PCM evidence. Selected local 0.37/0.40 replays have
+  their own recorded scope. Physical ARMv7/XU4, DAC/ALSA/acoustic output, effective
+  user-service/boot behavior, physical LAN and the original app remain unaccepted.
+  Prior limited emulated ARMv7 evidence does not close those gates.
+- **New DSP read:** actual CLI/Requests over synthetic TCP and guarded production
+  projection/admission pass. Installed `dsp show --help` on both native hosts
+  proves packaging only; it is not a live native DSP read or new PCM measurement.
+- **Security/transport:** legacy LAN HTTP/SOAP APIs remain unauthenticated; use a
+  trusted private network, not public exposure. Six bounded clients now refuse
+  Requests' eager redirect preparation before body consumption/private Location
+  parsing. Two old convenience helpers gain private errors but retain unbounded
+  non-streaming reads. Connect/read inactivity timeouts are not total deadlines.
+- **Failed floor retained:** `0ea93ec` stays FAILED in
+  [run 38391477130](https://github.com/de41tr/open-room-renderer/actions/runs/38391477130):
+  floor group 1 hit 165s (exit 124), while group 2 passed 708 in 157.96s and all
+  three other jobs passed. The reviewed three-group correction passes at
+  `53f4831`; it preserves all 7,303 old nodes/skip metadata and adds 33 scheduler
+  tests. This closes that correction, not a guarantee of future timing margin.
+- **Unresolved Snapcast debt:** `70d9308` stays FAILED in
+  [run 38362764862](https://github.com/de41tr/open-room-renderer/actions/runs/38362764862).
+  ARM joined_group_gain_50 matched 5/7 windows, with a shared 431-frame zero-run
+  despite correct median gain/RMS. Later unchanged-gate passes do not explain
+  the cause. A recurrence calls for focused common-path capture attribution,
+  without weakened thresholds or retries-until-green.
 
-- **Room name:** the Web dialog uses the existing persisted rename transaction,
-  session-bound name revisions compared inside its lock, explicit stale-draft
-  rejection and canonical readback. A committed persistence/discovery failure
-  remains UNKNOWN even when the new name is visible. Typed names preserve literal
-  percent sequences; legacy decoding stays unchanged. Root checks pass 249 on
-  each Python version, including 175 Node cases. This new dialog has not received
-  its own genuine-browser acceptance; the existing browser smoke remains scoped.
+## Next three user decisions
 
-- **Native data retention:** unchanged config was previously installer-owned.
-  Root config.yaml, state/ and migrated-profile/ are now excluded and protected
-  even against older manifest claims. Root focused checks pass 58 on each Python
-  version, with independent review. Updated-checkout invocation is required for
-  old installed uninstall scripts; no actual user installation was touched.
+1. Review Draft PR #2 and decide whether to merge it or request specific changes.
+   Merge/release remains a separate manual decision.
+2. Arrange and authorize real ARMv7/XU4 + DAC acceptance and effective user-service
+   testing, using the [hardware checklist](docs/TESTING.md#deferred-xu4--dac--original-app-acceptance)
+   and [service guide](GETTING_STARTED.md#4-optional-user-service). Include original
+   app/physical-LAN behavior; keep low-volume listening separate from software reads.
+3. Decide whether to proceed with optional go-librespot setup. Terms/account
+   acceptance and hardware/exclusive-output arbitration remain manual gates;
+   direct Spotify audio bypasses ORR EQ/balance and cannot share its state claims.
 
-- **Offline upgrade preparation:** the new installed Python can prepare a
-  separate migrated-profile from an explicitly offline native installation or
-  relocated snapshot. Seven state files remain byte-identical; Plex identity and
-  session files are omitted without reading contents. Only state/socket config
-  paths are rebased; fresh config/state remain untouched. Private no-clobber
-  output publishes config last, with committed/durability uncertainty distinguished.
-  Root integration passes 250 +1 declared native opt-in skip on both Python
-  versions; independent review and an installed-wheel smoke pass. Genuine
-  installed-native/socket proof passes both architectures at `1897843`. No activation or live
-  user migration occurred. See GETTING_STARTED for restrictions and recovery.
-
-- **Optional Spotify preparation:** `spotify prepare-exclusive` writes private,
-  credential-free direct-ALSA config, a sidecar user-unit proposal, a drop-in for
-  the existing canonical renderer and a manual stop/check/start guide. It never
-  installs, executes clients, contacts providers or activates services. Numeric
-  IPv4 loopback only; separate status/volume and bypassed ORR DSP are explicit.
-  Independent review, pinned-schema and static systemd checks pass. Root combined
-  operator integration passes 279 +1 declared native skip on both interpreters.
-  TERMS/ACCOUNT/HARDWARE/ARBITRATION remain pending; this is OFFLINE_ARTIFACT_ONLY.
-- **Executable-path correction:** actual static systemd verification rejects
-  quote/DEL executable prefixes. New installs/migration destinations now refuse
-  them before effects; cleanup of old prefixes and quoted source/config arguments
-  remains supported. Root affected-file checks pass 167 +1 native skip on each
-  interpreter. This is a separate behavior fix, not part of template extraction.
-
-- **Web output inspection:** a button-driven, non-modal read captures running
-  config scalars and uses one fresh no-spawn diagnostic client. Overlap is refused
-  without queueing or playback locks; identifiers/paths are hidden. Session changes
-  and dismissal discard late results. No active backend command or physical-audio
-  claim. Merged Web checks pass 535 on each interpreter; dedicated browser/native
-  acceptance of this new card remains separate from the existing diagnostic proof.
-- **Recovery guidance:** current-selection retry progress, exhaustion and backend
-  uncertainty use fixed private-safe messages. The existing three-attempt budget,
-  explicit Play/Stop policy, commands and sticky UNKNOWN remain unchanged.
-- **Ambiguous startup input:** duplicate explicit root settings now fail privately
-  before construction/effects. Unique settings, valid merge overrides, aliases,
-  coercions and legacy load_config behavior remain. Root startup/migration checks
-  pass 266 +1 declared native skip on each interpreter.
-- **Offline input guard:** the Spotify preparer rejects existing non-regular leaves
-  before opening them, retaining post-open checks and the documented same-user
-  replacement-race limit. A five-line fix passes 168 related checks on each Python;
-  synthetic negative controls confirm the prior gap without opening any device.
-
-- **Favorites storage preservation:** an observed dangling favorites.json link
-  previously looked like new empty storage and could be replaced by a save.
-  A narrow lstat absence check now uses the existing unavailable latch instead.
-  Six original store/Web/JSON reproductions preserve exact link/target bytes;
-  root focused checks pass 199 on both Python versions. Healthy/missing storage,
-  valid-link semantics and response categories remain unchanged. No automatic
-  repair/reload or protection against unobserved external writers is claimed.
-
-- **Saved DSP curve transfer:** export one selected saved current-plugin curve in
-  the existing v1 shape and import it under a new safe name in another room.
-  Explicit consent, exact escaped-request limits, collisions/context checks and
-  unavailable-storage fencing prevent silent normalization or overwrite. Only the
-  saved library commits under the existing DSP lock; active fields/files and
-  backend calls remain unchanged. Root focused integration passes 840 on each
-  Python version, including both frontend suites (219 Node cases). Review fixed
-  decimal rounding/underflow acceptance before freeze. Dedicated browser/native
-  transfer acceptance remains pending; broader whole-library restore is deferred.
-
-- **Managed favorites transfer:** private Backup JSON and Restore JSON preserve
-  IDs/order/exact values, with configured favorites excluded. Restore requires
-  healthy empty managed storage and commits once under its existing lock.
-  Explicit consent, full escaped-request limits and durability UNKNOWN remain.
-  Root transfer checks pass 514 on each Python; worker/replay checks pass 838.
-  Dedicated new-dialog browser acceptance remains pending.
-- **Saved audio state:** dangling gain, active-DSP, legacy-balance or device-name
-  entries now stop startup instead of silently selecting defaults. Public readers
-  intentionally fail for these degraded entries; valid/missing storage, writers,
-  UUID and precedence remain unchanged. Root checks pass 333 per Python, with
-  independent review. No automatic repair or later external-writer guarantee.
-- **Rejected queue edits:** the exact pre-effect 409 unavailable/REJECTED response
-  permits explicit Refresh to review/re-arm Move/Remove; a separate click sends
-  the new edit. Polls never retry, and UNKNOWN/ERROR/lost/malformed/committed
-  responses stay latched. Raw duplicate fields fail closed. Merged Node checks
-  pass 270; source/DOM proofs do not establish a new browser interaction check.
-
-- **Implicit config intent:** bare serve no longer substitutes defaults for an
-  observable dangling implicit-config leaf or failed inspection. Genuine absence,
-  explicit-config errors, captured input and legacy loaders remain compatible;
-  ancestors are not walked. Independent review and focused checks pass.
-- **Native handover command:** the offline Spotify guide now quotes the selected
-  installation's own executable, avoiding a missing/wrong global PATH command.
-  Manual provider/account/service/output acceptance gates are unchanged.
-
-- **Headless DSP recovery:** `dsp show` reads the existing canonical Web snapshot
-  and emits only validated active status/balance/bypass/source/bands. CONFIRMED
-  exits zero; PENDING/UNKNOWN keep null values and exit one. No private names,
-  identifiers, tokens or unrelated data escape. It does not prove earlier write
-  durability or physical output. Root checks pass 426 on each Python; independent
-  review/replay pass. Existing cached-confirmation reconciliation is preserved.
-  No endpoint, DSP mutation, persistence or backend I/O is added.
-
-- **Redirect boundary:** six bounded clients now prevent Requests' hidden
-  redirect preparation before it can drain bodies or parse private Location
-  text. Exactly one original request remains; ordinary ACK/rejection/UNKNOWN
-  categories are unchanged. A separate six-line fix keeps two older convenience
-  helpers' redirect failures private, while their non-streaming body reads stay
-  unbounded. Root merged checks pass 826 per Python; fresh reviews pass. No
-  follow, retry, new cap or total-deadline claim is introduced.
-
-- **Default scheduling:** explicit `--groups 3` balances complete modules after
-  the actual floor timeout. The same launch/deadline/owned-cleanup implementation
-  and all caps remain; native opt-in commands still use two groups. Both minors
-  preserve all 7,303 old node IDs and skip metadata exactly, adding 33 scheduler
-  cases only. New collections are 6,108 /562 /666; these are not runtime totals.
-  Root helper checks pass 46 per Python; hosted headroom still requires CI.
-
-## Implemented scope
-
-- **Architecture:** `EqPresetLibrary` owns saved-curve validation/storage and
-  `queue_protocol` owns pure authored queue/request contracts. Playback and
-  active DSP retain their existing authority, lock order and error semantics.
-  Differential observations match the baseline (51 DSP, 102 queue/adapter).
-  Architecture work stopped at these cohesive seams; see [the boundaries](docs/architecture.md#saved-dsp-library-and-authored-queue-contracts).
-- **Local Web controller:** Now Playing, position/artwork, transport/seek,
-  volume/mute, queue selection, all five repeat/shuffle modes, favorites
-  add/save-current/play/rename/delete/target repair, balance, EQ bypass and
-  ten-band/saved-preset editing are implemented and independently reviewed.
-  Typed same-origin/CSRF controls use canonical renderer truth; private-safe
-  metadata, sticky unknown outcomes, Stop and explicit volume=0 recovery remain
-  honest. Dialog cleanup, delayed-close races and logical focus return are
-  covered. See [controls and privacy limits](docs/WEB_UI.md).
-- **Playlists and export:** stopped-only JSON/M3U/direct-URL loading and authored
-  append/remove/move preserve metadata and selected duplicate occurrences.
-  Session/generation-fenced drafts make no media request before explicit Play;
-  provider/radio queues remain read-only for editing. Private current-queue JSON
-  export separates redacted preparation, private-URL consent and user-clicked
-  download, with exact-byte HMAC stale-review protection. Existing 32 KiB Web
-  and 1 MiB escaped request limits remain. No durable queue storage or new
-  playback/backend authority was added. See [playlist editing](docs/WEB_PLAYLISTS.md)
-  and [private export](docs/WEB_PLAYLIST_EXPORT.md); favorites/M3U export is deferred.
-- **Startup and delivery:** explicit-config failures and known saved-state
-  reader failures have private-safe startup diagnostics without adding reset/default
-  fallback or changing public loader/library error contracts. Backend cleanup
-  still precedes listener startup after a second active-DSP read failure.
-  Native source snapshots/wheels include all four Web assets; isolated HTTP
-  and hosted installed-CLI restart checks cover delivery on x86_64/ARM64.
-  Same-runner default-suite partitioning retains exact coverage, skips and caps.
-
-### Saved-state failure protection
-
-Saved-favorites read diagnostics are fully green at `660cab1`: fixed private-safe
-service-restart guidance, retained stale rows/gates, unchanged storage/mutation
-policy. Focused 246 Python cases per interpreter and 156 Node checks preceded
-that exact-head result. Current handover sections were consolidated; both older
-historical suffixes remain byte-identical.
-
-A separately reviewed saved-EQ correction now fences persistence after observed
-load failure. Valid/missing storage behavior remains normal, while previously
-destructive legacy Save/SourceSave/no-op Delete fail with 502/Failed. Web saved-
-library writes reject before effects with 409/REJECTED. Original bytes, active DSP,
-rollback and real committed-write uncertainty are retained; built-in load/edit/
-bypass remain usable. No automatic repair/reset/migration is added. External file
-changes after healthy/missing load are outside this bounded protection.
-
-Final combined local defaults pass **5399/74** on Python 3.12 and 3.11; **164
-Node** checks pass. Actual mpv 0.37/0.40 fresh-object malformed-library startup
-passes in **5.16s/4.85s**. Seven refused Web/legacy writes preserve bytes and live
-playback with no native/media mutations; all 231 previous native assertions and
-30s/35s caps remain. A one-fence-removed negative probe really overwrites its
-synthetic file and fails. This is not process/systemd restart, unreadable-file
-native proof, repaired-library recovery, browser or physical audio acceptance.
-Exact preservation head `3e44ad0` is fully green in run 38339941041. Hosted x86_64/
-ARM64 logs independently confirm all seven write refusals, byte preservation,
-usable active DSP and cleanup. Later changes still require their own CI.
-
-### Initial balance startup privacy
-
-A separately reviewed ten-line production correction catches only known initial
-balance ValueError during CLI startup. It prints fixed source-neutral guidance
-and exits 2 instead of exposing the original value in an exit-1 traceback.
-Source precedence, shared normalization, public exceptions and saved bytes stay
-unchanged. Validation remains after backend acquisition/gain initialization;
-existing cleanup runs, and identity may already have been published. Focused
-checks pass 487 per Python 3.11/3.12; 92 new cases include 17 baseline failures
-and 75 compatibility passes. No extra native replay is warranted for this error-
-only delta. Its hosted floor failure and the separately justified correction are
-recorded below.
-
-### Save-current draft recovery and floor gate
-
-A fresh selection/session change now latches an open Save current draft stale,
-preserving its entered name and original intent. Fixed guidance requires Close,
-review and reopen; Refresh cannot silently rebase it. Temporary read loss only
-uses existing freshness gates. PENDING, uncertain outcomes and already-sent
-verified-success closure remain unchanged. The frontend-only correction has
-independent review; root checks pass **169 Node /159 focused Web tests**.
-Actual browser acceptance remains pending.
-
-Initial-balance head `696700c` has a real floor-gate failure in run 38342139978:
-the first Python 3.11 default group hit the unchanged 165s watchdog, without a
-reported assertion failure; the second passed 550 cases in 136.61s. Both native
-jobs subsequently passed every step, but the floor failure means this is not a
-green checkpoint. A one-module transfer moves `test_startup_state.py` (measured
-10.02s) into the smaller group. Independent review and exact collection/skip
-parity pass on both interpreters. One combined Python 3.11 replay passes
-**4784 + 707 /74 skips** in **125.67s/113.01s**, helper exit 0 in 126.98s under
-the same 165s cap. No coverage, assertion, helper, process count or cap changes.
-Exact corrected head `ba7c759` is fully green in run 38343514991, with hosted
-floor groups 142.33s/138.29s. No further timing run is needed.
-
-### Latest favorite-repair evidence
-
-Change URL uses the existing stable-ID API, a blank private input, explicit
-keep/clear metadata choice and one submission per opening. It retains name,
-ID and order, clears private input and reports ACKNOWLEDGED or UNKNOWN; a
-redacted reread cannot establish exact-URL verification. Observed Rename/Delete/
-unsent Change URL conflicts require reopening, without claiming atomic concurrency.
-No server/store/API contract, detached playback or backend ownership changed.
-
-Independent review passes. Favorite-repair local evidence is **149 Node/DOM checks**,
-**159 focused Web/frontend checks on each Python 3.12 and 3.11**, and **195 root
-Web/frontend/installation checks**. Actual libmpv 0.37/0.40 keep/clear flows pass
-in **4.32s/4.19s**, preserving prior assertions/caps and proving no native/media
-side effects. No redundant full local sweep was run for this browser-only delta.
-The earlier complete local **5322/74** result belongs to `5534c4d`, not this head.
-Detailed scope and reproduction remain in [TESTING.md](docs/TESTING.md#browser-favorite-target-repair-checkpoint).
-
-## Compact checkpoint history
-
-These are exact-source checkpoints, not blanket certification of later work.
-Each listed hosted run passed all three jobs; from the DSP/package checkpoint
-onward, every step was also verified. Detailed local counts, timings, findings
-and evidence limits are retained in [TESTING.md](docs/TESTING.md).
-
-- Architecture `5b86bdd`: [run 38317217424](https://github.com/de41tr/open-room-renderer/actions/runs/38317217424).
-- First Web controller `81a3d72`: [run 38319222442](https://github.com/de41tr/open-room-renderer/actions/runs/38319222442), including 67 native checks and real Unix IPC on both native architectures.
-- DSP/editor and native packaging `7d68d79`: [run 38323337010](https://github.com/de41tr/open-room-renderer/actions/runs/38323337010); guarded Web -12 dB measured **-12.0387 dB at 1 kHz** on libmpv 0.37/0.40.
-- Playlist/startup `f7c6ed7`: [run 38325071508](https://github.com/de41tr/open-room-renderer/actions/runs/38325071508); the selector-order finding was corrected without relaxing any assertion or cap.
-- Navigation privacy/quiet-gain recovery `0668209`: [run 38326558265](https://github.com/de41tr/open-room-renderer/actions/runs/38326558265).
-- Final scheduling/docs `59726d5`: [run 38328911125](https://github.com/de41tr/open-room-renderer/actions/runs/38328911125), verified 01:02 UTC; no further timing changes unless a gate fails.
-- Private queue export `1dfd642`: [run 38330676949](https://github.com/de41tr/open-room-renderer/actions/runs/38330676949), verified 01:22 UTC.
-- Saved-state diagnostics/logical focus `5534c4d`: [run 38332263993](https://github.com/de41tr/open-room-renderer/actions/runs/38332263993), verified 01:42 UTC; full local defaults **5322/74** on both Python versions.
-- Browser favorite target repair/navigation docs `8c7df63`: run **38334412981**, verified 02:08 UTC; current hosted defaults **5324/74**, as scoped above.
-
-- Saved-favorites diagnostic/handover `660cab1`: [run 38337365883](https://github.com/de41tr/open-room-renderer/actions/runs/38337365883), verified 02:47 UTC; 5357/74 hosted defaults.
-
-## Remaining limits and next decisions
-
-**BROWSER_ACCEPTANCE_PENDING** applies to the wider manual/browser matrix.
-The bounded genuine Chrome desktop/mobile/control/dialog/download smoke passed
-at `66cbe158`; Firefox, physical mobile, full accessibility and interruption
-coverage remain outstanding. The full UI is
-available at the existing `/ui/` path; use [the browser checklist](docs/WEB_BROWSER_ACCEPTANCE.md)
-for the remaining scope. DOM doubles and native HTTP flows alone are not
-browser acceptance. Legacy unauthenticated controls remain a trusted-LAN limit.
-**HARDWARE_PENDING:** physical ARMv7/XU4, DAC/ALSA/audio and original-app acceptance
-remain outstanding; no physical-silence or hardware claim is made.
-
-Spotify's preferred technical candidate is now **go-librespot**, with a concrete
-read-only diagnostic first. Productive receiver/lifecycle/output mode still has
-**TERMS_PENDING / ACCOUNT_PENDING / HARDWARE_PENDING / ARBITRATION_PENDING**.
-An explicit exclusive whole-service mode is a valid later boundary; a universal
-multi-provider framework and shared DSP are not prerequisites for safe components.
-
-Next ranked work: verify the one evidence-led scheduling correction; keep
-metadata-only/richer queue transfer deferred for cross-format/provenance/seek
-semantics; keep effective-service activation rehearsal deferred for target
-prerequisites. The whole-product review found no other independent GO package.
-After exact-head verification, remain available for new evidence rather than
-invent code, tests or timestamp commits. Next review **13:10–13:40 UTC**.
-Retain 16:30 risk cutoff, 17:00 stabilization and 18:00 hard stop.
-See [RESUME.md](RESUME.md) for the bounded next steps and [PLAN.md](PLAN.md) for
-this phase's full constraints. The historical reports below retain their own
-exact-source scope, deadlines and failures.
+No further independent feature is justified by the completed whole-product and
+metadata-only reviews. Richer queue bookmarks/metadata remain deferred because
+of cross-consumer/versioning, title-origin and duration/seek policy, not hardware
+availability. General favorites merge and whole-library DSP restore are also
+outside this phase. Use [RESUME.md](RESUME.md) for bounded continuation,
+[PLAN.md](PLAN.md) for scope and [TESTING.md](docs/TESTING.md) for detailed evidence.
+Historical sections below retain their original source, deadlines and results.
 
 ---
 

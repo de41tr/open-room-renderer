@@ -1,64 +1,57 @@
 # Next-phase development plan — 13 October 2026
 
-The new user-authorized development window runs from **2026-10-12 22:12:31 UTC**
-to **2026-10-13 18:00 UTC (20:00 Europe/Berlin)**. This supersedes the older
-completed task boundaries below. Branch: `dot/renderer-next-phase-20261013`,
-created from verified remote main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`.
-No main push, merge or release is authorized.
+The authorized development window is **2026-10-12 22:12:31 UTC → 2026-10-13
+18:00 UTC (20:00 Europe/Berlin)**. Work only on
+`dot/renderer-next-phase-20261013` in Draft PR #2, based on main
+`ad21bd4972d4af81dd29d1d952e38313dbe491d9`. No main push, merge or release is
+authorized. No large/risky starts after **16:30 UTC**; stabilize from **17:00**.
 
-## Active corrected pipeline (05:35/05:56 mandate)
+## Current plan: hold scope and complete PR verification
 
-The later mandate supersedes the earlier wait decision below. Continue on the
-same branch/PR; maintain at least three useful possible packages and pursue
-independent work while CI, hardware or provider prerequisites are pending.
+The corrected 05:35/05:56 pipeline is delivered: genuine browser smoke, passive
+Spotify diagnosis and revised ADR, owned-player output selection, config/output
+checks, room name, installer retention and offline upgrade/Spotify preparation.
+Private saved-curve and empty-library favorites transfer, observed saved-state
+protection, headless DSP recovery and redirect privacy are also delivered.
+Architecture remains the two cohesive seams with one playback/queue authority.
+See [STATUS.md](STATUS.md) for usable features and [TESTING.md](docs/TESTING.md)
+for exact evidence; the checkpoint history below is not a fresh work queue.
 
-1. Genuine hosted Chrome desktop/mobile, keyboard/focus, real control/readback
-   and actual JSON download. Positive feasibility at 05:38; finish within
-   **07:05:39 UTC**, including fixes for demonstrated defects. This bounded
-   package passed at 06:29 on `66cbe158`; retain the existing smoke and move on.
-2. Reviewed go-librespot read-only REST/WS diagnostic and revised weighted ADR:
-   go-librespot 76, librespot 69, Soloist 61. Research ended within 14 minutes;
-   account/playback/terms acceptance remains separate.
-3. Explicit owned-mpv audio-device selection with deterministic opt-in isolation
-   and no foreign-player control; both hosted native null-device lanes now pass.
-4. Side-effect-free `config check --config PATH` and bounded no-start
-   `audio diagnose --config PATH` are implemented and reviewed. Complete their
-   hosted proof (fully green at `4fd1607`). Next publish Web room-name editing,
-   protect installer user-data ownership (published `70d9308`), then publish the
-   reviewed offline new-prefix migration profile. The credential-free Spotify
-   preparation bundle and demonstrated native path-validation fix are integrated;
-   verify their new native packaging checks while reviewing remaining operator
-   usability gaps. Retain the prior Snapcast failure without weakening gates.
-   All service activation remains explicit operator work.
+The evidence-led three-group default scheduling correction is now verified at
+**`53f4831bd469735e13c1448a91abdeba838dc1cf`** in
+[run 38394821007](https://github.com/de41tr/open-room-renderer/actions/runs/38394821007),
+all four jobs/every step, **12:21 UTC**. Floor **7260/76**, group times
+**149.62s /94.67s /89.85s** under **165s shared**; native defaults **7261/75** on
+x86_64/ARM64. All old nodes/skips, native opt-in two-group commands and caps remain.
+Retain failed `0ea93ec` floor and unresolved `70d9308` ARM Snapcast evidence.
+Neither later success nor this documentation changes those failed outcomes.
 
-The Web operator/input-safety and dangling-favorites corrections are fully green.
-Single saved-DSP-curve transfer is fully green at `52ccf01`. The assessed private
-managed-favorites backup/empty-only restore is now reviewed and integrated,
-alongside two demonstrated corrections: unavailable saved-audio entries must not
-select defaults, and a no-effect queue-edit rejection needs an explicit review
-path. These now pass all four exact-head CI jobs at `322139c`. Two subsequent
-operator corrections preserve implicit-config intent and use the proper native
-executable in generated handover guidance; verify their own CI. Preserve
-all UNKNOWN, privacy, atomicity and single-writer limits.
-
-Do not grow a universal engine framework, broad E2E suite, or timing campaign.
-**11:40 value decision: CONTINUE** the evidence-led failed-floor correction;
-next review **13:10–13:40 UTC**. The 165s failure is retained, not retried away.
-An opt-in third default group preserves all tests/skips and existing shared caps;
-finish its one exact-head verification. No other independent GO package emerged
-from the whole-backlog and metadata-only feasibility reviews.
-General favorites merge/overwrite and whole-library DSP transfer stay deferred.
-The original hard deadline remains.
-
-The whole-product review identifies a concrete remaining headless recovery gap:
-read-only `dsp show` now reuses the existing canonical Web DSP projection, with
-strict private output and explicit unconfirmed status. Exact `20bff6c` CI is
-fully green. Its
-review also demonstrated eager redirect-body consumption/private Location errors
-in six old bounded clients; the reviewed correction changes no normal outcome
-semantics. Two old non-streaming convenience helpers gain the same private-error
-protection in a separate commit, without claiming byte caps. Verify combined CI. Richer queue bookmarks and effective-service activation rehearsal stay
-ranked but deferred; no new format or framework merely to fill the window.
+1. **Keep this handover useful and source-pinned.** PLAN/STATUS/RESUME and
+   TESTING/COMPATIBILITY/STRATEGIC separate delivered work from target acceptance
+   and the next three user decisions. Preserve frozen STATUS/RESUME history
+   verbatim. The runtime result above does not certify a handover-only revision;
+   verify that revision through its own unchanged PR workflow. No further
+   documentation commit is needed merely to refresh a timestamp or record a pass.
+2. **Preserve acceptance boundaries.** Original Chrome control/focus/download
+   smoke passes; new dialogs and wider browser scope lack dedicated acceptance.
+   Native/null/PCM/installed proof does not substitute for physical ARMv7/DAC,
+   effective user-service/boot, physical LAN or original-app acceptance.
+   Spotify remains passive/offline, with no account/client activation or audio.
+3. **Use new evidence, not an empty clock, to reopen work.** Whole-product and
+   metadata-only feasibility reviews found no further independent GO feature.
+   Richer bookmarks/metadata need cross-consumer/versioning/title-origin and
+   duration/seek policy; they are not deferred because hardware is missing.
+   General favorites merge/overwrite, whole-library DSP restore, universal player
+   frameworks and extra timing/soak/browser campaigns remain out of scope.
+4. **Hand decisions back clearly.** The user next decides PR review/merge,
+   authorized real ARMv7/DAC/effective-service acceptance, and whether to proceed
+   with go-librespot under manual terms/account/exclusive-output gates. Direct
+   Spotify ALSA would bypass ORR DSP. Do not activate services or providers as
+   part of documentation preparation.
+5. **Stabilize and stop on time.** Keep the existing CI/review checks exact for
+   any authorized successor, diagnose actual failures without weakened gates or
+   retries-until-green, and report unfinished work at **18:00 UTC**. Remain
+   available within the window; do not create timestamp-only commits.
 
 ## Earlier phase plan and checkpoint history
 

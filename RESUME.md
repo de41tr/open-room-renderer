@@ -1,94 +1,76 @@
 # Resume the next-phase task
 
-## Active authorization and checkpoint
+## Boundary and exact checkpoint
 
-The current window is **2026-10-12 22:12:31 UTC → 2026-10-13 18:00 UTC**
-(13 October, 20:00 Europe/Berlin). Stop active work at the hard deadline and
-report unfinished CI as PENDING. Start no large/risky new work after **16:30 UTC**;
-stabilize from **17:00 UTC**. Older task deadlines below are historical only.
+The authorized window is **2026-10-12 22:12:31 UTC → 2026-10-13 18:00 UTC**
+(13 October, 20:00 Europe/Berlin). No large/risky starts after **16:30 UTC**;
+stabilize from **17:00 UTC** and stop at **18:00 UTC**, reporting unfinished
+checks as PENDING. Older deadlines below are historical only.
 
-Work exclusively on `dot/renderer-next-phase-20261013` in
-[Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
-`ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest fully CI-verified checkpoint **`20bff6c7911631480392f1363ef7ef65627bf986`**
-passes **all four jobs/every step** in **run 38388607430**, verified **11:27 UTC**.
-Floor groups **6267+708 /76 skips** pass **163.24s/140.10s** under 165s:
-**6975 passed /76 skipped**; native defaults **6976/75** on both architectures.
-Both installed native packages execute `dsp show --help`; that is packaging proof,
-not a physical DSP read. Standard Chrome and every existing native gate pass.
-Prior `70d9308` remains FAILED with unresolved zero-run cause. The subsequent
-redirect/privacy corrections require their own exact-head CI. Caps and scheduling
-remain unchanged; do not infer successor success from focused local checks.
+Use only `dot/renderer-next-phase-20261013` and
+[Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), open/unmerged.
+Main remains `ad21bd4972d4af81dd29d1d952e38313dbe491d9`; never push main, merge or
+release under this phase's authority.
 
-Redirect head **`0ea93ec`** is retained **FAILED** in run **38391477130**: floor
-group 1 reached the shared 165s watchdog (exit 124); group 2 passed 708 in
-157.96s. Chrome and both native hosts passed every step (native defaults 7228/75).
-The reviewed successor uses three explicit default groups under the same shared
-watchdogs; native opt-in lanes remain two-group. Every old node/skip is retained.
-Its exact-head CI remains PENDING; local candidate timing does not certify margin.
+**Verified source: `53f4831bd469735e13c1448a91abdeba838dc1cf`.**
+[Run 38394821007](https://github.com/de41tr/open-room-renderer/actions/runs/38394821007)
+passes all four jobs/every step, verified **12:21 UTC**. Floor **7260/76**;
+groups **149.62s /94.67s /89.85s** under the same **165s shared** watchdog.
+Native defaults **7261/75** on x86_64/ARM64; Chrome and all native gates pass.
+Three groups apply only to default suites; native opt-in lanes remain two-group.
+All assertions, skips, shared deadlines and caps remain unchanged.
+Runtime acceptance stays pinned to that source; documentation-only handover
+revisions receive their own PR checks. Do not infer a successor's result here.
 
-## What is already delivered
+## What to do next
 
-The bounded architecture extractions, functional local Web controller,
-ten-band DSP/preset editing, managed favorites including target repair,
-stopped-only playlist loading/editing, private queue JSON export, startup
-privacy diagnostics, logical dialog focus/cleanup, quiet-gain recovery and
-native asset packaging are implemented and independently reviewed. Do not
-restart the original architecture/Web/Spotify sequence. [STATUS.md](STATUS.md)
-contains the compact checkpoint history; [TESTING.md](docs/TESTING.md) preserves
-detailed evidence and limits.
+1. **Verify identity before continuing:** inspect branch/HEAD, clean status,
+   remote PR head and CI's head SHA. Read [STATUS.md](STATUS.md) for the compact
+   delivered scope; do not restart completed architecture, Web, Spotify research,
+   operator features or scheduling work.
+2. **Use the consolidated handover and check its PR revision:** the six required
+   documents distinguish runtime evidence, unaccepted targets and next decisions.
+   Keep the frozen STATUS/RESUME historical suffixes byte-identical. Observe the
+   existing workflow for any published successor through every job/step, without
+   transferring the runtime checkpoint's pass. Do not create another handover,
+   feature, broad E2E/soak run or timestamp-only commit merely to refresh a date.
+3. **Respond to concrete new evidence:** a demonstrated regression or changed,
+   authorized acceptance target may justify bounded work. The whole-product and
+   metadata-only reviews found no other independent GO package. Stay available
+   within the window; preserve the 16:30/17:00/18:00 boundaries.
 
-For the latest favorite-repair delta, local checks pass **149 Node/DOM cases**,
-**159 focused Web/frontend cases on each Python 3.12 and 3.11**, and **195 root
-Web/frontend/installation cases**. Actual libmpv 0.37/0.40 keep/clear flows pass
-in **4.32s/4.19s** with no native/media side effects and unchanged prior assertions
-and caps. No full local replay was added; the earlier **5322/74** complete local
-result belongs to `5534c4d`. Redacted favorite readback remains ACKNOWLEDGED,
-not proof of exact URL; UNKNOWN and observed conflict/reopen rules stay explicit.
+## Claims that must stay separate
 
-Saved-favorites read diagnostics are now fully green at the checkpoint above.
-The following separately reviewed saved-EQ data-preservation correction passes
-5399/74 complete local defaults on both interpreters, 164 Node checks and actual
-mpv 0.37/0.40 startup preservation in 5.16s/4.85s. Its exact-head CI is now green;
-hosted native logs confirm the same seven refusals and byte/active-state retention.
-Observed failed loads fence library persistence; normal storage responses and
-active DSP stay unchanged. Legacy degraded writes now fail, intentionally; this
-is not an extraction-equivalence claim. No automatic repair/reset/migration or
-external-file concurrency policy is added.
+- The `/ui/` controller and the original genuine Chrome 154 desktop/mobile-
+  emulated control/focus/queue-download smoke work. The unchanged gate passes at
+  this head; later room-name/output/transfer/recovery interactions lack dedicated
+  browser acceptance. Wider browser/mobile/accessibility checks remain open.
+- Native Linux x86_64/ARM64/mpv 0.37, null/PCM and installed/migration/socket proof
+  do not certify physical ARMv7/XU4, DAC, effective user-service/boot, physical LAN
+  or the original app. Install/migration never activated a user service.
+- `dsp show` has real CLI/synthetic TCP plus guarded production-projection proof.
+  Native installed-help proof is packaging only. Its private active snapshot
+  cannot prove a prior write, persistence durability or physical sound.
+- Spotify diagnosis is passive; prepare-exclusive creates offline artifacts only.
+  Ranking remains go-librespot 76 / librespot 69 / Soloist 61. No client/account
+  activation or provider audio occurred. TERMS/ACCOUNT/HARDWARE/ARBITRATION stay
+  pending; any accepted direct-ALSA exclusive mode bypasses ORR DSP.
+- Legacy LAN APIs remain unauthenticated. Bounded-client redirect/privacy fixes
+  do not make old convenience helpers' response reads bounded or convert
+  inactivity timeouts into total deadlines.
 
-## Immediate priorities
+## Retained failures and next decisions
 
-The explicit **05:35/05:56 corrected mandate** supersedes the 04:12 wait decision.
-Maintain three useful potential packages and work independently during CI.
+`0ea93ec` remains FAILED (run 38391477130, floor 165s exit 124; other three jobs
+passed). The three-group successor is verified; no more timing work is warranted
+without another actual failed gate. `70d9308` remains FAILED (run 38362764862,
+ARM Snapcast shared 431-frame zero-run); later passes leave its cause unresolved.
 
-1. **Keep the real-browser checkpoint exact.** The bounded smoke completed
-   successfully at 06:29 on `66cbe158`, run 38356723243/job 115161233008. Verified
-   artifact 11792544975 proves desktop/mobile, native dialog keyboard/focus, actual
-   mpv/null control and downloaded JSON bytes. First two failed focus assumptions
-   and the repaired favicon CSP defect stay recorded. No further harness growth
-   is needed; later source gets the existing gate, with wider manual scope pending.
-2. **Keep operator proof exact.** Passive Spotify diagnosis, explicit owned
-   output selection, pure config checking and no-start output diagnosis are
-   published and fully green at `4fd1607`. Native output/null proof passes on both
-   architectures. No provider-account, shared-DSP or physical-output claim.
-3. **Next ranked packages:** finish exact-head CI for the bounded default-only
-   three-group correction after the retained floor timeout. All original test
-   nodes/skips and native opt-in commands remain; no cap or assertion is relaxed.
-   Metadata-only/richer queue transfer remains DEFERRED after a separate source
-   review: even labels need versioning/title-origin policy, and duration affects
-   seek. Effective-service activation needs a suitable authorized target. No
-   other independent GO package emerged; do not invent work while staying
-   available through the deadline.
-4. **Honor the corrected Spotify choice.** [ADR001](docs/adr/001-spotify-sidecar.md)
-   ranks go-librespot 76 / librespot 69 / Soloist 61. Build expiry is not key renewal.
-   No actual account/client/provider operation occurred. A separately accepted
-   exclusive whole-service mode is possible without shared DSP, but foreign mpv,
-   uncertain shutdown, provider terms and physical output remain real boundaries.
-5. **11:40 value decision: CONTINUE** the bounded failed-gate correction;
-   review again around 13:10–13:40 UTC, without waiting
-   just for reporting, CI or unavailable hardware/accounts. No large/risky work
-   after 16:30; stabilize 17:00; stop 18:00 UTC even if CI is pending. Remain on the
-   existing branch/Draft PR #2, no main push, merge or release.
+The next user decisions are **PR review/merge**, **authorized real target/service
+acceptance**, and **whether to proceed with optional go-librespot setup and its
+manual terms/account/exclusive-output gates**. Rich queue metadata/bookmarks
+remain deferred for cross-consumer/versioning/title-origin/duration/seek policy;
+no hardware excuse or new format/framework is needed to fill this window.
 
 The historical handovers below are retained verbatim for evidence only. They do
 not reopen completed tasks or authorize work beyond this phase's hard stop.

@@ -1,5 +1,31 @@
 # Test evidence and limits
 
+## Verified runtime checkpoint and how to read this record
+
+**`53f4831bd469735e13c1448a91abdeba838dc1cf`** passes **all four jobs/every step**
+in [run 38394821007](https://github.com/de41tr/open-room-renderer/actions/runs/38394821007),
+verified **12:21 UTC**. Python 3.11 floor: **7260 passed /76 skipped**, groups
+**149.62s /94.67s /89.85s** under the unchanged **165s shared watchdog**. Native
+defaults: **7261/75** on x86_64 and ARM64. The existing real-Chrome, libmpv/null/PCM,
+production Unix IPC, installed/migration/socket, discovery/lifecycle and Snapcast
+steps pass. Default suites use three groups; native opt-in lanes remain two-group.
+No assertion, skip, deadline or job/step cap was weakened.
+
+This closes the bounded scheduling correction after `0ea93ec`; its original
+floor timeout remains FAILED. The older `70d9308` ARM Snapcast 431-frame zero-run
+also remains FAILED with an unresolved cause despite later unchanged-gate passes.
+Detailed failures and checkpoint-specific evidence below are retained. Earlier
+PENDING statements describe those checkpoints, not a blanket current failure or
+acceptance of broader scope. A documentation-only successor requires its own
+exact-head run; the result above belongs only to its named source.
+
+The passing Chrome smoke covers the original desktop/mobile-emulated
+control/focus/queue-download flow. Later room-name, output-inspection and transfer/
+recovery interactions lack dedicated genuine-browser acceptance. New `dsp show`
+coverage is actual CLI/synthetic TCP plus guarded production projection; installed
+help proves packaging only. Physical ARMv7/DAC, effective user-service/boot,
+original app, wider browser and Spotify account/audio acceptance remain open.
+
 ## Actual floor timeout and bounded third default group
 
 `0ea93ec`, run **38391477130**, floor job **115276061604**, is retained FAILED:
@@ -35,7 +61,8 @@ covering third-group overlap/failure/launch failure, shared timeout, interrupts,
 owned descendants, unrelated-process survival, CLI bounds and exact file/budget
 coverage. All 16 workflow shell blocks parse. No full local replay, sweep, extra
 native/browser campaign, threshold relaxation or retry-until-green was used.
-One final exact-head CI remains required before claiming recovered margin.
+The exact correction now passes at `53f4831`, as recorded above. This is
+observed hosted margin for that run, not a guarantee of future timing.
 
 ## Redirect preparation and legacy CLI privacy
 
@@ -65,7 +92,9 @@ is inferred from this privacy-only change.
 Final combined root integration passes **826** on Python 3.12/3.11 in
 **17.36s/17.59s**. No actual renderer, native/audio/browser/provider/service or
 full/timing campaign was added. All timeouts remain connect/read inactivity,
-not total elapsed deadlines. Current exact-head CI is a separate gate.
+not total elapsed deadlines. The redirect checkpoint `0ea93ec` then failed
+its floor timing gate; the combined scheduling successor `53f4831` passes as
+recorded above, without changing these client semantics.
 
 Preceding **20bff6c** is fully green, all four jobs/every step in **38388607430**,
 verified **11:27 UTC**: floor **6975/76**, groups **163.24s/140.10s**, native defaults

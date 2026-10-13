@@ -2,117 +2,78 @@
 
 ## Current next-phase scope
 
-After the retained 0ea93ec floor timeout, default suites explicitly opt into
-three same-runner groups. Native opt-in lanes remain two-group; every cap,
-assertion and existing skip is unchanged. Exact collection retains all 7,303
-previous nodes and adds only 33 scheduling checks. Root 46-case helper tests
-pass per Python. Increased process contention and hosted headroom still need
-exact-head CI; this does not add product or hardware acceptance.
+**Exact verified checkpoint:** `53f4831bd469735e13c1448a91abdeba838dc1cf`,
+[run 38394821007](https://github.com/de41tr/open-room-renderer/actions/runs/38394821007),
+all four jobs/every step, verified **12:21 UTC**. Floor **7260/76**, native defaults
+**7261/75** on x86_64/ARM64. Default suites use three same-runner groups; native
+opt-in lanes remain two-group. All old node IDs/skip metadata, assertions and caps
+remain. Floor **149.62s /94.67s /89.85s** passes under the same **165s shared**
+watchdog. A later documentation-only successor is not certified by this result.
 
-Six bounded clients now reject redirects before Requests prepares the next
-request, consumes bodies or parses Location. Ordinary successful/rejected/unknown
-outcomes, caps and inactivity timeouts stay unchanged. Two older CLI convenience
-helpers separately gain private redirect failures but keep non-streaming,
-unbounded response reads. Root merged checks pass 826 on each Python and fresh
-reviews pass; successor exact-head CI is still required. No follow/retry or new
-wall-clock deadline is claimed.
+| Area | Implemented and evidenced | Still outside accepted scope |
+| --- | --- | --- |
+| Architecture | Saved-curve `EqPresetLibrary` and pure `queue_protocol` seams; existing playback/queue and active-DSP authority retained | No universal engine abstraction or second queue owner |
+| Web controller | Existing `/ui/` listener; transport/seek/gain, queue/modes, favorites, DSP/presets, stopped playlist edits, room name, output inspection | Wider browser/mobile/accessibility/interruption matrix; new dialogs/cards/transfers do not have dedicated genuine-browser acceptance |
+| Genuine browser | Original Chrome 154 desktop/mobile-emulated layout, modal focus/keyboard, real mpv/null Play/Pause and downloaded queue JSON; unchanged smoke passes at `53f4831` | Physical mobile, Firefox, screen readers, physical audio, all manual cases |
+| Private transfers | Guarded queue JSON download; one saved curve under a new safe name; managed favorites exact-value/ID/order backup and healthy-empty-library restore | General merge/overwrite, whole-library DSP restore, durable queue or guaranteed durable browser save |
+| Native runtime | Linux x86_64/ARM64, native mpv 0.37 production Unix IPC and null/digital-PCM gates; selected local 0.37/0.40 evidence retains its own scope | Physical ARMv7/XU4/DAC/ALSA/acoustic output, physical LAN and original app; limited emulation is not hardware acceptance |
+| Installation/upgrade | Packaged Web assets, isolated installed lifecycle, user-data retention, fresh-prefix offline migration and real socket-refusal proof pass | No actual user migration, effective user-service acceptance, login lingering or reboot proof |
+| Config/output | Pure startup-input check, explicit owned-player device selection, no-start CLI diagnosis and private Web inspection | No complete runtime validation, proof of a particular DAC, audible output or foreign-player ownership |
+| New `dsp show` | Real CLI/Requests over synthetic TCP; guarded production Web projection/admission; installed-help packaging on both native hosts | No new live native DSP-read/PCM proof; no proof of prior write success, durability or physical output |
+| Spotify | go-librespot 76 / librespot 69 / Soloist 61 assessment; passive local REST/WS diagnosis and offline credential-free exclusive-mode proposals | No client/account activation or provider audio; TERMS/ACCOUNT/HARDWARE/ARBITRATION pending; direct Spotify ALSA bypasses ORR DSP |
 
-Read-only `dsp show` adds a strict private projection of the existing Web DSP
-snapshot. Only CONFIRMED exits zero; PENDING/UNKNOWN return truthful null values.
-Legacy mutation formatting and outcome categories remain, with improved UNKNOWN
-recovery guidance. Exact-host admission and cached confirmation reconciliation
-are preserved; no backend I/O, persistence, endpoint or physical-output claim.
-The ten-second timeout remains inactivity-based, not a total deadline. New read
-transport refuses eager redirect preparation; old clients are a separate fix.
-Focused root checks pass 426 per Python; exact `20bff6c` CI is fully green,
-including installed-help packaging on both native hosts.
+### Compatibility and safety changes to carry forward
 
-The implicit startup-config fallback now distinguishes an absent leaf from an
-observable dangling/uninspectable leaf. This deliberately changes degraded bare-
-serve behavior only; explicit errors, successful input, true absence, captured
-text and legacy public/print loading stay compatible. No ancestor/path-integrity
-guarantee. The generated Spotify handover uses its selected native executable,
-with shell quoting; provider/account/service/physical-output gates are unchanged.
-Those operator corrections are fully green at `144db38`, all four jobs/every
-step in run 38384524114, without adding physical/effective-unit acceptance.
+- Known unavailable saved libraries are fenced against destructive persistence;
+  dangling/uninspectable saved-audio or implicit-config entries fail privately
+  rather than silently choosing defaults. Healthy/absent-state behavior and
+  documented public-loader distinctions remain; no automatic repair/reset or
+  external-writer concurrency guarantee is added.
+- Room rename retains the existing transaction and legacy decoding while typed
+  names preserve literal percent sequences. Committed durability/discovery errors
+  remain UNKNOWN even when a new name is visible. Explicit review can re-arm only
+  a provably pre-effect rejected queue edit; uncertain outcomes stay latched.
+- Root config.yaml, state/ and migrated-profile/ remain user-owned even against
+  old manifest claims. Old installed uninstall scripts need the documented
+  updated-checkout invocation. Offline migration needs a fresh eligible prefix,
+  copies seven state files byte-for-byte, omits Plex identity/session files and
+  never activates services; copied bytes do not prove valid state or hardware.
+- The installed/native migration and socket proof that was pending at the first
+  feature checkpoint passed at `1897843` and passes in the unchanged gates
+  at `53f4831`. Real-user migration and effective-service acceptance remain pending.
+- `dsp show` emits only validated active status/balance/bypass/source/context/bands.
+  CONFIRMED exits 0; PENDING/UNKNOWN exits 1 with null values. Existing cached
+  confirmation reconciliation remains; no endpoint, backend command or persistence
+  write is added. Private identifiers, names and unrelated response data are omitted.
+- Six bounded clients prevent Requests' eager redirect preparation before body
+  reads/private Location parsing. Two older convenience helpers gain private
+  errors but keep unbounded non-streaming reads. Their connect/read inactivity
+  timeouts are not total elapsed deadlines. No follow/retry behavior was added.
+- Legacy HTTP/SOAP controls are unauthenticated. Web same-origin/CSRF admission
+  does not secure those legacy routes; retain trusted-private-LAN deployment.
 
-Managed-favorites private backup/restore uses the existing v1 seven-field format
-and preserves exact logical values/IDs/order. Only healthy empty managed storage
-can receive it; configured rows are untouched. No merge/overwrite/reset, larger
-limits or external-writer guarantee. Saved-audio readers now intentionally reject
-dangling/uninspectable entries instead of choosing defaults, including public
-loader calls; healthy/absent state, writers, UUID and precedence stay unchanged.
-Exact no-effect queue-row rejection gains explicit Refresh review and a separate
-new click, without re-arming uncertain outcomes or retrying from polls. Focused
-root checks and independent reviews pass; exact `322139c` CI is fully green.
-New transfer/recovery interactions have synthetic coverage, not dedicated browser
-or physical-device acceptance.
+### Retained failures and deferred decisions
 
-Single saved-DSP-curve transfer uses the existing v1 representation with a strict
-transfer-only decoder, current plugin and new safe name. It commits only saved
-library data under the existing DSP lock, leaving active state/files/backend calls
-untouched. Consent, exact bounds, stale ownership and durability UNKNOWN are
-explicit. Root 840-case checks pass on both Python versions; dedicated transfer
-browser/native/physical acceptance is not claimed. Its exact `52ccf01` CI is
-fully green. Whole-library DSP transfer and general favorites merge/overwrite
-remain deferred; the separately scoped favorites workflow is empty-only.
+`0ea93ec` is **FAILED** in run 38391477130: floor group 1 reached 165s/exit 124;
+group 2 passed 708 in 157.96s, and the other three jobs passed every step.
+The three-group correction is verified at `53f4831` without weakening a gate.
+`70d9308` is **FAILED** in run 38362764862: ARM Snapcast joined_group_gain_50
+matched only 5/7 windows with a shared 431-frame zero-run. Later passes of the
+unchanged gate leave that cause unresolved; no physical synchronization claim.
 
-An observed dangling favorites.json link now triggers the existing unavailable-
-storage policy instead of being replaced by a save. This intentional error-policy
-correction preserves healthy files, genuine absence and existing valid-symlink
-semantics. Synthetic store/Web/JSON byte/link proofs and both Python versions pass;
-no automatic repair/reload or later external-writer guarantee is introduced.
+The next decisions are PR review/merge, authorized real ARMv7/DAC/effective-service
+acceptance, and optional go-librespot setup under its manual terms/account/output
+gates. Richer queue metadata/bookmarks remain deferred for cross-consumer,
+versioning, title-origin and duration/seek policy, not unavailable hardware.
+See [STATUS](../STATUS.md), [TESTING](TESTING.md),
+[browser checklist](WEB_BROWSER_ACCEPTANCE.md) and
+[exclusive Spotify gates](SPOTIFY_EXCLUSIVE.md#required-manual-gates).
 
-The subsequent Web output card is an explicit single-probe read with hidden
-identifiers, no playback mutations and no automatic retry. Recovery messages are
-pure current-selection projections; retry budgets and command gates are unchanged.
-Duplicate explicit root startup settings intentionally fail before effects, while
-legacy loading and valid YAML merge overrides remain compatible. The offline
-Spotify preparer now rejects existing special inputs before opening them.
-Focused merged checks pass; dedicated new-card browser/physical acceptance is
-pending. Web/operator head `884de2f` is fully green, including installed migration
-and the unchanged Snapcast gate, without erasing the earlier `70d9308` failure.
+## Earlier next-phase checkpoint records
 
-**Current operator/browser delta:** bounded genuine Chrome desktop/mobile,
-keyboard/focus, production control and actual JSON downloads passed at `66cbe158`;
-the unchanged gate also passes at operator head `4fd1607`. Both native architectures
-at `4fd1607` prove explicit owned-player null output, isolated ambient config,
-disabled null fallback and no-start diagnostic reads preserving player/socket.
-All four jobs/every step pass in run 38359036576 (07:07 UTC). Physical DAC/ARMv7,
-Firefox and wider manual accessibility acceptance remain separate.
-
-The Web room-name workflow adds typed literal-percent names, lock-protected
-session/name revision checks and committed-error UNKNOWN without changing legacy
-decoding. Local 249-case checks pass on both interpreters; exact-head CI at
-`e9fd18a` passes all four jobs/every step in run 38361339841. Its new dialog is not
-separately real-browser accepted.
-The subsequent installer retention fix explicitly protects root config.yaml,
-state/ and migrated-profile/ even if an older manifest lists them; synthetic
-58-case checks pass on Python 3.11/3.12. Existing installed uninstall.py copies
-need the documented updated-checkout invocation to gain that protection.
-
-Offline migration prepares only a separate private profile for supported native
-layouts. It preserves seven state files and explicit config settings, rebases
-state/socket paths, omits Plex session/identity files and never activates services.
-Malformed storage is not repaired; copying bytes does not certify their validity.
-Focused and installed-wheel evidence passes; hosted installed/socket proof and
-any real-user migration remain pending. Existing destinations need fresh initial-
-config digest metadata; unsupported layouts require deliberate manual migration.
-
-Spotify now includes passive REST/WS diagnostics and an optional offline
-credential-free direct-ALSA config/unit/drop-in generator. The generator supports
-one canonical native user profile and numeric IPv4 loopback; manual effective-unit,
-ownership/output-release and provider/account checks remain mandatory. Static
-systemd/pinned-schema checks pass, without client execution or runtime arbitration.
-Separate audio bypasses ORR EQ/balance. Config checking remains startup-input only.
-New native executable prefixes containing either quote or DEL refuse before effects;
-old-prefix cleanup and quoted non-executable arguments remain supported.
-The later retention head `70d9308` failed ARM Snapcast on a shared short zero-run
-pattern; all other jobs/preceding steps passed. No threshold was weakened and
-new operator code still requires exact-head CI.
-The following paragraphs retain earlier checkpoint-specific acceptance records;
-current browser/operator results above supersede their pending status only for
-the scopes actually exercised. See STATUS and TESTING for exact source/CI scope.
+The following paragraphs retain their own exact-source scope. Their then-pending
+checks are superseded only where the current summary above explicitly closes the
+same gate; they do not certify later code or wider hardware/browser acceptance.
 
 The new phase starts from merged main `ad21bd4` and works only in Draft PR #2.
 DSP library and pure queue contracts now have separate responsibility boundaries;
