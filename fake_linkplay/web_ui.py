@@ -137,6 +137,35 @@ class WebRuntime:
     backend_gain_confirmed: bool = True
     queue_mode_locked: bool = False
     playlist_stopped: bool = False
+    station_recovery_pending: bool = False
+    station_recovery_attempts: int | None = None
+    station_recovery_limit: int | None = None
+
+
+def _playback_recovery(state: RendererState, runtime: WebRuntime) -> dict[str, object] | None:
+    """Allowlisted presentation only; never serialize a backend error or source."""
+    if state.phase == PlaybackPhase.ERROR and state.last_error in {
+            "Backend control failed", "Backend control failed; playback silence not confirmed"}:
+        return {"kind": "backend_control", "message":
+            "Backend control failed. Playback and silence are unconfirmed. "
+            "Choose Stop to request recovery, then check the reported state before starting playback again."}
+    attempts, limit = runtime.station_recovery_attempts, runtime.station_recovery_limit
+    if (runtime.transport_unknown or type(attempts) is not int or type(limit) is not int
+            or not 0 <= attempts <= limit <= MAX_SAFE_INTEGER or limit == 0):
+        return None
+    if (state.phase == PlaybackPhase.ERROR and attempts == limit
+            and state.last_error == "Station source unavailable: recovery exhausted"):
+        return {"kind": "station_exhausted", "message":
+            "Automatic station recovery is exhausted. Choose Play to try this selection again, "
+            "select another queue item, or choose Stop. This does not confirm silence."}
+    if (runtime.station_recovery_pending and state.phase in {PlaybackPhase.LOADING, PlaybackPhase.BUFFERING}
+            and state.last_error in {"Station source ended; retry pending",
+                "Station source stalled; retry pending", "Station source idle; retry pending",
+                "Station source unavailable; retry pending"}):
+        return {"kind": "station_retry", "attempts_used": attempts, "attempt_limit": limit,
+            "message": f"Station recovery pending: {attempts} of {limit} automatic retry attempts used. "
+                "Wait for confirmation, or choose Stop."}
+    return None
 
 
 class WebAdmissionError(ValueError):
@@ -638,6 +667,7 @@ class WebControlApi:
             "device": {"name": visible_device_name, "name_visible": visible_device_name == device_name,
                        "revision": self.device_revision(device_name)},
             "transport": {"phase": state.phase.value, "intent": state.intent, "status": transport_status,
+                "recovery": _playback_recovery(state, runtime),
                 "message": "Playback state is unconfirmed. Stop is available for recovery." if transport_status == "ERROR"
                     else "Waiting for renderer confirmation." if transport_status == "PENDING" else ""},
             "media": {"title": title, "artist": _display(state.artist), "album": _display(state.album),

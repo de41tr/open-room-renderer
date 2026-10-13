@@ -1997,3 +1997,42 @@ test('room rename leaves legacy whitespace normalization to the server, includin
   await h.ids.get('room-form').fire('submit');
   assert.equal(h.posts()[0].name, ' \ufeff '); assert.equal(h.ids.get('room-dialog').open, false);
 });
+
+test('recovery view validates pending counters and rejects inconsistent state', () => {
+  const recovery = {kind: 'station_retry', attempts_used: 1, attempt_limit: 3, message: 'Station recovery pending: 1 of 3 automatic retry attempts used.'};
+  const transport = {phase: 'BUFFERING', intent: 'play', status: 'PENDING', message: 'Waiting for renderer confirmation.', recovery};
+  assert.equal(validateState(state({transport})).transport.recovery.attempts_used, 1);
+  for (const bad of [{...recovery, attempts_used: -1}, {...recovery, attempts_used: 4}, {...recovery, attempt_limit: 0}, {...recovery, attempts_used: true}, {...recovery, kind: 'unknown'}, {...recovery, message: {}}]) assert.throws(() => validateState(state({transport: {...transport, recovery: bad}})));
+  for (const phase of ['PLAYING', 'STOPPED', 'PAUSED', 'ERROR']) assert.throws(() => validateState(state({transport: {...transport, phase}})));
+  assert.throws(() => validateState(state({transport: {...transport, status: 'ERROR'}})));
+  assert.throws(() => validateState(state({transport: {...transport, phase: 'ERROR', status: 'ERROR', recovery: {...recovery, kind: 'station_exhausted'}}})));
+  for (const kind of ['station_exhausted', 'backend_control']) assert.equal(validateState(state({transport: {phase: 'ERROR', intent: 'play', status: 'ERROR', message: '', recovery: {kind, message: 'Fixed explanation'}}})).transport.recovery.kind, kind);
+});
+test('app recovery explanation is read-only and clears after success, selection or stale state', async () => {
+  const h = await appHarness();
+  const recovery = {kind: 'station_retry', attempts_used: 2, attempt_limit: 3, message: 'Station recovery pending: 2 of 3 automatic retry attempts used. Wait for confirmation, or choose Stop.'};
+  const pending = state({transport: {phase: 'BUFFERING', intent: 'play', status: 'PENDING', message: 'Waiting for renderer confirmation.', recovery}});
+  h.setState(pending); await h.refresh();
+  const hint = h.ids.get('playback-recovery');
+  assert.equal(hint.hidden, false); assert.equal(hint.textContent, recovery.message); assert.equal(hint.children.length, 0);
+  assert.equal(h.ids.get('stop').disabled, false); assert.equal(h.posts().length, 0);
+  h.offline(); assert.equal(hint.hidden, true); assert.equal(hint.textContent, '');
+  await h.refresh(); assert.equal(hint.hidden, false);
+  h.setState(state({generation: 8, transport: {phase: 'PLAYING', intent: 'play', status: 'CONFIRMED', message: '', recovery: null}})); await h.refresh();
+  assert.equal(hint.hidden, true); assert.equal(hint.textContent, '');
+  assert.equal(h.posts().length, 0);
+});
+test('recovery guidance never erases sticky unknown outcomes or sends a retry', async () => {
+  const h = await appHarness(); h.setPost(() => {throw new Error('lost response');});
+  await h.ids.get('play').fire('click'); await h.settle();
+  assert.equal(h.posts().length, 1); assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN');
+  for (const kind of ['station_exhausted', 'backend_control']) {
+    h.setState(state({transport: {phase: 'ERROR', intent: 'play', status: 'ERROR', message: 'Playback state is unconfirmed. Stop is available for recovery.', recovery: {kind, message: kind === 'station_exhausted' ? 'Automatic station recovery is exhausted. Choose Play to try again.' : 'Backend control failed. Playback and silence are unconfirmed.'}}, actions: {...state().actions, pause: false, next: false, previous: false, seek: false}}));
+    await h.refresh();
+    assert.equal(h.ids.get('playback-recovery').hidden, false);
+    assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN');
+    assert.match(h.ids.get('notice-text').textContent, /outcome unknown/i);
+    assert.equal(h.ids.get('stop').disabled, false); assert.equal(h.ids.get('pause').disabled, true); assert.equal(h.ids.get('next').disabled, true);
+    assert.equal(h.posts().length, 1);
+  }
+});

@@ -212,6 +212,13 @@
     if (state.device.revision !== undefined && (!string(state.device.revision) || !/^[0-9a-f]{64}$/.test(state.device.revision) || typeof state.device.name_visible !== "boolean")) throw new Error("Invalid room name snapshot");
     const {transport, media, gain, queue, dsp, actions} = state;
     if (!isObject(transport) || !PHASES.includes(transport.phase) || !["CONFIRMED", "PENDING", "ERROR"].includes(transport.status) || !string(transport.message)) throw new Error("Invalid transport snapshot");
+    if (transport.recovery !== undefined && transport.recovery !== null) {
+      const recovery = transport.recovery;
+      if (!isObject(recovery) || !string(recovery.message) || !["station_retry", "station_exhausted", "backend_control"].includes(recovery.kind)) throw new Error("Invalid recovery snapshot");
+      if (recovery.kind === "station_retry") {
+        if (transport.status !== "PENDING" || !["LOADING", "BUFFERING"].includes(transport.phase) || !integer(recovery.attempts_used) || !integer(recovery.attempt_limit) || recovery.attempt_limit < 1 || recovery.attempts_used > recovery.attempt_limit) throw new Error("Invalid recovery progress");
+      } else if (transport.status !== "ERROR" || transport.phase !== "ERROR" || recovery.attempts_used !== undefined || recovery.attempt_limit !== undefined) throw new Error("Invalid recovery error");
+    }
     if (!isObject(media) || ![media.title, media.artist, media.album].every(string) || !(media.artwork === null || string(media.artwork)) || typeof media.is_live !== "boolean" || !optionalNumber(media.position_seconds) || !optionalNumber(media.duration_seconds)) throw new Error("Invalid media snapshot");
     if (!isObject(gain) || !["CONFIRMED", "PENDING", "UNKNOWN"].includes(gain.status) || !(gain.volume === null || (integer(gain.volume) && gain.volume <= 100)) || !optionalBoolean(gain.mute)) throw new Error("Invalid gain snapshot");
     if (!isObject(queue) || !string(queue.name) || !integer(queue.count) || queue.count > 1000 || !integer(queue.index) || !Object.hasOwn(MODES, queue.mode) || !Array.isArray(queue.items) || queue.items.length !== queue.count || (queue.count === 0 ? queue.index !== 0 : queue.index < 1 || queue.index > queue.count)) throw new Error("Invalid queue snapshot");

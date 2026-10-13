@@ -71,6 +71,29 @@ CSRF boundary. The ACK includes `device_revision` for canonical verification.
 This dialog has focused HTTP/DOM-double coverage; the existing real-Chrome smoke
 at the preceding checkpoint does not establish acceptance of this new dialog.
 
+### Station recovery explanations
+
+Now Playing adds a read-only explanation when the current station is actually
+retrying: **N of 3 automatic retry attempts used**. The original load is not one
+of those retries, and a used attempt is not a successful attempt. The existing
+renderer owns this finite budget; brief success does not replenish it. Counts
+appear only during a pending recovery owned by the current selection and
+vanish on success, superseding selection/owner commands, or stale browser state.
+
+After the budget is exhausted, choose **Play** for an explicit new attempt,
+select another queue item, or choose **Stop**. A backend-control failure instead
+warns that playback and silence are unconfirmed; request Stop and inspect the
+reported state. Neither explanation asserts silence. Other or unrecognized
+failures keep the generic PENDING/ERROR explanation. Earlier UNKNOWN request
+outcomes and all existing action gates remain in force.
+
+This is presentation only: no Retry action/endpoint, browser retry timer,
+automatic skip, new source resolution or changed recovery policy. Only exact
+fixed core error classifications and current selection-owned retry counters are
+projected; raw errors, URLs and paths are never included in the recovery view.
+Focused Python and existing DOM-double tests cover this addition; there is no
+new dedicated real-browser/layout or native-audio acceptance claim.
+
 ### Honest state and uncertain commands
 
 An HTTP acknowledgement says the request returned, not that music is audible.

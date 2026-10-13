@@ -375,7 +375,13 @@ class HttpApi:
             and not self._station_recovery_loading
             and not any(task is not None and not task.done() for task in
                         (self._station_recovery_task, self._queue_advance_task)))
+        recovery = self._station_recovery
+        current_recovery = recovery is not None and self._station_recovery_is_current(recovery)
         return WebRuntime(
+            station_recovery_pending=bool(current_recovery and self._station_recovery_task is not None
+                and not self._station_recovery_task.done()),
+            station_recovery_attempts=recovery.attempts if current_recovery else None,
+            station_recovery_limit=len(self._station_recovery_delays) if current_recovery else None,
             playlist_stopped=playlist_stopped,
             actions=frozenset(actions), transport_unknown=unknown,
             transport_pending=self._native_waiting_for_audio or self._pending_seek_target is not None,

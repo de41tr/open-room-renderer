@@ -96,6 +96,10 @@
     const phaseLabel = transport.status === "ERROR" ? "ERROR" : transport.status === "PENDING" && ["PLAYING", "PAUSED", "STOPPED"].includes(transport.phase) ? "PENDING" : transport.phase.replaceAll("_", " ");
     text("playback-state", control.fresh ? phaseLabel : "UNKNOWN · STALE");
     $("playback-state").dataset.kind = control.fresh ? transport.status.toLowerCase() : "unknown";
+    // A fresh explanation supplements, never replaces, uncertain request outcomes.
+    const recovery = control.fresh ? transport.recovery : null;
+    $("playback-recovery").hidden = !recovery;
+    text("playback-recovery", recovery?.message || "");
     const image = safeArtwork(media.artwork);
     if (image !== artworkURL) {
       artworkURL = image;
