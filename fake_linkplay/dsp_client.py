@@ -3,8 +3,8 @@
 Balance input is normalized -1..1, never a percentage, and writes use the
 renderer's 0.001 resolution. A mutation ACK acknowledges a request only; it
 does not independently observe the current DSP graph or audible output.
-There is intentionally no EQ read: the legacy API does not identify the active
-source reliably enough to select an unambiguous read command.
+The read-only show command uses the existing Web DSP snapshot: legacy EQ reads
+do not identify the active source unambiguously.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import sys
 
 import requests
 
+from .dsp_read_client import DspReadClient, DspReadError
 from .mpv_backend import BackendError, MpvBackend
 from .queue_client import QueueClientError, _endpoint
 
@@ -27,8 +28,8 @@ _INVALID_EQ = "Invalid DSP EQ input. Use on or off."
 _READ_FAILED = "DSP balance read was not confirmed."
 _REJECTED = "DSP request was rejected by the renderer."
 _UNKNOWN = ("DSP request outcome is unknown. "
-            "Inspect dsp balance get and status before an explicit retry; "
-            "the command may already have taken effect.")
+            "Inspect dsp show before an explicit retry; "
+            "the command may already have taken effect. A current read does not prove persistence.")
 
 
 class DspClientError(ValueError):
@@ -147,9 +148,12 @@ class DspClient:
 
 
 def add_dsp_parser(subparsers) -> None:
-    dsp = subparsers.add_parser("dsp", help="read balance or request balance/EQ changes",
+    dsp = subparsers.add_parser("dsp", help="inspect active DSP or request balance/EQ changes",
         description="Active DSP controls. Mutation acknowledgements do not observe audible output.")
     commands = dsp.add_subparsers(dest="dsp_cmd", required=True)
+    show = commands.add_parser("show", help="read the renderer-reported active DSP snapshot",
+        description="Observation only; physical output and durable persistence are unverified. "
+                    "Exit 0 only for CONFIRMED; PENDING/UNKNOWN print JSON and exit 1.")
     balance = commands.add_parser("balance", help="read or set normalized channel balance")
     balance_commands = balance.add_subparsers(dest="balance_cmd", required=True)
     get = balance_commands.add_parser("get", help="read renderer-reported normalized balance")
@@ -159,13 +163,17 @@ def add_dsp_parser(subparsers) -> None:
         help="finite decimal from -1 to 1 (no percentages); rounded to 0.001")
     eq = commands.add_parser("eq", help="enable or bypass the active EQ context")
     eq.add_argument("value", choices=("on", "off"))
-    for parser in (get, set_parser, eq):
+    for parser in (show, get, set_parser, eq):
         parser.add_argument("--host", default="127.0.0.1")
         parser.add_argument("--port", type=int, default=8080)
 
 
 def run_dsp_command(args: argparse.Namespace) -> int:
     try:
+        if args.dsp_cmd == "show":
+            result = DspReadClient(args.host, args.port).show()
+            print(json.dumps(result, allow_nan=False))
+            return 0 if result["status"] == "CONFIRMED" else 1
         client = DspClient(args.host, args.port)
         if args.dsp_cmd == "balance" and args.balance_cmd == "get":
             result = {"balance": client.get_balance()}
@@ -175,7 +183,7 @@ def run_dsp_command(args: argparse.Namespace) -> int:
         else:
             client.set_eq(args.value)
             result = {"request_acknowledged": True, "command": "eq", "value": args.value}
-    except DspClientError as exc:
+    except (DspClientError, DspReadError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     print(json.dumps(result))

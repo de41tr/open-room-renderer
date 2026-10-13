@@ -236,6 +236,7 @@ jobs:
         run: |
           prefix="$RUNNER_TEMP/orr-native"
           .venv-ci/bin/python scripts/install-native.py --prefix "$prefix"
+          "$prefix/venv/bin/python" -I "$prefix/venv/bin/open-room-renderer" dsp show --help
           migration_source="$RUNNER_TEMP/orr-migration-source"
           .venv-ci/bin/python scripts/install-native.py --stage-only --prefix "$migration_source"
           "$prefix/venv/bin/python" -I scripts/smoke-migration-profile.py "$migration_source" "$prefix"

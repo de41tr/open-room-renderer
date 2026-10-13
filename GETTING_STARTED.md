@@ -694,9 +694,10 @@ An uncertain result may already have taken effect; inspect status before retryin
 
 ## Local DSP controls
 
-Use the existing renderer's channel balance and EQ bypass controls directly:
+Inspect the renderer's active DSP, or use its channel balance and EQ bypass controls:
 
 ```sh
+open-room-renderer dsp show
 open-room-renderer dsp balance get
 open-room-renderer dsp balance set -0.25
 open-room-renderer dsp balance set 0
@@ -719,7 +720,7 @@ playback. Enabling EQ can restore previously configured positive gain: keep the
 volume low when testing an unfamiliar configuration. Preset/band editing and
 source-context selection are not part of this small CLI.
 
-All four forms accept `--host` and `--port` after their final subcommand/value,
+All DSP forms accept `--host` and `--port` after their final subcommand/value,
 defaulting to `127.0.0.1:8080`. Use a trusted private renderer endpoint; the
 existing HTTP API is unauthenticated. The client makes one request, follows no
 redirect, ignores environment proxies/netrc credentials, and never retries a
@@ -731,10 +732,54 @@ its state is still current or that sound was heard. A rejected request and an
 **UNKNOWN** outcome are different. In particular, HTTP 502 can mean the DSP was
 already applied but saving it failed, so it does not prove the old state remains.
 A missing/malformed acknowledgement also leaves the outcome unknown. Inspect
-`dsp balance get` and the existing status/DSP interface before explicitly
-retrying; generic playback status alone does not report active EQ. Failure
+`dsp show` before explicitly retrying; generic playback status alone does not
+report active EQ. A current DSP read cannot prove a prior request succeeded or
+that its settings were durably saved. Failure
 returns nonzero, prints a fixed private-safe diagnostic, and prints no success
 JSON. A read failure never substitutes an assumed balance value.
+
+### Read active DSP over SSH
+
+`dsp show` makes one read-only GET to the same existing Web state route used by
+the browser. Its version-1 JSON contains only `status`, `balance`, `eq_enabled`,
+`source`, `channel_mode`, and `bands`, plus `version`, `observation_only: true`
+and `physical_output_verified: false`.
+
+- `CONFIRMED` exits **0** and supplies the renderer-reported normalized balance,
+  EQ boolean, `global` or `wifi` active DSP context, `Stereo` channel mode and
+  all 40 numeric parameter records (ten bands with frequency, gain, Q and mode).
+  Bypassed EQ still reports its configured bands; those bands are not applied
+  while `eq_enabled` is false.
+- `PENDING` or `UNKNOWN` exits **1** and prints valid JSON with all five value
+  fields (`balance`, `eq_enabled`, `source`, `channel_mode`, `bands`) set to null.
+  Successful HTTP delivery alone does not establish confirmed DSP.
+- A connection, admission, framing or validation failure exits **1**, prints only
+  a fixed diagnostic on stderr and prints no JSON. It never invents a fallback.
+
+The snapshot observes renderer-maintained confirmation. It does not request a
+fresh backend scan, prove a previous command's success or durable persistence,
+measure live physical output, establish silence or change settings. Existing
+Web readback can reconcile an already-matching cached backend DSP confirmation
+in memory. No backend command, playback action or persistence write is issued.
+Unavailable saved-preset storage does not by itself hide independently confirmed
+active DSP; preset-library information is deliberately omitted here.
+
+This read inherits the Web route's exact-host admission. Use the renderer's
+configured advertised/bind address or exact local listener address (`localhost`
+is accepted for a loopback listener). An arbitrary DNS alias that works for the
+legacy API can be rejected; the client never substitutes a Host header to bypass
+that check. The route is unauthenticated, so use a trusted private network.
+
+The whole Web response is capped at **2 MiB**, matching the browser's budget;
+a very large queue can therefore make this read fail safely. Only the validated
+DSP allowlist is printed. Device/media/queue data, preset names and IDs, plugin
+IDs, CSRF/session/revision identifiers, response bodies and endpoint URLs are
+never included in output or saved by the command. JSON is strict UTF-8 with no
+duplicate fields, non-finite numbers or excessive nesting. Unsupported contexts,
+incomplete bands, invalid types/bounds and contradictory unconfirmed values fail
+closed. The ten-second timeout bounds connect/read inactivity, **not total
+wall-clock time**; a steadily arriving slow response can take longer. There are
+no redirects, retries, environment proxy/netrc credentials or cookies sent.
 
 ## Legacy direct controls and endpoint syntax
 

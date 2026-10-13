@@ -944,6 +944,33 @@ unchanged 165-second group watchdog. Existing 32 warnings remain. Hosted native
 results are PENDING until verified for the published head. Baseline or separate
 single-extraction runs do not certify later changes. No new endurance run is planned.
 
+## Read-only DSP CLI snapshot
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_dsp_read_client.py tests/test_dsp_show_projection.py tests/test_dsp_client.py
+```
+
+The read-only client tests validate the small version-1 output allowlist, exact
+numeric bounds and all forty unique parameters, honest CONFIRMED/PENDING/UNKNOWN
+exit semantics, null unconfirmed values and omission of unrelated private data.
+Hostile framing covers duplicate keys, non-finite/overflowing JSON, UTF-8,
+nesting, whole-response and cumulative stream size, content type/encoding,
+redirects (including requests' hidden next-request preparation), truncation and
+fixed private transport failures. Timeout cases use
+injected requests exceptions; they do not claim a measured total deadline.
+
+Normal loopback TCP fixtures run actual CLI children for ordinary/chunked
+responses, unconfirmed states, redirect refusal, truncated bodies and isolation
+from ambient proxy/netrc credentials. Separate synchronous fixtures exercise
+real Web admission, HttpApi DSP projection and Web JSON responses against a
+guarded synthetic backend, including global/WiFi, bypass, pending/unknown,
+unavailable saved-library storage and existing cached-DSP reconciliation.
+They guard backend, persistence, playback, queue and generation effects. No
+asyncio socketpair is needed. These are parser/transport and in-memory production
+projection checks, not a live HttpApi listener, native DSP/PCM or physical-output
+measurement. Existing native DSP acceptance remains separate. The existing installed-package
+CI step also runs `dsp show --help` with isolated Python; it makes no read request.
+
 ## Local DSP CLI acceptance
 
 ```sh
