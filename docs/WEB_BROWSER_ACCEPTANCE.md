@@ -28,7 +28,7 @@ The smoke drives genuine W3C element clicks and keyboard actions through existin
 
 - Desktop 1280-pixel and mobile-emulated 390-pixel rendering, actual column geometry
   and page overflow, plus home-link navigation and browser Back/Forward.
-- The export dialog's Tab/Shift+Tab/Escape handling, opener focus restoration,
+- The export dialog's native Tab/Shift+Tab/Escape handling, opener focus restoration,
   fresh unchecked consent, and cleanup on close and navigation/history restore.
 - UI Play/Pause through the real HTTP handler and unchanged production Unix IPC
   backend; real mpv reports selected PCM audio, advancing time, `ao=null`, and
@@ -52,6 +52,25 @@ production IPC backend and mpv are real. The following manual checks, especially
 320-pixel/zoom/screen-reader/interruption coverage, remain outstanding.
 
 Use the running renderer's existing HTTP port and open `/ui/` in a real browser on its trusted LAN. Do not expose the service to the internet. Use test audio and low volume for playback changes. No additional web server, framework, extension, or browser installation is required.
+
+## First hosted run and corrections
+
+The first real Chrome job for `fc5e4a5` in run 38353544786 used Chrome
+154.0.8037.97 with its normal sandbox. Desktop rendering/navigation and real
+Play/Pause through production HTTP/Unix IPC to mpv/null passed before the smoke
+failed on an overly strict Tab-wrap assertion. A native modal may move focus to
+browser controls before returning to the dialog; this is allowed by
+[HTML sequential-focus navigation](https://html.spec.whatwg.org/multipage/interaction.html#sequential-focus-navigation).
+The corrected smoke records exact focus state, permits only the unfocused BODY
+browser-chrome boundary, requires subsequent Tab re-entry, rejects background
+page controls and verifies a real background click is intercepted.
+
+The captured console also proved a product defect: the empty `data:,` favicon
+violated the shipped image CSP. It is now an explicit same-origin empty 204
+response at `/ui/favicon.ico`, through the existing guarded static handler.
+The four packaged assets and CSP are unchanged; no error is filtered out.
+The first run remains failed. A later successful exact-head job is required for
+mobile, keyboard and downloaded-file acceptance; no unrun check is inferred.
 
 ## Visual and keyboard checks
 
