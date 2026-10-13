@@ -7,6 +7,10 @@ output and no accounts/external media. This verifies Web wiring and native
 readback, not a browser, production Unix IPC, audible output or DSP samples.
 The gain recovery case discards one real readback in that test transport to
 induce uncertainty, then measures real Stop and volume-zero recovery.
+A terminal slice constructs a fresh API/native handle from malformed saved-EQ
+bytes plus an independently valid active snapshot. It covers the startup load,
+refused writes and usable live DSP; it performs no library repair or private
+reload and does not claim a CLI/systemd/process restart or unreadable-file probe.
 The existing test_libmpv_dsp.py digital-PCM gate remains the sample-level proof.
 """
 from __future__ import annotations
@@ -807,6 +811,209 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
     return evidence
 
 
+async def _exercise_unavailable(library: str, directory: Path, expected_graph: Any) -> dict[str, Any]:
+    """Fresh-object startup from malformed library bytes, with no repair/reload.
+
+    Reuse only the previous slice's generated WAV and valid active-DSP bytes.
+    A fresh native handle, API and listeners establish the load boundary. This
+    is not a CLI/systemd/process restart or an unreadable-file native probe.
+    """
+    baseline = asyncio.all_tasks()
+    state_dir = directory / "unavailable-startup" / "state"
+    state_dir.mkdir(parents=True)
+    invalid = b'{"version":1,"presets":{"Keep these original bytes":\n'
+    preset_file = state_dir / "eq_presets.json"
+    preset_file.write_bytes(invalid)
+    active_bytes = (directory / "state" / "active_dsp.json").read_bytes()
+    (state_dir / "active_dsp.json").write_bytes(active_bytes)
+    track = directory / "first.wav"
+    media_requests: list[str] = []
+    listeners = []
+    backend = api = server = session = monitor = None
+    evidence: dict[str, Any] = {
+        "scope": "fresh Config/RendererState/HttpApi/backend startup; actual libmpv/null readback",
+        "load_failure": "malformed saved-library bytes before construction; no private reload or repair",
+        "requests": [],
+    }
+
+    async def media(request):
+        media_requests.append(request.path)
+        return web.FileResponse(track)
+
+    media_app = web.Application()
+    media_app.router.add_get("/tone.wav", media)
+    media_server = TestServer(media_app, shutdown_timeout=1)
+    try:
+        await media_server.start_server()
+        listeners.extend(sock for site in media_server.runner.sites for sock in site._server.sockets)
+        url = str(media_server.make_url("/tone.wav"))
+        backend = _StagingBackend(library, (track, track))
+        backend._allowed_media = {url}
+        cfg = Config(uuid="00000000-0000-4000-8000-000000000000",
+                     state_dir=str(state_dir), advertise_ip="127.0.0.1", bind_address="127.0.0.1",
+                     default_volume=25, auto_spawn_mpv=False, enable_ssdp=False, enable_mdns=False,
+                     native_queue_staging=False)
+        api = HttpApi(cfg, RendererState.from_config(cfg), backend)
+        assert backend.read_property("af") == []
+        await api.initialize_channel_balance()
+        assert backend.read_property("af") == expected_graph
+        assert preset_file.read_bytes() == invalid
+        server = TestServer(api.app(), shutdown_timeout=1)
+        await server.start_server()
+        cfg.http_api_port = cfg.upnp_port = server.port
+        listeners.extend(sock for site in server.runner.sites for sock in site._server.sockets)
+        monitor = api._state_monitor_task
+        assert monitor is not None and not monitor.done()
+        origin = str(server.make_url("/")).rstrip("/")
+        async with ClientSession(timeout=ClientTimeout(total=5), trust_env=False) as session:
+            async def snapshot():
+                async with session.get(server.make_url(BASE + "/state")) as response:
+                    result = await response.json()
+                    assert response.status == 200, result
+                    assert result["dsp"]["status"] == "CONFIRMED", result
+                    assert result["dsp"]["editor"]["library_unavailable"] is True
+                    assert {preset["kind"] for preset in result["dsp"]["editor"]["presets"]} == {"builtin"}
+                    return result
+
+            token = (await snapshot())["csrf_token"]
+
+            async def command(action, *, expected=200, **fields):
+                async with session.post(server.make_url(BASE + "/command"),
+                    json={"action": action, **fields},
+                    headers={"Origin": origin, "X-ORR-CSRF": token}) as response:
+                    result = await response.json()
+                    assert response.status == expected, (action, response.status, result)
+                    if expected == 200:
+                        assert result["request_acknowledged"] is True
+                    return result
+
+            await command("volume", value=25)
+            await command("playlist_replace", expected_generation=(await snapshot())["generation"],
+                source={"format": "urls", "urls": [url, url], "name": "Unavailable library pair",
+                        "index": 1, "mode": "normal"})
+            await command("play", expected_generation=(await snapshot())["generation"])
+            first = await _eventually("startup-restored native source", lambda: _native_source(backend, url))
+            playing = await snapshot()
+            assert playing["transport"]["status"] == "CONFIRMED"
+            assert playing["transport"]["phase"] == "PLAYING"
+            assert playing["dsp"]["editor"]["bands"] == json.loads(active_bytes)["bands"]
+            assert playing["dsp"]["balance"] == json.loads(active_bytes)["balance"]
+            assert backend.read_property("af") == expected_graph
+            assert backend.read_property("volume") == 25 and backend.read_property("mute") is False
+            assert media_requests
+            evidence["active_restored_before_play"] = True
+            evidence["native_id"] = first["native_id"]
+
+            # Each refused real HTTP request must retain the exact file set,
+            # library/active state and owned queue, and make no native/media write.
+            actions = [("web", action) for action in (
+                "dsp_preset_save", "dsp_preset_rename", "dsp_preset_delete")]
+            actions += [("legacy", value) for value in (
+                "EQSave:Rejected native save",
+                'EQSourceSave:{"Name":"Rejected source save","source_name":"wifi"}',
+                'EQv2Delete:{"Name":"Absent native preset"}', "EQv2Delete:{}")]
+            for surface, action in actions:
+                before = await snapshot()
+                queue = api.state.queue
+                queue_value = deepcopy(queue)
+                active = api._active_dsp_snapshot()
+                saved = deepcopy(api.eq_presets)
+                files = {path.name: path.read_bytes() for path in state_dir.iterdir() if path.is_file()}
+                handle = backend._handle
+                command_count, requests = len(backend.commands), list(media_requests)
+                properties = ("playlist", "idle-active", "pause", "af", "volume", "mute", "track-list")
+                native = {key: backend.read_property(key) for key in properties}
+                if surface == "web":
+                    editor = before["dsp"]["editor"]
+                    fields = {"expected_dsp": editor["revision"]}
+                    if action != "dsp_preset_delete":
+                        fields["name"] = "Rejected native save"
+                    if action != "dsp_preset_save":
+                        fields["preset_id"] = editor["presets"][0]["id"]
+                    result = await command(action, expected=409, **fields)
+                    assert result["outcome"] == "REJECTED" and result["error"] == "preset_library_unavailable"
+                    status = 409
+                else:
+                    async with session.get(server.make_url("/httpapi.asp"),
+                                           params={"command": action}) as response:
+                        body = await response.text()
+                        assert response.status == 502 and body == "Failed", (action, response.status, body)
+                        status = response.status
+                after = await snapshot()
+                assert backend._handle == handle and handle is not None
+                assert backend.commands[command_count:] == [] and media_requests == requests
+                assert {key: backend.read_property(key) for key in properties} == native
+                assert api.state.queue is queue and api.state.queue == queue_value
+                assert api._active_dsp_snapshot() == active and api.eq_presets == saved
+                assert {path.name: path.read_bytes() for path in state_dir.iterdir() if path.is_file()} == files
+                assert preset_file.read_bytes() == invalid
+                for key in ("session_id", "generation", "queue", "transport", "gain", "dsp"):
+                    assert after[key] == before[key], (key, before[key], after[key])
+                evidence["requests"].append({"surface": surface, "action": action, "status": status,
+                    "bytes_preserved": True, "active_queue_generation_gain_retained": True,
+                    "native_mutations": 0, "media_requests": 0})
+
+            # Native sound remains usable despite the independently fenced library.
+            editor = (await snapshot())["dsp"]["editor"]
+            flat = next(preset for preset in editor["presets"] if preset["name"] == "Flat")
+            await command("dsp_preset_load", expected_dsp=editor["revision"], preset_id=flat["id"])
+            flat_state = await snapshot()
+            assert all(band["value"] == 0 for band in flat_state["dsp"]["editor"]["bands"]
+                       if band["param_name"].endswith("_gain"))
+            assert "equalizer=" not in backend.read_property("af")[0]["params"]["graph"]
+            editor = flat_state["dsp"]["editor"]
+            bands = [{**band, "value": {"f_gain": -4, "f_q": 1}.get(band["param_name"], band["value"])}
+                     for band in editor["bands"]]
+            await command("dsp_bands", expected_dsp=editor["revision"], bands=bands)
+            edited = backend.read_property("af")
+            assert "equalizer=f=1000.000" in edited[0]["params"]["graph"]
+            assert ":g=-4.000" in edited[0]["params"]["graph"]
+            assert (await snapshot())["dsp"]["editor"]["bands"] == bands
+            await command("eq", enabled=False)
+            bypass = backend.read_property("af")[0]["params"]["graph"]
+            assert "pan=" in bypass and "equalizer=" not in bypass
+            assert (await snapshot())["dsp"]["eq_enabled"] is False
+            await command("eq", enabled=True)
+            assert backend.read_property("af") == edited
+            later = await _eventually("same native lifetime after refused writes and live DSP", lambda: (
+                sample if (sample := _native_source(backend, url)) and sample["native_id"] == first["native_id"]
+                and sample["position"] > first["position"] + .08 else None))
+            final = await snapshot()
+            assert final["generation"] == playing["generation"] and final["queue"] == playing["queue"]
+            assert final["transport"] == playing["transport"] and final["gain"] == playing["gain"]
+            assert preset_file.read_bytes() == invalid
+            evidence["live_sound"] = {"builtin_load": True, "negative_band_edit": True,
+                "bypass_and_enable": True, "same_native_lifetime_advances": True,
+                "first_position": first["position"], "later_position": later["position"]}
+    finally:
+        try:
+            if server is not None:
+                await server.close()
+        finally:
+            try:
+                await media_server.close()
+            finally:
+                if backend is not None:
+                    backend.close()
+        await asyncio.sleep(0)
+        pending = [task for task in asyncio.all_tasks() - baseline if not task.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        assert not pending, f"Unavailable-library fixture leaked tasks: {pending!r}"
+        assert session is None or session.closed
+        assert all(listener.fileno() == -1 for listener in listeners)
+        assert backend is None or (backend._handle is None and backend.process is None)
+        assert api is None or api._state_monitor_task is None
+        assert monitor is None or monitor.done()
+        assert server is None or (server.closed and not server.runner.sites)
+        assert media_server.closed and not media_server.runner.sites
+    evidence["cleanup"] = {"native_handle_destroyed": True, "monitor_stopped": True,
+        "listeners_closed": True, "session_closed": True, "no_pending_tasks": True}
+    return evidence
+
+
 @pytest.mark.skipif(not os.environ.get("ORR_TEST_LIBMPV_PATH"),
                     reason="Web native acceptance requires explicit ORR_TEST_LIBMPV_PATH")
 def test_real_libmpv_web_controls(tmp_path: Path) -> None:
@@ -844,6 +1051,16 @@ def test_real_libmpv_web_controls(tmp_path: Path) -> None:
     assert evidence["gain_zero_recovery"]["injection"]["count"] == 1
     assert evidence["gain_zero_recovery"]["gain_after_successful_stop"]["status"] == "UNKNOWN"
     assert evidence["gain_zero_recovery"]["gain_after_zero"]["volume"] == 0
+    unavailable = evidence["unavailable_saved_eq"]
+    assert unavailable["active_restored_before_play"] is True
+    assert len(unavailable["requests"]) == 7
+    assert [request["status"] for request in unavailable["requests"]] == [409] * 3 + [502] * 4
+    assert all(request["bytes_preserved"] and request["active_queue_generation_gain_retained"]
+               and request["native_mutations"] == request["media_requests"] == 0
+               for request in unavailable["requests"])
+    assert all(unavailable["cleanup"].values())
+    assert all(unavailable["live_sound"][key] for key in
+               ("builtin_load", "negative_band_edit", "bypass_and_enable", "same_native_lifetime_advances"))
     print(json.dumps(evidence, sort_keys=True))
 
 
@@ -853,6 +1070,10 @@ if __name__ == "__main__":
 
     async def main():
         async with asyncio.timeout(30):
-            return await _exercise(sys.argv[2], Path(sys.argv[3]))
+            directory = Path(sys.argv[3])
+            evidence = await _exercise(sys.argv[2], directory)
+            evidence["unavailable_saved_eq"] = await _exercise_unavailable(
+                sys.argv[2], directory, evidence["dsp"]["native_combined_graph"])
+            return evidence
 
     print(json.dumps(asyncio.run(main()), sort_keys=True))
