@@ -2,6 +2,16 @@
 
 ## Current next-phase scope
 
+The subsequent Web output card is an explicit single-probe read with hidden
+identifiers, no playback mutations and no automatic retry. Recovery messages are
+pure current-selection projections; retry budgets and command gates are unchanged.
+Duplicate explicit root startup settings intentionally fail before effects, while
+legacy loading and valid YAML merge overrides remain compatible. The offline
+Spotify preparer now rejects existing special inputs before opening them.
+Focused merged checks pass; dedicated new-card browser/physical acceptance is
+pending. Preceding head `1897843` is fully green, including installed migration
+and the unchanged Snapcast gate, without erasing the earlier `70d9308` failure.
+
 **Current operator/browser delta:** bounded genuine Chrome desktop/mobile,
 keyboard/focus, production control and actual JSON downloads passed at `66cbe158`;
 the unchanged gate also passes at operator head `4fd1607`. Both native architectures

@@ -31,6 +31,11 @@ independent work while CI, hardware or provider prerequisites are pending.
    usability gaps. Retain the prior Snapcast failure without weakening gates.
    All service activation remains explicit operator work.
 
+The next reviewed package adds on-demand Web output inspection, fixed current
+recovery guidance, duplicate startup-input refusal and a narrow offline input
+preflight correction. Verify exact-head CI, then assess portable saved-library
+workflows against existing codecs before choosing further features.
+
 Do not grow a universal engine framework, broad E2E suite, or timing campaign.
 07:10 value decision: continue these practical workflows; next review
 **08:40–09:10 UTC**. The original hard deadline remains.

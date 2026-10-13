@@ -12,18 +12,19 @@ The explicit 05:35/05:56 mandate supersedes the historical wait decision below.
    A credential-free offline config/unit/drop-in generator is now implemented,
    with a manual handover guide and no activation. Account/provider/lifecycle/
    arbitration acceptance remains separate. No fake play.
-3. **PUBLISH ROOM WORKFLOW:** existing transaction plus guarded Web rename is
-   reviewed and passes 249 focused cases per interpreter. Useful room identification
-   has higher marginal value than more architecture or timing tests.
+3. **FOLLOW THROUGH ON WEB OPERATIONS:** room rename is published and green.
+   On-demand output inspection and fixed recovery guidance are now reviewed,
+   with 535 merged checks per interpreter and no new browser claim. Duplicate
+   startup keys are separately rejected before effects without a full schema rewrite.
 4. **FIX USER-DATA OWNERSHIP, THEN OFFLINE MIGRATION:** unchanged native config
    could be deleted by uninstall. Protect root config/state/profile paths even
    against old manifest claims. A new-prefix profile preparer may then remove
    manual copy/path-edit errors without replacing active config or starting audio.
    Preserve originals/bytes, refuse ambiguity, exclude provider credentials.
-5. **BOUND AND REASSESS:** room head `e9fd18a` is fully green; retention head
-   `70d9308` subsequently failed ARM Snapcast on shared short inserted-silence
-   evidence. Keep that failure and unchanged gates; the next feature CI supplies
-   a fresh observation, not a retries-until-green campaign. Keep at least three ranked
+5. **BOUND AND REASSESS:** operator head `1897843` is fully green; the unchanged
+   Snapcast gate passed after `70d9308` failed on a shared short zero-run pattern.
+   Keep that failure and unresolved cause; no extra replay or weakened gate.
+   Assess portable saved-library workflows for actual value. Keep at least three ranked
    candidates and work independently during CI. Next review **08:40–09:10 UTC**;
    risk cutoff 16:30, stabilize 17:00, hard stop 18:00 UTC.
 

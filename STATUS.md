@@ -8,16 +8,15 @@
 based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
 squash-merged. No main push, merge or release is authorized for this phase.
 
-Latest fully CI-verified checkpoint **`e9fd18acd77e96a4d38edef89532a3bbc577521a`**
-passes **all four jobs/every step** in **run 38361339841**, verified **07:27 UTC**.
-Hosted floor groups **4886+708 /75 skips** pass **147.26s/141.59s** under 165s:
-**5594 passed /75 skipped** total. The existing real Chrome and all native gates
-pass. This includes room-name source but does not add a dedicated browser rename
-scenario. Installer retention checkpoint `70d9308` failed ARM Snapcast in run 38362764862;
-all other jobs and ARM preceding steps passed. Correct median gain accompanied
-a shared 431-frame zero run and only 5/7 matching windows. Its origin is unresolved;
-keep the failure recorded and gates unchanged. Subsequent operator code needs
-its own CI; no green claim extends past `e9fd18a`.
+Latest fully CI-verified checkpoint **`189784309d6eb86e10ed2a0c7294e731fed0226d`**
+passes **all four jobs/every step** in **run 38365397046**, verified **08:05 UTC**.
+Floor groups **5102+708 /76 skips** pass **128.36s/102.14s** under 165s:
+**5810 passed /76 skipped**. Native defaults pass **5811/75**, including the required
+real socket-refusal case. Both architectures prove genuine installed migration,
+seven-file preservation/Plex omission, no-clobber and installed Spotify packaging.
+The unchanged Snapcast gate also passes both architectures. Prior `70d9308` run
+38362764862 remains FAILED on a shared 431-frame zero run; this later pass does
+not identify its cause. Subsequent Web/recovery/config changes require new CI.
 
 ## Active corrected work
 
@@ -86,7 +85,7 @@ software work; no report/CI wait is used instead of useful independent work.
   output publishes config last, with committed/durability uncertainty distinguished.
   Root integration passes 250 +1 declared native opt-in skip on both Python
   versions; independent review and an installed-wheel smoke pass. Genuine
-  installed-native/socket proof remains hosted pending. No activation or live
+  installed-native/socket proof passes both architectures at `1897843`. No activation or live
   user migration occurred. See GETTING_STARTED for restrictions and recovery.
 
 - **Optional Spotify preparation:** `spotify prepare-exclusive` writes private,
@@ -102,6 +101,24 @@ software work; no report/CI wait is used instead of useful independent work.
   them before effects; cleanup of old prefixes and quoted source/config arguments
   remains supported. Root affected-file checks pass 167 +1 native skip on each
   interpreter. This is a separate behavior fix, not part of template extraction.
+
+- **Web output inspection:** a button-driven, non-modal read captures running
+  config scalars and uses one fresh no-spawn diagnostic client. Overlap is refused
+  without queueing or playback locks; identifiers/paths are hidden. Session changes
+  and dismissal discard late results. No active backend command or physical-audio
+  claim. Merged Web checks pass 535 on each interpreter; dedicated browser/native
+  acceptance of this new card remains separate from the existing diagnostic proof.
+- **Recovery guidance:** current-selection retry progress, exhaustion and backend
+  uncertainty use fixed private-safe messages. The existing three-attempt budget,
+  explicit Play/Stop policy, commands and sticky UNKNOWN remain unchanged.
+- **Ambiguous startup input:** duplicate explicit root settings now fail privately
+  before construction/effects. Unique settings, valid merge overrides, aliases,
+  coercions and legacy load_config behavior remain. Root startup/migration checks
+  pass 266 +1 declared native skip on each interpreter.
+- **Offline input guard:** the Spotify preparer rejects existing non-regular leaves
+  before opening them, retaining post-open checks and the documented same-user
+  replacement-race limit. A five-line fix passes 168 related checks on each Python;
+  synthetic negative controls confirm the prior gap without opening any device.
 
 ## Implemented scope
 

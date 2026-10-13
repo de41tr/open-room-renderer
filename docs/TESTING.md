@@ -1,5 +1,44 @@
 # Test evidence and limits
 
+## Web operator guidance and startup-input boundary
+
+The Web inspection callback captures only running-config scalars and creates a
+fresh no-spawn diagnostic client. The existing bounded two-property method is
+unchanged. Exact admission, hidden identifiers, immediate overlap refusal,
+cancellation/cleanup, session changes and discarded late results are covered.
+Independent busy/privacy negative controls fail as intended. Recovery guidance
+uses only current selection-owned counters and allowlisted errors; exhaustion
+still performs exactly initial load plus three retries, and explicit Play makes
+the next load. No snapshot read drives recovery or changes command gates.
+
+Root merged Web/output/recovery/diagnostic/export checks pass **535** on Python
+3.12 (**11.13s**) and 3.11 (**11.14s**), including the combined frontend suite.
+Earlier isolated recovery integration passes 279 in 10.00s/9.96s. These are
+synthetic transport/server and DOM-double checks, not dedicated browser acceptance
+of the new card or physical audio evidence. No local AF_UNIX route was retried.
+
+Duplicate explicit root YAML settings now fail before construction or effects.
+The change preserves unique inputs, legitimate merges, aliases, coercions and
+legacy public load_config. Review caught a !!value-key normalization bypass before
+freeze. Root startup/config-check/migration checks pass **266 +1 declared native
+skip** in **15.45s/15.32s** on Python 3.12/3.11. This is an intentional startup
+validation change, not a behavior-neutral parser extraction.
+
+The separate five-line offline Spotify input guard refuses existing special leaves
+before opening them, while retaining post-open type/permission checks. Thirty
+synthetic pre-open regressions fail on the baseline and pass after correction;
+no real special file/device is opened. Root related checks pass **168** in
+**8.95s/9.23s** on Python 3.12/3.11. Same-user replacement races remain outside its
+pre-open guarantee, as documented; no broader filesystem framework was added.
+
+Preceding head **1897843** is fully green in run **38365397046**, all four jobs/every
+step, verified 08:05 UTC. Floor **5810/76** (128.36s/102.14s); native **5811/75**
+includes the required real socket-refusal case. Both architectures pass genuine
+installed-profile capture/Plex omission/no-clobber and Spotify parser packaging.
+The unchanged Snapcast gate passes all stages, including the previously failed
+one. Earlier run 38362764862 stays failed and its cause unresolved; no thresholds,
+windows, warmup or caps changed. The new source still requires its own CI.
+
 ## Latest integrated operator package and unresolved hosted failure
 
 Root Spotify/diagnostic/config/CLI/migration/installer integration passes **279 +1
@@ -542,6 +581,31 @@ existing installed-CLI, Unix, native audio, lifetime and client lanes remain
 part of that verification; prior green source checkpoints cannot substitute.
 
 ## Explicit startup configuration errors
+
+### Duplicate explicit root settings
+
+`tests/test_startup_duplicates.py` covers the deliberate startup-input policy
+change: repeated explicit top-level string settings fail before Config
+construction, including output followed by null, state paths, HTTP/UPnP ports,
+quoted/escaped/aliased/value-tag keys, identical values and duplicates beside a YAML merge.
+Exact fixed diagnostics omit even an unknown private key and credential-bearing
+value. Captured text never reopens its pathname. Config-check and explicit-serve
+dispatch are tested with construction, state, UUID, logging, backend, process
+and socket guards; existing synthetic saved bytes remain unchanged. The serve
+coroutine is advanced only to its synchronous validation failure, without an
+event loop, self-pipe, listeners or native services.
+
+Compatibility coverage preserves empty/null defaults, accepted scalar coercions,
+aliases (including recursive values), merge order/precedence, single explicit
+merge overrides, and nested-map behavior. The public legacy loader still selects
+the last duplicate value. This root-only rejection is a behavior/error-policy
+change, not a diagnostic-only refactor or a complete configuration schema.
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_startup_duplicates.py tests/test_config_check.py
+```
+
+### Existing startup boundary
 
 `tests/test_startup_config.py` covers the startup-only input boundary: real CLI
 and checkout-wrapper subprocesses reject missing/directory/unreadable files,

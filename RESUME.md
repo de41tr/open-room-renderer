@@ -10,16 +10,15 @@ stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 Work exclusively on `dot/renderer-next-phase-20261013` in
 [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
 `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest fully CI-verified checkpoint **`e9fd18acd77e96a4d38edef89532a3bbc577521a`**
-passes **all four jobs/every step** in **run 38361339841**, verified **07:27 UTC**.
-Hosted floor groups **4886+708 /75 skips** pass **147.26s/141.59s** under 165s:
-**5594 passed /75 skipped** total. The existing real Chrome and all native gates
-pass. This includes room-name source but does not add a dedicated browser rename
-scenario. Installer retention checkpoint `70d9308` failed ARM Snapcast in run 38362764862;
-all other jobs and ARM preceding steps passed. Correct median gain accompanied
-a shared 431-frame zero run and only 5/7 matching windows. Its origin is unresolved;
-keep the failure recorded and gates unchanged. Subsequent operator code needs
-its own CI; no green claim extends past `e9fd18a`.
+Latest fully CI-verified checkpoint **`189784309d6eb86e10ed2a0c7294e731fed0226d`**
+passes **all four jobs/every step** in **run 38365397046**, verified **08:05 UTC**.
+Floor groups **5102+708 /76 skips** pass **128.36s/102.14s** under 165s:
+**5810 passed /76 skipped**. Native defaults pass **5811/75**, including the required
+real socket-refusal case. Both architectures prove genuine installed migration,
+seven-file preservation/Plex omission, no-clobber and installed Spotify packaging.
+The unchanged Snapcast gate also passes both architectures. Prior `70d9308` run
+38362764862 remains FAILED on a shared 431-frame zero run; this later pass does
+not identify its cause. Subsequent Web/recovery/config changes require new CI.
 
 ## What is already delivered
 
@@ -65,12 +64,11 @@ Maintain three useful potential packages and work independently during CI.
    output selection, pure config checking and no-start output diagnosis are
    published and fully green at `4fd1607`. Native output/null proof passes on both
    architectures. No provider-account, shared-DSP or physical-output claim.
-3. **Next useful work:** verify the new installed migration/socket and Spotify
-   parser packaging checks in the next feature-head CI; retain the unresolved
-   prior Snapcast failure and investigate common-path silence only if it recurs;
-   rank actual remaining Web/operator recovery gaps before selecting another
-   feature. Offline migration, Spotify artifact generation and the narrow systemd
-   path fix are reviewed and integrated. No active provider/service operation.
+3. **Next useful work:** publish the reviewed output-inspection, recovery,
+   duplicate-input and special-file-guard commits; verify exact-head CI without
+   changing acceptance gates. Assess saved DSP/favorites portability against
+   existing codecs and full offline migration before choosing further work.
+   Keep any new feature bounded and evidence-backed; no mandatory format growth.
 4. **Honor the corrected Spotify choice.** [ADR001](docs/adr/001-spotify-sidecar.md)
    ranks go-librespot 76 / librespot 69 / Soloist 61. Build expiry is not key renewal.
    No actual account/client/provider operation occurred. A separately accepted
