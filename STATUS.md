@@ -8,14 +8,15 @@
 based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
 squash-merged. No main push, merge or release is authorized for this phase.
 
-Latest fully CI-verified checkpoint **`144db3822876a52ca1bd889dbcd318117a56cd3f`**
-passes **all four jobs/every step** in **run 38384524114**, verified **10:54 UTC**.
-Floor groups **6000+708 /76 skips** pass **132.44s/106.58s** under 165s:
-**6708 passed /76 skipped**; native defaults **6709/75** on both architectures.
-Standard Chrome and all native/Unix, installed, discovery and Snapcast gates pass.
+Latest fully CI-verified checkpoint **`20bff6c7911631480392f1363ef7ef65627bf986`**
+passes **all four jobs/every step** in **run 38388607430**, verified **11:27 UTC**.
+Floor groups **6267+708 /76 skips** pass **163.24s/140.10s** under 165s:
+**6975 passed /76 skipped**; native defaults **6976/75** on both architectures.
+Both installed native packages execute `dsp show --help`; that is packaging proof,
+not a physical DSP read. Standard Chrome and every existing native gate pass.
 Prior `70d9308` remains FAILED with unresolved zero-run cause. The subsequent
-read-only DSP CLI feature requires its own exact-head CI; its focused TCP/mock
-proof is not a new native or physical-output acceptance claim.
+redirect/privacy corrections require their own exact-head CI. Caps and scheduling
+remain unchanged; do not infer successor success from focused local checks.
 
 ## Active corrected work
 
@@ -169,6 +170,14 @@ software work; no report/CI wait is used instead of useful independent work.
   durability or physical output. Root checks pass 426 on each Python; independent
   review/replay pass. Existing cached-confirmation reconciliation is preserved.
   No endpoint, DSP mutation, persistence or backend I/O is added.
+
+- **Redirect boundary:** six bounded clients now prevent Requests' hidden
+  redirect preparation before it can drain bodies or parse private Location
+  text. Exactly one original request remains; ordinary ACK/rejection/UNKNOWN
+  categories are unchanged. A separate six-line fix keeps two older convenience
+  helpers' redirect failures private, while their non-streaming body reads stay
+  unbounded. Root merged checks pass 826 per Python; fresh reviews pass. No
+  follow, retry, new cap or total-deadline claim is introduced.
 
 ## Implemented scope
 

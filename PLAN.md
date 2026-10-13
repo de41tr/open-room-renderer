@@ -49,10 +49,12 @@ The original hard deadline remains.
 
 The whole-product review identifies a concrete remaining headless recovery gap:
 read-only `dsp show` now reuses the existing canonical Web DSP projection, with
-strict private output and explicit unconfirmed status. Verify its own CI. Its
+strict private output and explicit unconfirmed status. Exact `20bff6c` CI is
+fully green. Its
 review also demonstrated eager redirect-body consumption/private Location errors
-in six old bounded clients; fix that separately without changing normal outcome
-semantics. Richer queue bookmarks and effective-service activation rehearsal stay
+in six old bounded clients; the reviewed correction changes no normal outcome
+semantics. Two old non-streaming convenience helpers gain the same private-error
+protection in a separate commit, without claiming byte caps. Verify combined CI. Richer queue bookmarks and effective-service activation rehearsal stay
 ranked but deferred; no new format or framework merely to fill the window.
 
 ## Earlier phase plan and checkpoint history

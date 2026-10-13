@@ -2,6 +2,14 @@
 
 ## Current next-phase scope
 
+Six bounded clients now reject redirects before Requests prepares the next
+request, consumes bodies or parses Location. Ordinary successful/rejected/unknown
+outcomes, caps and inactivity timeouts stay unchanged. Two older CLI convenience
+helpers separately gain private redirect failures but keep non-streaming,
+unbounded response reads. Root merged checks pass 826 on each Python and fresh
+reviews pass; successor exact-head CI is still required. No follow/retry or new
+wall-clock deadline is claimed.
+
 Read-only `dsp show` adds a strict private projection of the existing Web DSP
 snapshot. Only CONFIRMED exits zero; PENDING/UNKNOWN return truthful null values.
 Legacy mutation formatting and outcome categories remain, with improved UNKNOWN
@@ -9,7 +17,8 @@ recovery guidance. Exact-host admission and cached confirmation reconciliation
 are preserved; no backend I/O, persistence, endpoint or physical-output claim.
 The ten-second timeout remains inactivity-based, not a total deadline. New read
 transport refuses eager redirect preparation; old clients are a separate fix.
-Focused root checks pass 426 per Python; exact-head CI is the next gate.
+Focused root checks pass 426 per Python; exact `20bff6c` CI is fully green,
+including installed-help packaging on both native hosts.
 
 The implicit startup-config fallback now distinguishes an absent leaf from an
 observable dangling/uninspectable leaf. This deliberately changes degraded bare-

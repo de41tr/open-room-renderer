@@ -781,6 +781,12 @@ closed. The ten-second timeout bounds connect/read inactivity, **not total
 wall-clock time**; a steadily arriving slow response can take longer. There are
 no redirects, retries, environment proxy/netrc credentials or cookies sent.
 
+The bounded DSP, queue, current-playlist, favorite-play, favorite-target and
+transport clients reject redirects before Requests can prepare a next request
+or consume its body. Malformed redirect locations therefore use the existing
+private failure/uncertainty path. Their byte limits and inactivity timeouts are
+unchanged; this is not a new total-runtime guarantee.
+
 ## Legacy direct controls and endpoint syntax
 
 The legacy `status`, `play`, `pause`, `resume`, `stop`, `volume`, and
@@ -789,6 +795,10 @@ ignoring environment proxies and netrc credentials. They never retry or follow r
 connect/read inactivity timeout is not a total elapsed-time deadline. Successful
 response text is printed unchanged, with a trailing newline; non-2xx responses
 fail without printing their bodies.
+The older status/favorites convenience helpers also skip hidden redirect-location
+parsing so malformed locations cannot escape as private-text tracebacks. Their
+existing non-streaming response reads remain **unbounded**; this privacy correction
+does not add a byte cap or a total deadline.
 
 Renderer hosts use the shared client grammar: ASCII letters, digits, dots and
 hyphens (up to 253 characters), or IPv6 literals with optional brackets. Scoped

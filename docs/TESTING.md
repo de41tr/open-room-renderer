@@ -1,5 +1,41 @@
 # Test evidence and limits
 
+## Redirect preparation and legacy CLI privacy
+
+Actual Requests 2.34.2 prepares Response.next even with allow_redirects=False.
+Baseline synthetic TCP evidence showed DSP reading 4,352 total bytes against its 256-byte
+cap and queue reading 1,052,672 against its 1,048,576-byte cap; malformed Location
+values escaped private failure handling. Exactly one original request was sent,
+not a followed redirect. Eighteen production lines now suppress preparation in
+six bounded clients while preserving all methods, parsers, caps and outcomes.
+
+A real-Requests guarded adapter matrix covers nine read/mutation routes, five
+redirect statuses and three Location forms; nine small TCP cases confirm wire
+behavior. All 144 new cases fail on baseline and pass corrected, as does clean
+replay. Worker focused coverage passes 658 on both Python versions, with nine
+async renderer fixtures deliberately excluded locally. Independent review passes
+144 per runtime, 330 adjacent cases and 162 extra in-memory controls. Root merged
+new/legacy DSP, queue, transport and redirect checks pass 718 per Python.
+
+A separate six-line correction prevents raw private Location/Unicode tracebacks
+from api_get and favorites_request. Tiny actual CLI subprocess probes establish
+the original failure and fixed private HTTP307 result, with one original request
+and no target contact. Its worker/reviewer focused slice passes 457 per Python;
+108 new cases retain success text, payloads and committed-durability warnings.
+These older helpers remain non-streaming and **unbounded**; no body-cap guarantee
+is inferred from this privacy-only change.
+
+Final combined root integration passes **826** on Python 3.12/3.11 in
+**17.36s/17.59s**. No actual renderer, native/audio/browser/provider/service or
+full/timing campaign was added. All timeouts remain connect/read inactivity,
+not total elapsed deadlines. Current exact-head CI is a separate gate.
+
+Preceding **20bff6c** is fully green, all four jobs/every step in **38388607430**,
+verified **11:27 UTC**: floor **6975/76**, groups **163.24s/140.10s**, native defaults
+**6976/75**. Both installed native packages execute dsp show --help; this proves
+packaging only. Existing caps and partition remain unchanged despite narrow
+floor headroom; investigate scheduling only if an actual failed gate justifies it.
+
 ## Implicit-config intent and native handover correction
 
 Bare serve's compatibility fallback now requires a missing selected leaf after
@@ -951,8 +987,8 @@ single-extraction runs do not certify later changes. No new endurance run is pla
 Root exact integration passes **426** focused cases on Python 3.12/3.11
 (**8.16s/8.37s**); worker/replay/independent review also pass. These include actual
 CLI/Requests over synthetic TCP and guarded production projection/admission,
-not a live native renderer or physical DSP measurement. New source requires its
-own CI. The added installed-help line is packaging proof only.
+not a live native renderer or physical DSP measurement. Exact `20bff6c` CI is
+fully green; the installed-help line passes both native hosts and proves packaging only.
 
 
 ```sh

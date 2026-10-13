@@ -10,14 +10,15 @@ stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 Work exclusively on `dot/renderer-next-phase-20261013` in
 [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
 `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest fully CI-verified checkpoint **`144db3822876a52ca1bd889dbcd318117a56cd3f`**
-passes **all four jobs/every step** in **run 38384524114**, verified **10:54 UTC**.
-Floor groups **6000+708 /76 skips** pass **132.44s/106.58s** under 165s:
-**6708 passed /76 skipped**; native defaults **6709/75** on both architectures.
-Standard Chrome and all native/Unix, installed, discovery and Snapcast gates pass.
+Latest fully CI-verified checkpoint **`20bff6c7911631480392f1363ef7ef65627bf986`**
+passes **all four jobs/every step** in **run 38388607430**, verified **11:27 UTC**.
+Floor groups **6267+708 /76 skips** pass **163.24s/140.10s** under 165s:
+**6975 passed /76 skipped**; native defaults **6976/75** on both architectures.
+Both installed native packages execute `dsp show --help`; that is packaging proof,
+not a physical DSP read. Standard Chrome and every existing native gate pass.
 Prior `70d9308` remains FAILED with unresolved zero-run cause. The subsequent
-read-only DSP CLI feature requires its own exact-head CI; its focused TCP/mock
-proof is not a new native or physical-output acceptance claim.
+redirect/privacy corrections require their own exact-head CI. Caps and scheduling
+remain unchanged; do not infer successor success from focused local checks.
 
 ## What is already delivered
 
@@ -63,9 +64,10 @@ Maintain three useful potential packages and work independently during CI.
    output selection, pure config checking and no-start output diagnosis are
    published and fully green at `4fd1607`. Native output/null proof passes on both
    architectures. No provider-account, shared-DSP or physical-output claim.
-3. **Next ranked packages:** verify the read-only `dsp show` checkpoint, then
-   separately close the observed eager redirect-body/private-error gap in six
-   existing bounded clients. Preserve ACK/REJECTED/UNKNOWN semantics and all caps.
+3. **Next ranked packages:** `dsp show` is fully green at `20bff6c`. Verify the
+   separate reviewed redirect-boundary and legacy-private-error corrections. Six
+   bounded clients refuse eager body reads; two non-streaming helpers gain only
+   privacy protection and remain unbounded. Preserve all outcomes and caps.
    Whole-product review defers richer queue bookmarks (3–5 hours plus unresolved
    position/restore semantics) and actual service/migrated-profile rehearsal
    (requires a suitable authorized user-service target). No substitute inert

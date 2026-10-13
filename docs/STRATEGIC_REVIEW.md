@@ -2,7 +2,7 @@
 
 ## 10:10 value review: CONTINUE bounded preservation and recovery
 
-1. **KEEP EXACT EVIDENCE:** `52ccf01` is fully green, all four jobs/every step.
+1. **KEEP EXACT EVIDENCE:** `20bff6c` is fully green, all four jobs/every step.
    Genuine browser smoke remains scoped to its original flows; new dialogs have
    synthetic coverage. Keep `70d9308` FAILED with unresolved silence insertion.
    No new browser/endurance/timing campaign or relaxed acceptance gate.
@@ -16,9 +16,9 @@
    private diagnostics and independent Stop. Publish separate correction commits.
 4. **RANK NEXT VALUE:** the whole-product review supports a narrow read-only
    `dsp show` for headless EQ recovery over the existing Web snapshot. It is now
-   reviewed; verify exact-head CI. Its review demonstrated eager redirect-body
-   consumption/private Location errors in six existing bounded clients; correct
-   that separately without changing normal outcomes. Richer queue bookmarks and
+   fully CI green. Its review demonstrated eager redirect-body consumption and
+   private Location errors; separate six-client and two-helper corrections are
+   reviewed and await their own CI, preserving normal outcomes. Richer queue bookmarks and
    effective-service/migrated-profile activation remain deferred for semantics,
    marginal value and target prerequisites. No speculative port schema or engine.
 5. **BOUND:** next value review **11:40–12:10 UTC**. Continue independent useful
