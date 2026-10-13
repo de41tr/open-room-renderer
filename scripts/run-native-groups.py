@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run exactly two explicit pytest file groups concurrently on one POSIX runner."""
+"""Run two, or explicitly three, pytest groups concurrently on one POSIX runner."""
 
 from __future__ import annotations
 
@@ -27,9 +27,9 @@ def _signal_group(process: subprocess.Popen, signum: int) -> bool:
 
 
 def run_groups(commands: list[list[str]], log_dir: Path, timeout: float) -> int:
-    """Keep both groups running after a failure; bound and clean up their trees."""
-    if len(commands) != 2 or any(not command for command in commands) or not 0 < timeout < math.inf:
-        raise ValueError("Two nonempty commands and a positive timeout are required")
+    """Keep all groups running after a failure; bound and clean up their trees."""
+    if len(commands) not in (2, 3) or any(not command for command in commands) or not 0 < timeout < math.inf:
+        raise ValueError("Two or three nonempty commands and a positive timeout are required")
     log_dir.mkdir(parents=True, exist_ok=True)
     interrupted = 0
 
@@ -102,15 +102,22 @@ def run_groups(commands: list[list[str]], log_dir: Path, timeout: float) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--timeout", type=float, default=360)
+    parser.add_argument("--groups", type=int, choices=(2, 3), default=2,
+                        help="Three groups are opt-in for the default suite; native lanes use two")
     parser.add_argument("--log-dir", type=Path, required=True)
     parser.add_argument("files", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     files = args.files[1:] if args.files[:1] == ["--"] else args.files
-    if files.count(":::") != 1:
-        parser.error("Separate exactly two explicit file groups with :::")
-    split = files.index(":::")
-    groups = [files[:split], files[split + 1:]]
-    if not all(groups) or len(set(files)) != len(files) or not 0 < args.timeout < math.inf:
+    if files.count(":::") != args.groups - 1:
+        parser.error(f"Separate exactly {args.groups} explicit file groups with :::")
+    groups: list[list[str]] = [[]]
+    for file in files:
+        if file == ":::":
+            groups.append([])
+        else:
+            groups[-1].append(file)
+    entries = [file for group in groups for file in group]
+    if not all(groups) or len(set(entries)) != len(entries) or not 0 < args.timeout < math.inf:
         parser.error("Groups must be nonempty, contain unique files, and have a positive timeout")
     return run_groups([[sys.executable, "-m", "pytest", "-q", "-s", *group]
                        for group in groups], args.log_dir, args.timeout)
