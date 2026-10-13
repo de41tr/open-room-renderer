@@ -13,6 +13,40 @@
   const text = (id, value) => { const element = $(id); if (element.textContent !== value) element.textContent = value; };
   const balanceLabel = value => value === 0 ? "Center" : `${Math.round(Math.abs(value) * 100)}% ${value < 0 ? "left" : "right"}`;
   const working = key => drafts[key] || document.activeElement === $(key);
+  // Return focus during this dismissal, never from a queued close event or a
+  // later response. Rebuilt favorite controls are resolved only in their session.
+  function dialogLifecycle(id, clear, fallback = null) {
+    const dialog = $(id);
+    let returnFocus = null;
+    function close(restore = true) {
+      const target = returnFocus, wasOpen = dialog.open;
+      returnFocus = null;
+      clear();
+      if (!wasOpen) return;
+      dialog.close();
+      if (restore === false || !target || ["favorite-dialog", "dsp-dialog", "playlist-dialog", "export-dialog"].some(other => $(other).open)) return;
+      const available = item => item?.isConnected && !item.disabled && !item.closest("[hidden], [inert], details:not([open])");
+      const replacement = target.favoriteKey && target.session === snapshot?.session_id
+        ? Array.from($("favorites-list").querySelectorAll("button")).find(button => button.dataset.favoriteKey === target.favoriteKey) : null;
+      [target.opener, replacement, fallback && $(fallback), $("refresh")].find(available)?.focus({preventScroll: true});
+    }
+    dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
+    // Native close events are queued: an old event must not clear a reopened
+    // draft, restore old focus, or retain the old opening control.
+    dialog.addEventListener("close", () => { if (!dialog.open) { returnFocus = null; clear(); } });
+    return {
+      open(opener) {
+        if (dialog.open) return;
+        returnFocus = {opener, favoriteKey: opener?.dataset.favoriteKey, session: snapshot?.session_id};
+        dialog.showModal();
+      },
+      close
+    };
+  }
+  const favoriteDialog = dialogLifecycle("favorite-dialog", clearFavoriteForm, "add-favorite");
+  const presetDialog = dialogLifecycle("dsp-dialog", clearPresetForm, "dsp-preset");
+  const playlistDialog = dialogLifecycle("playlist-dialog", clearPlaylist);
+  const exportDialog = dialogLifecycle("export-dialog", clearExport);
   async function request(path, options) {
     const abort = new AbortController();
     const timer = window.setTimeout(() => abort.abort(), options.method === "POST" ? 20000 : 8000);
@@ -284,7 +318,7 @@
     $("playlist-file").value = ""; $("playlist-urls").value = ""; $("playlist-name").value = ""; $("playlist-confirm").checked = false;
     text("playlist-dialog-status", ""); text("playlist-preview", ""); text("playlist-size", "");
   }
-  function closePlaylist() { clearPlaylist(); $("playlist-dialog").close(); }
+  function closePlaylist(restore = true) { playlistDialog.close(restore); }
   function openPlaylist(action) {
     if (!control.canMutate(action)) return;
     clearPlaylist(); playlistDraft = new PlaylistDraft(snapshot, action);
@@ -295,14 +329,11 @@
     text("playlist-dialog-heading", append ? "Add URLs to queue" : "Load playlist");
     text("playlist-dialog-hint", append ? "Append explicit URLs to this queue. Supported track metadata is preserved, shuffle history is reset, and playback remains stopped." : "Replace the queue from a local authored JSON file, an M3U URL list, or pasted explicit URLs. Playback remains stopped.");
     text("playlist-submit", append ? "Add URLs, keep stopped" : "Replace queue, keep stopped");
-    renderPlaylist(); $("playlist-dialog").showModal(); $(append ? "playlist-urls" : "playlist-format").focus();
+    renderPlaylist(); playlistDialog.open($(append ? "playlist-add" : "playlist-load")); $(append ? "playlist-urls" : "playlist-format").focus();
   }
   $("playlist-load").addEventListener("click", () => openPlaylist("playlist_replace"));
   $("playlist-add").addEventListener("click", () => openPlaylist("playlist_append"));
   ["playlist-close", "playlist-cancel"].forEach(id => $(id).addEventListener("click", closePlaylist));
-  // Native close events are queued: an old event must not erase a reopened draft.
-  $("playlist-dialog").addEventListener("close", () => { if (!$("playlist-dialog").open) clearPlaylist(); });
-  $("playlist-dialog").addEventListener("cancel", event => { event.preventDefault(); closePlaylist(); });
   $("playlist-format").addEventListener("change", () => {
     if (!playlistDraft || playlistDraft.sent || playlistDraft.stale || playlistDraft.action !== "playlist_replace") return;
     const format = $("playlist-format").value;
@@ -350,7 +381,7 @@
     text("export-summary", ""); text("export-status", "");
     $("export-prepare").disabled = true; $("export-confirm").disabled = true;
   }
-  function closeExport() { clearExport(); $("export-dialog").close(); }
+  function closeExport(restore = true) { exportDialog.close(restore); }
   function exportCurrent(context) {
     return exportContext === context && $("export-dialog").open && !context.stale && control.fresh && snapshot && context.identity === exportIdentity(snapshot);
   }
@@ -432,12 +463,10 @@
     if (!control.fresh || !snapshot?.queue.count || $("export-dialog").open) return;
     clearExport();
     exportContext = {state: snapshot, identity: exportIdentity(snapshot), summary: null, pending: false, failed: false, sent: false, stale: false, url: null, abort: null, status: ""};
-    $("export-dialog").showModal(); $("export-close").focus();
+    exportDialog.open($("playlist-export")); $("export-close").focus();
     return prepareExport(exportContext, false);
   });
   ["export-close", "export-cancel"].forEach(id => $(id).addEventListener("click", closeExport));
-  $("export-dialog").addEventListener("cancel", event => { event.preventDefault(); closeExport(); });
-  $("export-dialog").addEventListener("close", () => { if (!$("export-dialog").open) clearExport(); });
   $("export-confirm").addEventListener("change", () => {
     if (exportContext && !$("export-confirm").checked) {
       releaseExportFile(exportContext);
@@ -478,7 +507,7 @@
         const actions = element("div", "favorite-actions");
         if (favorite.editable) {
           [["rename", "Rename"], ["delete", "Delete"]].forEach(([action, label]) => {
-            const button = element("button", "button subtle small", label); button.type = "button"; button.dataset.favoriteKey = `${action}:${favorite.id}`; button.setAttribute("aria-label", `${label} favorite: ${favorite.name}`); button.addEventListener("click", () => openFavorite(action, favorite)); actions.append(button);
+            const button = element("button", "button subtle small", label); button.type = "button"; button.dataset.favoriteKey = `${action}:${favorite.id}`; button.setAttribute("aria-label", `${label} favorite: ${favorite.name}`); button.addEventListener("click", () => openFavorite(action, favorite, button)); actions.append(button);
           });
         } else actions.append(element("span", "read-only", "From config"));
         row.append(actions); fragment.append(row);
@@ -518,7 +547,7 @@
       if (result.kind === "acknowledged") { drafts[key] = false; $(key + "-draft").hidden = true; $(key).blur(); render(); }
     });
   });
-  function openFavorite(mode, favorite = null) {
+  function openFavorite(mode, favorite = null, opener = $(mode === "current" ? "save-current" : "add-favorite")) {
     if (!control.canMutate("favorite_add") || !control.favoritesFresh) return;
     dialogContext = {mode, favorite, generation: snapshot.generation, session: snapshot.session_id, serial: ++dialogSerial};
     $("favorite-form").reset(); text("favorite-dialog-status", "");
@@ -531,7 +560,7 @@
     $("favorite-name").value = favorite?.name || (mode === "current" ? snapshot.media.title : "");
     $("favorite-submit").classList.toggle("destructive", mode === "delete");
     $("favorite-submit").disabled = false;
-    $("favorite-dialog").showModal();
+    favoriteDialog.open(opener);
     (mode === "delete" ? $("favorite-cancel") : $("favorite-name")).focus();
   }
   function clearFavoriteForm() {
@@ -541,11 +570,9 @@
     $("favorite-name").value = "";
     text("favorite-delete-name", ""); text("favorite-dialog-status", "");
   }
-  function closeFavorite() { $("favorite-dialog").close(); clearFavoriteForm(); }
+  function closeFavorite(restore = true) { favoriteDialog.close(restore); }
   // Closing the dialog clears local input only. An in-flight command continues
   // independently and its acknowledgement/unknown outcome stays in the notice.
-  // A queued close event from an older dialog must not clear its reopened draft.
-  $("favorite-dialog").addEventListener("close", () => { if (!$("favorite-dialog").open) clearFavoriteForm(); });
   ["favorite-close", "favorite-cancel"].forEach(id => $(id).addEventListener("click", closeFavorite));
   $("add-favorite").addEventListener("click", () => openFavorite("add"));
   $("save-current").addEventListener("click", () => openFavorite("current"));
@@ -615,13 +642,12 @@
     $("dsp-shared-field").hidden = !shared; $("dsp-shared-confirm").disabled = !shared; $("dsp-shared-confirm").required = shared;
     text("dsp-shared-warning", `This preset is shared. ${mode === "delete" ? "Deleting" : "Renaming"} it affects ALL stored contexts that use it, including other source or channel settings.`);
     $("dsp-preset-submit").classList.toggle("destructive", mode === "delete");
-    renderSoundEditor(); $("dsp-dialog").showModal(); (mode === "delete" ? $("dsp-cancel") : $("dsp-name")).focus();
+    renderSoundEditor(); presetDialog.open($("dsp-" + mode)); (mode === "delete" ? $("dsp-cancel") : $("dsp-name")).focus();
   }
   function clearPresetForm() { presetContext = null; $("dsp-name").value = ""; $("dsp-shared-confirm").checked = false; text("dsp-preset-name", ""); text("dsp-dialog-status", ""); }
-  function closePreset() { $("dsp-dialog").close(); clearPresetForm(); }
+  function closePreset(restore = true) { presetDialog.close(restore); }
   ["save", "rename", "delete"].forEach(mode => $("dsp-" + mode).addEventListener("click", () => openPreset(mode)));
   ["dsp-close", "dsp-cancel"].forEach(id => $(id).addEventListener("click", closePreset));
-  $("dsp-dialog").addEventListener("close", () => { if (!$("dsp-dialog").open) clearPresetForm(); });
   $("dsp-preset-form").addEventListener("submit", async event => {
     event.preventDefault();
     const context = presetContext, editor = currentEditor();
@@ -656,7 +682,7 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
   // Scrub private dialog input before navigation/BFCache, even if already closed.
   // Only local drafts are dismissed; sent commands and their outcomes stay live.
-  window.addEventListener("pagehide", () => { closePlaylist(); closeFavorite(); closePreset(); closeExport(); });
+  window.addEventListener("pagehide", () => { closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); });
   window.addEventListener("online", () => poll());
   window.addEventListener("offline", () => { control.fresh = false; control.favoritesFresh = false; render(); });
   poll();

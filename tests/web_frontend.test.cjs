@@ -152,9 +152,10 @@ const vm = require('node:vm');
 async function appHarness() {
   const ids = new Map();
   let current = state(), library = favorites([favorite()]), revision = 0, postHook = null, exportHook = null;
-  const requests = [], events = new Map(), timers = new Map(), blobs = new Map(), created = [], revoked = [], syntheticClicks = []; let timerId = 0;
+  const requests = [], events = new Map(), timers = new Map(), blobs = new Map(), created = [], revoked = [], syntheticClicks = [], focusCalls = []; let timerId = 0;
   class Element {
     constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attributes = {}; this.listeners = new Map(); this.textContent = ''; this.value = ''; this.hidden = false; this.disabled = false; this.checked = false; this.classList = {toggle() {}}; this.open = false; }
+    get isConnected() {return this.attached === true || Boolean(this.parentNode?.isConnected);}
     get value() {return this._value || '';}
     set value(value) {this._value = value; if (this.type === 'file' && value === '') this.files = [];}
     setAttribute(key, value) {this.attributes[key] = value; if (key === 'src') this.src = value;}
@@ -163,18 +164,23 @@ async function appHarness() {
     addEventListener(name, callback) {if (!this.listeners.has(name)) this.listeners.set(name, []); this.listeners.get(name).push(callback);}
     async fire(name) {const event = {defaultPrevented: false, preventDefault() {this.defaultPrevented = true;}}; for (const callback of this.listeners.get(name) || []) await callback(event); return event;}
     click() {syntheticClicks.push(this.id); return this.fire('click');}
-    append(...children) {this.children.push(...children.flatMap(child => child.tagName === 'FRAGMENT' ? child.children : [child]));}
-    replaceChildren(...children) {this.children = []; this.append(...children);}
+    append(...children) {for (const child of children.flatMap(child => child.tagName === 'FRAGMENT' ? child.children : [child])) {child.parentNode = this; this.children.push(child);}}
+    replaceChildren(...children) {for (const child of this.children) child.parentNode = null; this.children = []; this.append(...children);}
     querySelectorAll(tag) {const found = []; for (const child of this.children) {if (child.tagName.toLowerCase() === tag) found.push(child); found.push(...child.querySelectorAll(tag));} return found;}
-    focus() {document.activeElement = this;}
+    closest(selector) {
+      assert.equal(selector, '[hidden], [inert], details:not([open])');
+      for (let node = this; node; node = node.parentNode) if (node.hidden || node.inert || node.tagName === 'DETAILS' && !node.open) return node;
+      return null;
+    }
+    focus() {focusCalls.push(this); if (this.isConnected && !this.disabled && !this.closest('[hidden], [inert], details:not([open])')) document.activeElement = this;}
     blur() {if (document.activeElement === this) document.activeElement = null;}
     showModal() {this.open = true;}
-    close() {this.open = false; this.fire('close');}
+    close() {if (!this.open) return; this.open = false; this.fire('close');}
     reset() {ids.get('favorite-name').value = ''; ids.get('favorite-url').value = '';}
   }
   const html = fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/index.html'), 'utf8');
   for (const match of html.matchAll(/<([a-z][a-z0-9]*)\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
-    const element = new Element(match[1]); element.id = match[3]; element.hidden = /\bhidden\b/.test(match[2]); element.disabled = /\bdisabled\b/.test(match[2]);
+    const element = new Element(match[1]); element.attached = true; element.id = match[3]; element.hidden = /\bhidden\b/.test(match[2]); element.disabled = /\bdisabled\b/.test(match[2]);
     const type = match[2].match(/\btype="([^"]*)"/); if (type) element.type = type[1];
     const value = match[2].match(/\bvalue="([^"]*)"/); if (value) element.value = value[1];
     const download = match[2].match(/\bdownload="([^"]*)"/); if (download) element.setAttribute('download', download[1]); ids.set(element.id, element);
@@ -197,7 +203,7 @@ async function appHarness() {
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/app.js'), 'utf8'), {window, document, fetch, AbortController, TextEncoder, TextDecoder, Uint8Array, URL: TestURL, Blob, Date, console});
   async function settle() {for (let i = 0; i < 10; i += 1) await tick();}
   await settle();
-  return {ids, timers, requests, blobs, created, revoked, syntheticClicks, setExport: fn => {exportHook = fn;}, exports: () => requests.filter(item => item.url.endsWith('/playlist/export')), pagehide: (persisted = true) => events.get('pagehide')?.({type: 'pagehide', persisted}), pageshow: () => events.get('pageshow')?.({type: 'pageshow', persisted: true}), setState: value => {current = value;}, setFavorites: value => {library = value;}, setPost: fn => {postHook = fn;}, settle, refresh: async () => {await ids.get('refresh').fire('click'); await settle();}, posts: () => requests.filter(item => item.options.method === 'POST').map(item => JSON.parse(item.options.body))};
+  return {ids, timers, requests, blobs, created, revoked, syntheticClicks, focusCalls, focused: () => document.activeElement, setExport: fn => {exportHook = fn;}, exports: () => requests.filter(item => item.url.endsWith('/playlist/export')), pagehide: (persisted = true) => events.get('pagehide')?.({type: 'pagehide', persisted}), pageshow: () => events.get('pageshow')?.({type: 'pageshow', persisted: true}), setState: value => {current = value;}, setFavorites: value => {library = value;}, setPost: fn => {postHook = fn;}, settle, refresh: async () => {await ids.get('refresh').fire('click'); await settle();}, posts: () => requests.filter(item => item.options.method === 'POST').map(item => JSON.parse(item.options.body))};
 }
 test('app renders metadata as text, and polling preserves favorite form edits', async () => {
   const h = await appHarness();
@@ -1183,4 +1189,155 @@ test('an old private read cannot revoke or replace a newer dialog-owned Blob', a
   await h.ids.get('export-close').fire('click'); await old; h.setExport(null); await readyExport(h); const owned = h.created[0];
   late.resolve({done: false, value: encoded(privateJSON({name: 'Old private document'}))}); await h.settle();
   assert.equal(h.ids.get('export-download').getAttribute('href'), owned); assert.equal(h.created.length, 1); assert.equal(h.revoked.length, 0); assert.equal(await h.blobs.get(owned).text(), privateJSON());
+});
+
+/* Logical focus-target checks only. The double models connected/detached nodes
+ * and records application focus calls; native focus/modality remains browser QA. */
+const focusDialogs = [
+  {dialog: 'favorite-dialog', open: 'add-favorite', close: 'favorite-close', cancel: 'favorite-cancel'},
+  {dialog: 'dsp-dialog', open: 'dsp-save', close: 'dsp-close', cancel: 'dsp-cancel'},
+  {dialog: 'playlist-dialog', open: 'playlist-load', close: 'playlist-close', cancel: 'playlist-cancel'},
+  {dialog: 'export-dialog', open: 'playlist-export', close: 'export-close', cancel: 'export-cancel'}
+];
+const favoriteAction = (h, action, id = 'favorite-id') => h.ids.get('favorites-list').querySelectorAll('button').find(button => button.dataset.favoriteKey === `${action}:${id}`);
+async function dismissDialog(h, kind, dismiss) {
+  if (dismiss === 'escape') {const event = await h.ids.get(kind.dialog).fire('cancel'); assert.equal(event.defaultPrevented, true);}
+  else await h.ids.get(kind[dismiss]).fire('click');
+}
+test('logical dialog focus returns to each explicit opening control for Close, Cancel and Escape', async () => {
+  for (const kind of focusDialogs) for (const dismiss of ['close', 'cancel', 'escape']) {
+    const h = await appHarness(), opener = h.ids.get(kind.open);
+    h.ids.get('refresh').focus(); // Pointer activation need not focus its button.
+    await opener.fire('click'); const before = h.focusCalls.length;
+    await dismissDialog(h, kind, dismiss);
+    assert.equal(h.ids.get(kind.dialog).open, false); assert.equal(h.focused(), opener, `${kind.dialog}: ${dismiss}`);
+    assert.deepEqual(h.focusCalls.slice(before), [opener]); assert.equal(h.posts().length, kind.dialog === 'export-dialog' ? 1 : 0);
+  }
+});
+test('logical favorite focus resolves successful rename replacement and deleted favorite Add fallback', async () => {
+  for (const mode of ['rename', 'delete']) {
+    const h = await appHarness(), opener = favoriteAction(h, mode);
+    h.setPost(() => {h.setFavorites(favorites(mode === 'rename' ? [{...favorite(), name: 'Renamed'}] : [])); return {request_acknowledged: true};});
+    await opener.fire('click'); h.ids.get('favorite-name').value = 'Renamed';
+    await h.ids.get('favorite-form').fire('submit');
+    assert.equal(opener.isConnected, false); assert.equal(h.ids.get('favorite-dialog').open, false);
+    const expected = mode === 'rename' ? favoriteAction(h, mode) : h.ids.get('add-favorite');
+    assert.notEqual(expected, opener); assert.equal(expected.disabled, false); assert.equal(h.focused(), expected);
+    assert.equal(h.posts().length, 1); assert.equal(h.posts()[0].action, `favorite_${mode}`);
+  }
+});
+test('logical favorite focus survives remote redraw before Close, Cancel or Escape without sending', async () => {
+  for (const mode of ['rename', 'delete']) for (const dismiss of ['close', 'cancel', 'escape']) {
+    const h = await appHarness(), opener = favoriteAction(h, mode);
+    await opener.fire('click'); h.setFavorites(favorites([{...favorite(), name: 'Changed remotely'}])); await h.refresh();
+    const expected = favoriteAction(h, mode); assert.equal(opener.isConnected, false); assert.notEqual(expected, opener);
+    await dismissDialog(h, focusDialogs[0], dismiss);
+    assert.equal(h.focused(), expected); assert.equal(h.posts().length, 0);
+  }
+});
+test('logical favorite focus never resolves an identical row identity from a different session', async () => {
+  const h = await appHarness(), opener = favoriteAction(h, 'rename'); await opener.fire('click');
+  h.setState(state({session_id: 'restarted'})); h.setFavorites(favorites([favorite()], 'restarted')); await h.refresh();
+  assert.equal(opener.isConnected, false); assert.equal(favoriteAction(h, 'rename').disabled, false);
+  await h.ids.get('favorite-cancel').fire('click'); assert.equal(h.focused(), h.ids.get('add-favorite')); assert.equal(h.posts().length, 0);
+});
+test('logical preset focus falls back to Presets after verified rename or deletion disables its opener', async () => {
+  for (const mode of ['rename', 'delete']) {
+    const h = await appHarness(); await selectPreset(h, revisionID('c')); const opener = h.ids.get('dsp-' + mode);
+    await opener.fire('click'); h.ids.get('dsp-name').value = 'Renamed';
+    h.setPost(() => {const presets = editor().presets.filter(preset => preset.id !== revisionID('c')); if (mode === 'rename') presets.push({id: revisionID('f'), name: 'Renamed', kind: 'saved', shared: false}); h.setState(soundState(editor({revision: revisionID('e'), presets}))); return {request_acknowledged: true};});
+    await h.ids.get('dsp-preset-form').fire('submit');
+    assert.equal(opener.disabled, true); assert.equal(h.ids.get('dsp-dialog').open, false); assert.equal(h.ids.get('dsp-preset').disabled, false);
+    assert.equal(h.focused(), h.ids.get('dsp-preset')); assert.equal(h.posts().length, 1);
+  }
+});
+test('logical preset focus handles remote deletion before Cancel and Escape', async () => {
+  for (const dismiss of ['cancel', 'escape']) {
+    const h = await appHarness(); await selectPreset(h, revisionID('c')); await h.ids.get('dsp-rename').fire('click');
+    h.setState(soundState(editor({revision: revisionID('e'), presets: editor().presets.filter(preset => preset.id !== revisionID('c'))}))); await h.refresh();
+    await dismissDialog(h, focusDialogs[1], dismiss); assert.equal(h.focused(), h.ids.get('dsp-preset')); assert.equal(h.posts().length, 0);
+  }
+});
+test('logical dialog focus falls back to enabled Refresh when failed readback disables opening controls', async () => {
+  for (const kind of focusDialogs) for (const dismiss of ['close', 'cancel', 'escape']) {
+    const h = await appHarness(); await h.ids.get(kind.open).fire('click'); h.setState({}); await h.refresh();
+    assert.equal(h.ids.get(kind.open).disabled, true); assert.equal(h.ids.get('refresh').disabled, false);
+    await dismissDialog(h, kind, dismiss); assert.equal(h.focused(), h.ids.get('refresh'), `${kind.dialog}: ${dismiss}`);
+  }
+});
+test('logical dialog focus never chooses a disabled final fallback', async () => {
+  const h = await appHarness(); await h.ids.get('playlist-load').fire('click'); h.setState({}); await h.refresh();
+  h.ids.get('refresh').disabled = true; const before = h.focusCalls.length;
+  await h.ids.get('playlist-close').fire('click'); assert.equal(h.focusCalls.length, before);
+});
+test('logical dialog focus ignores already-closed and queued old close events before or after reopen', async () => {
+  for (const kind of focusDialogs) {
+    const h = await appHarness(), dialog = h.ids.get(kind.dialog); dialog.close = () => {dialog.open = false;};
+    await h.ids.get(kind.open).fire('click'); await h.ids.get(kind.close).fire('click'); h.ids.get('stop').focus(); const before = h.focusCalls.length;
+    await h.ids.get(kind.close).fire('click'); await dialog.fire('close'); assert.equal(h.focusCalls.length, before); assert.equal(h.focused(), h.ids.get('stop'));
+    await h.ids.get(kind.open).fire('click'); const current = h.focused(), reopened = h.focusCalls.length;
+    await dialog.fire('close'); assert.equal(dialog.open, true); assert.equal(h.focusCalls.length, reopened); assert.equal(h.focused(), current);
+    await h.ids.get(kind.cancel).fire('click'); assert.equal(h.focused(), h.ids.get(kind.open));
+    h.ids.get('stop').focus(); const ended = h.focusCalls.length; await dialog.fire('close'); assert.equal(h.focusCalls.length, ended);
+  }
+});
+test('logical dialog focus uses the new opening control after reopening a shared dialog', async () => {
+  for (const [first, second, dialog, close] of [['add-favorite', 'save-current', 'favorite-dialog', 'favorite-close'], ['playlist-load', 'playlist-add', 'playlist-dialog', 'playlist-close'], ['dsp-save', 'dsp-rename', 'dsp-dialog', 'dsp-close']]) {
+    const h = await appHarness(); await selectPreset(h, revisionID('c')); h.ids.get(dialog).close = () => {h.ids.get(dialog).open = false;};
+    await h.ids.get(first).fire('click'); await h.ids.get(close).fire('click'); await h.ids.get(second).fire('click');
+    const before = h.focusCalls.length; await h.ids.get(dialog).fire('close'); assert.equal(h.focusCalls.length, before);
+    await h.ids.get(close).fire('click'); assert.equal(h.focused(), h.ids.get(second));
+  }
+});
+test('logical dialog focus is suppressed on pagehide, including late close events and BFCache-style reopen', async () => {
+  for (const kind of focusDialogs) for (const closed of [false, true]) {
+    const h = await appHarness(), dialog = h.ids.get(kind.dialog); dialog.close = () => {dialog.open = false;};
+    await h.ids.get(kind.open).fire('click'); if (closed) dialog.open = false;
+    const before = h.focusCalls.length; h.pagehide(); h.pageshow(); await dialog.fire('close'); await h.refresh();
+    assert.equal(h.focusCalls.length, before); assert.equal(dialog.open, false); assertPrivateDialogsCleared(h); assertExportCleared(h);
+    await h.ids.get(kind.open).fire('click'); await h.ids.get(kind.close).fire('click'); assert.equal(h.focused(), h.ids.get(kind.open));
+  }
+});
+test('logical dialog focus does not leave another open modal during dismissal', async () => {
+  const h = await appHarness(); await h.ids.get('add-favorite').fire('click'); await h.ids.get('playlist-load').fire('click');
+  const before = h.focusCalls.length, current = h.focused(); await h.ids.get('favorite-close').fire('click');
+  assert.equal(h.focusCalls.length, before); assert.equal(h.focused(), current); assert.equal(h.ids.get('playlist-dialog').open, true);
+});
+test('logical dialog focus is never restored by a late acknowledged mutation after dismissal', async () => {
+  for (const kind of privateDialogs) for (const navigation of [false, true]) {
+    const h = await appHarness(), pending = deferred(); h.setPost(() => pending.promise);
+    await privateDraft(h, kind, 'Submitted'); const submitting = h.ids.get(kind.form).fire('submit'); await h.settle();
+    if (navigation) {h.pagehide(); h.pageshow();} else await h.ids.get(kind.dialog).fire('cancel');
+    h.ids.get('stop').focus(); const before = h.focusCalls.length;
+    h.setState(state({generation: 8})); h.setFavorites(favorites([{...favorite(), id: 'new-id', name: 'Submitted'}]));
+    pending.resolve({request_acknowledged: true, favorite_id: 'new-id'}); await submitting; await h.refresh();
+    assert.equal(h.focusCalls.length, before); assert.equal(h.focused(), h.ids.get('stop')); assert.equal(h.ids.get(kind.dialog).open, false); assert.equal(h.ids.get(kind.name).value, ''); assert.equal(h.ids.get(kind.status).textContent, ''); assert.equal(h.posts().length, 1);
+  }
+});
+test('logical dialog focus is never restored by an old export response while a newer modal is open', async () => {
+  const h = await appHarness(), pending = deferred(); h.setExport(() => pending.promise);
+  const reading = h.ids.get('playlist-export').fire('click'); await h.settle(); await h.ids.get('export-close').fire('click'); await reading;
+  h.setExport(null); await h.ids.get('playlist-export').fire('click'); const before = h.focusCalls.length, current = h.focused();
+  pending.resolve(exportResponse(exportSummary())); await h.settle();
+  assert.equal(h.focusCalls.length, before); assert.equal(h.focused(), current); assert.equal(h.ids.get('export-dialog').open, true);
+});
+
+test('logical dialog focus skips controls under hidden, inert or collapsed ancestors', async () => {
+  for (const kind of focusDialogs) for (const blocked of ['hidden', 'inert', 'collapsed']) {
+    const h = await appHarness(), opener = h.ids.get(kind.open);
+    await opener.fire('click');
+    // Explicit ancestry models these blockers without pretending to parse layout.
+    const ancestor = new opener.constructor(blocked === 'collapsed' ? 'details' : 'section');
+    h.ids.get('sound-panel').append(ancestor); ancestor.append(opener);
+    if (kind.dialog === 'dsp-dialog') ancestor.append(h.ids.get('dsp-preset'));
+    if (blocked !== 'collapsed') ancestor[blocked] = true;
+    const before = h.focusCalls.length; await h.ids.get(kind.close).fire('click');
+    assert.deepEqual(h.focusCalls.slice(before), [h.ids.get('refresh')], `${kind.dialog}: ${blocked}`);
+  }
+});
+test('logical favorite focus skips a rebuilt matching action hidden with its list', async () => {
+  const h = await appHarness(); await favoriteAction(h, 'rename').fire('click');
+  h.setFavorites(favorites([{...favorite(), name: 'Renamed remotely'}])); await h.refresh(); h.ids.get('favorites-list').hidden = true;
+  const before = h.focusCalls.length; await h.ids.get('favorite-cancel').fire('click');
+  assert.deepEqual(h.focusCalls.slice(before), [h.ids.get('add-favorite')]); assert.equal(h.posts().length, 0);
 });
