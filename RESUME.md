@@ -10,16 +10,14 @@ stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 Work exclusively on `dot/renderer-next-phase-20261013` in
 [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
 `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest fully CI-verified checkpoint **`322139c6ac74a8446e3e25a2d73204b6ecc185ac`**
-passes **all four jobs/every step** in **run 38382292288**, verified **10:31 UTC**.
-Floor groups **5948+708 /76 skips** pass **156.60s/143.82s** under 165s:
-**6656 passed /76 skipped**; native defaults **6657/75** on both architectures.
+Latest fully CI-verified checkpoint **`144db3822876a52ca1bd889dbcd318117a56cd3f`**
+passes **all four jobs/every step** in **run 38384524114**, verified **10:54 UTC**.
+Floor groups **6000+708 /76 skips** pass **132.44s/106.58s** under 165s:
+**6708 passed /76 skipped**; native defaults **6709/75** on both architectures.
 Standard Chrome and all native/Unix, installed, discovery and Snapcast gates pass.
-This includes private favorites transfer, saved-audio-state preservation and
-rejected queue-edit recovery. Prior `70d9308` remains FAILED with unresolved
-zero-run cause. The subsequent implicit-config and native-guide corrections
-require their own exact-head CI. New workflow interactions still have no
-dedicated browser or physical-audio acceptance claim.
+Prior `70d9308` remains FAILED with unresolved zero-run cause. The subsequent
+read-only DSP CLI feature requires its own exact-head CI; its focused TCP/mock
+proof is not a new native or physical-output acceptance claim.
 
 ## What is already delivered
 
@@ -65,13 +63,13 @@ Maintain three useful potential packages and work independently during CI.
    output selection, pure config checking and no-start output diagnosis are
    published and fully green at `4fd1607`. Native output/null proof passes on both
    architectures. No provider-account, shared-DSP or physical-output claim.
-3. **Next ranked packages:** the favorites transfer and two recovery corrections
-   are fully green at `322139c`. Verify the subsequent implicit-config leaf fence
-   and prefix-qualified Spotify handover command through exact-head CI. Keep
-   one-shot uncertainty and all existing gates; assess further work only from
-   demonstrated startup/configuration or operator-handover gaps.
-   Whole-library DSP transfer and general favorites merge/overwrite stay deferred.
-   No format/cap expansion merely to create work.
+3. **Next ranked packages:** verify the read-only `dsp show` checkpoint, then
+   separately close the observed eager redirect-body/private-error gap in six
+   existing bounded clients. Preserve ACK/REJECTED/UNKNOWN semantics and all caps.
+   Whole-product review defers richer queue bookmarks (3–5 hours plus unresolved
+   position/restore semantics) and actual service/migrated-profile rehearsal
+   (requires a suitable authorized user-service target). No substitute inert
+   framework or speculative port schema is justified.
 4. **Honor the corrected Spotify choice.** [ADR001](docs/adr/001-spotify-sidecar.md)
    ranks go-librespot 76 / librespot 69 / Soloist 61. Build expiry is not key renewal.
    No actual account/client/provider operation occurred. A separately accepted

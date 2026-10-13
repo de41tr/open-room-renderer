@@ -8,16 +8,14 @@
 based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
 squash-merged. No main push, merge or release is authorized for this phase.
 
-Latest fully CI-verified checkpoint **`322139c6ac74a8446e3e25a2d73204b6ecc185ac`**
-passes **all four jobs/every step** in **run 38382292288**, verified **10:31 UTC**.
-Floor groups **5948+708 /76 skips** pass **156.60s/143.82s** under 165s:
-**6656 passed /76 skipped**; native defaults **6657/75** on both architectures.
+Latest fully CI-verified checkpoint **`144db3822876a52ca1bd889dbcd318117a56cd3f`**
+passes **all four jobs/every step** in **run 38384524114**, verified **10:54 UTC**.
+Floor groups **6000+708 /76 skips** pass **132.44s/106.58s** under 165s:
+**6708 passed /76 skipped**; native defaults **6709/75** on both architectures.
 Standard Chrome and all native/Unix, installed, discovery and Snapcast gates pass.
-This includes private favorites transfer, saved-audio-state preservation and
-rejected queue-edit recovery. Prior `70d9308` remains FAILED with unresolved
-zero-run cause. The subsequent implicit-config and native-guide corrections
-require their own exact-head CI. New workflow interactions still have no
-dedicated browser or physical-audio acceptance claim.
+Prior `70d9308` remains FAILED with unresolved zero-run cause. The subsequent
+read-only DSP CLI feature requires its own exact-head CI; its focused TCP/mock
+proof is not a new native or physical-output acceptance claim.
 
 ## Active corrected work
 
@@ -163,6 +161,14 @@ software work; no report/CI wait is used instead of useful independent work.
 - **Native handover command:** the offline Spotify guide now quotes the selected
   installation's own executable, avoiding a missing/wrong global PATH command.
   Manual provider/account/service/output acceptance gates are unchanged.
+
+- **Headless DSP recovery:** `dsp show` reads the existing canonical Web snapshot
+  and emits only validated active status/balance/bypass/source/bands. CONFIRMED
+  exits zero; PENDING/UNKNOWN keep null values and exit one. No private names,
+  identifiers, tokens or unrelated data escape. It does not prove earlier write
+  durability or physical output. Root checks pass 426 on each Python; independent
+  review/replay pass. Existing cached-confirmation reconciliation is preserved.
+  No endpoint, DSP mutation, persistence or backend I/O is added.
 
 ## Implemented scope
 
@@ -312,11 +318,11 @@ read-only diagnostic first. Productive receiver/lifecycle/output mode still has
 An explicit exclusive whole-service mode is a valid later boundary; a universal
 multi-provider framework and shared DSP are not prerequisites for safe components.
 
-Next ranked packages: finish exact-head verification of the three bounded
-preservation/recovery packages; assess any demonstrated startup/configuration
-recovery gap; check operator reproduction instructions for remaining concrete
-handover gaps. No speculative schema, merge/overwrite or engine expansion.
-**10:10 value review: CONTINUE**; next review **11:40–12:10 UTC**.
+Next ranked work: verify read-only DSP CLI exact-head CI; separately correct the
+newly demonstrated eager redirect-body/private-error gap in six existing bounded
+clients; keep richer queue bookmarks and effective-service activation rehearsal
+deferred for semantics/value and target prerequisites. No broad client framework,
+port schema or new engine. Next value review **11:40–12:10 UTC**.
 Retain 16:30 risk cutoff, 17:00 stabilization and 18:00 hard stop.
 See [RESUME.md](RESUME.md) for the bounded next steps and [PLAN.md](PLAN.md) for
 this phase's full constraints. The historical reports below retain their own

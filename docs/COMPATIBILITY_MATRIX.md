@@ -2,13 +2,23 @@
 
 ## Current next-phase scope
 
+Read-only `dsp show` adds a strict private projection of the existing Web DSP
+snapshot. Only CONFIRMED exits zero; PENDING/UNKNOWN return truthful null values.
+Legacy mutation formatting and outcome categories remain, with improved UNKNOWN
+recovery guidance. Exact-host admission and cached confirmation reconciliation
+are preserved; no backend I/O, persistence, endpoint or physical-output claim.
+The ten-second timeout remains inactivity-based, not a total deadline. New read
+transport refuses eager redirect preparation; old clients are a separate fix.
+Focused root checks pass 426 per Python; exact-head CI is the next gate.
+
 The implicit startup-config fallback now distinguishes an absent leaf from an
 observable dangling/uninspectable leaf. This deliberately changes degraded bare-
 serve behavior only; explicit errors, successful input, true absence, captured
 text and legacy public/print loading stay compatible. No ancestor/path-integrity
 guarantee. The generated Spotify handover uses its selected native executable,
 with shell quoting; provider/account/service/physical-output gates are unchanged.
-These subsequent corrections require their own exact-head CI.
+Those operator corrections are fully green at `144db38`, all four jobs/every
+step in run 38384524114, without adding physical/effective-unit acceptance.
 
 Managed-favorites private backup/restore uses the existing v1 seven-field format
 and preserves exact logical values/IDs/order. Only healthy empty managed storage

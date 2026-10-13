@@ -14,15 +14,13 @@
    instead of choosing defaults; exact pre-effect queue-edit rejection permits
    explicit Refresh and a separate new click. Preserve valid behavior, UNKNOWN,
    private diagnostics and independent Stop. Publish separate correction commits.
-4. **RANK NEXT VALUE:** finish combined integration/CI first; assess critical
-   startup/configuration gaps only from concrete evidence; review practical
-   operator reproduction/handover gaps. Existing mute validation and intentional
-   volume coercions are not reasons to invent a broad schema: 85 guarded pure
-   probes confirm those existing protections, so further gain validation is
-   DEFERRED. The subsequent review did justify two small fixes: preserve an
-   observable implicit-config leaf instead of defaults, and qualify the generated
-   native handover executable. No further operator mismatch was found. Spotify account,
-   provider, physical-output and effective-unit acceptance remain pending.
+4. **RANK NEXT VALUE:** the whole-product review supports a narrow read-only
+   `dsp show` for headless EQ recovery over the existing Web snapshot. It is now
+   reviewed; verify exact-head CI. Its review demonstrated eager redirect-body
+   consumption/private Location errors in six existing bounded clients; correct
+   that separately without changing normal outcomes. Richer queue bookmarks and
+   effective-service/migrated-profile activation remain deferred for semantics,
+   marginal value and target prerequisites. No speculative port schema or engine.
 5. **BOUND:** next value review **11:40–12:10 UTC**. Continue independent useful
    work during CI, but do not manufacture features or test counts. No new large/
    risky work after 16:30; stabilize 17:00; hard stop 18:00 UTC.

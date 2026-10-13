@@ -23,7 +23,9 @@ pass **122**, one existing static unit verifier deselected, on both Python versi
 
 Preceding **322139c** is fully green in **38382292288**, all four jobs/every step,
 verified **10:31 UTC**: floor **6656/76**, groups **156.60s/143.82s** under unchanged
-165s caps; native defaults **6657/75**. New source requires its own exact-head CI.
+165s caps; native defaults **6657/75**. Subsequent operator head **144db38** also
+passes all four jobs/every step in **38384524114**, verified **10:54 UTC**: floor
+**6708/76**, groups **132.44s/106.58s**, native defaults **6709/75**, unchanged caps.
 
 ## Managed-favorites transfer and bounded recovery corrections
 
@@ -945,6 +947,13 @@ results are PENDING until verified for the published head. Baseline or separate
 single-extraction runs do not certify later changes. No new endurance run is planned.
 
 ## Read-only DSP CLI snapshot
+
+Root exact integration passes **426** focused cases on Python 3.12/3.11
+(**8.16s/8.37s**); worker/replay/independent review also pass. These include actual
+CLI/Requests over synthetic TCP and guarded production projection/admission,
+not a live native renderer or physical DSP measurement. New source requires its
+own CI. The added installed-help line is packaging proof only.
+
 
 ```sh
 PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_dsp_read_client.py tests/test_dsp_show_projection.py tests/test_dsp_client.py
