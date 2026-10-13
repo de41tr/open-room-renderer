@@ -169,20 +169,28 @@ def file_entry(path: Path, prefix: Path) -> dict:
     return entry
 
 
+def is_user_data(path: Path, prefix: Path) -> bool:
+    relative = path.relative_to(prefix)
+    return relative == Path("config.yaml") or relative.parts[0] in {"state", "migrated-profile"}
+
+
 def write_manifest(prefix: Path) -> None:
-    # Installation begins in a new directory; runtime state is created only later.
+    # User configuration/state never becomes installer-owned, even during recovery.
     files = []
     directories = []
     for directory, children, names in os.walk(prefix, followlinks=False):
         parent = Path(directory)
         for name in list(children):
             path = parent / name
-            if path.is_symlink():
+            if is_user_data(path, prefix):
+                children.remove(name)
+            elif path.is_symlink():
                 files.append(file_entry(path, prefix))
                 children.remove(name)
             else:
                 directories.append(str(path.relative_to(prefix)))
-        files.extend(file_entry(parent / name, prefix) for name in names if parent / name != prefix / MANIFEST)
+        files.extend(file_entry(parent / name, prefix) for name in names
+                     if parent / name != prefix / MANIFEST and not is_user_data(parent / name, prefix))
     (prefix / MANIFEST).write_text(json.dumps({"format": 1, "files": files, "directories": directories}, indent=2) + "\n")
 
 
@@ -211,6 +219,9 @@ def uninstall(prefix: Path, *, dry_run: bool) -> None:
     preserved = []
     removable = []
     for entry, path in paths:
+        # Older format-1 manifests may claim user data; ownership never overrides it.
+        if is_user_data(path, prefix):
+            continue
         if not path.exists() and not path.is_symlink():
             continue
         matches = (path.is_symlink() and entry.get("symlink") == os.readlink(path)) if "symlink" in entry else (
@@ -233,6 +244,8 @@ def uninstall(prefix: Path, *, dry_run: bool) -> None:
         manifest.unlink()
     if not dry_run:
         for path in sorted(directories, key=lambda p: len(p.parts), reverse=True):
+            if is_user_data(path, prefix):
+                continue
             try:
                 path.rmdir()  # Only empty owned directories, never foreign/runtime files.
             except OSError:
@@ -241,7 +254,8 @@ def uninstall(prefix: Path, *, dry_run: bool) -> None:
             prefix.rmdir()
         except OSError:
             pass
-    print("Runtime state, unknown files, modified files, and any manually copied service unit are preserved.")
+    print("User data (config.yaml, state/, migrated-profile/), unknown files, modified files, "
+          "and any manually copied service unit are preserved.")
 
 
 def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require_alsa: bool) -> None:

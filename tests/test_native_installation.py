@@ -206,6 +206,140 @@ def test_uninstall_rejects_replaced_parent_and_unlinks_owned_symlink_only(instal
     assert not prefix.exists()
 
 
+def test_manifest_excludes_only_root_user_data_without_traversing_it(installer, tmp_path, monkeypatch):
+    prefix = tmp_path / "p"
+    protected = ("config.yaml", "state/nested/settings.json", "migrated-profile/nested/config.yaml")
+    owned = ("config.yaml.backup", "stateful/file", "migrated-profile-old/file",
+             "source/config.yaml", "source/state/file", "source/migrated-profile/file")
+    for relative in (*protected, *owned):
+        path = prefix / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("synthetic data")
+    for name in ("state", "migrated-profile"):
+        (prefix / name / "empty").mkdir()
+    scandir = installer.os.scandir
+
+    def no_user_data_traversal(path):
+        assert Path(path) not in (prefix / "state", prefix / "migrated-profile")
+        return scandir(path)
+
+    monkeypatch.setattr(installer.os, "scandir", no_user_data_traversal)
+    installer.write_manifest(prefix)
+    data = json.loads((prefix / installer.MANIFEST).read_text())
+    assert {entry["path"] for entry in data["files"]} == set(owned)
+    assert set(data["directories"]) == {
+        "stateful", "migrated-profile-old", "source", "source/state", "source/migrated-profile"}
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_old_manifest_cannot_own_user_data_or_retain_cleanup_tools(installer, tmp_path, capsys, changed):
+    prefix = tmp_path / "p"
+    protected = ("config.yaml", "state/nested/settings.json", "migrated-profile/nested/config.yaml")
+    owned = ("source/config.yaml", "source/state/file", "source/migrated-profile/file",
+             "installation-receipt.json", "uninstall.py")
+    entries = []
+    for relative in (*protected, *owned):
+        path = prefix / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("original synthetic data")
+        entries.append(installer.file_entry(path, prefix))
+        if changed and relative in protected:
+            path.write_text("changed synthetic user data")
+    directories = ("state", "state/nested", "state/empty", "migrated-profile",
+                   "migrated-profile/nested", "migrated-profile/empty", "source",
+                   "source/state", "source/migrated-profile")
+    for relative in directories:
+        (prefix / relative).mkdir(exist_ok=True)
+    # Old manifests include the exact hashes of configuration and saved state.
+    manifest = prefix / installer.MANIFEST
+    manifest.write_text(json.dumps({"format": 1, "files": entries, "directories": directories}))
+    before = {relative: (prefix / relative).read_bytes() for relative in (*protected, *owned, installer.MANIFEST)}
+    installer.uninstall(prefix, dry_run=True)
+    assert {relative: (prefix / relative).read_bytes() for relative in before} == before
+    assert all((prefix / relative).is_dir() for relative in directories)
+    output = capsys.readouterr().out
+    assert "Preserved modified file:" not in output
+    for relative in protected:
+        assert f"Would remove {prefix / relative}" not in output
+
+    installer.uninstall(prefix, dry_run=False)
+    assert {relative: (prefix / relative).read_bytes() for relative in protected} == {
+        relative: before[relative] for relative in protected}
+    assert all((prefix / relative).is_dir() for relative in directories if not relative.startswith("source"))
+    assert not (prefix / "source").exists()
+    assert not any((prefix / relative).exists() for relative in (*owned, installer.MANIFEST))
+    assert "Preserved modified file:" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["config.yaml", "state", "migrated-profile"])
+@pytest.mark.parametrize("kind", ["regular_file", "symlink", "broken_symlink"])
+def test_user_data_names_are_protected_regardless_of_file_kind(installer, tmp_path, name, kind):
+    prefix = tmp_path / "p"
+    prefix.mkdir()
+    path = prefix / name
+    outside = tmp_path / "outside"
+    if kind == "regular_file":
+        path.write_text("user data")
+    else:
+        if kind == "symlink":
+            outside.mkdir()
+            (outside / "data").write_text("outside user data")
+        path.symlink_to(outside, target_is_directory=True)
+    entry = installer.file_entry(path, prefix)
+    installer.write_manifest(prefix)
+    manifest = prefix / installer.MANIFEST
+    data = json.loads(manifest.read_text())
+    assert data["files"] == data["directories"] == []
+    # Simulate an old or forged ownership claim; the link itself must survive.
+    data["files"] = [entry]
+    data["directories"] = [name]
+    manifest.write_text(json.dumps(data))
+    installer.uninstall(prefix, dry_run=False)
+    assert installer.file_entry(path, prefix) == entry
+    assert not manifest.exists()
+    if kind == "symlink":
+        assert (outside / "data").read_text() == "outside user data"
+
+
+@pytest.mark.parametrize("section", ["files", "directories"])
+@pytest.mark.parametrize("unsafe", ["state/../safe", "migrated-profile/./file", "config.yaml/../safe"])
+def test_protected_paths_do_not_bypass_manifest_validation(installer, tmp_path, section, unsafe):
+    prefix = tmp_path / "p"
+    prefix.mkdir()
+    safe = prefix / "safe"
+    safe.write_text("keep until all paths validate")
+    data = {"format": 1, "files": [installer.file_entry(safe, prefix)], "directories": []}
+    data[section].append({"path": unsafe, "sha256": "anything"} if section == "files" else unsafe)
+    manifest = prefix / installer.MANIFEST
+    manifest.write_text(json.dumps(data))
+    before = manifest.read_bytes()
+    with pytest.raises(ValueError, match="Unsafe path"):
+        installer.uninstall(prefix, dry_run=False)
+    assert safe.read_text() == "keep until all paths validate"
+    assert manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize("section", ["files", "directories"])
+@pytest.mark.parametrize("name", ["state", "migrated-profile"])
+def test_protected_subtrees_still_reject_symlink_traversal_before_deletion(installer, tmp_path, section, name):
+    prefix = tmp_path / "p"
+    (prefix / name).mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "file").write_text("outside user data")
+    (prefix / name / "nested").symlink_to(outside, target_is_directory=True)
+    safe = prefix / "safe"
+    safe.write_text("owned file")
+    data = {"format": 1, "files": [installer.file_entry(safe, prefix)], "directories": []}
+    unsafe = f"{name}/nested/file"
+    data[section].append({"path": unsafe, "sha256": "anything"} if section == "files" else unsafe)
+    (prefix / installer.MANIFEST).write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="traverses a symlink"):
+        installer.uninstall(prefix, dry_run=False)
+    assert safe.read_text() == "owned file"
+    assert (outside / "file").read_text() == "outside user data"
+
+
 def test_portable_and_compat_runners_keep_identity(runner, monkeypatch):
     portable_path = runner.prepare("portable")
     portable = load_config(portable_path)
@@ -309,8 +443,11 @@ def test_incomplete_install_has_safe_manifest(installer, tmp_path, monkeypatch):
     assert receipt["mode"] == "installation-incomplete"
     assert receipt["source"]["source_sha256"] == installer.source_receipt(prefix / "source")["source_sha256"]
     assert (prefix / installer.MANIFEST).is_file()
+    config = (prefix / "config.yaml").read_bytes()
     installer.uninstall(prefix, dry_run=False)
-    assert not prefix.exists()
+    assert {path.name for path in prefix.iterdir()} == {"config.yaml", "state"}
+    assert (prefix / "config.yaml").read_bytes() == config
+    assert not any((prefix / "state").iterdir())
 
 
 def test_generated_unit_quotes_spaces_and_specifiers(installer):

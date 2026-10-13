@@ -421,10 +421,18 @@ python3 ~/.local/share/open-room-renderer/uninstall.py --uninstall
 ```
 
 Use the original `--prefix` for a custom installation. Uninstall removes only
-unchanged manifest-owned files and empty owned directories. It preserves runtime
-state, edits, unknown files, and any manually copied unit; review/remove that unit
-separately and reload the user manager. No recursive broad deletion is used.
+unchanged manifest-owned files and empty owned directories. The root `config.yaml`,
+`state/`, and `migrated-profile/` are user data: they are excluded from new manifests
+and preserved even if an older manifest lists them. Edits, unknown files, and any
+manually copied unit are also preserved; review/remove that unit separately and
+reload the user manager. Protected user data alone does not retain the manifest,
+receipt, or uninstall script; modified installer-owned files still retain the
+manifest and uninstall script for review. No recursive broad deletion is used.
 Stop all renderer/mpv processes first; a remaining IPC socket blocks removal.
+Older installations retain their original `uninstall.py`. To use the current
+preservation rules on those installations, run this checkout's
+`scripts/install-native.py --prefix /path/to/old-prefix --uninstall`, first adding
+`--dry-run` to review the proposed removal.
 
 For upgrades, install into a new prefix, stop the old instance, and migrate a
 backup of its state and chosen settings. Update state/socket paths and the user
