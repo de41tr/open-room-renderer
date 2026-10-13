@@ -247,9 +247,18 @@ jobs:
           from xml.etree import ElementTree
           import fake_linkplay
           from fake_linkplay.config import Config, load_config
+          from fake_linkplay.cli import build_parser
+          from fake_linkplay import spotify_exclusive
           from fake_linkplay.upnp_description import description_xml
           prefix = Path(sys.argv[1]).resolve()
           assert Path(fake_linkplay.__file__).resolve().is_relative_to(prefix / "venv")
+          assert Path(spotify_exclusive.__file__).resolve().is_relative_to(prefix / "venv")
+          offline_args = build_parser().parse_args(["spotify", "prepare-exclusive",
+              "--renderer-prefix", str(prefix), "--renderer-config", str(prefix / "config.yaml"),
+              "--renderer-unit", str(prefix / "open-room-renderer.service"),
+              "--go-librespot-binary", "/not-executed/go-librespot",
+              "--output-dir", "/not-created/offline-proposal", "--port", "3678"])
+          assert offline_args.spotify_cmd == "prepare-exclusive"
           for name in ("index.html", "style.css", "controller.js", "app.js"):
               asset = files("fake_linkplay").joinpath("web_assets", name)
               assert Path(str(asset)).resolve().is_relative_to(prefix / "venv")

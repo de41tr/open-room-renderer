@@ -349,6 +349,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "discover":
         return run_discovery(args)
     if args.cmd == "spotify":
+        if args.spotify_cmd == "prepare-exclusive":
+            from .spotify_exclusive import run_prepare_exclusive
+            return run_prepare_exclusive(args)
         return run_spotify_diagnostic(args)
     if args.cmd == "dsp":
         return run_dsp_command(args)

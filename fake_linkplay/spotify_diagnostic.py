@@ -269,8 +269,10 @@ class SpotifyDiagnosticClient:
 
 
 def add_spotify_parser(subparsers) -> None:
-    parser = subparsers.add_parser("spotify", help="optional read-only local sidecar diagnostics")
+    parser = subparsers.add_parser("spotify", help="optional local sidecar diagnostics and offline proposals")
     commands = parser.add_subparsers(dest="spotify_cmd", required=True)
+    from .spotify_exclusive import add_prepare_parser
+    add_prepare_parser(commands)
     diagnose = commands.add_parser("diagnose", help="observe an already running go-librespot sidecar",
         description="Read-only, sidecar-reported observations. No installation, login, playback or shared DSP.")
     diagnose.add_argument("--host", default="127.0.0.1", help="numeric loopback only (default: 127.0.0.1)")
