@@ -57,7 +57,7 @@ from .queue_policy import (NORMAL, ShuffleRandom, is_shuffle, natural_successor,
                            shuffle_exhausted, shuffle_step)
 from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
-from .startup_state import _read_state
+from .startup_state import StartupStateError, _INITIAL_BALANCE_ERROR, _read_state
 from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, connection_manager_properties, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
 
 LOG = logging.getLogger(__name__)
@@ -272,7 +272,12 @@ class HttpApi:
         )
         desired_balance = (self._pending_dsp_restore["balance"]
                            if self._pending_dsp_restore is not None else cfg.channel_balance)
-        self.cfg.channel_balance = self._normalize_channel_balance(str(desired_balance))
+        try:
+            self.cfg.channel_balance = self._normalize_channel_balance(str(desired_balance))
+        except ValueError:
+            if _startup:
+                raise StartupStateError(_INITIAL_BALANCE_ERROR) from None
+            raise
         # Configuration is desired state until the startup transaction confirms it.
         self.channel_balance = "0.0"
         # Loading the library never activates it. A separate, strictly validated

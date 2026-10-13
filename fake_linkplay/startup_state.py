@@ -9,6 +9,11 @@ class StartupStateError(ValueError):
     """An expected startup state failure, with only fixed operator guidance."""
 
 
+_INITIAL_BALANCE_ERROR = (
+    "Initial channel balance is invalid. Check channel_balance in configuration or saved state."
+)
+
+
 StateStage = Literal["directory", "identity", "gain", "device_name", "active_dsp", "channel_balance"]
 _STATE_ERRORS: dict[StateStage, str] = {
     "directory": "State directory could not be opened. Check its path and permissions.",
