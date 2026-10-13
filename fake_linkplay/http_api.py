@@ -38,7 +38,7 @@ from . import eq_presets
 from .eq_presets import DEFAULT_EQ_BAND_FREQS, DEFAULT_EQ_PLUGIN, EqPresetLibrary
 from .capabilities import capability_fields, configured_sources, service_capability
 from .eventing import EventSubscriber, EventSubscriptionManager
-from .favorites import FavoritesApi, FavoritesStore
+from .favorites import FavoriteError, FavoritesApi, FavoritesStore
 from .queue_playlist import QueuePlaylistApi
 from .web_audio_output import make_output_inspector
 from .web_playlists import PLAYLIST_ACTIONS
@@ -446,6 +446,14 @@ class HttpApi:
             await self._web_import_dsp_curve(command)
         elif action.startswith("dsp_"):
             await self._run_dsp_command("", web_command=command)
+        elif action == "favorite_restore":
+            try:
+                self.favorites.restore_empty(command.favorites_bytes)
+            except FavoriteError as exc:
+                if exc.code in {"library_not_empty", "library_unavailable"}:
+                    code = "favorites_not_empty" if exc.code == "library_not_empty" else "favorites_unavailable"
+                    raise WebAdmissionError(code, exc.status) from None
+                raise
         elif action == "favorite_play":
             await self._play_preset_snapshot(self.favorites.playback_snapshot(command.id))
         elif action == "favorite_add":

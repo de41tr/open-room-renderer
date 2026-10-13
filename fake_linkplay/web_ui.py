@@ -24,7 +24,7 @@ from aiohttp import web
 
 from .canonical_target import canonical_target_url
 from .device_name import DeviceNameCommittedError, validate_device_name
-from .favorites import FavoriteError, FavoritesStore, validate_target_edit
+from .favorites import FavoriteError, FavoritesStore, decode_favorites_document, validate_target_edit
 from .eq_presets import EqPresetLibrary, PRESET_LIBRARY_UNAVAILABLE_MESSAGE, normalize_eq_preset_name
 from .eq_transfer import EqTransferCurve, decode_eq_transfer, encode_eq_transfer
 from .log_safety import redact_media_urls
@@ -69,6 +69,7 @@ _SCHEMAS = {
     "favorite_add": {"name", "url"}, "favorite_current": {"name", "expected_generation"},
     "favorite_rename": {"id", "name"}, "favorite_target": {"id", "url", "metadata"},
     "favorite_delete": {"id"}, "favorite_play": {"id"},
+    "favorite_restore": {"expected_session", "text", "private_import_confirmed"},
     "playlist_replace": {"expected_generation", "source"},
     "playlist_append": {"expected_generation", "urls"},
     "playlist_remove": {"expected_generation", "index"},
@@ -80,6 +81,9 @@ _SCHEMAS = {
     "dsp_preset_delete": {"expected_dsp", "preset_id"},
     "dsp_preset_import": {"expected_dsp", "text", "private_import_confirmed"},
 }
+FAVORITES_EXPORT_FILENAME = "open-room-renderer-favorites.json"
+_FAVORITES_EXPORT_DOMAIN = b"orr:web-favorites-export:v1\0"
+_SESSION_TOKEN = re.compile(r"[A-Za-z0-9_-]{32}\Z")
 CURVE_EXPORT_FILENAME = "open-room-renderer-eq-curve.json"
 _EXPORT_FILENAME = "open-room-renderer-playlist.json"
 _EXPORT_DOMAIN = b"orr:web-playlist-export:v1\0"
@@ -111,6 +115,8 @@ class WebCommand:
     metadata: str = ""
     expected_dsp: str = ""
     expected_device: str = ""
+    expected_session: str = ""
+    favorites_bytes: bytes | None = field(default=None, repr=False)
     preset_id: str = ""
     bands: list[dict[str, object]] | None = None
     curve: EqTransferCurve | None = field(default=None, repr=False)
@@ -127,6 +133,15 @@ class WebPlaylistExport:
     action: str
     expected_session: str
     expected_generation: int
+    expected_export: str = ""
+    private_export_confirmed: bool = False
+
+
+@dataclass(frozen=True)
+class WebFavoritesExport:
+    """A managed-only private read with no playback or active-DSP authority."""
+    action: str
+    expected_session: str
     expected_export: str = ""
     private_export_confirmed: bool = False
 
@@ -358,6 +373,40 @@ def prepare_playlist_export(queue: PlaybackQueue) -> tuple[bytes, PlaybackQueue]
         raise WebAdmissionError("export_unavailable", 409) from None
 
 
+def decode_favorites_export(encoded: bytes) -> WebFavoritesExport:
+    payload = _decode_request(encoded)
+    action = payload["action"]
+    fields = {"action", "expected_session"}
+    if action == "download":
+        fields |= {"expected_export", "private_export_confirmed"}
+    if action not in {"prepare", "download"} or payload.keys() != fields:
+        raise WebAdmissionError()
+    if not isinstance(payload["expected_session"], str) or not _SESSION_TOKEN.fullmatch(payload["expected_session"]):
+        raise WebAdmissionError()
+    if action == "download" and (payload["private_export_confirmed"] is not True
+            or not isinstance(payload["expected_export"], str)
+            or not _DSP_TOKEN.fullmatch(payload["expected_export"])):
+        raise WebAdmissionError()
+    return WebFavoritesExport(**payload)
+
+
+def prepare_favorites_export(encoded: bytes) -> bytes:
+    """Prove this complete exact snapshot fits the escaped restore command.
+
+    The same strict persisted decoder and Web URL validator gate both sides.
+    Session IDs have a fixed 32-character URL-safe representation.
+    """
+    try:
+        envelope = json.dumps({"action": "favorite_restore", "expected_session": "f" * 32,
+            "text": encoded.decode("utf-8"), "private_import_confirmed": True},
+            ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+        if decode_command(envelope).favorites_bytes != encoded:
+            raise ValueError
+        return encoded
+    except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError):
+        raise WebAdmissionError("favorites_export_unavailable", 409) from None
+
+
 def decode_dsp_export(encoded: bytes) -> WebDspExport:
     payload = _decode_request(encoded)
     action = payload["action"]
@@ -436,6 +485,17 @@ def decode_command(encoded: bytes) -> WebCommand:
             _integer(payload["index"], 1, 1000)
         if action == "queue_mode" and (not isinstance(payload["mode"], str) or payload["mode"] not in MODES):
             raise ValueError
+        if action == "favorite_restore":
+            if (payload["private_import_confirmed"] is not True or not isinstance(payload["text"], str)
+                    or not isinstance(payload["expected_session"], str)
+                    or not _SESSION_TOKEN.fullmatch(payload["expected_session"])):
+                raise ValueError
+            payload["favorites_bytes"] = payload.pop("text").encode("utf-8")
+            for record in decode_favorites_document(payload["favorites_bytes"]):
+                validate_url(record.url)
+                if record.artwork:
+                    validate_url(record.artwork)
+            del payload["private_import_confirmed"]
         if action == "dsp_preset_import":
             if payload["private_import_confirmed"] is not True or not isinstance(payload["text"], str):
                 raise ValueError
@@ -573,6 +633,9 @@ class WebControlApi:
             "forbidden": "Browser request was not admitted.",
             "unavailable": "Requested operation is currently unavailable.",
             "read_failed": "Renderer state could not be read.",
+            "stale_favorites_transfer": "The renderer session or managed favorites changed. Close this dialog and review again.",
+            "favorites_not_empty": "Managed favorites must be empty before restoring. No favorites were replaced.",
+            "favorites_export_unavailable": "This managed library cannot be exported for browser restore. The complete file and escaped restore request must fit the transfer limits.",
             "favorites_unavailable": "Managed favorites could not be loaded. Stop the renderer service, repair or restore its saved favorites library, then restart it.",
             "command_failed": "Command outcome is unknown. Refresh before any explicit retry.",
         }
@@ -773,6 +836,8 @@ class WebControlApi:
 
     def _admit(self, command: WebCommand) -> WebCommand:
         """All guards run immediately before dispatch, with no intervening await."""
+        if command.action == "favorite_restore" and not secrets.compare_digest(command.expected_session, self._session_id):
+            raise WebAdmissionError("stale_favorites_transfer", 409)
         state = self._current_state()
         if command.expected_generation is not None and command.expected_generation != state.generation:
             raise WebAdmissionError("stale_generation", 409)
@@ -798,6 +863,28 @@ class WebControlApi:
                 raise WebAdmissionError() from None
             command = replace(command, prepared_queue=queue)
         return command
+
+    def _favorites_export(self, encoded: bytes) -> web.Response:
+        request = decode_favorites_export(encoded)
+        if not secrets.compare_digest(request.expected_session, self._session_id):
+            raise WebAdmissionError("stale_favorites_transfer", 409)
+        try:
+            data = prepare_favorites_export(self._favorites.backup_bytes())
+        except FavoriteError as exc:
+            if exc.code == "library_unavailable":
+                raise WebAdmissionError("favorites_unavailable", 503) from None
+            raise
+        revision = hmac.new(self._export_key, _FAVORITES_EXPORT_DOMAIN + data, hashlib.sha256).hexdigest()
+        if request.action == "download":
+            if not secrets.compare_digest(request.expected_export, revision):
+                raise WebAdmissionError("stale_favorites_transfer", 409)
+            return web.Response(body=data, content_type="application/json", headers={
+                **_HEADERS, "Content-Length": str(len(data)),
+                "Content-Disposition": f'attachment; filename="{FAVORITES_EXPORT_FILENAME}"'})
+        return web.json_response({"version": 1, "session_id": self._session_id,
+            "revision": revision, "count": len(decode_favorites_document(data)),
+            "size_bytes": len(data), "filename": FAVORITES_EXPORT_FILENAME,
+            "scope": "managed_only"}, headers=_HEADERS)
 
     async def _dsp_export(self, encoded: bytes) -> web.Response:
         request = decode_dsp_export(encoded)
@@ -876,11 +963,13 @@ class WebControlApi:
                             return self._error("favorites_unavailable", 503, "ERROR")
                         raise
                 return web.json_response(value, headers=_HEADERS)
-            if path not in {PREFIX + "/command", PREFIX + "/playlist/export", PREFIX + "/output/inspect", PREFIX + "/dsp/export"}:
+            if path not in {PREFIX + "/command", PREFIX + "/playlist/export", PREFIX + "/output/inspect", PREFIX + "/dsp/export", PREFIX + "/favorites/export"}:
                 raise WebAdmissionError("not_found", 404)
             if request.method != "POST":
                 raise WebAdmissionError("method_not_allowed", 405)
             encoded = await self._body(request, origin)
+            if path == PREFIX + "/favorites/export":
+                return self._favorites_export(encoded)
             if path == PREFIX + "/dsp/export":
                 return await self._dsp_export(encoded)
             if path == PREFIX + "/output/inspect":
