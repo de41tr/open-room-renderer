@@ -2062,6 +2062,9 @@ class HttpApi:
             raise WebAdmissionError("unavailable", 409) from None
         if command.expected_dsp != self.web_api.dsp_revision(active, self._eq_library):
             raise WebAdmissionError("stale_dsp", 409)
+        if (self._eq_library.unavailable
+                and command.action in {"dsp_preset_save", "dsp_preset_rename", "dsp_preset_delete"}):
+            raise WebAdmissionError("preset_library_unavailable", 409)
         plugin, source = active["plugin"], active["source"]
         payload = {"pluginURI": plugin}
         if source:
@@ -2531,8 +2534,8 @@ class HttpApi:
         """Load a validated preset library, never claim it is already applied."""
         try:
             self._eq_library.load(self.cfg.state_dir)
-        except (OSError, ValueError, TypeError, UnicodeError, RecursionError) as exc:
-            LOG.warning("could not load EQ preset library: %s", exc)
+        except (OSError, ValueError, TypeError, UnicodeError, RecursionError):
+            LOG.warning(eq_presets.PRESET_LIBRARY_UNAVAILABLE_MESSAGE)
 
     def _persist_eq_presets(self) -> None:
         # The library commit and active metadata commit stay in this transaction.

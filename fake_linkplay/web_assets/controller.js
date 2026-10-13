@@ -16,6 +16,8 @@
   const DSP_MODES = Object.freeze({"-1": "Bypass band", "0": "Low shelf", "1": "Peak", "2": "High shelf", "3": "Low pass", "5": "High pass"});
   const DSP_FIELDS = Object.freeze({freq: {label: "Frequency (Hz)", min: 10, max: 24000}, gain: {label: "Gain (dB)", min: -24, max: 24}, q: {label: "Q", min: 0.1, max: 30}, mode: {label: "Filter"}});
   const DSP_KEYS = Object.freeze(Array.from("abcdefghij", band => Object.keys(DSP_FIELDS).map(field => `${band}_${field}`)).flat());
+  const DSP_LIBRARY_ACTIONS = Object.freeze(["dsp_preset_save", "dsp_preset_rename", "dsp_preset_delete"]);
+  const DSP_LIBRARY_UNAVAILABLE_MESSAGE = "Saved EQ presets could not be loaded. Stop the renderer service, repair or restore its saved EQ preset library, then restart it.";
   const opaqueID = value => string(value) && /^[a-f0-9]{64}$/.test(value);
   function validBandValue(key, value) {
     if (typeof value !== "number" || !Number.isFinite(value)) return false;
@@ -24,6 +26,7 @@
   }
   function validateEditor(editor) {
     if (!isObject(editor) || !opaqueID(editor.revision) || !["global", "wifi"].includes(editor.source) || editor.channel_mode !== "Stereo" || !Array.isArray(editor.bands) || editor.bands.length !== DSP_KEYS.length || !Array.isArray(editor.presets)) throw new Error("Invalid sound editor snapshot");
+    if (Object.hasOwn(editor, "library_unavailable") && typeof editor.library_unavailable !== "boolean") throw new Error("Invalid sound preset library availability");
     editor.bands.forEach((band, index) => { if (!isObject(band) || band.param_name !== DSP_KEYS[index] || !validBandValue(band.param_name, band.value)) throw new Error("Invalid sound band"); });
     const ids = new Set();
     editor.presets.forEach(preset => {
@@ -258,7 +261,11 @@
     const body = {action, ...values};
     if (["play", "pause", "next", "previous", "seek", "queue_select", "queue_mode", "favorite_current", ...PLAYLIST_ACTIONS].includes(action)) body.expected_generation = state.generation;
     if (["queue_select", "queue_mode"].includes(action)) body.queue_name = state.queue.name;
-    if (action.startsWith("dsp_")) { if (state.dsp.status !== "CONFIRMED" || !state.dsp.editor) throw new Error("Read confirmed sound state first"); body.expected_dsp = state.dsp.editor.revision; }
+    if (action.startsWith("dsp_")) {
+      if (state.dsp.status !== "CONFIRMED" || !state.dsp.editor) throw new Error("Read confirmed sound state first");
+      if (DSP_LIBRARY_ACTIONS.includes(action) && state.dsp.editor.library_unavailable === true) throw new Error(DSP_LIBRARY_UNAVAILABLE_MESSAGE);
+      body.expected_dsp = state.dsp.editor.revision;
+    }
     return body;
   }
   function commandError(response) {
@@ -292,7 +299,7 @@
     changed() { this.onChange(this); }
     get busy() { return this.active.size > 0; }
     get stopBusy() { return Array.from(this.active.values()).some(item => item.action === "stop"); }
-    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (!action.startsWith("favorite_") || this.favoritesFresh) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor)) && (!action.startsWith("playlist_") || playlistAvailable(this.state, action) && (action === "playlist_replace" || this.playlistEditable))); }
+    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (!action.startsWith("favorite_") || this.favoritesFresh) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor && (!DSP_LIBRARY_ACTIONS.includes(action) || this.state.dsp.editor.library_unavailable !== true))) && (!action.startsWith("playlist_") || playlistAvailable(this.state, action) && (action === "playlist_replace" || this.playlistEditable))); }
     refresh() {
       this.readAgain = true;
       if (!this.readPromise) {
@@ -396,5 +403,5 @@
       return result;
     }
   }
-  return {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
+  return {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
 });

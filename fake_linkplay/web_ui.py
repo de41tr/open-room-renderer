@@ -24,7 +24,7 @@ from aiohttp import web
 
 from .canonical_target import canonical_target_url
 from .favorites import FavoriteError, FavoritesStore, validate_target_edit
-from .eq_presets import EqPresetLibrary, normalize_eq_preset_name
+from .eq_presets import EqPresetLibrary, PRESET_LIBRARY_UNAVAILABLE_MESSAGE, normalize_eq_preset_name
 from .log_safety import redact_media_urls
 from .mpv_backend import BackendError
 from .persistence import AtomicWriteCommittedError, validate_eq_records
@@ -411,7 +411,10 @@ class WebControlApi:
 
     def dsp_revision(self, active: dict[str, object], library: EqPresetLibrary) -> str:
         """Include the entire library because rename/delete operate by name."""
-        return self._dsp_digest("revision", [active, library.presets])
+        value = [active, library.presets]
+        if library.unavailable:
+            value.append({"library_unavailable": True})
+        return self._dsp_digest("revision", value)
 
     def dsp_preset_id(self, plugin: str, name: str) -> str:
         return self._dsp_digest("preset", [plugin, name])
@@ -420,7 +423,7 @@ class WebControlApi:
         plugin = active["plugin"]
         saved = set(library.names(plugin))
         names = list(_BUILTIN_PRESETS) + sorted(saved.difference(_BUILTIN_PRESETS))
-        return {"revision": self.dsp_revision(active, library),
+        editor = {"revision": self.dsp_revision(active, library),
                 "source": "wifi" if active["source"] else "global", "channel_mode": "Stereo",
                 "bands": [dict(record) for record in active["bands"]],
                 "presets": [{"id": self.dsp_preset_id(plugin, name),
@@ -428,6 +431,9 @@ class WebControlApi:
                              "kind": "saved" if name in saved else "builtin",
                              "shared": name in saved and len(library.presets[name]) > 1}
                             for name in names]}
+        if library.unavailable:
+            editor["library_unavailable"] = True
+        return editor
 
     def dsp_preset_name(self, preset_id: str, plugin: str, library: EqPresetLibrary) -> str:
         """Resolve only a current-context opaque ID; never accept a raw URI."""
@@ -450,6 +456,7 @@ class WebControlApi:
             "stale_export": "The queue or renderer session changed. Reopen Export and review it again.",
             "stale_dsp": "DSP settings or saved presets changed. Refresh and review before choosing again.",
             "preset_conflict": "That preset name already exists. Choose another name.",
+            "preset_library_unavailable": PRESET_LIBRARY_UNAVAILABLE_MESSAGE,
             "forbidden": "Browser request was not admitted.",
             "unavailable": "Requested operation is currently unavailable.",
             "read_failed": "Renderer state could not be read.",

@@ -18,6 +18,10 @@ from urllib.parse import unquote
 from .persistence import atomic_write_text, validate_eq_records
 
 DEFAULT_EQ_PLUGIN = "http://moddevices.com/plugins/caps/EqNp"
+PRESET_LIBRARY_UNAVAILABLE_MESSAGE = (
+    "Saved EQ presets could not be loaded. Stop the renderer service, repair or "
+    "restore its saved EQ preset library, then restart it."
+)
 DEFAULT_EQ_BAND_FREQS = {
     "a": 30.0,
     "b": 62.5,
@@ -131,47 +135,72 @@ def eq_payload(command: str, prefix: str) -> dict[str, object]:
     return payload
 
 
+class EqPresetLibraryUnavailableError(OSError):
+    """Known pre-write refusal after an observed saved-library load failure."""
+
+    def __init__(self) -> None:
+        super().__init__(PRESET_LIBRARY_UNAVAILABLE_MESSAGE)
+
+
 class EqPresetLibrary:
     """Own the saved preset mapping without claiming any curve is active."""
 
     def __init__(self) -> None:
         self.presets: dict[str, dict[str, list[dict[str, object]]]] = {}
+        self._unavailable = False
+
+    @property
+    def unavailable(self) -> bool:
+        """A failed load fences writes for this lifetime, independent of DSP."""
+        return self._unavailable
 
     def load(self, state_dir: str | Path) -> None:
         """Replace the library only after the complete bounded file validates."""
         path = Path(state_dir) / "eq_presets.json"
         try:
-            with path.open("rb") as stream:
-                encoded = stream.read(1024 * 1024 + 1)
-        except FileNotFoundError:
-            return
-        if len(encoded) > 1024 * 1024:
-            raise ValueError("EQ preset document is too large")
-        payload = json.loads(encoded, parse_constant=reject_eq_constant,
-                             object_pairs_hook=unique_eq_object)
-        if (not isinstance(payload, dict) or type(payload.get("version", 1)) is not int
-                or payload.get("version", 1) != 1):
-            raise ValueError("Unsupported EQ preset document")
-        presets = payload.get("presets")
-        if not isinstance(presets, dict):
-            raise ValueError("Invalid EQ preset library")
-        loaded: dict[str, dict[str, list[dict[str, object]]]] = {}
-        for name, plugins in presets.items():
-            if not isinstance(name, str) or not isinstance(plugins, dict):
-                raise ValueError("Invalid EQ preset")
-            clean_name = normalize_eq_preset_name(name)
-            if clean_name in loaded:
-                raise ValueError("Duplicate EQ preset name")
-            loaded[clean_name] = {}
-            for plugin_uri, bands in plugins.items():
-                if not isinstance(plugin_uri, str) or not plugin_uri:
-                    raise ValueError("Invalid EQ plugin")
-                loaded[clean_name][plugin_uri] = merge_eq_bands(None, bands)
+            try:
+                with path.open("rb") as stream:
+                    encoded = stream.read(1024 * 1024 + 1)
+            except FileNotFoundError:
+                # A dangling file symlink is existing storage that could still
+                # be atomically replaced. Only a genuinely absent entry is new.
+                try:
+                    path.lstat()
+                except FileNotFoundError:
+                    return
+                raise
+            if len(encoded) > 1024 * 1024:
+                raise ValueError("EQ preset document is too large")
+            payload = json.loads(encoded, parse_constant=reject_eq_constant,
+                                 object_pairs_hook=unique_eq_object)
+            if (not isinstance(payload, dict) or type(payload.get("version", 1)) is not int
+                    or payload.get("version", 1) != 1):
+                raise ValueError("Unsupported EQ preset document")
+            presets = payload.get("presets")
+            if not isinstance(presets, dict):
+                raise ValueError("Invalid EQ preset library")
+            loaded: dict[str, dict[str, list[dict[str, object]]]] = {}
+            for name, plugins in presets.items():
+                if not isinstance(name, str) or not isinstance(plugins, dict):
+                    raise ValueError("Invalid EQ preset")
+                clean_name = normalize_eq_preset_name(name)
+                if clean_name in loaded:
+                    raise ValueError("Duplicate EQ preset name")
+                loaded[clean_name] = {}
+                for plugin_uri, bands in plugins.items():
+                    if not isinstance(plugin_uri, str) or not plugin_uri:
+                        raise ValueError("Invalid EQ plugin")
+                    loaded[clean_name][plugin_uri] = merge_eq_bands(None, bands)
+        except (OSError, ValueError, TypeError, UnicodeError, RecursionError):
+            self._unavailable = True
+            raise
         self.presets = loaded
 
     def persist(self, state_dir: str | Path, *,
                 write_text: Callable[[Path, str], None] = atomic_write_text) -> None:
         """Write library bytes only; preserve pre/post-replacement exceptions."""
+        if self.unavailable:
+            raise EqPresetLibraryUnavailableError()
         payload = {"version": 1, "presets": self.presets}
         encoded = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
         if len(encoded.encode("utf-8")) > 1024 * 1024:

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_MODES, validateEditor, MODES, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError} = require('../fake_linkplay/web_assets/controller.js');
 const clone = value => JSON.parse(JSON.stringify(value));
 const revisionID = letter => letter.repeat(64);
+const eqLibraryWarning = 'Saved EQ presets could not be loaded. Stop the renderer service, repair or restore its saved EQ preset library, then restart it.';
 function editor(overrides = {}) {
   return {revision: revisionID('a'), source: 'global', channel_mode: 'Stereo', bands: DSP_KEYS.map(param_name => ({param_name, value: param_name.endsWith('_freq') ? 1000 : param_name.endsWith('_q') ? 1 : param_name.endsWith('_mode') ? 1 : 0})), presets: [
     {id: revisionID('b'), name: 'Flat', kind: 'builtin', shared: false},
@@ -417,6 +418,11 @@ test('sound editor validates exact canonical bands, bounded numbers, modes and o
   assert.throws(() => validateState(soundState(editor(), {status: 'PENDING'})));
   assert.equal(validateState(soundState(null, {status: 'UNKNOWN', balance: null, eq_enabled: null})).dsp.editor, null);
 });
+test('saved EQ library availability is an optional strict boolean without changing healthy snapshots', () => {
+  const healthy = editor(); assert.equal(validateEditor(healthy), healthy); assert.equal(Object.hasOwn(healthy, 'library_unavailable'), false);
+  for (const value of [true, false]) assert.equal(validateState(soundState(editor({library_unavailable: value}))).dsp.editor.library_unavailable, value);
+  for (const value of [undefined, null, 0, 1, 'true', 'false', [], {}]) assert.throws(() => validateEditor(editor({library_unavailable: value})), /Invalid sound preset library availability/);
+});
 test('sound drafts preserve input, never mutate canonical state, and require explicit reload after any stale revision', () => {
   const draft = new DspDraft(), original = state(); draft.observe(original, true); draft.edit('a_gain', '3.0');
   draft.observe(state({generation: 22}), true); assert.equal(draft.values.a_gain, '3.0'); assert.equal(draft.dirty, true); assert.equal(draft.canApply(original, true), true); assert.equal(original.dsp.editor.bands[1].value, 0);
@@ -433,8 +439,93 @@ test('sound guard and controller block unconfirmed editing without blocking Stop
   assert.equal(h.controller.canMutate('dsp_bands'), false); assert.equal(h.controller.canMutate('stop'), true);
   assert.equal((await h.controller.mutate({action: 'dsp_bands', bands: editor().bands, expected_dsp: revisionID('a')}, 'Apply')).kind, 'blocked'); assert.equal(h.posts().length, 0);
 });
+test('unavailable saved EQ library blocks guarded and direct controller writes without blocking live sound', async () => {
+  const h = harness(); h.setState(soundState(editor({library_unavailable: true}))); await h.controller.refresh();
+  for (const action of ['dsp_preset_save', 'dsp_preset_rename', 'dsp_preset_delete']) {
+    assert.equal(h.controller.canMutate(action), false, action);
+    assert.throws(() => guardedAction(h.controller.state, action, {name: 'New', preset_id: revisionID('c')}), {message: eqLibraryWarning});
+    assert.equal((await h.controller.mutate({action, expected_dsp: revisionID('a'), name: 'New', preset_id: revisionID('c')}, 'Write preset')).kind, 'blocked');
+  }
+  assert.equal(h.posts().length, 0);
+  for (const action of ['dsp_bands', 'dsp_preset_load', 'balance', 'eq', 'stop']) {
+    assert.equal(h.controller.canMutate(action), true, action);
+    assert.doesNotThrow(() => guardedAction(h.controller.state, action));
+  }
+  for (const availability of [{}, {library_unavailable: false}]) {
+    h.setState(soundState(editor(availability))); await h.controller.refresh();
+    for (const action of ['dsp_preset_save', 'dsp_preset_rename', 'dsp_preset_delete']) assert.equal(h.controller.canMutate(action), true, action);
+  }
+});
 async function editBand(h, key, value) {h.ids.get('dsp-' + key).value = value; await h.ids.get('dsp-' + key).fire('input');}
 async function selectPreset(h, id) {h.ids.get('dsp-preset').value = id; await h.ids.get('dsp-preset').fire('change');}
+test('unavailable saved EQ library shows fixed repair guidance and refuses direct write handlers', async () => {
+  const h = await appHarness();
+  // Even a retained saved selection cannot bypass the independent write guard.
+  h.setState(soundState(editor({revision: revisionID('e'), library_unavailable: true}))); await h.refresh(); await selectPreset(h, revisionID('c'));
+  assert.equal(h.ids.get('dsp-save-hint').textContent, eqLibraryWarning);
+  assert.equal(h.ids.get('dsp-current').textContent, 'Global · Stereo'); assert.equal(h.ids.get('connection-label').textContent, 'Connected');
+  for (const mode of ['save', 'rename', 'delete']) {
+    assert.equal(h.ids.get('dsp-' + mode).disabled, true);
+    await h.ids.get('dsp-' + mode).fire('click'); assert.equal(h.ids.get('dsp-dialog').open, false);
+    await h.ids.get('dsp-preset-form').fire('submit');
+  }
+  assert.equal(h.posts().length, 0);
+  h.setState(soundState(editor({revision: revisionID('f'), presets: []}))); await h.refresh();
+  assert.equal(h.ids.get('dsp-save').disabled, false); assert.doesNotMatch(h.ids.get('dsp-save-hint').textContent, /could not be loaded/);
+});
+test('unavailable saved EQ library leaves builtin Load, bands, balance and bypass usable', async () => {
+  const h = await appHarness();
+  let active = editor({revision: revisionID('e'), library_unavailable: true, presets: editor().presets.filter(preset => preset.kind === 'builtin')});
+  h.setState(soundState(active, {eq_enabled: true})); await h.refresh();
+  for (const id of ['dsp-preset', 'dsp-a_gain', 'balance', 'balance-submit', 'eq', 'stop']) assert.equal(h.ids.get(id).disabled, false, id);
+  await selectPreset(h, revisionID('b')); assert.equal(h.ids.get('dsp-load').disabled, false); await h.ids.get('dsp-load').fire('click');
+  h.ids.get('balance').value = '-0.35'; await h.ids.get('balance').fire('input'); await h.ids.get('balance-form').fire('submit');
+  await h.ids.get('eq').fire('click');
+  h.setPost(body => {active = {...active, revision: revisionID('f'), bands: body.bands}; h.setState(soundState(active, {eq_enabled: true})); return {request_acknowledged: true};});
+  await editBand(h, 'a_gain', '2.5'); assert.equal(h.ids.get('dsp-apply').disabled, false); assert.equal(h.ids.get('dsp-save-hint').textContent, eqLibraryWarning);
+  await h.ids.get('dsp-band-form').fire('submit');
+  assert.deepEqual(h.posts().slice(0, 3), [{action: 'dsp_preset_load', expected_dsp: revisionID('e'), preset_id: revisionID('b')}, {action: 'balance', value: -0.35}, {action: 'eq', enabled: false}]);
+  assert.equal(h.posts()[3].action, 'dsp_bands'); assert.equal(h.posts()[3].expected_dsp, revisionID('e')); assert.equal(h.posts()[3].bands[1].value, 2.5);
+  assert.equal(h.ids.get('dsp-draft-label').textContent, 'Confirmed values'); assert.equal(h.ids.get('dsp-save').disabled, true); assert.equal(h.ids.get('dsp-save-hint').textContent, eqLibraryWarning);
+});
+test('saved EQ library degradation stales an open band draft until explicit discard and reload', async () => {
+  const h = await appHarness(); await editBand(h, 'a_gain', '4');
+  h.setState(soundState(editor({revision: revisionID('e'), library_unavailable: true, presets: [editor().presets[0]]}))); await h.refresh();
+  assert.equal(h.ids.get('dsp-a_gain').value, '4'); assert.equal(h.ids.get('dsp-apply').disabled, true); assert.match(h.ids.get('dsp-editor-message').textContent, /Discard and reload/); assert.equal(h.ids.get('dsp-save-hint').textContent, eqLibraryWarning);
+  await h.ids.get('dsp-band-form').fire('submit'); assert.equal(h.posts().length, 0);
+  await h.ids.get('dsp-discard').fire('click'); await editBand(h, 'a_gain', '2');
+  assert.equal(h.ids.get('dsp-apply').disabled, false); assert.equal(h.ids.get('dsp-save').disabled, true);
+});
+test('saved EQ library degradation blocks open Save, Rename and Delete dialogs across recovery', async () => {
+  for (const mode of ['save', 'rename', 'delete']) {
+    const h = await appHarness(); await selectPreset(h, revisionID('d')); await h.ids.get('dsp-' + mode).fire('click');
+    h.ids.get('dsp-name').value = 'Keep local name'; h.ids.get('dsp-shared-confirm').checked = true;
+    h.setState(soundState(editor({revision: revisionID('e'), library_unavailable: true, presets: [editor().presets[0]]}))); await h.refresh();
+    assert.equal(h.ids.get('dsp-dialog').open, true); assert.equal(h.ids.get('dsp-name').value, 'Keep local name'); assert.equal(h.ids.get('dsp-shared-confirm').checked, true);
+    assert.equal(h.ids.get('dsp-preset-submit').disabled, true); assert.equal(h.ids.get('dsp-name').disabled, true); assert.equal(h.ids.get('dsp-shared-confirm').disabled, true); assert.equal(h.ids.get('dsp-dialog-status').textContent, eqLibraryWarning);
+    await h.ids.get('dsp-preset-form').fire('submit'); await h.refresh(); assert.equal(h.posts().length, 0);
+    h.setState(soundState(editor({revision: revisionID('f')}))); await h.refresh();
+    assert.equal(h.ids.get('dsp-preset-submit').disabled, true); assert.match(h.ids.get('dsp-dialog-status').textContent, /Close this dialog/);
+    await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.posts().length, 0);
+    await h.ids.get('dsp-cancel').fire('click'); await selectPreset(h, revisionID('d')); await h.ids.get('dsp-' + mode).fire('click');
+    assert.equal(h.ids.get('dsp-preset-submit').disabled, false); assert.equal(h.ids.get('dsp-dialog-status').textContent, '');
+  }
+});
+test('Delete ACK followed by unavailable EQ library readback never verifies an absent saved record', async () => {
+  const h = await appHarness(); await selectPreset(h, revisionID('c')); await h.ids.get('dsp-delete').fire('click');
+  h.setPost(() => {h.setState(soundState(editor({revision: revisionID('e'), library_unavailable: true, presets: [editor().presets[0]]}))); return {request_acknowledged: true};});
+  await h.ids.get('dsp-preset-form').fire('submit');
+  assert.equal(h.ids.get('dsp-dialog').open, true); assert.equal(h.ids.get('dsp-preset-submit').disabled, true); assert.match(h.ids.get('dsp-dialog-status').textContent, /saved change has not been verified/); assert.equal(h.ids.get('dsp-save-hint').textContent, eqLibraryWarning);
+  assert.ok(h.ids.get('dsp-dialog-status').textContent.endsWith(eqLibraryWarning));
+  await h.ids.get('dsp-preset-form').fire('submit'); await h.refresh(); assert.equal(h.posts().length, 1);
+});
+test('saved EQ library guidance preserves a lost preset response and never retries it', async () => {
+  const h = await appHarness(); await h.ids.get('dsp-save').fire('click'); h.ids.get('dsp-name').value = 'Uncertain curve';
+  h.setPost(() => {h.setState(soundState(editor({revision: revisionID('e'), library_unavailable: true, presets: [editor().presets[0]]}))); throw new Error('lost response');});
+  await h.ids.get('dsp-preset-form').fire('submit'); await h.refresh();
+  assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN'); assert.match(h.ids.get('dsp-dialog-status').textContent, /^UNKNOWN/); assert.ok(h.ids.get('dsp-dialog-status').textContent.endsWith(eqLibraryWarning));
+  assert.equal(h.ids.get('dsp-preset-submit').disabled, true); await h.ids.get('dsp-preset-form').fire('submit'); assert.equal(h.posts().length, 1);
+});
 test('app shows 40 confirmed fields, preserves local draft during polls and discards without sending', async () => {
   const h = await appHarness(); assert.equal(DSP_KEYS.filter(key => h.ids.has('dsp-' + key)).length, 40); assert.equal(h.ids.get('dsp-a_freq').value, '1000');
   await editBand(h, 'a_gain', '3.25'); await h.refresh(); assert.equal(h.ids.get('dsp-a_gain').value, '3.25'); assert.equal(h.ids.get('dsp-apply').disabled, false); assert.equal(h.ids.get('dsp-save').disabled, true); assert.match(h.ids.get('dsp-save-hint').textContent, /never saves unsent/);

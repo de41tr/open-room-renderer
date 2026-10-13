@@ -1,7 +1,7 @@
 /* Same-origin UI. Canonical snapshots are the only source of displayed state. */
 (function () {
   "use strict";
-  const {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
+  const {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
   const $ = id => document.getElementById(id);
   const drafts = {seek: false, volume: false, mode: false, balance: false};
   let snapshot = null, queueSignature = "", favoritesSignature = "", artworkURL = null;
@@ -194,19 +194,22 @@
     }
     const selected = editor?.presets.find(preset => preset.id === $("dsp-preset").value);
     const clean = !soundDraft.dirty && !soundDraft.stale && !soundDraft.pending && !soundDraft.review;
+    const libraryUnavailable = editor?.library_unavailable === true;
+    const libraryWritable = control.canMutate("dsp_preset_save");
     $("dsp-preset").disabled = !available || !clean;
     $("dsp-load").disabled = !available || !clean || !selected;
-    $("dsp-save").disabled = !available || !clean;
-    $("dsp-rename").disabled = !available || !clean || selected?.kind !== "saved";
-    $("dsp-delete").disabled = !available || !clean || selected?.kind !== "saved";
-    text("dsp-save-hint", !clean ? "Apply or discard your draft before saving or changing presets. Save active curve never saves unsent edits." : "Saves only the confirmed active curve. Loading a preset enables EQ.");
+    $("dsp-save").disabled = !libraryWritable || !clean;
+    $("dsp-rename").disabled = !libraryWritable || !clean || selected?.kind !== "saved";
+    $("dsp-delete").disabled = !libraryWritable || !clean || selected?.kind !== "saved";
+    text("dsp-save-hint", libraryUnavailable ? DSP_LIBRARY_UNAVAILABLE_MESSAGE : !clean ? "Apply or discard your draft before saving or changing presets. Save active curve never saves unsent edits." : "Saves only the confirmed active curve. Loading a preset enables EQ.");
     if (presetContext) {
       if (!presetContext.sent && (presetContext.session !== snapshot.session_id || (editor && presetContext.revision !== editor.revision))) presetContext.stale = true;
-      const stale = presetContext.stale || !editor;
-      $("dsp-preset-submit").disabled = !available || !clean || stale || presetContext.sent;
+      const stale = presetContext.stale || !editor || libraryUnavailable;
+      $("dsp-preset-submit").disabled = !libraryWritable || !clean || stale || presetContext.sent;
       $("dsp-name").disabled = presetContext.sent || stale;
       $("dsp-shared-confirm").disabled = presetContext.mode === "save" || !presetContext.preset?.shared || presetContext.sent || stale;
-      if (stale && !presetContext.sent) text("dsp-dialog-status", "Sound settings or presets changed, or readback is unavailable. Close this dialog and review the latest state before continuing.");
+      if (libraryUnavailable && !presetContext.sent) text("dsp-dialog-status", DSP_LIBRARY_UNAVAILABLE_MESSAGE);
+      else if (stale && !presetContext.sent) text("dsp-dialog-status", "Sound settings or presets changed, or readback is unavailable. Close this dialog and review the latest state before continuing.");
     }
   }
   function renderQueue(ready) {
@@ -718,13 +721,14 @@
     const current = currentEditor();
     const oldRemoved = current && !current.presets.some(item => item.kind === "saved" && item.id === context.preset?.id);
     const named = current?.presets.some(item => item.kind === "saved" && item.name === name);
-    const verified = result.kind === "acknowledged" && context.session === snapshot.session_id && current && (context.mode === "delete" ? oldRemoved : context.mode === "rename" ? named && (name === context.preset.name || oldRemoved) : named);
+    const verified = result.kind === "acknowledged" && context.session === snapshot.session_id && current && current.library_unavailable !== true && (context.mode === "delete" ? oldRemoved : context.mode === "rename" ? named && (name === context.preset.name || oldRemoved) : named);
     if (verified) closePreset();
     else {
       context.sent = result.kind !== "error" && result.kind !== "blocked";
       if (result.code === "stale_dsp") context.stale = true;
       renderSoundEditor();
-      text("dsp-dialog-status", result.kind === "acknowledged" ? "Request acknowledged, but the saved change has not been verified. Close this dialog and review the preset list before another request." : `${result.kind.toUpperCase()} · ${result.text}`);
+      const message = result.kind === "acknowledged" ? "Request acknowledged, but the saved change has not been verified. Close this dialog and review the preset list before another request." : `${result.kind.toUpperCase()} · ${result.text}`;
+      text("dsp-dialog-status", message + (current?.library_unavailable === true ? " " + DSP_LIBRARY_UNAVAILABLE_MESSAGE : ""));
     }
   });
   $("artwork").addEventListener("load", () => { if ($("artwork").getAttribute("src") === artworkURL) { $("artwork").hidden = false; $("artwork-fallback").hidden = true; } });
