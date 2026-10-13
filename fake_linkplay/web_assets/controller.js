@@ -285,6 +285,61 @@
     }
     return {kind: "unknown", text: "The request outcome could not be confirmed. Check the current state before trying again.", committed: false};
   }
+  const OUTPUT_FAMILIES = Object.freeze(["alsa", "pulse", "pipewire", "jack", "coreaudio", "wasapi", "sdl", "sndio", "oss", "openal", "null", "pcm", "not_observed", "unrecognized"]);
+  const OUTPUT_PROPERTY_STATUSES = Object.freeze(["value", "unavailable", "unsupported", "not_read", "timed_out", "transport_error", "malformed_response", "request_failed", "response_limit"]);
+  function validateOutputInspection(value, session) {
+    const oneOf = (item, values) => values.includes(item);
+    if (!exactFields(value, ["version", "session_id", "status", "configuration", "connection", "socket_path_check", "live_intent", "driver", "comparison", "null_output", "observations", "renderer_ownership", "physical_device", "audible_output"]) || value.version !== 1 || value.session_id !== session || !oneOf(value.status, ["complete", "incomplete"]) ||
+        !exactFields(value.configuration, ["source", "selection", "driver_family", "spawn_policy", "identifier"]) || value.configuration.source !== "running_renderer" || !oneOf(value.configuration.selection, ["mpv_default", "explicit_output"]) || !oneOf(value.configuration.driver_family, OUTPUT_FAMILIES) || !oneOf(value.configuration.spawn_policy, ["auto_spawn_enabled", "external_only"]) || value.configuration.identifier !== "hidden" ||
+        !oneOf(value.connection, ["not_attempted", "connected", "socket_missing", "socket_invalid", "timed_out", "transport_error"]) || !oneOf(value.socket_path_check, ["not_checked", "unchanged_at_checks", "changed"]) ||
+        !exactFields(value.live_intent, ["status", "selection", "driver_family", "identifier"]) || !oneOf(value.live_intent.status, OUTPUT_PROPERTY_STATUSES) || !oneOf(value.live_intent.selection, ["not_observed", "mpv_default", "explicit_output"]) || !oneOf(value.live_intent.driver_family, OUTPUT_FAMILIES) || value.live_intent.identifier !== "hidden" ||
+        !exactFields(value.driver, ["status", "family"]) || !oneOf(value.driver.status, OUTPUT_PROPERTY_STATUSES) || !oneOf(value.driver.family, OUTPUT_FAMILIES) || !oneOf(value.comparison, ["matches", "differs", "not_compared"]) || !oneOf(value.null_output, ["deliberately_silent", "not_observed"]) ||
+        value.observations !== "sequential_not_atomic" || value.renderer_ownership !== "unverified" || value.physical_device !== "not_verified" || value.audible_output !== "not_verified") throw new Error("Invalid output inspection");
+    return value;
+  }
+  function outputInspectionLines(value) {
+    const selection = {mpv_default: "mpv default", explicit_output: "explicit output", not_observed: "not observed"};
+    const family = name => ({not_observed: "driver family not observed", unrecognized: "driver family unrecognized"}[name] || `${name} driver family`);
+    const property = {value: "observed", unavailable: "unavailable (can be idle)", unsupported: "not supported by this mpv", not_read: "not read", timed_out: "timed out", transport_error: "connection failed", malformed_response: "invalid response", request_failed: "read failed", response_limit: "response limit reached"};
+    const connection = {not_attempted: "not attempted", connected: "connected", socket_missing: "socket missing; the player may not be running", socket_invalid: "socket path is invalid", timed_out: "two-second inspection budget expired", transport_error: "socket connection failed"};
+    const path = {not_checked: "not checked", unchanged_at_checks: "unchanged at the check instants; ownership remains unverified", changed: "changed during inspection; results are incomplete and were not compared"};
+    return [
+      `Running configuration: ${selection[value.configuration.selection]}; ${family(value.configuration.driver_family)}; identifier hidden.`,
+      `Startup policy: ${value.configuration.spawn_policy === "auto_spawn_enabled" ? "renderer may start its configured player" : "external player only"}. This inspection never starts a player.`,
+      `Local mpv connection: ${connection[value.connection]}. Socket path: ${path[value.socket_path_check]}.`,
+      `Live output intent: ${property[value.live_intent.status]}; ${selection[value.live_intent.selection]}; ${family(value.live_intent.driver_family)}; identifier hidden.`,
+      `Live output driver: ${property[value.driver.status]}; ${family(value.driver.family)}.`,
+      {matches: "Configured output matches the observed live intent. This does not prove the physical output.", differs: "Configured output differs from the observed live intent. Review the running configuration and player before making changes.", not_compared: "Configured and live output intent were not compared. A default selection or incomplete observation cannot establish a match."}[value.comparison],
+      value.null_output === "deliberately_silent" ? "The null output is deliberately silent. It does not send sound to a physical device." : "A deliberately silent null output was not established by this inspection."
+    ];
+  }
+  class OutputInspection {
+    constructor(request, onChange = () => {}) { this.request = request; this.onChange = onChange; this.session = null; this.dismiss(); }
+    dismiss() { this.context = null; this.open = false; this.pending = false; this.result = null; this.error = ""; }
+    observe(state) {
+      if (this.session !== state?.session_id) { this.dismiss(); this.session = state?.session_id || null; }
+    }
+    canInspect(state) { return Boolean(state?.session_id && state?.csrf_token && !this.pending); }
+    async inspect(state) {
+      this.observe(state);
+      if (!this.canInspect(state)) return;
+      const context = {session: state.session_id}; this.context = context;
+      this.open = true; this.pending = true; this.result = null; this.error = ""; this.onChange();
+      try {
+        const response = await this.request("/orr/v1/web/output/inspect", {method: "POST", timeoutMs: 4000,
+          headers: {"X-ORR-CSRF": state.csrf_token}, body: {action: "inspect", expected_session: context.session}});
+        if (this.context !== context) return;
+        if (response.status !== 200) {
+          const code = response.body?.error;
+          this.error = code === "output_inspection_busy" ? "Another output inspection is still finishing. No new inspection was started. Try again explicitly when ready." : code === "stale_output_inspection" || code === "forbidden" ? "The renderer session or browser admission changed. Refresh before inspecting again." : "Output inspection could not be completed. No automatic retry was sent.";
+        } else this.result = validateOutputInspection(response.body, context.session);
+      } catch (_) {
+        if (this.context === context) this.error = "Output inspection was not received or could not be read. No automatic retry was sent.";
+      } finally {
+        if (this.context === context) { this.pending = false; this.onChange(); }
+      }
+    }
+  }
   class Controller {
     constructor(request, onChange = () => {}) {
       this.request = request;
@@ -432,5 +487,5 @@
       return result;
     }
   }
-  return {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
+  return {OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
 });

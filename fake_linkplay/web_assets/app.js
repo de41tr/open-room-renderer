@@ -1,7 +1,7 @@
 /* Same-origin UI. Canonical snapshots are the only source of displayed state. */
 (function () {
   "use strict";
-  const {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
+  const {OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
   const $ = id => document.getElementById(id);
   const drafts = {seek: false, volume: false, mode: false, balance: false};
   let snapshot = null, queueSignature = "", favoritesSignature = "", artworkURL = null;
@@ -50,7 +50,7 @@
   const roomDialog = dialogLifecycle("room-dialog", clearRoomForm, "rename-room");
   async function request(path, options) {
     const abort = new AbortController();
-    const timer = window.setTimeout(() => abort.abort(), options.method === "POST" ? 20000 : 8000);
+    const timer = window.setTimeout(() => abort.abort(), options.timeoutMs || (options.method === "POST" ? 20000 : 8000));
     try {
       const response = await fetch(path, {
         method: options.method, credentials: "same-origin", mode: "same-origin", redirect: "error", cache: "no-store",
@@ -69,6 +69,19 @@
     } finally { window.clearTimeout(timer); }
   }
   const control = new Controller(request, render);
+  const outputInspection = new OutputInspection(request, renderOutputInspection);
+  function renderOutputInspection() {
+    outputInspection.observe(control.state);
+    $("inspect-output").disabled = !outputInspection.canInspect(control.state);
+    $("output-inspection-detail").hidden = !outputInspection.open;
+    text("output-inspection-status", outputInspection.pending ? "Inspecting output once… Playback controls, including Stop, remain available." : outputInspection.error || (outputInspection.result ? `Inspection ${outputInspection.result.status}. This is a point-in-time observation.` : ""));
+    const items = outputInspection.result ? outputInspectionLines(outputInspection.result).map(line => {
+      const item = document.createElement("li"); item.textContent = line; return item;
+    }) : [];
+    $("output-inspection-results").replaceChildren(...items);
+  }
+  $("inspect-output").addEventListener("click", () => outputInspection.inspect(control.state));
+  $("dismiss-output-inspection").addEventListener("click", () => { outputInspection.dismiss(); renderOutputInspection(); $("inspect-output").focus({preventScroll: true}); });
   function noticeView() {
     let {kind, text: message} = control.notice;
     if (!control.fresh && !control.busy) { if (kind !== "acknowledged") kind = "unknown"; message = "Connection lost or state unavailable. Displayed values are stale. " + (control.operation ? message : "Refresh to reconnect."); }
@@ -83,6 +96,7 @@
   function render() {
     snapshot = control.state;
     noticeView();
+    renderOutputInspection();
     $("refresh").disabled = false;
     if (!snapshot) return;
     const {media, transport, gain, queue, dsp} = snapshot;
@@ -788,7 +802,7 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
   // Scrub private dialog input before navigation/BFCache, even if already closed.
   // Only local drafts are dismissed; sent commands and their outcomes stay live.
-  window.addEventListener("pagehide", () => { closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); });
+  window.addEventListener("pagehide", () => { outputInspection.dismiss(); renderOutputInspection(); closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); });
   window.addEventListener("online", () => poll());
   window.addEventListener("offline", () => { control.fresh = false; control.favoritesFresh = false; control.favoritesReadFailure = null; render(); });
   poll();

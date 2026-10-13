@@ -429,13 +429,16 @@ class WebControlApi:
                  device_name: Callable[[], str], runtime: Callable[[], WebRuntime],
                  dsp_snapshot: Callable[[], dict[str, object]], favorites: FavoritesStore,
                  dispatch: Callable[[WebCommand], Awaitable[dict[str, object] | None]],
-                 allowed_hosts: tuple[str, ...]) -> None:
+                 allowed_hosts: tuple[str, ...],
+                 inspect_output: Callable[[], Awaitable[dict[str, object]]] | None = None) -> None:
         self._current_state = current_state
         self._device_name = device_name
         self._runtime = runtime
         self._dsp_snapshot = dsp_snapshot
         self._favorites = favorites
         self._dispatch = dispatch
+        self._inspect_output = inspect_output
+        self._output_inspection_busy = False
         self._allowed_hosts = frozenset(host.lower().rstrip(".") for host in allowed_hosts if host and host not in {"0.0.0.0", "::", "*"})
         self._csrf_token = secrets.token_urlsafe(32)
         self._session_id = secrets.token_urlsafe(24)
@@ -495,6 +498,10 @@ class WebControlApi:
     def _error(code: str, status: int, outcome: str = "REJECTED", *, committed: bool = False,
                effect: str | None = None) -> web.Response:
         messages = {
+            "stale_output_inspection": "The renderer session changed. Refresh before inspecting again.",
+            "output_inspection_busy": "An output inspection is already running. No new inspection was started.",
+            "output_inspection_unavailable": "Output inspection is unavailable in this renderer.",
+            "output_inspection_failed": "Output inspection could not be completed. No automatic retry was sent.",
             "stale_generation": "Selection changed. Refresh before choosing again.",
             "export_unavailable": "This queue cannot be exported for browser import. For supported larger queues, use playlist save-current FILE in the CLI.",
             "stale_export": "The queue or renderer session changed. Reopen Export and review it again.",
@@ -732,6 +739,30 @@ class WebControlApi:
             command = replace(command, prepared_queue=queue)
         return command
 
+    async def _output_inspection(self, encoded: bytes) -> web.Response:
+        payload = _decode_request(encoded)
+        if (payload.keys() != {"action", "expected_session"} or payload["action"] != "inspect"
+                or not isinstance(payload["expected_session"], str)
+                or not payload["expected_session"].isascii()):
+            raise WebAdmissionError()
+        if not secrets.compare_digest(payload["expected_session"], self._session_id):
+            raise WebAdmissionError("stale_output_inspection", 409)
+        if self._inspect_output is None:
+            raise WebAdmissionError("output_inspection_unavailable", 503)
+        if self._output_inspection_busy:
+            raise WebAdmissionError("output_inspection_busy", 409)
+        # Synchronous claim on the shared adapter before the first await. Never
+        # queue behind another probe or hold the renderer's playback lock.
+        self._output_inspection_busy = True
+        try:
+            summary = await self._inspect_output()
+            return web.json_response({**summary, "session_id": self._session_id}, headers=_HEADERS)
+        except Exception:
+            # No raw exception, backend response or playback UNKNOWN outcome.
+            return self._error("output_inspection_failed", 503, "ERROR")
+        finally:
+            self._output_inspection_busy = False
+
     async def handle(self, request: web.Request) -> web.Response:
         dispatched = False
         try:
@@ -767,11 +798,13 @@ class WebControlApi:
                             return self._error("favorites_unavailable", 503, "ERROR")
                         raise
                 return web.json_response(value, headers=_HEADERS)
-            if path not in {PREFIX + "/command", PREFIX + "/playlist/export"}:
+            if path not in {PREFIX + "/command", PREFIX + "/playlist/export", PREFIX + "/output/inspect"}:
                 raise WebAdmissionError("not_found", 404)
             if request.method != "POST":
                 raise WebAdmissionError("method_not_allowed", 405)
             encoded = await self._body(request, origin)
+            if path == PREFIX + "/output/inspect":
+                return await self._output_inspection(encoded)
             if path == PREFIX + "/playlist/export":
                 return self._playlist_export(decode_playlist_export(encoded))
             command = self._admit(decode_command(encoded))

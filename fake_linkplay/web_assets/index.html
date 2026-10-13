@@ -48,6 +48,16 @@
             <form id="mode-form" class="mode-form"><label for="mode">Repeat &amp; shuffle</label><select id="mode" disabled><option value="normal">In order</option><option value="repeat-one">Repeat one</option><option value="repeat-all">Repeat all</option><option value="shuffle-once">Shuffle</option><option value="shuffle-repeat-all">Shuffle + repeat all</option></select><p id="mode-current" class="field-hint">Waiting for renderer</p><div id="mode-draft" class="draft-line" hidden><button id="mode-submit" class="button small" type="submit" disabled>Apply mode</button><button id="mode-cancel" class="button subtle small" type="button">Cancel</button></div></form>
           </div>
         </section>
+        <section class="card output-inspection-card" aria-labelledby="output-inspection-heading">
+          <div class="section-heading"><h2 id="output-inspection-heading">Inspect output</h2><button id="inspect-output" class="button small" type="button" disabled>Inspect output</button></div>
+          <p class="field-hint">Read two local mpv output properties once, with a two-second shared budget. No playback commands, device changes or player startup. Output identifiers and socket paths are hidden.</p>
+          <div id="output-inspection-detail" hidden>
+            <p id="output-inspection-status" class="field-hint" role="status" aria-live="polite"></p>
+            <ul id="output-inspection-results" class="field-hint"></ul>
+            <p class="field-hint">Configuration comes from this running renderer, not a reread of the config file. The two observations are sequential, not atomic. An unavailable driver can mean the player is idle. Player ownership, the physical device and audible sound are unverified.</p>
+            <button id="dismiss-output-inspection" class="button subtle small" type="button">Dismiss inspection</button>
+          </div>
+        </section>
         <section id="sound-panel" class="card sound-card" hidden aria-labelledby="sound-heading"><div class="section-heading"><h2 id="sound-heading">Sound</h2><span class="muted">Active output</span></div><form id="balance-form"><div class="range-heading"><label for="balance">Channel balance</label><span id="balance-current">UNKNOWN</span></div><input id="balance" type="range" min="-1" max="1" step="0.01" value="0" disabled><div id="balance-scale" class="timeline"><span>Left</span><span>Center</span><span>Right</span></div><div id="balance-draft" class="draft-line" hidden><output id="balance-target" for="balance">Center</output><button id="balance-submit" class="button small" type="submit" disabled>Set balance</button><button id="balance-cancel" class="button subtle small" type="button">Cancel</button></div></form><div class="eq-line"><div><span class="label">Equalizer</span><p class="field-hint" id="eq-current">State unavailable</p></div><button id="eq" class="button small" type="button" disabled aria-pressed="false">Enable EQ</button></div>
           <div class="dsp-editor">
             <div class="section-heading dsp-heading"><h3>10-band equalizer</h3><span id="dsp-current" class="muted">Waiting for readback</span></div>

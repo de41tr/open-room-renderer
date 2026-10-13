@@ -19,6 +19,9 @@ include the four static assets.
 ## Controls
 
 - Rename room: a persisted renderer/discovery name from an explicit dialog.
+- [Inspect output](WEB_OUTPUT_INSPECTION.md): an inline, explicit read of running
+  output configuration and two mpv properties, with identifiers hidden and no
+  playback commands. Stop remains reachable while this non-modal read runs.
 - Now Playing: safe title/artist/album, optional artwork, live-stream label,
   canonical playback phase and reported position/duration.
 - Play, Pause, Stop, Next, Previous, bounded Seek, volume and mute.

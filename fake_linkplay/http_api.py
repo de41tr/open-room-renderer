@@ -40,6 +40,7 @@ from .capabilities import capability_fields, configured_sources, service_capabil
 from .eventing import EventSubscriber, EventSubscriptionManager
 from .favorites import FavoritesApi, FavoritesStore
 from .queue_playlist import QueuePlaylistApi
+from .web_audio_output import make_output_inspector
 from .web_playlists import PLAYLIST_ACTIONS
 from .web_ui import (WebAdmissionError, WebCommand, WebControlApi, WebDspCommandError,
                      WebRuntime)
@@ -300,6 +301,8 @@ class HttpApi:
             device_name=lambda: self.device_name_override or self.cfg.friendly_name,
             runtime=self._web_runtime, dsp_snapshot=self._web_dsp_snapshot,
             favorites=self.favorites, dispatch=self._web_dispatch,
+            inspect_output=make_output_inspector(socket_path=cfg.mpv_socket,
+                configured_output=cfg.mpv_audio_device, auto_spawn=cfg.auto_spawn_mpv),
             allowed_hosts=(self.cfg.advertise_ip or "", self.cfg.bind_address,
                            self.cfg.mdns_hostname.rstrip(".") if self.cfg.enable_mdns else ""),
         )

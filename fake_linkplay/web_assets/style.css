@@ -19,3 +19,5 @@
 
 /* Room-name editing reuses the bounded modal and existing field styles. */
 #rename-room{margin-top:8px}#room-dialog{max-height:calc(100dvh - 36px);overflow:auto}#room-dialog .dialog-actions{flex-wrap:wrap}
+
+.output-inspection-card .section-heading{flex-wrap:wrap}.output-inspection-card li+li{margin-top:7px}.output-inspection-card ul{padding-left:19px}.output-inspection-card #dismiss-output-inspection{margin-top:10px}

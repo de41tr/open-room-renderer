@@ -2036,3 +2036,127 @@ test('recovery guidance never erases sticky unknown outcomes or sends a retry', 
     assert.equal(h.posts().length, 1);
   }
 });
+
+// Output inspection is a separate, explicit read workflow, never a playback mutation.
+const {OutputInspection, validateOutputInspection, outputInspectionLines} = require('../fake_linkplay/web_assets/controller.js');
+function outputReport(changes = {}) {
+  return {version: 1, session_id: 'session-one', status: 'complete',
+    configuration: {source: 'running_renderer', selection: 'explicit_output', driver_family: 'alsa', spawn_policy: 'auto_spawn_enabled', identifier: 'hidden'},
+    connection: 'connected', socket_path_check: 'unchanged_at_checks',
+    live_intent: {status: 'value', selection: 'explicit_output', driver_family: 'alsa', identifier: 'hidden'},
+    driver: {status: 'value', family: 'alsa'}, comparison: 'matches', null_output: 'not_observed',
+    observations: 'sequential_not_atomic', renderer_ownership: 'unverified', physical_device: 'not_verified', audible_output: 'not_verified', ...changes};
+}
+test('output report accepts only exact schemas and allowlisted classifications', () => {
+  assert.deepEqual(validateOutputInspection(outputReport(), 'session-one'), outputReport());
+  const invalid = [
+    {version: 2}, {session_id: 'other-session'}, {secret: 'synthetic-secret'}, {comparison: 'synthetic-secret'},
+    {configuration: {...outputReport().configuration, identifier: '/tmp/synthetic-secret'}},
+    {configuration: {...outputReport().configuration, source: 'on_disk'}},
+    {configuration: {...outputReport().configuration, raw: 'https://example.test/?token=synthetic-secret'}},
+    {live_intent: {...outputReport().live_intent, driver_family: 'alsa/synthetic-secret'}},
+    {driver: {status: 'value', family: 'synthetic-secret'}}, {connection: 'synthetic-secret'},
+    {socket_path_check: 'owned'}, {renderer_ownership: 'verified'}, {audible_output: 'verified'},
+    {physical_device: 'verified'}, {observations: 'atomic'}, {null_output: 'probably_silent'}
+  ];
+  invalid.forEach(change => assert.throws(() => validateOutputInspection(outputReport(change), 'session-one')));
+  for (const name of Object.keys(outputReport())) {const value = outputReport(); delete value[name]; assert.throws(() => validateOutputInspection(value, 'session-one'));}
+});
+test('output text explains incomplete, idle, changed, default, null and comparison limits', () => {
+  const text = outputInspectionLines(outputReport({status: 'incomplete', connection: 'timed_out', socket_path_check: 'changed', comparison: 'not_compared', null_output: 'deliberately_silent', driver: {status: 'unavailable', family: 'not_observed'}})).join(' ');
+  assert.match(text, /two-second inspection budget/); assert.match(text, /changed during inspection/); assert.match(text, /can be idle/);
+  assert.match(text, /not compared/); assert.match(text, /deliberately silent/); assert.match(text, /does not send sound/); assert.match(text, /identifier hidden/);
+  assert.match(outputInspectionLines(outputReport({comparison: 'differs'})).join(' '), /differs from/);
+  assert.match(outputInspectionLines(outputReport({connection: 'socket_missing'})).join(' '), /socket missing/);
+  assert.match(outputInspectionLines(outputReport({configuration: {...outputReport().configuration, selection: 'mpv_default', spawn_policy: 'external_only'}})).join(' '), /mpv default.*external player only/);
+});
+test('output inspection is explicit and deduplicated without changing playback state or notices', async () => {
+  const h = harness(); await h.controller.refresh(); const pending = deferred(); const calls = [];
+  const inspection = new OutputInspection(async (...args) => {calls.push(args); return pending.promise;});
+  const before = clone({notice: h.controller.notice, state: h.controller.state, epoch: h.controller.epoch, operation: h.controller.operation});
+  inspection.observe(h.controller.state); assert.equal(calls.length, 0);
+  const first = inspection.inspect(h.controller.state);
+  assert.equal(inspection.pending, true); assert.equal(h.controller.canMutate('stop'), true);
+  await inspection.inspect(h.controller.state); assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], ['/orr/v1/web/output/inspect', {method: 'POST', timeoutMs: 4000, headers: {'X-ORR-CSRF': 'test-csrf-token'}, body: {action: 'inspect', expected_session: 'session-one'}}]);
+  pending.resolve({status: 200, body: outputReport()}); await first;
+  assert.equal(inspection.pending, false); assert.equal(inspection.result.comparison, 'matches');
+  assert.deepEqual({notice: h.controller.notice, state: h.controller.state, epoch: h.controller.epoch, operation: h.controller.operation}, before);
+  await h.controller.refresh(); assert.equal(calls.length, 1);
+});
+test('output errors are private, local and not retried or put in unknown command outcomes', async () => {
+  for (const response of [new Error('synthetic-private-error'), {status: 503, body: {error: 'synthetic-private-error', message: 'synthetic-private-error', outcome: 'UNKNOWN'}}, {status: 200, body: outputReport({driver: {status: 'value', family: 'synthetic-private-error'}})}]) {
+    let calls = 0;
+    const inspection = new OutputInspection(async () => {calls += 1; if (response instanceof Error) throw response; return response;});
+    await inspection.inspect(state());
+    assert.equal(inspection.pending, false); assert.equal(inspection.result, null); assert.match(inspection.error, /No automatic retry/);
+    assert.doesNotMatch(inspection.error, /synthetic-private-error/);
+    inspection.observe(state({revision: 8})); await tick(); assert.equal(calls, 1);
+  }
+});
+test('output dismissal and session changes discard late success or failure and allow explicit new inspection', async () => {
+  for (const change of ['dismiss', 'restart']) for (const fail of [false, true]) {
+    const pending = deferred(); let calls = 0;
+    const inspection = new OutputInspection(async () => ++calls === 1 ? pending.promise : {status: 200, body: outputReport({session_id: change === 'restart' ? 'new-session' : 'session-one'})});
+    const first = inspection.inspect(state());
+    const latest = change === 'restart' ? state({session_id: 'new-session', csrf_token: 'new-token'}) : state();
+    if (change === 'dismiss') inspection.dismiss(); else inspection.observe(latest);
+    assert.equal(inspection.open, false); assert.equal(inspection.pending, false);
+    await inspection.inspect(latest); assert.equal(inspection.result.session_id, latest.session_id);
+    if (fail) pending.reject(new Error('old error')); else pending.resolve({status: 200, body: outputReport()});
+    await first;
+    assert.equal(inspection.result.session_id, latest.session_id); assert.equal(inspection.error, ''); assert.equal(calls, 2);
+  }
+});
+test('output overlap and stale-session errors provide explicit retry or refresh guidance', async () => {
+  for (const code of ['output_inspection_busy', 'stale_output_inspection', 'forbidden']) {
+    let calls = 0;
+    const inspection = new OutputInspection(async () => {calls += 1; return {status: 409, body: {error: code}};});
+    await inspection.inspect(state());
+    assert.match(inspection.error, code === 'output_inspection_busy' ? /No new inspection was started/ : /Refresh before inspecting/);
+    assert.equal(calls, 1); assert.equal(inspection.result, null);
+  }
+});
+test('inline output UI keeps Stop reachable and has an independent pending/result/error notice', async () => {
+  const h = await appHarness(); const wait = deferred();
+  h.setPost(body => body.action === 'inspect' ? wait.promise : {request_acknowledged: true});
+  const inspecting = h.ids.get('inspect-output').fire('click'); await h.settle();
+  assert.equal(h.posts().filter(body => body.action === 'inspect').length, 1);
+  assert.equal(h.ids.get('inspect-output').disabled, true);
+  assert.equal(h.ids.get('output-inspection-detail').hidden, false);
+  assert.match(h.ids.get('output-inspection-status').textContent, /Inspecting output once/);
+  for (const id of ['favorite-dialog', 'dsp-dialog', 'playlist-dialog', 'export-dialog', 'room-dialog']) assert.equal(h.ids.get(id).open, false);
+  assert.equal(h.ids.get('stop').disabled, false); await h.ids.get('stop').fire('click');
+  const notice = h.ids.get('notice-text').textContent; assert.match(notice, /^Stop:/);
+  wait.resolve(outputReport({null_output: 'deliberately_silent', driver: {status: 'value', family: 'null'}})); await inspecting;
+  assert.equal(h.ids.get('notice-text').textContent, notice);
+  assert.equal(h.ids.get('inspect-output').disabled, false);
+  assert.match(h.ids.get('output-inspection-results').children.map(item => item.textContent).join(' '), /deliberately silent/);
+  const requests = h.requests.filter(item => item.url.endsWith('/output/inspect'));
+  assert.equal(requests.length, 1); assert.equal(requests[0].options.credentials, 'same-origin'); assert.equal(requests[0].options.redirect, 'error'); assert.equal(requests[0].options.cache, 'no-store');
+  assert.equal(requests[0].options.referrerPolicy, 'no-referrer'); assert.equal(requests[0].options.headers['X-ORR-CSRF'], 'test-csrf-token');
+  await h.refresh(); assert.equal(h.posts().filter(body => body.action === 'inspect').length, 1);
+  h.setPost(() => {throw new Error('synthetic-private-error');}); await h.ids.get('inspect-output').fire('click');
+  assert.equal(h.ids.get('notice-text').textContent, notice); assert.match(h.ids.get('output-inspection-status').textContent, /No automatic retry/);
+});
+test('inline output dismissal, pagehide and session change scrub results and ignore late response', async () => {
+  for (const dismiss of ['button', 'pagehide', 'session']) {
+    const h = await appHarness(); const wait = deferred(); h.setPost(() => wait.promise);
+    const inspecting = h.ids.get('inspect-output').fire('click'); await h.settle();
+    if (dismiss === 'button') {await h.ids.get('dismiss-output-inspection').fire('click'); assert.equal(h.focused().id, 'inspect-output');}
+    if (dismiss === 'pagehide') h.pagehide();
+    if (dismiss === 'session') {h.setState(state({session_id: 'new-session', csrf_token: 'new-token'})); h.setFavorites(favorites([], 'new-session')); await h.refresh();}
+    assert.equal(h.ids.get('output-inspection-detail').hidden, true);
+    wait.resolve(outputReport()); await inspecting;
+    assert.equal(h.ids.get('output-inspection-detail').hidden, true); assert.equal(h.ids.get('output-inspection-results').children.length, 0);
+    assert.equal(h.ids.get('output-inspection-status').textContent, '');
+    assert.equal(h.posts().filter(body => body.action === 'inspect').length, 1);
+  }
+});
+test('output section is non-modal and rendered entirely as safe text', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/index.html'), 'utf8');
+  assert.match(html, /<section class="card output-inspection-card"/); assert.doesNotMatch(html, /<dialog[^>]*output-inspection/);
+  assert.match(html, /two observations are sequential, not atomic/); assert.match(html, /physical device and audible sound are unverified/);
+  const app = fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/app.js'), 'utf8');
+  assert.match(app, /item\.textContent = line/);
+});
