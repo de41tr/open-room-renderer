@@ -500,6 +500,16 @@ async def test_real_unix_ipc_explicit_audio_device_selects_null(native_workspace
             assert await _property(backend, "load-scripts") is False
             assert (await backend.loadfile(str(track)))["error"] == "success"
             await _eventually("explicit null output active", lambda: _matches(backend, "current-ao", "null"))
+            # The diagnostic is a separate read-only client. Its close must not
+            # stop/reap the owned player, delete the socket, or alter playback.
+            diagnostic = MpvBackend(str(endpoint), auto_spawn=False)
+            observed = await diagnostic.diagnose_audio_output()
+            assert observed["connection"] == "connected"
+            assert observed["socket_path_check"] == "unchanged_at_checks"
+            assert observed["audio_device"] == {"status": "value", "value": "null"}
+            assert observed["current_ao"] == {"status": "value", "value": "null"}
+            assert diagnostic.process is diagnostic._startup_task is diagnostic._shutdown_task is None
+            assert process.returncode is None and endpoint.exists()
             assert await _property(backend, "path") == str(track)
             await backend.stop()
     finally:
@@ -511,6 +521,7 @@ async def test_real_unix_ipc_explicit_audio_device_selects_null(native_workspace
         "active_output_driver": "null", "ao_override_used": False, "child_reaped": True,
         "ambient_config_ignored": True, "null_fallback_disabled": True,
         "physical_output_verified": False,
+        "read_only_diagnostic": "intent_and_active_driver_null; player_and_socket_preserved",
     }, sort_keys=True))
 
 
