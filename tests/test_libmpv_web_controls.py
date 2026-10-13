@@ -5,6 +5,8 @@ MpvBackend and libmpv; only the command transport is the existing test-only
 ctypes adapter. Generated finite WAVs are served on literal loopback, with null
 output and no accounts/external media. This verifies Web wiring and native
 readback, not a browser, production Unix IPC, audible output or DSP samples.
+The gain recovery case discards one real readback in that test transport to
+induce uncertainty, then measures real Stop and volume-zero recovery.
 The existing test_libmpv_dsp.py digital-PCM gate remains the sample-level proof.
 """
 from __future__ import annotations
@@ -534,9 +536,82 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
                 "media_requests_before_explicit_play": 0, "actual_source_after_explicit_play": 1,
                 "native_id_after_explicit_play": selected_source["native_id"],
             }
+            # One synthetic reply loss in the existing ctypes transport makes
+            # the production gain path uncertain after a real native write.
+            # Never manufacture UNKNOWN by changing backend or renderer state.
+            original_command = backend.command
+            lost_readbacks = []
+
+            async def lose_one_gain_readback(args, timeout=5.0):
+                result = await original_command(args, timeout)
+                if args == ["get_property", "volume"] and not lost_readbacks:
+                    assert result == {"error": "success", "data": 26}
+                    lost_readbacks.append(result)
+                    return {"error": "synthetic lost reply after real native volume readback"}
+                return result
+
+            backend.command = lose_one_gain_readback
+            try:
+                failed = await command("volume", value=26, expected=502)
+            finally:
+                backend.command = original_command
+            assert failed["outcome"] == "UNKNOWN" and failed["error"] == "command_failed"
+            assert len(lost_readbacks) == 1
+            assert backend.read_property("volume") == 26 and backend.read_property("mute") is False
+            unknown_gain = {"status": "UNKNOWN", "volume": None, "mute": None, "last_confirmed": None}
+            assert (await snapshot())["gain"] == unknown_gain
+            assert api.state.gain_confirmed is False and backend.gain_confirmed is False
+
             await command("stop")
             assert backend.read_property("idle-active") is True
             await canonical(2, "STOPPED")
+            stopped = await snapshot()
+            assert stopped["gain"] == unknown_gain, "Stop must not claim it reconfirmed gain"
+            assert backend.read_property("volume") == 26 and backend.read_property("mute") is False
+            assert backend.read_property("playlist") == []
+
+            # The recovery itself has no injected response: both writes and
+            # both confirmations pass through to the same live native handle.
+            gain_calls = []
+
+            async def observe_gain_recovery(args, timeout=5.0):
+                result = await original_command(args, timeout)
+                if (isinstance(args, list) and args[0] in {"set_property", "get_property"}
+                        and args[1] in {"volume", "mute"}):
+                    gain_calls.append({"command": args, "response": result})
+                return result
+
+            before = len(backend.commands)
+            requests_before = list(media_requests)
+            backend.command = observe_gain_recovery
+            try:
+                await command("volume", value=0)
+            finally:
+                backend.command = original_command
+            assert gain_calls == [
+                {"command": ["set_property", "volume", 0], "response": {"error": "success"}},
+                {"command": ["get_property", "volume"], "response": {"error": "success", "data": 0}},
+                {"command": ["set_property", "mute", False], "response": {"error": "success"}},
+                {"command": ["get_property", "mute"], "response": {"error": "success", "data": False}},
+            ]
+            assert backend.commands[before:] == [["set_property", "volume", 0], ["set_property", "mute", False]]
+            assert backend.read_property("volume") == 0 and backend.read_property("mute") is False
+            assert api.state.gain_confirmed is True and backend.gain_confirmed is True
+            recovered = await canonical(2, "STOPPED")
+            assert recovered["gain"] == {"status": "CONFIRMED", "volume": 0, "mute": False,
+                                          "last_confirmed": {"volume": 0, "mute": False}}
+            assert recovered["generation"] == stopped["generation"]
+            assert recovered["queue"] == stopped["queue"] and recovered["dsp"] == stopped["dsp"]
+            assert backend.read_property("af") == graph and backend.read_property("playlist") == []
+            assert backend.read_property("idle-active") is True and media_requests == requests_before
+            evidence["gain_zero_recovery"] = {
+                "scope": "REAL_BACKEND/null/readback with one synthetic lost gain reply; no physical-silence claim",
+                "injection": {"kind": "discard one successful native volume readback", "count": len(lost_readbacks),
+                              "actual_native_volume": lost_readbacks[0]["data"], "web_http_status": 502},
+                "gain_after_successful_stop": stopped["gain"], "native_recovery_calls": gain_calls,
+                "gain_after_zero": recovered["gain"], "transport_after_zero": recovered["transport"],
+                "source_queue_dsp_retained": True, "media_requests_during_recovery": 0,
+            }
     finally:
         release.set()
         dsp_release.set()
@@ -596,6 +671,9 @@ def test_real_libmpv_web_controls(tmp_path: Path) -> None:
     assert evidence["playlist_edits"]["native_mutations_before_explicit_play"] == 0
     assert evidence["playlist_import"]["formats"] == ["json", "m3u", "urls"]
     assert evidence["playlist_import"]["actual_source_after_explicit_play"] == 1
+    assert evidence["gain_zero_recovery"]["injection"]["count"] == 1
+    assert evidence["gain_zero_recovery"]["gain_after_successful_stop"]["status"] == "UNKNOWN"
+    assert evidence["gain_zero_recovery"]["gain_after_zero"]["volume"] == 0
     print(json.dumps(evidence, sort_keys=True))
 
 
