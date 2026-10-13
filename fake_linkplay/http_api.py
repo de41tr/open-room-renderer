@@ -44,7 +44,7 @@ from .web_playlists import PLAYLIST_ACTIONS
 from .web_ui import (WebAdmissionError, WebCommand, WebControlApi, WebDspCommandError,
                      WebRuntime)
 from .config import Config
-from .device_name import validate_device_name
+from .device_name import DeviceNameCommittedError, validate_device_name
 from .log_safety import redact_media_urls
 from .metadata_formatting import metadata_with_art, metadata_with_duration, metadata_with_url
 from .mpv_backend import LIVE_STATION_HISTORY_OPTIONS, BackendError, MpvBackend
@@ -414,6 +414,9 @@ class HttpApi:
             # before dispatch. Its stopped/backend-empty guard means the
             # existing replacement takes no await before installing this queue.
             await self._replace_queue(command.prepared_queue)
+        elif action == "device_rename":
+            await self._rename_device(command.name, expected_device=command.expected_device)
+            return {"device_revision": self.web_api.device_revision(command.name)}
         elif action == "seek":
             await self._seek_command(command.seconds)
         elif action == "volume":
@@ -2328,10 +2331,14 @@ class HttpApi:
         except BackendError as exc:
             raise ValueError("Invalid EQ parameters") from exc
 
-    async def _rename_device(self, requested_name: str) -> None:
+    async def _rename_device(self, requested_name: str, *, expected_device: str | None = None) -> None:
         """Commit locally before refresh; never roll back an already-replaced name."""
 
         async with self._rename_lock:
+            # Browser drafts compare after waiting for the transaction lock.
+            # Legacy callers keep the exact existing decoding and semantics.
+            if expected_device is not None and expected_device != self.web_api.device_revision():
+                raise WebAdmissionError("stale_device", 409)
             durability_error: AtomicWriteCommittedError | None = None
             try:
                 atomic_write_text(Path(self.cfg.state_dir) / "device_name", requested_name + "\n")
@@ -2355,12 +2362,12 @@ class HttpApi:
                 # A failed refresh may already have withdrawn old advertisements.
                 # A same-name retry must run refresh again, not pretend to undo it.
                 LOG.warning("Device name applied; discovery refresh failed")
-                raise OSError("Device name applied; discovery refresh failed") from exc
+                raise DeviceNameCommittedError("Device name applied; discovery refresh failed") from exc
             finally:
                 self._schedule_event_notify()
             if durability_error is not None:
                 raise durability_error
-            LOG.info("Persisted WiiM Home device rename request name=%s", requested_name)
+            LOG.info("Persisted WiiM Home device rename request")
 
     @staticmethod
     def _decode_device_name_command(command: str) -> str:

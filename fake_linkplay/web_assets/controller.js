@@ -209,6 +209,7 @@
   }
   function validateState(state) {
     if (!isObject(state) || state.version !== 1 || !string(state.session_id) || !state.session_id || !integer(state.revision) || !integer(state.generation) || !string(state.csrf_token) || !state.csrf_token || !isObject(state.device) || !string(state.device.name)) throw new Error("Invalid renderer snapshot");
+    if (state.device.revision !== undefined && (!string(state.device.revision) || !/^[0-9a-f]{64}$/.test(state.device.revision) || typeof state.device.name_visible !== "boolean")) throw new Error("Invalid room name snapshot");
     const {transport, media, gain, queue, dsp, actions} = state;
     if (!isObject(transport) || !PHASES.includes(transport.phase) || !["CONFIRMED", "PENDING", "ERROR"].includes(transport.status) || !string(transport.message)) throw new Error("Invalid transport snapshot");
     if (!isObject(media) || ![media.title, media.artist, media.album].every(string) || !(media.artwork === null || string(media.artwork)) || typeof media.is_live !== "boolean" || !optionalNumber(media.position_seconds) || !optionalNumber(media.duration_seconds)) throw new Error("Invalid media snapshot");
@@ -299,7 +300,7 @@
     changed() { this.onChange(this); }
     get busy() { return this.active.size > 0; }
     get stopBusy() { return Array.from(this.active.values()).some(item => item.action === "stop"); }
-    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (!action.startsWith("favorite_") || this.favoritesFresh) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor && (!DSP_LIBRARY_ACTIONS.includes(action) || this.state.dsp.editor.library_unavailable !== true))) && (!action.startsWith("playlist_") || playlistAvailable(this.state, action) && (action === "playlist_replace" || this.playlistEditable))); }
+    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (action !== "device_rename" || /^[0-9a-f]{64}$/.test(this.state.device.revision || "")) && (!action.startsWith("favorite_") || this.favoritesFresh) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor && (!DSP_LIBRARY_ACTIONS.includes(action) || this.state.dsp.editor.library_unavailable !== true))) && (!action.startsWith("playlist_") || playlistAvailable(this.state, action) && (action === "playlist_replace" || this.playlistEditable))); }
     refresh() {
       this.readAgain = true;
       if (!this.readPromise) {
@@ -350,7 +351,7 @@
     async mutate(body, label) {
       if (!isObject(body) || !string(body.action) || !this.canMutate(body.action)) return {kind: "blocked", text: "Read current state and wait for the pending request before trying again."};
       if (requestBytes(body) > MAX_REQUEST_BYTES) return {kind: "blocked", text: "The complete request exceeds the 32,768-byte limit."};
-      const id = ++this.operation;
+      const id = ++this.operation, session = this.state.session_id;
       this.epoch += 1;
       this.fresh = false;
       this.favoritesReadFailure = null;
@@ -361,7 +362,7 @@
       let result;
       try {
         const response = await this.request("/orr/v1/web/command", {method: "POST", headers: {"X-ORR-CSRF": this.state.csrf_token}, body});
-        if (response.status === 200 && isObject(response.body) && response.body.request_acknowledged === true) result = {kind: "acknowledged", text: `${label}: request acknowledged. Reading the current state…`, id, favoriteId: response.body.favorite_id || null};
+        if (response.status === 200 && isObject(response.body) && response.body.request_acknowledged === true) result = {kind: "acknowledged", text: `${label}: request acknowledged. Reading the current state…`, id, favoriteId: response.body.favorite_id || null, deviceRevision: response.body.device_revision};
         else result = {...commandError(response), id};
       } catch (_) {
         result = {kind: "unknown", text: `${label}: outcome unknown because the response was lost. The command may have taken effect. No retry was sent.`, id};
@@ -379,19 +380,40 @@
             ? "Target-change request rejected. Review the replacement URL and metadata choice before starting again."
             : "Target-change outcome unknown. The change may have taken effect. No retry was sent. The exact saved URL cannot be verified from this redacted view.";
       }
+      if (body.action === "device_rename") {
+        // Names can legally contain private URL text. Never echo server errors
+        // or user input, and never let matching readback erase a failed step.
+        result.text = result.kind === "acknowledged"
+          ? "Room rename acknowledged. Reading the current name…"
+          : result.kind === "error"
+            ? "Room rename rejected. Use 1–128 characters without control characters. Reopen Rename room and review the current name before trying again."
+            : result.committed
+              ? "The room name was applied, but persistence or discovery is unconfirmed. A matching name cannot confirm either. No retry was sent."
+              : "Room rename outcome unknown. The name may have changed; persistence or discovery is unconfirmed. No retry was sent.";
+      }
       this.active.delete(id);
       this.fresh = false;
-      if (result.kind === "unknown") this.unknownOutcomes = this.unknownOutcomes.concat({id, label, committed: result.committed === true}).slice(-20);
+      if (result.kind === "unknown") this.unknownOutcomes = this.unknownOutcomes.concat({id, label: body.action === "device_rename" ? "Rename room (persistence/discovery unconfirmed)" : label, committed: result.committed === true}).slice(-20);
       if (id === this.operation) this.notice = {...result, kind: result.kind === "acknowledged" ? "pending" : result.kind};
       this.changed();
       await this.refresh();
+      if (body.action === "device_rename" && result.kind === "acknowledged") {
+        result.deviceVerified = Boolean(this.fresh && this.state.session_id === session
+          && string(result.deviceRevision) && /^[0-9a-f]{64}$/.test(result.deviceRevision)
+          && this.state.device.revision === result.deviceRevision);
+        result.text = result.deviceVerified
+          ? "Room name saved; the current name is verified."
+          : "Room rename acknowledged, but the current name has not been verified. Close this dialog and refresh before another request.";
+      }
       if (body.action === "favorite_target" && result.kind === "acknowledged") {
         if (!this.favoritesFresh) result.text += " The favorites list could not be refreshed.";
         if (!this.fresh) result.text += " Current renderer state is unavailable. Refresh before another command.";
       }
       if (id === this.operation && result.kind === "acknowledged") {
         // An ACK is not a playback observation. State badges remain canonical.
-        if (body.action === "favorite_target") {
+        if (body.action === "device_rename") {
+          this.notice = {...result, kind: result.deviceVerified ? "confirmed" : "acknowledged"};
+        } else if (body.action === "favorite_target") {
           this.notice = {...result};
         } else {
           this.notice = this.fresh

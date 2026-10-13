@@ -15,7 +15,7 @@ function editor(overrides = {}) {
 const soundState = (value = editor(), changes = {}) => state({dsp: {...state().dsp, editor: value, ...changes}});
 function state(overrides = {}) {
   return {
-    version: 1, session_id: 'session-one', revision: 1, generation: 7, csrf_token: 'test-csrf-token', device: {name: 'Living room'},
+    version: 1, session_id: 'session-one', revision: 1, generation: 7, csrf_token: 'test-csrf-token', device: {name: 'Living room', revision: revisionID('1'), name_visible: true},
     transport: {phase: 'STOPPED', intent: 'stop', status: 'CONFIRMED', message: ''},
     media: {title: 'Track <script>bad()</script>', artist: 'Artist', album: '', artwork: null, is_live: false, position_seconds: 0, duration_seconds: 120},
     gain: {status: 'CONFIRMED', volume: 20, mute: false, last_confirmed: {volume: 20, mute: false}},
@@ -1912,4 +1912,88 @@ test('app clears saved-favorites advice on network, malformed, private-message, 
   const h = await appHarness(); h.setFavorites({__status: 503, ...favoritesUnavailable().body}); await h.refresh(); h.offline();
   assert.equal(h.ids.get('favorites-note').textContent, 'Favorites could not be refreshed. This list may be stale.');
   assert.equal(h.ids.get('play').disabled, true); assert.equal(h.ids.get('stop').disabled, false);
+});
+
+/* Room rename: typed-name and dialog control-flow, not browser acceptance. */
+const renamedDevice = (name = 'Küche 🔊 %2F%2525', visible = true) => ({name, revision: revisionID('2'), name_visible: visible});
+test('room rename sends one literal typed request and waits for ACK plus canonical name identity', async () => {
+  const h = await appHarness(), wait = deferred(); h.setPost(() => wait.promise);
+  await h.ids.get('rename-room').fire('click');
+  assert.equal(h.focused(), h.ids.get('room-name')); assert.equal(h.ids.get('room-name').value, 'Living room');
+  h.ids.get('room-name').value = 'Küche 🔊 %2F%2525';
+  const submitting = h.ids.get('room-form').fire('submit'); await h.settle();
+  assert.equal(h.ids.get('device-name').textContent, 'Living room'); assert.equal(h.ids.get('room-submit').disabled, true);
+  await h.ids.get('room-form').fire('submit'); assert.deepEqual(h.posts(), [{action: 'device_rename', name: 'Küche 🔊 %2F%2525', expected_device: revisionID('1')}]);
+  h.setState(state({device: renamedDevice()})); await h.refresh();
+  assert.match(h.ids.get('room-dialog-status').textContent, /^PENDING/); assert.equal(h.ids.get('room-dialog').open, true);
+  wait.resolve({request_acknowledged: true, device_revision: revisionID('2')}); await submitting;
+  assert.equal(h.ids.get('room-dialog').open, false); assert.equal(h.ids.get('room-name').value, '');
+  assert.equal(h.focused(), h.ids.get('rename-room')); assert.equal(h.ids.get('notice-kind').textContent, 'CONFIRMED');
+});
+test('room rename stale session or name is latched while unchanged polling and read loss preserve drafts', async () => {
+  for (const changed of [state({session_id: 'restarted'}), state({device: renamedDevice('Remote rename')})]) {
+    const h = await appHarness(); await h.ids.get('rename-room').fire('click'); h.ids.get('room-name').value = 'Draft';
+    h.offline(); assert.equal(h.ids.get('room-submit').disabled, true); await h.ids.get('room-form').fire('submit'); assert.equal(h.posts().length, 0);
+    await h.refresh(); assert.equal(h.ids.get('room-submit').disabled, false); assert.equal(h.ids.get('room-name').value, 'Draft');
+    h.setState(changed); await h.refresh(); assert.equal(h.ids.get('room-submit').disabled, true); assert.match(h.ids.get('room-dialog-status').textContent, /name changed or the renderer restarted/);
+    h.setState(state()); await h.refresh(); h.ids.get('room-submit').disabled = false;
+    await h.ids.get('room-form').fire('submit'); assert.equal(h.posts().length, 0); assert.equal(h.ids.get('room-submit').disabled, true);
+  }
+});
+test('room rename requires matching same-session canonical identity even after a successful ACK', async () => {
+  for (const outcome of ['wrong-name', 'missing-token', 'new-session', 'failed-read', 'hidden-name']) {
+    const h = await appHarness(); await h.ids.get('rename-room').fire('click'); h.ids.get('room-name').value = 'Requested name';
+    h.setPost(() => {
+      h.setState(outcome === 'failed-read' ? {} : state({session_id: outcome === 'new-session' ? 'new-session' : 'session-one', device: outcome === 'wrong-name' ? state().device : renamedDevice(outcome === 'hidden-name' ? 'Open Room Renderer' : 'Requested name', outcome !== 'hidden-name')}));
+      return {request_acknowledged: true, ...(outcome === 'missing-token' ? {} : {device_revision: revisionID('2')})};
+    });
+    await h.ids.get('room-form').fire('submit');
+    if (outcome === 'hidden-name') {
+      assert.equal(h.ids.get('room-dialog').open, false); await h.ids.get('rename-room').fire('click');
+      assert.equal(h.ids.get('room-name').value, ''); assert.match(h.ids.get('room-dialog-status').textContent, /current name is hidden/);
+    } else {
+      assert.equal(h.ids.get('room-dialog').open, true); assert.equal(h.ids.get('room-submit').disabled, true);
+      assert.match(h.ids.get('room-dialog-status').textContent, /current name has not been verified/); assert.notEqual(h.ids.get('notice-kind').textContent, 'CONFIRMED');
+      await h.ids.get('room-form').fire('submit'); assert.equal(h.posts().length, 1);
+    }
+  }
+});
+test('room rename committed error and lost response remain UNKNOWN despite changed name and later requests', async () => {
+  for (const fault of ['committed', 'lost', 'rejected']) {
+    const h = await appHarness(); await h.ids.get('rename-room').fire('click'); h.ids.get('room-name').value = 'Changed';
+    h.setPost(() => {
+      h.setState(state({device: renamedDevice('Changed')}));
+      if (fault === 'lost') throw new Error('https://private.invalid/?token=DO_NOT_ECHO');
+      return {__status: fault === 'rejected' ? 409 : 502, outcome: fault === 'rejected' ? 'REJECTED' : 'UNKNOWN', committed: fault === 'committed', message: 'https://private.invalid/?token=DO_NOT_ECHO'};
+    });
+    await h.ids.get('room-form').fire('submit'); assert.equal(h.ids.get('room-dialog').open, true); assert.equal(h.ids.get('room-submit').disabled, true);
+    assert.match(h.ids.get('room-dialog-status').textContent, fault === 'rejected' ? /^ERROR/ : /^UNKNOWN/);
+    assert.doesNotMatch(h.ids.get('room-dialog-status').textContent + h.ids.get('notice-text').textContent, /DO_NOT_ECHO/);
+    await h.refresh(); assert.match(h.ids.get('room-dialog-status').textContent, fault === 'rejected' ? /^ERROR/ : /^UNKNOWN/);
+    await h.ids.get('room-form').fire('submit'); assert.equal(h.posts().length, 1);
+    await h.ids.get('room-cancel').fire('click'); h.setPost(() => ({request_acknowledged: true})); await h.ids.get('stop').fire('click');
+    if (fault !== 'rejected') assert.match(h.ids.get('notice-text').textContent, /Rename room \(persistence\/discovery unconfirmed\)/);
+  }
+});
+test('room rename cancellation, Escape and navigation scrub drafts and late responses cannot dismiss a newer dialog', async () => {
+  for (const dismiss of ['room-close', 'room-cancel', 'escape', 'pagehide']) {
+    const h = await appHarness(); await h.ids.get('rename-room').fire('click'); h.ids.get('room-name').value = 'https://private.invalid/?token=LOCAL_ONLY';
+    if (dismiss === 'escape') await h.ids.get('room-dialog').fire('cancel'); else if (dismiss === 'pagehide') h.pagehide(); else await h.ids.get(dismiss).fire('click');
+    assert.equal(h.ids.get('room-dialog').open, false); assert.equal(h.ids.get('room-name').value, ''); assert.equal(h.posts().length, 0);
+    if (dismiss !== 'pagehide') assert.equal(h.focused(), h.ids.get('rename-room'));
+  }
+  const h = await appHarness(), wait = deferred(); h.setPost(() => wait.promise);
+  await h.ids.get('rename-room').fire('click'); h.ids.get('room-name').value = 'Submitted'; const submitting = h.ids.get('room-form').fire('submit'); await h.settle();
+  await h.ids.get('room-cancel').fire('click'); assert.equal(h.ids.get('room-name').value, ''); assert.equal(h.focused(), h.ids.get('refresh'));
+  h.setState(state({device: renamedDevice('Submitted')})); wait.resolve({request_acknowledged: true, device_revision: revisionID('2')}); await submitting;
+  await h.ids.get('rename-room').fire('click'); h.ids.get('room-name').value = 'New draft'; await h.ids.get('room-dialog').fire('close');
+  assert.equal(h.ids.get('room-dialog').open, true); assert.equal(h.ids.get('room-name').value, 'New draft'); assert.equal(h.posts().length, 1);
+});
+
+test('room rename leaves legacy whitespace normalization to the server, including U+FEFF', async () => {
+  const h = await appHarness(); await h.ids.get('rename-room').fire('click');
+  h.ids.get('room-name').value = ' \ufeff ';
+  h.setPost(() => {h.setState(state({device: renamedDevice('\ufeff')})); return {request_acknowledged: true, device_revision: revisionID('2')};});
+  await h.ids.get('room-form').fire('submit');
+  assert.equal(h.posts()[0].name, ' \ufeff '); assert.equal(h.ids.get('room-dialog').open, false);
 });

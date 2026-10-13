@@ -23,6 +23,7 @@ from urllib.parse import unquote, urlsplit
 from aiohttp import web
 
 from .canonical_target import canonical_target_url
+from .device_name import DeviceNameCommittedError, validate_device_name
 from .favorites import FavoriteError, FavoritesStore, validate_target_edit
 from .eq_presets import EqPresetLibrary, PRESET_LIBRARY_UNAVAILABLE_MESSAGE, normalize_eq_preset_name
 from .log_safety import redact_media_urls
@@ -59,6 +60,7 @@ _GENERATION_ACTIONS = frozenset({"play", "pause", "next", "previous", "seek",
                                "queue_select", "queue_mode", "favorite_current"}) | PLAYLIST_ACTIONS
 _SCHEMAS = {
     **{name: {"expected_generation"} for name in ("play", "pause", "next", "previous")},
+    "device_rename": {"name", "expected_device"},
     "stop": set(), "seek": {"seconds", "expected_generation"},
     "volume": {"value"}, "mute": {"value"}, "balance": {"value"}, "eq": {"enabled"},
     "queue_select": {"queue_name", "index", "expected_generation"},
@@ -105,6 +107,7 @@ class WebCommand:
     id: str = ""
     metadata: str = ""
     expected_dsp: str = ""
+    expected_device: str = ""
     preset_id: str = ""
     bands: list[dict[str, object]] | None = None
     source: PlaybackQueue | None = field(default=None, repr=False)
@@ -318,6 +321,13 @@ def decode_command(encoded: bytes) -> WebCommand:
         action = payload["action"]
         if action not in _SCHEMAS or payload.keys() != _SCHEMAS[action] | {"action"}:
             raise ValueError
+        if action == "device_rename":
+            if (not isinstance(payload["name"], str) or not isinstance(payload["expected_device"], str)
+                    or not _DSP_TOKEN.fullmatch(payload["expected_device"])):
+                raise ValueError
+            # Typed JSON is already decoded. In particular, %2F and %25 stay
+            # literal; only the legacy transport applies URL/hex decoding.
+            payload["name"] = validate_device_name(payload["name"].strip())
         if action in _GENERATION_ACTIONS:
             _integer(payload["expected_generation"], 0, MAX_SAFE_INTEGER)
         if action == "playlist_replace":
@@ -364,7 +374,7 @@ def decode_command(encoded: bytes) -> WebCommand:
                         or name in _BUILTIN_PRESETS):
                     raise ValueError
                 payload["name"] = name
-        if "name" in payload:
+        if "name" in payload and action != "device_rename":
             _text(payload["name"], 256, required=True)
         if "id" in payload and (not isinstance(payload["id"], str) or not _ID.fullmatch(payload["id"])):
             raise ValueError
@@ -409,6 +419,10 @@ class WebControlApi:
     def _dsp_digest(self, kind: str, value: object) -> str:
         encoded = json.dumps([kind, value], sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
         return hmac.new(self._dsp_key, encoded, hashlib.sha256).hexdigest()
+
+    def device_revision(self, name: str | None = None) -> str:
+        """Session-bound name identity, including names hidden by redaction."""
+        return self._dsp_digest("device_name", self._device_name() if name is None else name)
 
     def dsp_revision(self, active: dict[str, object], library: EqPresetLibrary) -> str:
         """Include the entire library because rename/delete operate by name."""
@@ -455,6 +469,8 @@ class WebControlApi:
             "stale_generation": "Selection changed. Refresh before choosing again.",
             "export_unavailable": "This queue cannot be exported for browser import. For supported larger queues, use playlist save-current FILE in the CLI.",
             "stale_export": "The queue or renderer session changed. Reopen Export and review it again.",
+            "stale_device": "The room name changed. Reopen Rename room and review the current name.",
+            "device_rename_committed": "The room name was applied, but persistence or discovery is unconfirmed. Readback alone cannot confirm either. No automatic retry was sent.",
             "stale_dsp": "DSP settings or saved presets changed. Refresh and review before choosing again.",
             "preset_conflict": "That preset name already exists. Choose another name.",
             "preset_library_unavailable": PRESET_LIBRARY_UNAVAILABLE_MESSAGE,
@@ -614,10 +630,13 @@ class WebControlApi:
         dsp = self._dsp_snapshot()
         dsp = {**dsp, "name": _dsp_name(dsp.get("name", ""))}
         self._revision += 1
+        device_name = self._device_name()
+        visible_device_name = _dsp_name(device_name, "Open Room Renderer")
         return {
             "version": 1, "session_id": self._session_id, "revision": self._revision,
             "csrf_token": self._csrf_token, "generation": state.generation,
-            "device": {"name": _display(self._device_name(), "Open Room Renderer")},
+            "device": {"name": visible_device_name, "name_visible": visible_device_name == device_name,
+                       "revision": self.device_revision(device_name)},
             "transport": {"phase": state.phase.value, "intent": state.intent, "status": transport_status,
                 "message": "Playback state is unconfirmed. Stop is available for recovery." if transport_status == "ERROR"
                     else "Waiting for renderer confirmation." if transport_status == "PENDING" else ""},
@@ -733,8 +752,11 @@ class WebControlApi:
             return self._error(exc.code, exc.status)
         except WebDspCommandError as exc:
             return self._error("command_failed", 502, "UNKNOWN", effect=exc.effect)
+        except DeviceNameCommittedError:
+            return self._error("device_rename_committed", 502, "UNKNOWN", committed=True)
         except AtomicWriteCommittedError:
-            return self._error("command_failed", 502, "UNKNOWN", committed=True)
+            code = "device_rename_committed" if dispatched and command.action == "device_rename" else "command_failed"
+            return self._error(code, 502, "UNKNOWN", committed=True)
         except Exception:
             # Core operations can have effects before raising, including
             # rejected native navigation/seek and persistence-after-commit.

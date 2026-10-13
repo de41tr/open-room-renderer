@@ -263,3 +263,31 @@ def test_custom_refresh_withdraws_old_name_and_announces_new_name() -> None:
     assert encode_name(old_instance) not in announcement
     protocol.refresh()
     assert transport.sendto.call_count == 2
+
+
+async def test_custom_name_logging_omits_private_instance_on_start_and_query(monkeypatch, caplog) -> None:
+    """Synthetic socket only: protocol data keeps names; diagnostic logs do not."""
+    import asyncio
+    import struct
+    from unittest.mock import AsyncMock, Mock
+    from fake_linkplay.mdns import CustomMdnsResponder, MDNS_PORT
+
+    cfg = Config(uuid="00000000-0000-4000-8000-000000000001", wiim_home_profile=True,
+                 advertise_ip="192.0.2.10", mdns_instance_name="https://private.invalid/?token=DO_NOT_LOG")
+    transport = Mock()
+    protocol = CustomMdnsProtocol(cfg)
+    protocol.connection_made(transport)
+    caplog.set_level("DEBUG", logger="fake_linkplay.mdns")
+    monkeypatch.setattr("fake_linkplay.mdns.socket.socket", Mock(return_value=Mock()))
+    monkeypatch.setattr(asyncio.get_running_loop(), "create_datagram_endpoint",
+                        AsyncMock(return_value=(transport, protocol)))
+    responder = CustomMdnsResponder(cfg)
+    await responder.start()
+    query = (struct.pack("!HHHHHH", 0, 0, 1, 0, 0, 0) + encode_name(protocol.instance)
+             + struct.pack("!HH", DNS_TYPE_SRV, DNS_CLASS_IN))
+    protocol.datagram_received(query, ("192.0.2.20", MDNS_PORT))
+    assert encode_name(protocol.instance) in transport.sendto.call_args.args[0]
+    await responder.stop()
+    assert "custom mDNS responder started" in caplog.text
+    assert "mDNS response qtype=" in caplog.text
+    assert "do_not_log" not in caplog.text.lower()

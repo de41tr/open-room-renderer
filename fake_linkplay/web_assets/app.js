@@ -7,7 +7,7 @@
   let snapshot = null, queueSignature = "", favoritesSignature = "", artworkURL = null;
   let dialogContext = null, dialogSerial = 0, pollTimer = null, pollRun = 0;
   const soundDraft = new DspDraft();
-  let playlistDraft = null, queueEditing = null, exportContext = null;
+  let playlistDraft = null, queueEditing = null, exportContext = null, roomContext = null;
   const queueIntents = new WeakMap();
   let presetSignature = "", presetContext = null, presetSerial = 0, soundSubmission = null;
   const text = (id, value) => { const element = $(id); if (element.textContent !== value) element.textContent = value; };
@@ -24,7 +24,7 @@
       clear();
       if (!wasOpen) return;
       dialog.close();
-      if (restore === false || !target || ["favorite-dialog", "dsp-dialog", "playlist-dialog", "export-dialog"].some(other => $(other).open)) return;
+      if (restore === false || !target || ["favorite-dialog", "dsp-dialog", "playlist-dialog", "export-dialog", "room-dialog"].some(other => $(other).open)) return;
       const available = item => item?.isConnected && !item.disabled && !item.closest("[hidden], [inert], details:not([open])");
       const replacement = target.favoriteKey && target.session === snapshot?.session_id
         ? Array.from($("favorites-list").querySelectorAll("button")).find(button => button.dataset.favoriteKey === target.favoriteKey) : null;
@@ -47,6 +47,7 @@
   const presetDialog = dialogLifecycle("dsp-dialog", clearPresetForm, "dsp-preset");
   const playlistDialog = dialogLifecycle("playlist-dialog", clearPlaylist);
   const exportDialog = dialogLifecycle("export-dialog", clearExport);
+  const roomDialog = dialogLifecycle("room-dialog", clearRoomForm, "rename-room");
   async function request(path, options) {
     const abort = new AbortController();
     const timer = window.setTimeout(() => abort.abort(), options.method === "POST" ? 20000 : 8000);
@@ -87,6 +88,7 @@
     const {media, transport, gain, queue, dsp} = snapshot;
     const ready = control.canMutate("play");
     text("device-name", snapshot.device.name || "Listening room");
+    renderRoomRename();
     text("track-title", media.title || (queue.count ? "Untitled track" : "Ready when you are"));
     text("track-artist", media.artist || (queue.count ? "Artist unavailable" : "Choose something from your favorites."));
     text("track-album", media.album);
@@ -523,6 +525,44 @@
     }
     $("favorites-list").querySelectorAll("button").forEach(button => { button.disabled = !ready || !control.favoritesFresh; });
   }
+  function renderRoomRename() {
+    const ready = control.canMutate("device_rename"), context = roomContext;
+    $("rename-room").disabled = !ready;
+    if (!context) return;
+    // Only a fresh external observation invalidates an unsent draft. Our own
+    // pending write may change readback before its discovery refresh finishes.
+    if (!context.sent && control.fresh && (context.session !== snapshot.session_id || context.revision !== snapshot.device.revision)) context.stale = true;
+    $("room-name").disabled = context.sent || context.stale || !ready;
+    $("room-submit").disabled = context.sent || context.stale || !ready;
+    if (context.stale && !context.sent) text("room-dialog-status", "The room name changed or the renderer restarted. Close this dialog and reopen Rename room to review the current name.");
+    else if (!context.sent) text("room-dialog-status", !control.fresh ? "Current state is unavailable. Wait for fresh state before saving." : snapshot.device.name_visible ? "" : "The current name is hidden because it may contain private text. Enter a new name to replace it.");
+  }
+  function clearRoomForm() {
+    roomContext = null; $("room-name").value = ""; text("room-dialog-status", "");
+  }
+  function closeRoom(restore = true) { roomDialog.close(restore); }
+  $("rename-room").addEventListener("click", () => {
+    if ($("room-dialog").open || !control.canMutate("device_rename")) return;
+    roomContext = {session: snapshot.session_id, revision: snapshot.device.revision, sent: false, stale: false};
+    $("room-name").value = snapshot.device.name_visible ? snapshot.device.name : "";
+    renderRoomRename(); roomDialog.open($("rename-room")); $("room-name").focus();
+  });
+  ["room-close", "room-cancel"].forEach(id => $(id).addEventListener("click", closeRoom));
+  $("room-form").addEventListener("submit", async event => {
+    event.preventDefault(); renderRoomRename();
+    const context = roomContext;
+    if (!context || context.sent || context.stale || !control.canMutate("device_rename")) return;
+    const name = $("room-name").value;
+    // Python's existing name normalization is authoritative (JS trim differs
+    // for U+FEFF and some whitespace); send every nonempty input unchanged.
+    if (!name) { text("room-dialog-status", "Enter a room name of 1–128 characters."); $("room-name").focus(); return; }
+    context.sent = true; text("room-dialog-status", "PENDING · Saving the name and waiting for discovery refresh…");
+    const result = await run({action: "device_rename", name, expected_device: context.revision}, "Rename room");
+    // Closing scrubs only this draft, never cancels or rolls back a sent rename.
+    if (roomContext !== context) return;
+    if (result.kind === "acknowledged" && result.deviceVerified) closeRoom();
+    else { text("room-dialog-status", `${result.kind.toUpperCase()} · ${result.text}`); renderRoomRename(); }
+  });
   async function run(body, label) { const result = await control.mutate(body, label); return result; }
   function command(action, values = {}) { return guardedAction(snapshot, action, values); }
   ["play", "pause", "stop", "next", "previous"].forEach(action => $(action).addEventListener("click", () => run(command(action), action[0].toUpperCase() + action.slice(1))));
@@ -744,7 +784,7 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
   // Scrub private dialog input before navigation/BFCache, even if already closed.
   // Only local drafts are dismissed; sent commands and their outcomes stay live.
-  window.addEventListener("pagehide", () => { closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); });
+  window.addEventListener("pagehide", () => { closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); });
   window.addEventListener("online", () => poll());
   window.addEventListener("offline", () => { control.fresh = false; control.favoritesFresh = false; control.favoritesReadFailure = null; render(); });
   poll();
