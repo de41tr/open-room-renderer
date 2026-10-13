@@ -1,5 +1,103 @@
 # Test evidence and limits
 
+## Published DSP and native-install checkpoint
+
+Exact head `7d68d79` passed all three jobs and every step in
+[run 38323337010](https://github.com/de41tr/open-room-renderer/actions/runs/38323337010),
+verified at 23:53 UTC. Native groups retain 23+44 checks on x86_64 and ARM64.
+Logs explicitly confirm installed package resources and all five Web routes on
+each owned/external SIGTERM, SIGINT and SIGHUP restart cycle, followed by owned
+uninstall. Existing Unix/client/lifetime/clocked/discovery/Snapcast gates pass.
+This closes the native installer delivery gap for that exact software scope;
+browser, physical ARMv7/audio and later playlist/startup changes remain separate.
+
+Hosted default groups complete in 157.08s on x86_64 and 147.76s on ARM64, versus
+235.97s/225.40s in the first-Web run. This is an observed different-source run
+comparison, not a controlled benchmark. The floor group reached 159.50s under
+its unchanged 165-second watchdog, motivating a bounded same-process rebalance
+before adding new startup/Web tests; no cap relaxation is authorized.
+
+## Floor headroom: final same-runner rebalance
+
+The floor's measured 159.50s remainder group at `7d68d79` left little of its
+unchanged 165-second watchdog for new startup coverage. Both default invocations
+now move only `test_startup_config.py` and `test_web_ui.py` into the existing CLI
+group. The helper, two processes, runners, caps, assertions and skips are unchanged.
+Final collection comparison on actual Python 3.11.17 and 3.12.14 preserves all
+**5,121 unique nodes** and identical skip/skipif/xfail metadata, with disjoint
+**4,612 + 509** groups. There is no coverage omission or duplication.
+
+One measured Python 3.11 replay finished in 134.941s wall, but **was not green**:
+remainder 4537 passed/74 skipped/1 failed (133.71s), second group 509 passed
+(86.05s). The unchanged workflow-string assertion required `favorites_cli.py`
+last. Only selector order was corrected; the assertion was preserved. All 13
+focused helper/workflow checks then passed, and final collection parity was
+reconfirmed. No second complete replay was used to disguise the failed result.
+The preceding full runtime checks below remain valid for runtime source;
+final hosted scheduling/timing must be established on the new exact head.
+
+## Stopped playlist and startup checkpoint
+
+Final combined default groups pass **5047 tests / 74 opt-in skips** on each
+interpreter: Python 3.12 4797+250 (147.74s/68.58s), Python 3.11 4797+250
+(151.29s/68.47s). The default full-coverage partition is distinct from native
+opt-in acceptance; no existing assertion or skip was removed. Final frontend
+checks pass 75 Node/DOM cases, including delayed-close/reopen, file-read races,
+private input cleanup and stale rows/drafts. These remain browser doubles.
+
+The short actual libmpv Web flow retains its old assertions and 30s/35s caps,
+then checks all three import formats, canonical append/move/remove, selected
+duplicate occurrence and metadata preservation, stale/playing rejection without
+native mutations, zero media requests before explicit Play, and actual decoding
+after Play. Final integrated 0.37/0.40 runs pass in **4.25s/4.06s**. This uses the
+existing ctypes command adapter and real aiohttp/native null output, not local
+production Unix IPC, a browser, physical audio or a new PCM measurement.
+
+A measured maximum-size queue initially spent about 59 ms per eligibility poll.
+A small reviewed copy-on-write validation view removes redundant deep copying
+and URL parsing while preserving full escaped bounds and per-call freshness.
+Twenty alternating pairs measured **54.86 → 34.00 ms** median for 1,000 ordinary
+tracks, **63.77 → 44.15 ms** for 1,000 equal-resolved tracks at the exact 1 MiB
+SOAP bound. Independent differential/duplicate/detachment checks pass. There is
+no cache; cost remains synchronous O(track count), with no ARMv7 timing claim.
+
+Exact newly published-head hosted CI is independently required. The unchanged
+existing installed-CLI, Unix, native audio, lifetime and client lanes remain
+part of that verification; prior green source checkpoints cannot substitute.
+
+## Explicit startup configuration errors
+
+`tests/test_startup_config.py` covers the startup-only input boundary: real CLI
+and checkout-wrapper subprocesses reject missing/directory/unreadable files,
+invalid UTF-8, secret-bearing YAML syntax/tag failures, unsupported mappings and
+preset/source entries, existing constructor constraints, and failing logging/gain
+conversions with fixed stderr and exit status 2. Unit guards prove these errors
+precede identity/state hydration, logging, backend construction and listeners.
+An unreadable-file subprocess requires a non-root user and otherwise skips that
+specific case.
+
+Minimal YAML/default acceptance is checked in real processes with the backend
+constructor deliberately replaced by a stopping sentinel. These tests do not
+start mpv, bind ports, advertise discovery, or claim a live service health check.
+They also preserve the bare-serve missing-default fallback, public loader behavior,
+accepted volume coercions/clamping and unknown logging-name fallback. The tests
+also distinguish an invalid configured volume (rejected before reading
+otherwise valid saved gain) from normal saved-gain restoration for valid YAML.
+Checkout probe doubles check the existing privileged-port probe is not duplicated
+and its OS error detail is not echoed. Existing mocked lifecycle tests continue to
+own degraded backend availability, binding failure and cleanup behavior.
+
+Focused commands (no native services or provider accounts):
+
+```sh
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_startup_config.py
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_backend_lifecycle.py tests/test_active_dsp_persistence.py -k cli
+PYTHONPATH=. .venv/bin/python -m pytest -q tests/test_identity.py tests/test_gain_persistence.py tests/test_discovery_interface.py tests/test_native_installation.py -k 'runner or custom_missing_port or identity or gain or discovery_interface or public_yaml or public_ports'
+```
+
+This does not establish comprehensive config validation, persisted-state error
+redaction, actual listener startup, systemd behavior, or hardware acceptance.
+
 ## Web DSP editor: locked state and measured audio
 
 The band/preset extension reuses the existing DSP transaction, with a Web-only

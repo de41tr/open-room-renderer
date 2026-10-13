@@ -1,5 +1,28 @@
 # Next-phase strategic review
 
+## 23:42 UTC value/risk assessment (first 90 minutes)
+
+1. **CONTINUE:** integrate stopped-only local playlist loading/editing and verify
+   actual explicit-Play behavior. This completes a useful browser workflow while
+   retaining the existing queue authority and strict limits.
+2. **CONTINUE:** fail closed with private-safe diagnostics for explicitly selected
+   startup config errors. Preserve public/default-loader compatibility and normal
+   backend-degraded availability; independent review precedes integration.
+3. **PIVOT:** architecture work is complete at the two cohesive boundaries. Spend
+   effort on delivered workflows and installation correctness, not more seams.
+4. **DEFER:** Spotify integration, physical ARMv7/DAC/original-app acceptance and
+   genuine browser acceptance remain separate gates; no fake success or repeated
+   known-blocked browser routes. Retain prior long-run evidence without new soaks.
+5. **BOUND:** a measured 1,000-item playlist eligibility check costs about 59 ms
+   median on this host; examine only a small semantics-preserving reduction in
+   repeated work, without caches or weaker validation. If no clean improvement,
+   document the cost and move on. Reassess within 90–120 minutes.
+
+The hard stop remains 2026-10-13 18:00 UTC, with no large/risky work after 16:30
+and stabilization from 17:00. Published DSP/package head `7d68d79` has final local
+checks green; exact-head hosted CI is still running. Private candidates are not
+covered by earlier published green results.
+
 ## Architecture checkpoint and pivot
 
 Two bounded, cohesive extractions remove saved-DSP-library ownership and pure

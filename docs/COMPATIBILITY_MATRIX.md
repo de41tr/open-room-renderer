@@ -11,13 +11,22 @@ required. The functional local Web UI is IMPLEMENTED with software/native wiring
 checks: playback/seek, volume/mute, queue selection/modes, favorite management,
 balance, EQ bypass, ten-band editing and saved-preset management. First-Web
 head `81a3d72` has all three hosted jobs green (run 38319222442); later DSP
-changes have full local checks and measured native PCM, with new-head CI pending.
+head `7d68d79` is also fully green (run 38323337010), including measured native
+PCM and real isolated installed UI routes on x86_64/ARM64.
 BROWSER_ACCEPTANCE_PENDING is explicit; real-browser
 layout/interaction is not inferred from Node/DOM doubles. Optional Spotify is
 assessed in [ADR 001](adr/001-spotify-sidecar.md): official Soloist ARMv7/WS is
 verified in documentation; integrated playback is BLOCKED/DEFERRED pending
 policy/output-arbitration design and account/hardware tests. No provider playback
 or shared DSP is claimed.
+Stopped-only browser playlist import/editing is implemented with canonical
+metadata/duplicate selection and existing replacement semantics; no durable
+queue store or seamless live reorder. Explicit-config startup uses fixed private
+errors before effects; implicit missing-default/public-loader behavior remains.
+Both have combined runtime checks and require their own exact-head hosted
+verification. The final same-runner selector rebalance has exact coverage parity
+and focused workflow checks; its earlier timing replay failure is documented
+explicitly in TESTING.md.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.

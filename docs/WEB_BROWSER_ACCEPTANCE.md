@@ -45,3 +45,28 @@ Record browser/version, viewport, server revision, passes/failures, and screensh
 - Check that PENDING/UNKNOWN hides unconfirmed current editor values, that Stop
   remains available during a pending apply, and that a lost response is never
   automatically retried. Physical/audible validation remains separate.
+
+## Stopped playlist workflow
+
+- At narrow/mobile widths and 200% zoom, open Load playlist and Add URLs. Check
+  labels, native file selection, focus return, keyboard movement and wrapping.
+- Load a small authored JSON, a simple M3U and pasted direct URLs. The preview
+  must show only safe counts/settings. Explicitly acknowledge replacement; the
+  renderer must stay stopped and make no media request until Play.
+- Verify JSON-owned settings, M3U/URL settings, duplicate occurrence selection,
+  append, remove and move. Metadata must survive ordinary edits. Removing the
+  selected last item chooses its predecessor; removing the only item is disabled.
+- Confirm playing/paused/pending or provider/radio queues do not offer unsafe
+  edits. Stop is a separate explicit action, not an automatic import prelude.
+- Test malformed JSON, duplicate JSON fields, invalid UTF-8, JSON BOM, valid M3U
+  BOM, large files and escaped request sizes exceeding 32 KiB. Errors must not
+  echo filenames, original file text, private URLs or query tokens.
+- Change selection/queue in another controller, restart the renderer, and flip
+  capabilities while a dialog/row is visible. Old intent must stay stale rather
+  than become actionable after a later poll. Detached old row handlers must fail.
+- Close and immediately reopen each favorite, DSP and playlist dialog. A delayed
+  previous close event must not erase the new draft. Cancel/Escape/navigation
+  must still clear private input, including a late file-read result and browser
+  back/forward-cache restoration.
+- Lose the mutation response and verify sticky UNKNOWN with no automatic POST
+  retry; inspect canonical state before making a new explicit choice.

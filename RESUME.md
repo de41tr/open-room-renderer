@@ -33,8 +33,8 @@ local defaults pass 4551+250 /74 on both 3.12 and 3.11 after the final
 dialog/installation corrections. Actual 0.37/0.40
 Web+PCM tests pass; guarded Web -12 dB applies measure -12.0387 dB at 1 kHz.
 DSP feature, native acceptance, same-runner default-suite scheduling, native
-asset packaging and documentation are separate commits. Verify the exact new
-head's hosted CI before claiming the new checkpoint green.
+asset packaging and documentation are separate commits. Exact head `7d68d79`
+passed all three jobs/every step in run 38323337010.
 The scheduling change preserves exact node/skip coverage and the 15-minute job
 cap; its 139.519s local grouped replay is not a hosted timing claim.
 
@@ -44,12 +44,21 @@ all-entry output-arbitration gates; standalone Soloist DIY use is supported.
 No account, key, client download or provider code was added.
 
 Native installation now includes the exact four Web assets in its source
-snapshot/provenance. Independent staged-wheel/isolated HTTP checks pass; hosted
-installed-CLI lifecycle must still confirm the new route assertions. Shared
+snapshot/provenance. Independent staged-wheel/isolated HTTP checks and hosted
+installed-CLI lifecycle on x86_64/ARM64 confirm the new route assertions. Shared
 favorite/preset delayed-close races are fixed; final Node checks pass 50/50.
 
-Continue the independently reviewed stopped-only playlist workflow candidate
-while CI runs. Keep candidate evidence distinct from published checkpoints.
+Stopped-only playlist loading/editing and private-safe explicit-config startup
+are integrated and independently reviewed as the next checkpoint. Pure playlist
+capability validation avoids redundant deep copying/URL validation but retains
+full per-call bounds and no cache. Combined local defaults pass 5047/74 on both 3.12/3.11; 75 Node checks and final
+actual native Web flows pass. Publish separate feature/native/startup/docs commits
+after the reviewed same-runner group rebalance. Exact 5,121-node/skip parity and
+13 final helper checks pass; the one timing replay failed an unchanged selector-
+order assertion before its order-only correction. No second full replay or cap
+relaxation. Final scheduling is still a hosted CI gate. Preceding DSP run
+38323337010 is fully green. Keep candidate evidence distinct from published
+checkpoints.
 Do not repeat old soak tests or known blocked browser routes. Genuine browser,
 physical ARMv7/DAC/original-app and account acceptance remain pending.
 

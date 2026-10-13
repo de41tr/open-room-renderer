@@ -39,6 +39,14 @@ DEFERRED (ADR 001); prioritize stopped-only playlist loading/editing next, witho
 introducing another playback authority. Exact new-head CI and real browser QA
 remain distinct gates.
 
+**Practical workflow checkpoint:** stopped-only JSON/M3U/URL playlist loading and
+canonical append/remove/move are integrated with independent review and short
+actual native explicit-Play checks. Startup errors for explicitly selected config
+files now fail privately before identity/backend/listener effects, preserving the
+public loader and bare-serve fallback. Final combined default/floor verification
+and exact-head CI are separate gates. The first 90-minute assessment is recorded
+in docs/STRATEGIC_REVIEW.md; no speculative new audio engine or core rewrite.
+
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
 and independent review precede milestone publication. Full native CI follows
 cohesive milestones; unchanged older endurance evidence is not rerun without

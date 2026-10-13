@@ -38,6 +38,27 @@ passed all three jobs at Web head `81a3d72` in
 That run includes all 67 native checks, real Unix IPC on both native architectures
 and an explicit Node version check. It does not certify later DSP changes.
 
+The next practical workflow candidate is IMPLEMENTED and independently reviewed:
+stopped-only JSON/M3U/direct-URL playlist loading, append/remove/move with metadata
+and selected duplicate occurrence preserved, generation/session-fenced drafts
+and no media request before explicit Play. Provider/radio queues stay read-only
+for edits; replacement remains explicit and stopped. Exact 32 KiB Web envelopes
+and existing 1 MiB escaped request limits remain. This is not durable queue storage.
+
+Explicit startup config errors now fail privately before identity/backend/listener
+work. Public load_config and bare-serve missing-default fallback remain compatible;
+malformed explicit YAML is rejected even if saved gain could previously mask its
+bad default_volume. This is bounded startup validation, not a comprehensive schema.
+Independent review reproduced/fixed SafeLoader scalar-tag exception leaks and
+recursive wrapper copying. Final combined defaults pass **5047/74** on Python
+3.12 and 3.11; 75 Node checks pass. Final actual native Web flows pass on
+0.37/0.40 in 4.25s/4.06s, including stopped edits and explicit Play. New-head CI
+remains PENDING; earlier green checkpoints do not certify these changes.
+The floor's measured 159.50s/165s headroom also prompted a same-runner two-file
+rebalance. Exact collection/skip parity holds. Its one timing replay exposed an
+unchanged selector-order assertion; order was fixed, all 13 focused workflow
+checks pass, and final hosted scheduling is PENDING. No cap/assertion was relaxed.
+
 BROWSER_ACCEPTANCE_PENDING: no real browser/layout/focus acceptance is claimed.
 The complete UI is locally reproducible at the renderer's existing `/ui/` path;
 see docs/WEB_UI.md and docs/WEB_BROWSER_ACCEPTANCE.md. Legacy unauthenticated
@@ -57,20 +78,23 @@ lock; incomplete effects remain explicit, and unsent drafts are never saved as
 active curves. Final integrated Python 3.12 and 3.11 complete groups each pass
 **4551+250 /74** after the dialog and installation fixes. Actual libmpv 0.37/0.40 Web and PCM checks pass; the new guarded
 Web -12 dB curve measures **-12.0387 dB at 1 kHz** on both versions.
-Exact new-head hosted CI remains PENDING. Playlist work is a separate candidate
-and is not covered by these results.
+Exact DSP/package head `7d68d79` passed all three jobs and every step in
+[run 38323337010](https://github.com/de41tr/open-room-renderer/actions/runs/38323337010).
+Playlist/startup changes are a separate candidate and are not covered by that run.
 
 A delivery review caught a native-installer snapshot omission that left out the
 four Web assets. The explicit asset/provenance fix is integrated, independently
 reviewed and verified through a staged-source offline installed wheel and actual
 HTTP routes. The existing hosted installed-CLI lifecycle now checks the assets
-on each restart; its exact-head native result remains PENDING. A reproduced
+on each restart; those checks pass on hosted x86_64 and ARM64 at `7d68d79`. A reproduced
 delayed dialog-close/reopen race is also fixed and covered by 50 Node checks.
 
 Native CI default tests now reuse the existing two-process partition on the same
 runner. Exact collection/skip parity and one full grouped replay pass; local wall
-time was 139.519s versus the preceding 204.38s serial pytest run. Hosted savings
-are unmeasured. No runners, tests, assertions, skips or existing caps changed.
+time was 139.519s versus the preceding 204.38s serial pytest run. Hosted native
+default groups complete in 157.08s (x86_64) and 147.76s (ARM64), compared with
+235.97s/225.40s at the first-Web checkpoint; these are different-source runs, not
+a controlled benchmark. No runners, assertions, skips or existing caps changed.
 
 Hardware/original-app acceptance remains HARDWARE_PENDING. No provider account
 authorization is available.

@@ -27,7 +27,9 @@ include the four static assets.
   Configuration-owned favorites remain read-only. Selecting a queue entry plays
   it; Next/Previous on a stopped queue preserve stopped selection semantics.
 - Confirmed channel balance, EQ enable/bypass, all ten EQ bands and preset
-  load/save/rename/delete. Playlist import/edit/export is a separate increment.
+  load/save/rename/delete.
+- Stopped-only local JSON/M3U playlist loading or direct URL entry, plus append,
+  remove and move for ordinary explicit queues. No browser export endpoint.
 
 Sliders show a local draft and require an explicit Apply/Set/Seek action. Cancel
 sends nothing. Polling does not overwrite an unfinished edit. The supported
@@ -91,6 +93,36 @@ keeps each transaction intact if its browser request is interrupted.
 
 See [the DSP editor contract](WEB_DSP_EDITOR.md) for precise numeric bounds,
 opaque identifiers, locked revision checks and effect codes.
+
+## Load and edit a stopped playlist
+
+Choose **Stop** and wait for confirmed stopped state before **Load playlist**.
+Select an authored JSON or simple M3U file, or paste direct HTTP(S) URLs. File
+text is read locally; only the selected document/URLs are submitted to this
+renderer after confirmation, never to an external service. JSON preserves its
+stored name, selected index and mode. For M3U/direct URLs, choose those settings
+in the dialog. The preview shows counts/settings, not private source URLs.
+
+Replacement explicitly discards the old queue's metadata/history. It remains
+stopped and fetches no media until you choose **Play**. Keep your original file:
+the queue is in memory and is not a durable playlist library or automatic backup.
+M3U support is the existing strict direct-URL subset, not HLS resolution; comment
+and EXTINF display text are discarded. The entire encoded Web request is limited
+to 32,768 bytes, so a larger offline CLI playlist may not fit in the browser.
+
+For ordinary explicit queues, **Add URLs**, Remove and Move preserve canonical
+metadata and the selected occurrence even when URLs repeat. Removing the selected
+entry chooses its next neighbor, or the preceding final item. Removing the only
+item is disabled. Moving uses final one-based positions. Every accepted edit
+resets position/shuffle traversal through existing queue replacement behavior;
+there is no seamless live reorder. Provider/radio-derived queues are deliberately
+read-only here, although a stopped queue can be replaced with a new explicit one.
+
+Changes from another controller or a server restart make old rows/drafts stale.
+Review fresh state and reopen the dialog; the UI does not silently rebase an old
+edit, chain it after Stop, or retry an unknown response. Cancel, Escape and page
+navigation clear private file/URL drafts. Closing cannot retract a sent command.
+See [the bounded playlist contract](WEB_PLAYLISTS.md) for exact formats/admission.
 
 ## Browser security and privacy scope
 
