@@ -653,7 +653,9 @@ def uninstall(directory: str) -> dict:
 
 def add_receiver_parser(commands) -> None:
     client = commands.add_parser("install-client", help="verify and privately extract a pinned official archive; no execution")
-    client.add_argument("--archive", required=True)
+    source = client.add_mutually_exclusive_group(required=True)
+    source.add_argument("--archive", help="existing pinned official archive for offline installation")
+    source.add_argument("--download", action="store_true", help="download the pinned official release for this native userspace")
     client.add_argument("--output-dir", required=True)
     receiver = commands.add_parser("receiver", help="explicit exclusive receiver user-service lifecycle")
     receiver.add_argument("--directory", required=True, help="private receiver setup directory")
@@ -676,7 +678,7 @@ def run_receiver(args: argparse.Namespace) -> int:
         if sys.platform != "linux" or os.geteuid() == 0:
             fail("Use the exclusive receiver as a normal Linux user, never root.")
         if args.spotify_cmd == "install-client":
-            result = install_client(args.archive, args.output_dir)
+            result = install_client(args.archive, args.output_dir, download=args.download)
         elif args.receiver_cmd == "switch":
             result = switch(args.directory, args.mode)
         elif args.receiver_cmd == "status":

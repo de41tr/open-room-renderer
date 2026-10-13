@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 import os
@@ -150,6 +151,72 @@ def test_real_client_pins_are_complete_and_not_architecture_filename_claims():
     for name, spec in client.ARCHIVES.items():
         assert len(spec[1]) == len(client.BINARY_SHA256[name]) == 64
         assert spec[1] != client.BINARY_SHA256[name]
+
+
+def test_client_cli_requires_one_source_and_preserves_offline_path(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(receiver, 'install_client', lambda *args, **kwargs: calls.append((args, kwargs)) or {})
+    base = ['spotify', 'install-client', '--output-dir', str(tmp_path / 'client')]
+    for source in ([], ['--download', '--archive', '/archive.tar.gz']):
+        with pytest.raises(SystemExit) as exc:
+            cli.main(base + source)
+        assert exc.value.code == 2
+    assert not calls
+    assert cli.main(base + ['--download']) == 0
+    assert cli.main(base + ['--archive', '/archive.tar.gz']) == 0
+    assert calls == [((None, str(tmp_path / 'client')), {'download': True}),
+                     (('/archive.tar.gz', str(tmp_path / 'client')), {'download': False})]
+
+
+def test_download_still_requires_pinned_archive_and_fresh_destination(monkeypatch, tmp_path):
+    calls = []
+    async def download(machine):
+        calls.append(machine)
+        return b'corrupt or incomplete archive'
+    monkeypatch.setattr(client, '_download_archive', download)
+    output = tmp_path / 'client'
+    with pytest.raises(ExclusiveProfileError, match='SHA-256'):
+        client.install_client(None, str(output), download=True)
+    assert calls == [client.platform.machine().lower()] and not output.exists()
+    output.mkdir()
+    (output / 'keep').write_text('unchanged')
+    with pytest.raises(ExclusiveProfileError, match='must be new'):
+        client.install_client(None, str(output), download=True)
+    assert len(calls) == 1 and (output / 'keep').read_text() == 'unchanged'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('case,error', [('redirect', 'official HTTPS'), ('oversize', 'size limit'),
+                                       ('timeout', 'not completed')])
+async def test_download_rejects_external_redirect_oversize_and_stall(monkeypatch, case, error):
+    calls = []
+    class Response:
+        status = 302 if case == 'redirect' else 200
+        headers = {'Location': 'https://unrelated.example/client'} if case == 'redirect' else {}
+        content_length = None
+        @property
+        def content(self): return self
+        async def iter_chunked(self, _size):
+            if case == 'timeout':
+                await asyncio.sleep(1)
+            yield b'x' * 9
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+    class Session:
+        def __init__(self, **kwargs):
+            assert kwargs['trust_env'] is False and kwargs['auto_decompress'] is False
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): pass
+        def get(self, url, **kwargs):
+            assert kwargs['allow_redirects'] is False
+            calls.append(url)
+            return Response()
+    monkeypatch.setattr(client.aiohttp, 'ClientSession', Session)
+    monkeypatch.setattr(client, 'MAX_ARCHIVE', 8)
+    monkeypatch.setattr(client, 'DOWNLOAD_SECONDS', 0.01)
+    with pytest.raises(ExclusiveProfileError, match=error):
+        await client._download_archive('armv7l')
+    assert calls == [f'https://github.com/devgianlu/go-librespot/releases/download/{client.UPSTREAM_VERSION}/go-librespot_linux_armv6.tar.gz']
 
 
 def test_install_can_resume_owned_partial_links(ready, monkeypatch, tmp_path):

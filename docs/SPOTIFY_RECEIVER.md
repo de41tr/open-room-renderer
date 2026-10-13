@@ -38,11 +38,17 @@ meets the version floor; this is not an instruction to upgrade an existing OS.
 
 ### Client provenance and actual ARM ABI
 
-`spotify install-client` verifies a supplied archive against the pinned official
+`spotify install-client` downloads the native pinned release with `--download`,
+or uses a supplied `--archive` for offline installation. It verifies the official
 release SHA-256 and extracts **only** its expected executable into a fresh 0700
 directory. The executable has an independent code-pinned SHA-256, also checked
 before every Spotify start. A mutable receipt cannot authorize an arbitrary
-replacement binary. The installer does not download or execute the client.
+replacement binary. Downloads use only official GitHub HTTPS release hosts,
+with a 60-second total limit, a 32 MiB size cap and no automatic retries. No
+account, cookies or environment credentials are used. The installer never
+executes the client and leaves an existing output directory unchanged.
+Credential-free `https_proxy` / `HTTPS_PROXY` is supported; authenticated proxies
+can use the existing offline archive path instead.
 ELF class, machine, endianness, ARM EABI/hard-float flags and target loader are
 checked against the current native Python userspace. Cross-installation is not
 supported. A static ABI match does not prove target execution or dependencies.
@@ -66,17 +72,20 @@ foreground/custom-service launch paths first. Retain your existing config/state.
    Set the native config's `mpv_audio_device` to the actual
    `alsa/hw:CARD=NAME,DEV=N` from target inspection. Keep its native private
    state/run directories and explicit unprivileged ports.
-2. Download the appropriate archive from the
-   [pinned official release](https://github.com/devgianlu/go-librespot/releases/tag/v0.10.3).
-   For verified native ARMv7 hard-float userspace, choose the generic `armv6`
-   archive, not the Raspberry-Pi-specific variant. Install it without execution:
+2. Download and privately install the correct native artifact from the
+   [pinned official release](https://github.com/devgianlu/go-librespot/releases/tag/v0.10.3)
+   in one command, without executing it:
 
    ```sh
    ORR="$HOME/.local/share/open-room-renderer/venv/bin/open-room-renderer"
    "$ORR" spotify install-client \
-     --archive "$HOME/Downloads/go-librespot_linux_armv6.tar.gz" \
+     --download \
      --output-dir "$HOME/.local/share/orr-spotify-client-v0.10.3"
    ```
+
+   For an offline target, replace `--download` with `--archive /absolute/path/to/archive.tar.gz`.
+   On verified native ARMv7 hard-float userspace, the selected archive is the
+   generic `go-librespot_linux_armv6.tar.gz`, not the Raspberry-Pi-specific variant.
 
 3. Prepare a separate private receiver directory. No account, process or device
    is touched by this step; it validates native files and client provenance:

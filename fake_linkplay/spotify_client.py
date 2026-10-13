@@ -1,10 +1,11 @@
-"""Pinned, offline installation of the optional upstream Spotify executable.
+"""Pinned installation of the optional upstream Spotify executable.
 
-Only an operator-supplied official release archive is accepted. No download,
-client execution, credential operation, or Spotify request occurs here.
+Use a supplied archive or explicitly download the native official release.
+No client execution, credential operation, or Spotify request occurs here.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -13,6 +14,9 @@ import platform
 import stat
 import struct
 import tarfile
+from urllib.parse import urljoin, urlsplit
+
+import aiohttp
 
 from .spotify_exclusive import (ExclusiveProfileError, UPSTREAM_COMMIT,
                                 UPSTREAM_VERSION, _directory, _path, _read)
@@ -33,10 +37,54 @@ BINARY_SHA256 = {
 }
 MAX_ARCHIVE = 32 * 1024 * 1024
 MAX_BINARY = 64 * 1024 * 1024
+DOWNLOAD_SECONDS = 60
+DOWNLOAD_HOSTS = {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}
 
 
 def fail(message: str) -> None:
     raise ExclusiveProfileError(message)
+
+
+async def _download_archive(machine: str) -> bytes:
+    """Fetch one fixed release, without cookies, environment credentials or retries."""
+    url = f"https://github.com/devgianlu/go-librespot/releases/download/{UPSTREAM_VERSION}/{ARCHIVES[machine][0]}"
+    proxy = os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY")
+    if proxy:
+        parsed = urlsplit(proxy)
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None):
+            fail("Client download supports only credential-free HTTP(S) proxies; use --archive instead.")
+    try:
+        async with asyncio.timeout(DOWNLOAD_SECONDS), aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=DOWNLOAD_SECONDS, connect=10, sock_read=10),
+                trust_env=False, cookie_jar=aiohttp.DummyCookieJar(), auto_decompress=False,
+                headers={"Accept-Encoding": "identity", "User-Agent": "open-room-renderer-client-installer"}) as session:
+            for _ in range(4):
+                target = urlsplit(url)
+                if (target.scheme != "https" or target.hostname not in DOWNLOAD_HOSTS
+                        or target.port not in (None, 443) or target.username is not None or target.password is not None):
+                    fail("Client download left the official HTTPS release hosts.")
+                async with session.get(url, allow_redirects=False, proxy=proxy) as response:
+                    if response.status in {301, 302, 303, 307, 308}:
+                        location = response.headers.get("Location")
+                        if not location:
+                            fail("Official client download returned an invalid redirect.")
+                        url = urljoin(url, location)
+                        continue
+                    if response.status != 200:
+                        fail("Official client download failed; retry later or use --archive.")
+                    if (response.headers.get("Content-Encoding", "identity").lower() != "identity"
+                            or (response.content_length is not None and response.content_length > MAX_ARCHIVE)):
+                        fail("Official client download exceeds its archive size or encoding limit.")
+                    payload = bytearray()
+                    async for chunk in response.content.iter_chunked(65536):
+                        if len(payload) + len(chunk) > MAX_ARCHIVE:
+                            fail("Official client download exceeds its archive size limit.")
+                        payload.extend(chunk)
+                    return bytes(payload)
+            fail("Official client download exceeded its redirect limit.")
+    except (aiohttp.ClientError, TimeoutError, OSError):
+        fail("Official client download was not completed within its limits; retry later or use --archive.")
 
 
 def _binary(path: Path) -> bytes:
@@ -92,16 +140,26 @@ def elf_abi(data: bytes, machine: str) -> dict:
             "arm_hard_float": elf_machine == 40, "hardware_verified": False}
 
 
-def install_client(archive: str, output_dir: str) -> dict:
+def install_client(archive: str | None, output_dir: str, *, download: bool = False) -> dict:
     """Extract exactly one pinned binary into a fresh private client directory."""
     if os.geteuid() == 0:
         fail("Install the optional client as your normal user, never root.")
-    source, output = _path(archive), _path(output_dir)
+    if (archive is not None) == download:
+        fail("Choose exactly one client source: --archive or --download.")
+    output = _path(output_dir)
     machine = platform.machine().lower()
     if machine not in ARCHIVES:
         fail("Client installation supports native x86_64, aarch64 and ARMv7 hard-float userspace only.")
+    # Reject an occupied/invalid destination before any network operation.
+    with _directory(output.parent) as parent:
+        try:
+            os.stat(output.name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            fail("Client output directory must be new; existing files were left unchanged.")
     expected = ARCHIVES[machine]
-    payload = _binary(source)
+    payload = asyncio.run(_download_archive(machine)) if download else _binary(_path(archive))
     if len(payload) > MAX_ARCHIVE or hashlib.sha256(payload).hexdigest() != expected[1]:
         fail("Archive does not match the pinned official release SHA-256 for this userspace.")
     import io
