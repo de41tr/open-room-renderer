@@ -337,6 +337,14 @@ edit, chain it after Stop, or retry an unknown response. Cancel, Escape and page
 navigation clear private file/URL drafts. Closing cannot retract a sent command.
 See [the bounded playlist contract](WEB_PLAYLISTS.md) for exact formats/admission.
 
+If Move or Remove is explicitly rejected as temporarily unavailable before any
+change, review the queue and choose **Refresh**. A fresh, eligible stopped queue
+in the same renderer session/generation can enable that rejected control again;
+only a separate row click sends a new edit. Refresh itself never edits or retries.
+Ordinary polling cannot re-arm it, and uncertain, malformed or acknowledged
+responses remain one-shot. This recovery has synthetic DOM control-flow coverage;
+it does not extend the existing real-browser acceptance evidence.
+
 ## Export a private queue file
 
 Choose **Export JSON**, review the redacted queue summary, and explicitly accept

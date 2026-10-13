@@ -461,6 +461,15 @@
     }
     return {kind: "unknown", text: "The request outcome could not be confirmed. Check the current state before trying again.", committed: false};
   }
+  function queueEditRejected(response) {
+    if (response.status !== 409 || !exactFields(response.body, ["error", "message", "outcome"])
+        || response.body.error !== "unavailable" || response.body.outcome !== "REJECTED"
+        || response.body.message !== "Requested operation is currently unavailable." || !string(response.rawBody)) return false;
+    // The parsed schema has exactly three fixed string values. Count members
+    // in the original valid JSON with strings intact: any duplicate (including
+    // escaped keys) or overwritten nested value adds a fourth separator.
+    return response.rawBody.match(/"(?:\\.|[^"\\])*"|:/g)?.filter(token => token === ":").length === 3;
+  }
   const OUTPUT_FAMILIES = Object.freeze(["alsa", "pulse", "pipewire", "jack", "coreaudio", "wasapi", "sdl", "sndio", "oss", "openal", "null", "pcm", "not_observed", "unrecognized"]);
   const OUTPUT_PROPERTY_STATUSES = Object.freeze(["value", "unavailable", "unsupported", "not_read", "timed_out", "transport_error", "malformed_response", "request_failed", "response_limit"]);
   function validateOutputInspection(value, session) {
@@ -603,6 +612,10 @@
         if (response.status === 200 && isObject(response.body) && response.body.request_acknowledged === true) result = {kind: "acknowledged", text: `${label}: request acknowledged. Reading the current state…`, id, favoriteId: response.body.favorite_id || null, deviceRevision: response.body.device_revision};
         else result = {...commandError(response), id};
         if (body.action === "favorite_restore" && result.kind === "unknown" && response.status === 502 && response.body?.error === "command_failed" && response.body.outcome === "UNKNOWN" && response.body.committed === true) result.favoritesLibraryDurabilityUnknown = true;
+        // Only this exact admission rejection proves a row edit had no effect.
+        // Extra fields (including committed/effect), other errors and local
+        // blocking must never grant the UI permission to re-arm an old edit.
+        if (["playlist_remove", "playlist_move"].includes(body.action) && queueEditRejected(response)) result.queueEditRejected = true;
         if (body.action === "dsp_preset_import" && result.kind === "unknown" && response.status === 502 && response.body?.error === "command_failed" && response.body.outcome === "UNKNOWN" && response.body.effect === "LIBRARY_COMMITTED_DURABILITY_UNKNOWN") {
           result.curveLibraryDurabilityUnknown = true; result.committed = true;
         }
@@ -611,7 +624,7 @@
       }
       if (body.action.startsWith("playlist_") && result.kind !== "acknowledged") {
         // Never echo a server error that could contain private source text.
-        result.text = result.kind === "error" ? "Playlist request rejected. Review the source, current queue and stopped state before starting again." : "Playlist request outcome unknown. It may have taken effect. Check the current queue before starting again. No retry was sent.";
+        result.text = result.queueEditRejected ? "Queue edit rejected; nothing was changed. Review the queue, then choose Refresh to enable a new attempt. Refresh does not send an edit." : result.kind === "error" ? "Playlist request rejected. Review the source, current queue and stopped state before starting again." : "Playlist request outcome unknown. It may have taken effect. Check the current queue before starting again. No retry was sent.";
       }
       if (body.action === "dsp_preset_import") {
         // Import errors must never disclose a local filename, name, plugin or

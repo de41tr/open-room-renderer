@@ -151,7 +151,7 @@ test('configured favorites do not consume the managed-only 100 item limit', () =
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-async function appHarness() {
+async function appHarness({controllerClass = Controller} = {}) {
   const ids = new Map();
   let current = state(), library = favorites([favorite()]), revision = 0, postHook = null, exportHook = null;
   const requests = [], events = new Map(), timers = new Map(), blobs = new Map(), created = [], revoked = [], syntheticClicks = [], focusCalls = []; let timerId = 0;
@@ -188,15 +188,15 @@ async function appHarness() {
     const download = match[2].match(/\bdownload="([^"]*)"/); if (download) element.setAttribute('download', download[1]); ids.set(element.id, element);
   }
   const document = {activeElement: null, hidden: false, getElementById: id => {assert.ok(ids.has(id), `Unknown element ${id}`); return ids.get(id);}, createElement: tag => new Element(tag), createDocumentFragment: () => new Element('fragment'), addEventListener: (name, callback) => events.set(name, callback)};
-  const window = {RendererControl: require('../fake_linkplay/web_assets/controller.js'), setTimeout: (callback, delay) => {timers.set(++timerId, {callback, delay}); return timerId;}, clearTimeout: id => timers.delete(id), addEventListener: (name, callback) => events.set(name, callback)};
+  const window = {RendererControl: {...require('../fake_linkplay/web_assets/controller.js'), Controller: controllerClass}, setTimeout: (callback, delay) => {timers.set(++timerId, {callback, delay}); return timerId;}, clearTimeout: id => timers.delete(id), addEventListener: (name, callback) => events.set(name, callback)};
   const fetch = async (url, options) => {
     requests.push({url, options}); let payload;
     if (url.endsWith('/playlist/export')) return exportHook ? exportHook(JSON.parse(options.body), options) : exportResponse(JSON.parse(options.body).action === 'prepare' ? exportSummary(current) : privateJSON(), {attachment: JSON.parse(options.body).action === 'download'});
     if (options.method === 'POST') payload = postHook ? await postHook(JSON.parse(options.body)) : {request_acknowledged: true};
     else if (url.endsWith('/favorites')) payload = typeof library === 'function' ? await library() : clone(library);
-    else payload = {...clone(current), revision: ++revision};
+    else payload = typeof current === 'function' ? await current() : {...clone(current), revision: ++revision};
     const status = payload.__status || 200; delete payload.__status;
-    return new Response(JSON.stringify(payload), {status, headers: {'Content-Type': 'application/json'}});
+    return new Response(payload.__raw ?? JSON.stringify(payload), {status, headers: {'Content-Type': 'application/json'}});
   };
   class TestURL extends URL {
     static createObjectURL(blob) {const url = 'blob:owned-' + (created.length + 1); blobs.set(url, blob); created.push(url); return url;}
@@ -2159,4 +2159,222 @@ test('output section is non-modal and rendered entirely as safe text', () => {
   assert.match(html, /two observations are sequential, not atomic/); assert.match(html, /physical device and audible sound are unverified/);
   const app = fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/app.js'), 'utf8');
   assert.match(app, /item\.textContent = line/);
+});
+
+// Explicit Refresh recovery is deliberately narrower than generic rejection.
+const queueAdmissionRejection = () => ({__status: 409, error: 'unavailable', outcome: 'REJECTED', message: 'Requested operation is currently unavailable.'});
+const queueRejectedGuidance = 'Queue edit rejected; nothing was changed. Review the queue, then choose Refresh to enable a new attempt. Refresh does not send an edit.';
+const queueRecoveryActions = ['remove', 'up', 'down'];
+const queueRecoveryRow = (h, direction) => playlistRows(h, direction)[direction === 'up' ? 1 : 0];
+async function ordinaryQueuePoll(h) {
+  const timer = [...h.timers.values()].find(item => item.delay === 2000);
+  assert.ok(timer); await timer.callback(); await h.settle();
+}
+test('queue rejection recovery admits only the exact pre-effect response for Move and Remove', async () => {
+  for (const action of ['playlist_remove', 'playlist_move', 'playlist_append', 'playlist_replace', 'play', 'stop']) {
+    const h = harness(); await h.controller.refresh();
+    h.hooks.post = () => {const body = queueAdmissionRejection(); delete body.__status; return {status: 409, body, rawBody: JSON.stringify(body)};};
+    const result = await h.controller.mutate({action, expected_generation: 7}, 'Synthetic operation');
+    assert.equal(result.queueEditRejected === true, ['playlist_remove', 'playlist_move'].includes(action));
+    if (result.queueEditRejected) assert.equal(result.text, queueRejectedGuidance);
+    assert.equal(h.posts().length, 1);
+  }
+  const h = harness();
+  const blocked = await h.controller.mutate({action: 'playlist_remove', expected_generation: 7, index: 1}, 'Remove');
+  assert.equal(blocked.kind, 'blocked'); assert.equal(blocked.queueEditRejected, undefined); assert.equal(h.posts().length, 0);
+});
+test('queue rejection recovery requires explicit Refresh then a separate new row choice for all three actions', async () => {
+  for (const direction of queueRecoveryActions) {
+    const h = await appHarness(), row = queueRecoveryRow(h, direction);
+    h.setPost(queueAdmissionRejection); await row.fire('click');
+    assert.equal(row.disabled, true); assert.equal(h.ids.get('notice-text').textContent, queueRejectedGuidance);
+    assert.equal(h.ids.get('connection-label').textContent, 'Connected');
+    assert.equal(h.ids.get('playlist-add').disabled, false); assert.equal(h.posts().length, 1);
+    await ordinaryQueuePoll(h); await ordinaryQueuePoll(h); await row.fire('click');
+    assert.equal(row.disabled, true); assert.equal(h.posts().length, 1);
+    const readsBefore = h.requests.filter(item => item.url.endsWith('/state')).length;
+    await h.refresh();
+    assert.ok(h.requests.filter(item => item.url.endsWith('/state')).length > readsBefore);
+    assert.equal(queueRecoveryRow(h, direction), row); assert.equal(row.disabled, false);
+    assert.equal(h.posts().length, 1); assert.match(h.ids.get('notice-text').textContent, /available again; no edit was sent/);
+    assert.equal(playlistRows(h, 'up')[0].disabled, true); assert.equal(playlistRows(h, 'down')[1].disabled, true);
+    h.setPost(() => ({request_acknowledged: true})); await row.fire('click');
+    assert.equal(h.posts().length, 2); assert.deepEqual(h.posts()[1], h.posts()[0]);
+    assert.equal(row.disabled, true); await h.refresh(); await row.fire('click'); assert.equal(h.posts().length, 2);
+  }
+});
+test('queue rejection recovery requires a new review for each subsequent no-effect rejection', async () => {
+  for (const direction of queueRecoveryActions) {
+    const h = await appHarness(), row = queueRecoveryRow(h, direction); h.setPost(queueAdmissionRejection);
+    for (let count = 1; count <= 2; ++count) {
+      await row.fire('click'); assert.equal(h.posts().length, count); assert.equal(row.disabled, true);
+      await ordinaryQueuePoll(h); await row.fire('click'); assert.equal(h.posts().length, count);
+      await h.refresh(); assert.equal(row.disabled, false); assert.equal(h.posts().length, count);
+    }
+  }
+});
+test('queue rejection recovery never admits UNKNOWN, ERROR, lost, malformed, ACK or contradictory envelopes', async () => {
+  const cases = [
+    ['UNKNOWN', () => ({...queueAdmissionRejection(), outcome: 'UNKNOWN'})],
+    ['ERROR', () => ({...queueAdmissionRejection(), outcome: 'ERROR'})],
+    ['lost', () => {throw new Error('synthetic-private-response');}],
+    ['malformed', () => ({ok: true, message: 'synthetic-private-response'})],
+    ['ACK', () => ({request_acknowledged: true})],
+    ['committed', () => ({...queueAdmissionRejection(), committed: true})],
+    ['not committed', () => ({...queueAdmissionRejection(), committed: false})],
+    ['effect', () => ({...queueAdmissionRejection(), effect: 'LIBRARY_COMMITTED_DURABILITY_UNKNOWN'})],
+    ['extra ACK', () => ({...queueAdmissionRejection(), request_acknowledged: true})],
+    ['wrong status 200', () => ({...queueAdmissionRejection(), __status: 200})],
+    ['wrong status 400', () => ({...queueAdmissionRejection(), __status: 400})],
+    ['wrong error', () => ({...queueAdmissionRejection(), error: 'stale_generation'})],
+    ['wrong message', () => ({...queueAdmissionRejection(), message: 'synthetic-private-response'})],
+    ['missing message', () => ({__status: 409, error: 'unavailable', outcome: 'REJECTED'})],
+    ['missing error', () => ({__status: 409, message: 'Requested operation is currently unavailable.', outcome: 'REJECTED'})],
+    ['missing outcome', () => ({__status: 409, error: 'unavailable', message: 'Requested operation is currently unavailable.'})]
+  ];
+  for (const direction of queueRecoveryActions) for (const [name, reply] of cases) {
+    const h = await appHarness(), row = queueRecoveryRow(h, direction); h.setPost(reply);
+    await row.fire('click'); await ordinaryQueuePoll(h); await h.refresh(); await row.fire('click');
+    assert.equal(row.disabled, true, `${direction}: ${name}`); assert.equal(h.posts().length, 1, name);
+    assert.doesNotMatch(h.ids.get('notice-text').textContent, /synthetic-private-response|nothing was changed|available again/);
+    if (['UNKNOWN', 'ERROR', 'lost', 'malformed', 'missing message', 'missing outcome'].includes(name)) assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN');
+  }
+});
+test('queue rejection recovery never re-arms a locally blocked row request', async () => {
+  class LocallyBlocked extends Controller {
+    async mutate(body, label) {return body.action.startsWith('playlist_') ? {kind: 'blocked', text: 'Read current state before trying again.'} : super.mutate(body, label);}
+  }
+  for (const direction of queueRecoveryActions) {
+    const h = await appHarness({controllerClass: LocallyBlocked}), row = queueRecoveryRow(h, direction);
+    await row.fire('click'); await ordinaryQueuePoll(h); await h.refresh();
+    assert.equal(row.disabled, true); await row.fire('click'); assert.equal(h.posts().length, 0);
+  }
+});
+test('queue rejection recovery demands fresh eligible readback after the explicit Refresh', async () => {
+  const unavailable = [
+    {},
+    state({transport: {...state().transport, phase: 'PAUSED'}}),
+    state({transport: {...state().transport, status: 'UNKNOWN'}}),
+    state({actions: {...state().actions, playlist_remove: false, playlist_move: false}}),
+    state({queue: {...state().queue, count: 1, items: state().queue.items.slice(0, 1)}})
+  ];
+  for (const direction of queueRecoveryActions) for (const next of unavailable) {
+    const h = await appHarness(), row = queueRecoveryRow(h, direction); h.setPost(queueAdmissionRejection);
+    await row.fire('click'); h.setState(next); await h.refresh();
+    assert.equal(row.disabled, true); await row.fire('click'); assert.equal(h.posts().length, 1);
+    assert.doesNotMatch(h.ids.get('notice-text').textContent, /available again/);
+  }
+  const h = await appHarness(), row = queueRecoveryRow(h, 'remove'); h.setPost(queueAdmissionRejection);
+  await row.fire('click'); h.setState({}); await h.refresh(); h.setState(state());
+  await ordinaryQueuePoll(h); assert.equal(row.disabled, true);
+  await h.refresh(); assert.equal(row.disabled, false); assert.equal(h.posts().length, 1);
+});
+test('queue rejection recovery never revives detached, restarted, replaced or unsupported old intents', async () => {
+  const changes = [
+    {generation: 8}, {session_id: 'restarted'},
+    {queue: {...state().queue, name: 'Replacement queue'}},
+    {queue: {...state().queue, items: state().queue.items.map(item => ({...item, title: 'Different title'}))}},
+    {queue: {...state().queue, playlist_edit_reason: 'unsupported_queue'}}
+  ];
+  for (const direction of queueRecoveryActions) for (const change of changes) {
+    const h = await appHarness(), row = queueRecoveryRow(h, direction); h.setPost(queueAdmissionRejection);
+    await row.fire('click'); h.setState(state(change)); await h.refresh();
+    assert.equal(row.disabled, true); await row.fire('click'); assert.equal(h.posts().length, 1);
+    h.setState(state()); await h.refresh(); await row.fire('click'); assert.equal(h.posts().length, 1);
+  }
+});
+test('queue rejection recovery cannot be pre-authorized by Refresh while the request is pending', async () => {
+  for (const direction of queueRecoveryActions) {
+    const h = await appHarness(), row = queueRecoveryRow(h, direction), pending = deferred(); h.setPost(() => pending.promise);
+    const editing = row.fire('click'); await h.settle(); await h.refresh();
+    assert.equal(row.disabled, true); assert.equal(h.ids.get('stop').disabled, false);
+    pending.resolve(queueAdmissionRejection()); await editing; await ordinaryQueuePoll(h);
+    assert.equal(row.disabled, true); await row.fire('click'); assert.equal(h.posts().length, 1);
+    await h.refresh(); assert.equal(row.disabled, false); assert.equal(h.posts().length, 1);
+  }
+});
+test('queue rejection recovery waits for post-click read even when an ordinary read was already pending', async () => {
+  const h = await appHarness(), row = queueRecoveryRow(h, 'remove'); h.setPost(queueAdmissionRejection); await row.fire('click');
+  const old = deferred(), fresh = deferred(); let reads = 0;
+  h.setState(() => ++reads === 1 ? old.promise : fresh.promise);
+  const polling = ordinaryQueuePoll(h); await h.settle();
+  const refreshing = h.refresh(); await h.settle();
+  assert.equal(reads, 1); assert.equal(row.disabled, true);
+  old.resolve(state({revision: 50})); await h.settle();
+  assert.equal(reads, 2); assert.equal(row.disabled, true); assert.equal(h.posts().length, 1);
+  fresh.resolve(state({revision: 51})); await Promise.all([polling, refreshing]);
+  assert.equal(row.disabled, false); assert.equal(h.posts().length, 1);
+});
+test('queue rejection recovery cannot supersede a newer Stop or UNKNOWN outcome', async () => {
+  for (const direction of queueRecoveryActions) for (const late of [false, true]) for (const unknownStop of [false, true]) {
+    const h = await appHarness(), row = queueRecoveryRow(h, direction), pending = deferred();
+    h.setPost(body => {
+      if (body.action !== 'stop') return late ? pending.promise : queueAdmissionRejection();
+      if (unknownStop) throw new Error('lost Stop');
+      return {request_acknowledged: true};
+    });
+    const editing = row.fire('click'); await h.settle(); if (!late) await editing;
+    assert.equal(h.ids.get('stop').disabled, false); await h.ids.get('stop').fire('click');
+    const notice = h.ids.get('notice-text').textContent;
+    if (late) {pending.resolve(queueAdmissionRejection()); await editing;}
+    await h.refresh(); await row.fire('click');
+    assert.equal(row.disabled, true); assert.deepEqual(h.posts().map(body => body.action), [direction === 'remove' ? 'playlist_remove' : 'playlist_move', 'stop']);
+    assert.equal(h.ids.get('notice-text').textContent, notice);
+    assert.equal(h.ids.get('notice-kind').textContent, unknownStop ? 'UNKNOWN' : 'CONFIRMED');
+  }
+});
+test('queue rejection recovery is invalidated by a superseding command or pagehide during Refresh', async () => {
+  for (const supersede of ['stop', 'pagehide']) {
+    const h = await appHarness(), row = queueRecoveryRow(h, 'remove'); h.setPost(queueAdmissionRejection); await row.fire('click');
+    const pending = deferred(); let reads = 0;
+    h.setState(() => ++reads === 1 ? pending.promise : state({revision: 51}));
+    const refreshing = h.refresh(); await h.settle(); assert.equal(row.disabled, true);
+    let stopping;
+    if (supersede === 'stop') {h.setPost(() => ({request_acknowledged: true})); stopping = h.ids.get('stop').fire('click'); await h.settle();}
+    else {h.pagehide(); h.pageshow();}
+    pending.resolve(state({revision: 50})); await refreshing; if (stopping) await stopping;
+    assert.equal(row.disabled, true); await row.fire('click');
+    assert.equal(h.posts().length, supersede === 'stop' ? 2 : 1);
+    assert.doesNotMatch(h.ids.get('notice-text').textContent, /available again/);
+    if (supersede === 'pagehide') {await h.refresh(); assert.equal(row.disabled, false);}
+  }
+});
+test('queue rejection recovery preserves earlier UNKNOWN history and independent Stop availability', async () => {
+  const h = await appHarness(), row = queueRecoveryRow(h, 'remove');
+  h.setPost(() => {throw new Error('lost Play');}); await h.ids.get('play').fire('click');
+  h.setPost(queueAdmissionRejection); await row.fire('click'); await h.refresh();
+  assert.equal(row.disabled, false); assert.equal(h.ids.get('stop').disabled, false);
+  assert.match(h.ids.get('notice-text').textContent, /Earlier request outcome unknown: Play/);
+  assert.equal(h.posts().length, 2);
+});
+test('queue rejection recovery refuses raw duplicate members before JSON.parse can erase contradictions', async () => {
+  const invalid = [
+    '{"error":"unavailable","outcome":"UNKNOWN","message":"Requested operation is currently unavailable.","outcome":"REJECTED"}',
+    '{"error":"unavailable","outcome":"ERROR","message":"Requested operation is currently unavailable.","outcome":"REJECTED"}',
+    '{"error":"unavailable","message":"Requested operation is currently unavailable.","outcome":"REJECTED","outcome":"REJECTED"}',
+    '{"error":"unavailable","message":"Requested operation is currently unavailable.","outcome":"UNKNOWN","out\\u0063ome":"REJECTED"}',
+    '{"error":"unavailable","message":{"committed":true},"message":"Requested operation is currently unavailable.","outcome":"REJECTED"}',
+    '{"error":"unavailable","message":"synthetic-private-response: \\\"UNKNOWN\\\"","message":"Requested operation is currently unavailable.","outcome":"REJECTED"}',
+    '{"error":"unavailable","message":"Requested operation is currently unavailable.","outcome":"REJECTED",}',
+  ];
+  for (const direction of queueRecoveryActions) for (const raw of invalid) {
+    const h = await appHarness(), row = queueRecoveryRow(h, direction);
+    h.setPost(() => ({__status: 409, __raw: raw})); await row.fire('click'); await h.refresh();
+    assert.equal(row.disabled, true); await row.fire('click'); assert.equal(h.posts().length, 1);
+    assert.doesNotMatch(h.ids.get('notice-text').textContent, /nothing was changed|available again|synthetic-private-response/);
+  }
+  // Key order, whitespace and legal JSON escaping are not extra members.
+  for (const raw of [
+    '{"error": "unavailable", "message": "Requested operation is currently unavailable.", "outcome": "REJECTED"}',
+    ' { "out\\u0063ome" : "REJECTED", "message" : "Requested operation is currently unavailable.", "error" : "unavailable" }\n'
+  ]) {
+    const h = await appHarness(), row = queueRecoveryRow(h, 'remove');
+    h.setPost(() => ({__status: 409, __raw: raw})); await row.fire('click');
+    assert.equal(h.ids.get('notice-text').textContent, queueRejectedGuidance);
+    await h.refresh(); assert.equal(row.disabled, false); assert.equal(h.posts().length, 1);
+  }
+  const h = harness(); await h.controller.refresh();
+  const body = queueAdmissionRejection(); delete body.__status; h.hooks.post = () => ({status: 409, body});
+  const result = await h.controller.mutate({action: 'playlist_remove', expected_generation: 7, index: 1}, 'Remove');
+  assert.equal(result.kind, 'error'); assert.equal(result.queueEditRejected, undefined, 'Missing raw admission evidence must fail closed');
 });

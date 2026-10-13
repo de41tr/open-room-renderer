@@ -9,6 +9,7 @@
   const soundDraft = new DspDraft();
   let playlistDraft = null, queueEditing = null, exportContext = null, roomContext = null, curveExportContext = null, curveImportDraft = null, favoritesExportContext = null, favoritesRestoreDraft = null;
   const queueIntents = new WeakMap();
+  let queueReview = 0;
   let presetSignature = "", presetContext = null, presetSerial = 0, soundSubmission = null;
   const text = (id, value) => { const element = $(id); if (element.textContent !== value) element.textContent = value; };
   const balanceLabel = value => value === 0 ? "Center" : `${Math.round(Math.abs(value) * 100)}% ${value < 0 ? "left" : "right"}`;
@@ -69,7 +70,9 @@
       while (true) { const {done, value} = await reader.read(); if (done) break; total += value.length; if (total > 2 * 1024 * 1024) { await reader.cancel(); throw new Error("Response too large"); } chunks.push(value); }
       const bytes = new Uint8Array(total); let offset = 0;
       chunks.forEach(chunk => { bytes.set(chunk, offset); offset += chunk.length; });
-      return {status: response.status, body: JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(bytes))};
+      const source = new TextDecoder("utf-8", {fatal: true}).decode(bytes);
+      return {status: response.status, body: JSON.parse(source),
+        ...(response.status === 409 && ["playlist_remove", "playlist_move"].includes(options.body?.action) ? {rawBody: source} : {})};
     } finally { window.clearTimeout(timer); }
   }
   const control = new Controller(request, render);
@@ -274,7 +277,9 @@
           edit.addEventListener("click", async () => {
             if (!intent.allowed || intent.eligibility.stale || intent.edge || intent.sent || intent.stale || intent.session !== snapshot.session_id || intent.generation !== snapshot.generation || !control.canMutate(action)) return;
             intent.sent = true;
-            await run({action, expected_generation: intent.generation, ...values}, direction === "remove" ? "Remove queue entry" : "Move queue entry");
+            intent.rejectedOperation = null;
+            const result = await run({action, expected_generation: intent.generation, ...values}, direction === "remove" ? "Remove queue entry" : "Move queue entry");
+            if (result.queueEditRejected === true && result.id === control.operation) intent.rejectedOperation = result.id;
           });
           edits.append(edit);
         });
@@ -1127,11 +1132,30 @@
   $("artwork").addEventListener("load", () => { if ($("artwork").getAttribute("src") === artworkURL) { $("artwork").hidden = false; $("artwork-fallback").hidden = true; } });
   $("artwork").addEventListener("error", () => { $("artwork").hidden = true; $("artwork-fallback").hidden = false; });
   async function poll() { const run = ++pollRun; window.clearTimeout(pollTimer); await control.refresh(); if (run === pollRun) pollTimer = window.setTimeout(poll, document.hidden ? 10000 : 2000); }
-  $("refresh").addEventListener("click", () => { poll(); });
+  $("refresh").addEventListener("click", async () => {
+    // Capture only completed, verified rejections already known at this click.
+    // A Refresh while a request is pending cannot authorize a later rejection.
+    const operation = control.operation, review = ++queueReview;
+    const rejected = control.busy ? [] : Array.from($("queue-list").querySelectorAll("button"))
+      .filter(button => queueIntents.get(button)?.rejectedOperation === operation);
+    await poll();
+    if (review !== queueReview || !control.fresh || control.busy || control.operation !== operation) return;
+    let rearmed = false;
+    rejected.forEach(button => {
+      const intent = queueIntents.get(button);
+      if (!button.isConnected || intent.rejectedOperation !== operation || !intent.sent || !intent.allowed || intent.eligibility.stale || intent.edge || intent.stale
+          || intent.session !== snapshot.session_id || intent.generation !== snapshot.generation || !control.canMutate(intent.action)) return;
+      intent.sent = false; intent.rejectedOperation = null; rearmed = true;
+    });
+    if (rearmed) {
+      if (control.notice.id === operation && control.notice.queueEditRejected === true) control.notice = {...control.notice, text: "Queue refreshed. The rejected edit is available again; no edit was sent. Review the queue before choosing it."};
+      render();
+    }
+  });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
   // Scrub private dialog input before navigation/BFCache, even if already closed.
   // Only local drafts are dismissed; sent commands and their outcomes stay live.
-  window.addEventListener("pagehide", () => { outputInspection.dismiss(); renderOutputInspection(); closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); curveExportDialog.close(false); curveImportDialog.close(false); favoritesExportDialog.close(false); favoritesRestoreDialog.close(false); });
+  window.addEventListener("pagehide", () => { queueReview += 1; outputInspection.dismiss(); renderOutputInspection(); closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); curveExportDialog.close(false); curveImportDialog.close(false); favoritesExportDialog.close(false); favoritesRestoreDialog.close(false); });
   window.addEventListener("online", () => poll());
   window.addEventListener("offline", () => { control.fresh = false; control.favoritesFresh = false; control.favoritesReadFailure = null; render(); });
   poll();
