@@ -78,6 +78,14 @@ Verify its independent checkpoint. Current status/resume instructions are
 consolidated without altering historical evidence; assess any further storage
 concern read-only before choosing a policy change.
 
+**02:42 preservation review:** the failed-load preset overwrite is reproduced
+and a narrowly fenced, independently reviewed correction is integrated. Normal
+valid-storage responses and active DSP remain; degraded legacy write failures
+change explicitly. Complete local and short actual native preservation checks
+pass. Verify exact-head CI before moving to another concrete operator defect;
+no automatic repair, broad storage concurrency or speculative feature expansion.
+Next value review: 04:12–04:42 UTC.
+
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
 and independent review precede milestone publication. Full native CI follows
 cohesive milestones; unchanged older endurance evidence is not rerun without

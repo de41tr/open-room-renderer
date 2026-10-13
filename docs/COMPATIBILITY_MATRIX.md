@@ -56,6 +56,13 @@ managed-library unavailability with a fixed 503/ERROR envelope and local failed-
 read hint. Generic reads, storage policy and dispatched mutation UNKNOWN remain
 unchanged. Focused 246 Python cases per interpreter/156 Node checks pass; new-head
 CI and genuine browser behavior remain separate.
+Head `660cab1` is fully green in run 38337365883 (5357/74 hosted defaults).
+The following saved-EQ failure-policy fix blocks persistence after observed load
+failure, preserving damaged/unreadable storage and independent active DSP. Healthy
+responses stay unchanged; legacy degraded writes intentionally become 502/Failed,
+and Web writes reject pre-effect with 409. Existing rollback/committed uncertainty
+stays intact. Complete local 5399/74, 164 Node and short actual native startup
+checks pass; exact new-head CI is separate. No external-file CAS or repair claim.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.

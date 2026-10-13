@@ -125,3 +125,17 @@ Record browser/version, viewport, server revision, passes/failures, and screensh
   repair hint. Stop the test renderer service, restore known-good test state and
   restart: valid matching reads should clear the hint and restore controls.
   A browser Refresh alone must not pretend to repair or reload saved state.
+
+## Saved EQ library preservation
+
+- Use disposable test state with malformed saved presets and a valid independent
+  active-DSP snapshot. Confirm current DSP can remain CONFIRMED, recovery guidance
+  is visible, and saved-library writes are disabled. Band edits, balance, bypass
+  and built-in loading must retain their normal controls; use low/test volume.
+- Open a preset draft while healthy, then observe a library-unavailable state in
+  the test fixture. The draft must not silently regain write capability or claim
+  an acknowledged save was verified. Check keyboard/focus and narrow layouts.
+- Stop the test service, restore a known-good test library and restart. Healthy
+  controls should return after fresh state. Do not damage a real library or infer
+  filesystem/crash guarantees from browser state. Legacy write rejection and
+  exact byte preservation have separate synthetic/native acceptance evidence.

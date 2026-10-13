@@ -1,5 +1,47 @@
 # Test evidence and limits
 
+## Failed-load EQ preset preservation checkpoint
+
+Preceding exact head `660cab1` passed all three jobs/every step in
+[run 38337365883](https://github.com/de41tr/open-room-renderer/actions/runs/38337365883),
+verified 02:47 UTC. Hosted defaults total 5357/74; floor groups 4807+550 /74 run
+in 153.73s/131.05s under the unchanged 165s cap. This result scopes the favorites
+read diagnostic, not the following failure-policy correction.
+
+Final combined defaults pass **4849+550 /74 opt-in skips** on Python 3.12
+(127.72s/103.47s) and 3.11 (130.48s/102.39s). Same selectors, assertions and caps;
+no scheduling change. Node/DOM checks pass **164**. Focused preservation/rollback/
+Web suites pass 298 on each interpreter; 42 new Python cases and eight frontend
+regressions have independent review. Five synthetic destructive-write probes
+fail against baseline and pass with the candidate. All final source/test hashes
+match the independently reviewed and native-tested files.
+
+The existing native Web case adds one terminal fresh-object startup slice:
+malformed saved-library bytes plus an independently valid active-DSP snapshot,
+new Config/RendererState/HttpApi/native handle and listeners. Actual mpv 0.37
+passes in **5.16s**, 0.40 in **4.85s**. Three Web saved-library refusals return
+409/REJECTED; four legacy Save/SourceSave/no-op Delete refusals return 502/Failed.
+Each retains exact files, active state, queue identity/value, generation, gain,
+native handle/properties and playing lifetime with zero native/media mutations.
+Builtin Flat load, negative band edit and bypass/enable remain operational.
+All 231 original assertions and the original flow's AST remain unchanged (283
+assertions total); 30s child/35s supervisor caps and cleanup assertions remain.
+
+One bounded negative-sensitivity run removes only the persistence fence in a
+separate disposable copy. It fails in 4.78s on legacy Save returning 200 and
+actually replacing the malformed fixture file. This distinguishes real byte
+preservation from the Web admission guard alone. No real user data was read or
+repaired. No additional native case, Unix retry or endurance campaign was added.
+
+Native scope is malformed-file fresh-object startup/readback with libmpv/null,
+not an unreadable-file native probe, CLI/systemd/process restart, library repair,
+production Unix transport or physical audio. Unreadable-but-replaceable storage,
+dangling symlink, unavailable lifetime, ordinary valid/missing loads and error
+privacy are synthetic/unit coverage. The protection does not close external-file
+races after healthy/missing load. Healthy write failures retain existing pre-/
+post-replacement uncertainty. Exact new-source hosted CI is initially PENDING.
+
+
 ## Saved-favorites read diagnostics checkpoint
 
 Exact preceding head `8c7df63` passed all three jobs/every step in

@@ -8,10 +8,10 @@
 based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
 squash-merged. No main push, merge or release is authorized for this phase.
 
-Latest CI-verified checkpoint **`8c7df63b0619d2dd728e6f721fcb964adadf2f2e`** passes all three
-jobs and every step in **run 38334412981**, verified **02:08 UTC**. Hosted floor
-groups pass **4774 + 550 /74 opt-in skips** in **140.96s/118.60s** under the
-unchanged 165-second watchdog: **5324 passed /74 skipped** in total. Native,
+Latest CI-verified checkpoint **`660cab19a908090660a751e7dbbd7681e3b56637`** passes all three
+jobs and every step in **run 38337365883**, verified **02:47 UTC**. Hosted floor
+groups pass **4807 + 550 /74 opt-in skips** in **153.73s/131.05s** under the
+unchanged 165-second watchdog: **5357 passed /74 skipped** in total. Native,
 installed-lifecycle, production Unix and later acceptance gates are successful.
 This evidence applies only to that exact source; later edits need their own CI.
 
@@ -47,21 +47,30 @@ This evidence applies only to that exact source; later edits need their own CI.
   and hosted installed-CLI restart checks cover delivery on x86_64/ARM64.
   Same-runner default-suite partitioning retains exact coverage, skips and caps.
 
-### Saved-favorites read diagnostics (new correction)
+### Saved-state failure protection
 
-A malformed/unreadable managed library now gives fixed repair/restart guidance
-on its admitted Web GET instead of a generic state-read error. The browser
-labels it as a failed-read report, retains stale rows, disables favorite controls
-and leaves unrelated playback available. No exception, path, secret URL or
-partial library is exposed. Storage/fallback policies and all mutation UNKNOWN
-outcomes are unchanged. Healthy recovery or another failure clears the advice.
+Saved-favorites read diagnostics are fully green at `660cab1`: fixed private-safe
+service-restart guidance, retained stale rows/gates, unchanged storage/mutation
+policy. Focused 246 Python cases per interpreter and 156 Node checks preceded
+that exact-head result. Current handover sections were consolidated; both older
+historical suffixes remain byte-identical.
 
-Independent review and **246 focused Python checks on each supported interpreter**
-pass; the root replay passes 246 in 16.69s and Node/DOM checks pass **156**.
-Integrated source hashes match the reviewed candidate. Exact new-source CI is
-**PENDING**; the green checkpoint above does not cover this correction. No full
-local/native/browser campaign was added. STATUS/RESUME are consolidated while
-preserving both historical sections byte-for-byte.
+A separately reviewed saved-EQ correction now fences persistence after observed
+load failure. Valid/missing storage behavior remains normal, while previously
+destructive legacy Save/SourceSave/no-op Delete fail with 502/Failed. Web saved-
+library writes reject before effects with 409/REJECTED. Original bytes, active DSP,
+rollback and real committed-write uncertainty are retained; built-in load/edit/
+bypass remain usable. No automatic repair/reset/migration is added. External file
+changes after healthy/missing load are outside this bounded protection.
+
+Final combined local defaults pass **5399/74** on Python 3.12 and 3.11; **164
+Node** checks pass. Actual mpv 0.37/0.40 fresh-object malformed-library startup
+passes in **5.16s/4.85s**. Seven refused Web/legacy writes preserve bytes and live
+playback with no native/media mutations; all 231 previous native assertions and
+30s/35s caps remain. A one-fence-removed negative probe really overwrites its
+synthetic file and fails. This is not process/systemd restart, unreadable-file
+native proof, repaired-library recovery, browser or physical audio acceptance.
+Exact new-source hosted CI is **PENDING**; `660cab1` does not certify this change.
 
 ### Latest favorite-repair evidence
 
@@ -97,6 +106,8 @@ and evidence limits are retained in [TESTING.md](docs/TESTING.md).
 - Saved-state diagnostics/logical focus `5534c4d`: [run 38332263993](https://github.com/de41tr/open-room-renderer/actions/runs/38332263993), verified 01:42 UTC; full local defaults **5322/74** on both Python versions.
 - Browser favorite target repair/navigation docs `8c7df63`: run **38334412981**, verified 02:08 UTC; current hosted defaults **5324/74**, as scoped above.
 
+- Saved-favorites diagnostic/handover `660cab1`: [run 38337365883](https://github.com/de41tr/open-room-renderer/actions/runs/38337365883), verified 02:47 UTC; 5357/74 hosted defaults.
+
 ## Remaining limits and next decisions
 
 **BROWSER_ACCEPTANCE_PENDING:** genuine rendering/layout, accessibility/focus,
@@ -114,13 +125,11 @@ and combined-provider policy scope. Provider account acceptance is
 **ACCOUNT_PENDING**. No credentials, client/key, provider code or proprietary
 binary was added.
 
-The read-only diagnostic correction above awaits its own exact-head CI.
-A separately scoped preset-library write protection is planned after a synthetic
-failed-load overwrite reproduction. It is not part of this checkpoint; normal
-valid-storage responses must remain unchanged, with degraded-case changes explicit.
-The next value/risk review is due **02:42–03:12 UTC**. Avoid redundant full-suite,
-endurance, timing or known-blocked browser campaigns. Start no large/risky new
-work after **16:30 UTC**, stabilize from **17:00 UTC**, and stop at **18:00 UTC**.
+The saved-EQ preservation correction awaits its own exact-head CI. The 02:42
+value review prioritizes concrete data-preservation/recovery defects over broad
+feature growth. Next review: **04:12–04:42 UTC**. Avoid redundant endurance,
+timing or known-blocked browser campaigns. Start no large/risky new work after
+**16:30 UTC**, stabilize from **17:00 UTC**, and stop at **18:00 UTC**.
 See [RESUME.md](RESUME.md) for the bounded next steps and [PLAN.md](PLAN.md) for
 this phase's full constraints. The historical reports below retain their own
 exact-source scope, deadlines and failures.

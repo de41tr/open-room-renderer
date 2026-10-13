@@ -166,6 +166,14 @@ restart settings failed. Keep the warning and reread the current state; do not
 infer rollback or click repeated automatic retries. The existing lock/shield
 keeps each transaction intact if its browser request is interrupted.
 
+If saved EQ presets could not be loaded, the editor now shows fixed recovery
+guidance and disables Save/Rename/Delete. Confirmed active bands, balance, bypass
+and built-in loading still work. Stop the renderer service, repair or restore the
+saved library from a known-good backup, then restart; Refresh does not repair it.
+The renderer does not overwrite/reset a failed-load library. Normal healthy
+writes and existing committed-write uncertainty remain unchanged. See
+[the exact degraded-storage contract](WEB_DSP_EDITOR.md#unavailable-saved-preset-storage).
+
 See [the DSP editor contract](WEB_DSP_EDITOR.md) for precise numeric bounds,
 opaque identifiers, locked revision checks and effect codes.
 

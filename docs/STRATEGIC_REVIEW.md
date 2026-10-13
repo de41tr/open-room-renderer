@@ -1,5 +1,27 @@
 # Next-phase strategic review
 
+## 02:42 UTC value/risk assessment
+
+1. **CONTINUE:** finish the separately scoped failed-load EQ preset write fence.
+   Synthetic Web/legacy probes establish an actual overwrite risk; focused tests
+   and independent review pass. Complete bounded native startup proof and final
+   combined checks before publication. This deliberately changes degraded-write
+   failure policy, while preserving valid-storage responses and active DSP.
+2. **CONTINUE:** verify the exact saved-favorites diagnostic head `660cab1`
+   (run 38337365883) before publishing a later checkpoint. Its current native
+   gates are still running; earlier `8c7df63` success does not certify it.
+3. **PIVOT:** the requested controller and practical playlist/favorite/DSP
+   workflows are implemented. Prioritize concrete data-preservation/recovery
+   defects and clear handover over speculative feature growth or more seams.
+4. **DEFER:** external-file concurrency/CAS, automatic repair/migration/salvage,
+   additional audio engines and provider integration. Genuine browser and
+   physical/account acceptance remain separate; do not retry blocked routes or
+   infer them from synthetic/native null-output evidence.
+5. **BOUND:** keep all existing assertions, watchdogs and scheduling unchanged.
+   No new soak/timing campaign. Reassess value at **04:12–04:42 UTC**; retain the
+   16:30 risk cutoff, 17:00 stabilization and 18:00 hard stop.
+
+
 ## 01:12 UTC value/risk assessment
 
 1. **CONTINUE:** verify exact export head `1dfd642` in hosted CI. Its complete

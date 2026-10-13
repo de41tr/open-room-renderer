@@ -128,9 +128,11 @@ up the acquired backend before any listeners start. Existing state rules and rea
 order are unchanged: an identity may already have been published before a later
 failure, and no automatic reset or retry is added. The public configuration/state
 readers and ordinary API construction retain their original exceptions. Favorites'
-unavailable/config fallback and the EQ preset library's warn-and-empty policy are
-unchanged, as are later legacy-balance normalization, backend availability, binding,
-and cleanup diagnostics.
+unavailable/config fallback remains. A separate saved-EQ protection now preserves
+failed-load storage and blocks saved-library writes while independent active DSP
+stays usable; see [preset recovery](docs/WEB_DSP_EDITOR.md#unavailable-saved-preset-storage).
+Later legacy-balance normalization, backend availability, binding and cleanup
+diagnostics retain their existing behavior.
 
 For compatibility, bare `serve` still selects `configs/config.example.yaml`
 relative to the current directory and uses built-in defaults if that implicit

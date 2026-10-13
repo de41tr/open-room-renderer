@@ -192,6 +192,18 @@ These boundaries stop short of a player-core rewrite. The implemented browser
 controller below reuses them. Stateful source ownership, recovery and native
 staging still warrant a wider design before extraction.
 
+### Saved-library failure policy
+
+After an observed failed load, `EqPresetLibrary` latches unavailable and fences
+`persist` before serialization/writer invocation. This is a separately documented
+data-preservation fix, not part of the behavior-neutral extraction. Normal
+healthy storage remains unchanged; the existing renderer transaction rolls back
+legacy proposals on a pre-write refusal. Web admission refuses saved-library
+writes inside the existing DSP lock before any proposal. Active DSP and built-in
+operations retain their authority and availability. No repair, live reload,
+filesystem freshness protocol or extra lock is introduced. See
+[the storage boundary](WEB_DSP_EDITOR.md#unavailable-saved-preset-storage).
+
 ## Browser controller boundary
 
 One `WebControlApi` is constructed beside the existing favorites and eventing

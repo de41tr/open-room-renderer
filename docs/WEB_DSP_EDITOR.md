@@ -2,8 +2,9 @@
 
 This extends the existing same-origin `/orr/v1/web` boundary. It creates no
 backend, source context, queue owner, persistence store, lock or polling task.
-Legacy DSP command responses, lock ordering, rollback and cancellation shielding
-remain unchanged. Browser admission is still a trusted-LAN safety boundary,
+Healthy-storage legacy DSP responses, lock ordering, rollback and cancellation
+shielding remain unchanged. The failed-load write protection below is a separate,
+intentional failure-policy correction. Browser admission is still a trusted-LAN safety boundary,
 not authentication; the legacy endpoints remain unauthenticated.
 
 ## Confirmed projection
@@ -61,6 +62,47 @@ Saved presets override same-name built-ins exactly as the existing library
 resolves them. Deleting a legacy saved `Flat`, `Bass Boost` or `Treble Boost`
 therefore reveals the built-in with the same ID and `kind: builtin`. Presence
 checks after delete must check for a matching **saved** record.
+
+## Unavailable saved preset storage
+
+A failed load of existing `eq_presets.json` now fences saved-library writes for
+that library instance. This includes invalid/oversized/unsupported content,
+encoding/nesting errors, unreadability and a dangling file symlink. A genuinely
+missing entry at initial load still permits normal new-library creation. No
+partial-record salvage, file reset, deletion, migration or backup writer is added.
+
+The confirmed editor adds optional `library_unavailable: true` only in this
+state. Healthy editor shapes and revision input remain unchanged. Availability
+is included in the existing derived revision when unavailable; there is no new
+counter or authority. This storage flag does not make confirmed active DSP
+UNKNOWN. Current bands, balance, bypass and built-in loading remain usable.
+The browser shows fixed repair guidance and disables Save/Rename/Delete.
+
+With a current revision, Web saved-library writes reject inside the existing
+DSP lock before a proposal/backend/disk effect: HTTP **409**,
+`error: preset_library_unavailable`, `outcome: REJECTED`. An older revision can
+still reject as `stale_dsp` first. The fixed message directs the operator to stop
+the renderer service, repair/restore the saved library, and restart. It never
+echoes invalid values, names, plugin identifiers, paths or exceptions.
+
+The essential fence is also in `EqPresetLibrary.persist`, before serialization
+or invoking the writer. Previously destructive legacy `EQSave`, `EQSourceSave`
+and no-op `EQv2Delete` now return the existing **502 / Failed** envelope after
+observed load failure. Existing transaction rollback restores staged mapping/name
+metadata; active state and original bytes are retained. Unknown-name Rename may
+still fail with its existing 400 before persistence. Normal valid-library parsing,
+responses, builtin overrides, multi-plugin semantics and version-1 bytes remain.
+This is an explicit degraded-behavior change, not a behavior-neutral extraction.
+
+Pre-/post-replacement write failures of a previously healthy library retain their
+existing rollback/committed/UNKNOWN semantics; they do not create a failed-load
+latch. Startup logging uses the same fixed private-safe guidance. Recovery requires
+a fresh service/library instance after manual repair/restoration; Refresh is not
+repair. Stop the service before editing its saved state, and retain a private backup.
+
+This protects observed load failures. It does not detect another process changing
+or replacing the file after a healthy load, or a file appearing after a missing
+read. No live reload, filesystem polling or compare-and-swap protocol is introduced.
 
 ## Strict commands
 

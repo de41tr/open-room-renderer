@@ -10,9 +10,9 @@ stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 Work exclusively on `dot/renderer-next-phase-20261013` in
 [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
 `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest CI-verified checkpoint **`8c7df63b0619d2dd728e6f721fcb964adadf2f2e`** passes all three
-jobs/every step in **run 38334412981**, verified **02:08 UTC**. Its hosted floor
-passes **4774+550 /74 opt-in skips** in **140.96s/118.60s**, for **5324/74** overall.
+Latest CI-verified checkpoint **`660cab19a908090660a751e7dbbd7681e3b56637`** passes all three
+jobs/every step in **run 38337365883**, verified **02:47 UTC**. Its hosted floor
+passes **4807+550 /74 opt-in skips** in **153.73s/131.05s**, for **5357/74** overall.
 Verify the actual branch/head on resumption; any newer edit needs separate CI.
 
 ## What is already delivered
@@ -34,25 +34,26 @@ and caps. No full local replay was added; the earlier **5322/74** complete local
 result belongs to `5534c4d`. Redacted favorite readback remains ACKNOWLEDGED,
 not proof of exact URL; UNKNOWN and observed conflict/reopen rules stay explicit.
 
-The following saved-favorites diagnostic correction has independent review,
-246 focused Python checks on each interpreter and 156 Node checks, but its own
-exact-head CI is initially PENDING. It changes only an admitted Web read failure
-and its fixed browser advice; legacy routes, storage policies and dispatched
-UNKNOWN outcomes stay unchanged. The historical suffixes below are byte-identical
-following consolidation of these current instructions.
+Saved-favorites read diagnostics are now fully green at the checkpoint above.
+The following separately reviewed saved-EQ data-preservation correction passes
+5399/74 complete local defaults on both interpreters, 164 Node checks and actual
+mpv 0.37/0.40 startup preservation in 5.16s/4.85s. Its own exact-head CI is PENDING.
+Observed failed loads fence library persistence; normal storage responses and
+active DSP stay unchanged. Legacy degraded writes now fail, intentionally; this
+is not an extraction-equivalence claim. No automatic repair/reset/migration or
+external-file concurrency policy is added.
 
 ## Immediate priorities
 
 1. **Keep evidence exact-source.** Recheck the current published head and its
-   own CI before declaring a later checkpoint green. The `8c7df63` run is complete;
+   own CI before declaring a later checkpoint green. The `660cab1` run is complete;
    old pending export/scheduling instructions are superseded. Retain existing
    native, Unix IPC, installation, PCM, discovery and Snapcast gates and all caps.
-2. **Verify the diagnostic checkpoint**, then finish the separately scoped
-   preset-library protection. The failed-load overwrite is reproduced; fence
-   unavailable storage without changing valid-storage responses, active DSP,
-   locks or committed-write uncertainty. This is an explicit failure-policy fix,
-   not a neutral extraction; it is not implemented in this checkpoint.
-3. **Review value/risk at 02:42–03:12 UTC**, then every 90–120 minutes within the
+2. **Verify the preservation checkpoint.** Keep its explicit failure-policy
+   correction separate from earlier neutral extractions. Preserve active DSP,
+   valid-storage responses, stored bytes, locks and commit-uncertainty behavior.
+   The native proof is fresh-object startup, not a process restart or repair flow.
+3. **Review value/risk at 04:12–04:42 UTC**, then every 90–120 minutes within the
    authorized window. Prefer concrete user workflow gaps; stop architecture,
    timing and redundant soak/full-suite campaigns unless new evidence justifies
    work. Use [PLAN.md](PLAN.md) and [STRATEGIC_REVIEW.md](docs/STRATEGIC_REVIEW.md)
@@ -68,8 +69,9 @@ following consolidation of these current instructions.
    Favorites/M3U export remains deferred.
 5. **Stabilize and hand over by the deadline.** No large/risky work after 16:30 UTC;
    final stabilization begins at 17:00 UTC and active work stops at 18:00 UTC.
-   Preserve the single queue/playback authority, lock/generation ordering, exact
-   protocols/errors and private-state boundaries. Keep behavior-neutral extraction
+   Preserve the single queue/playback authority, lock/generation ordering, normal
+   protocol/error behavior and private-state boundaries; document deliberate
+   degraded-failure fixes separately. Keep behavior-neutral extraction
    commits separate from features, leave the PR in draft, and report remaining
    acceptance limits and the final head's actual CI status.
 
