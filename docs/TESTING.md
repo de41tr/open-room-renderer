@@ -1,5 +1,32 @@
 # Test evidence and limits
 
+## Recovery checkpoint and bounded final scheduling balance
+
+Exact head `0668209` passed all three jobs/every step in
+[run 38326558265](https://github.com/de41tr/open-room-renderer/actions/runs/38326558265),
+verified at 00:31 UTC on 13 October. Both native logs explicitly show gain UNKNOWN
+after successful Stop, then confirmed native volume 0/mute readbacks without
+Play/media requests, and complete owned cleanup. All 67 native checks and later
+installed/Unix/client/lifetime/clocked/discovery/Snapcast gates pass. Complete
+default coverage remains 5047 passed/74 skipped; actual browser/physical audio
+remain separate acceptance requirements.
+
+The floor passed narrowly again: **160.64s/118.16s** versus 149.89s/105.22s in
+the preceding run, with both groups slowing and no backend-source change. One
+90-second-bounded Python 3.11 focused measurement passed **39 tests in 15.95s**;
+rounded pytest phase sums were 8.84s for `test_native_group_runner.py` and 6.96s
+for `test_cli_commands.py`. That evidence supports moving those two complete
+independent modules to the existing second group. It is not a hosted timing
+prediction or a reason to optimize production code.
+
+The final workflow-only balance preserves all **5,121 unique nodes**, identical
+skip/skipif/xfail metadata on 3.11/3.12, and disjoint **4,573 + 548** groups.
+Both lanes use the same selectors; `favorites_cli.py` remains last. Independent
+review and all 13 focused helper/workflow checks pass on each Python version.
+No full local rerun was added. Helpers, processes, runners, assertions, skips
+and every cap remain unchanged. New-head hosted scheduling is PENDING; make
+no further timing adjustment unless an actual gate fails.
+
 ## Operator recovery and navigation privacy delta
 
 End-to-end operator review reproduced two concrete gaps: favorite/preset private
@@ -83,7 +110,10 @@ interpreter: Python 3.12 4797+250 (147.74s/68.58s), Python 3.11 4797+250
 (151.29s/68.47s). The default full-coverage partition is distinct from native
 opt-in acceptance; no existing assertion or skip was removed. Final frontend
 checks pass 75 Node/DOM cases, including delayed-close/reopen, file-read races,
-private input cleanup and stale rows/drafts. These remain browser doubles.
+private input cleanup and stale rows/drafts. These remain browser doubles. Programmatic Stop events in the DOM harness
+verify controller concurrency, not clickability through a native modal: real
+users first close the modal, then choose Stop. The manual checklist records
+that accessible sequence; modal close never cancels a sent request.
 
 The short actual libmpv Web flow retains its old assertions and 30s/35s caps,
 then checks all three import formats, canonical append/move/remove, selected

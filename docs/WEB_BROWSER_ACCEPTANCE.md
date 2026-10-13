@@ -22,7 +22,7 @@ Use the running renderer's existing HTTP port and open `/ui/` in a real browser 
 ## Interruptions and concurrency
 
 - Delay a command response or disconnect after submission. The UI must say PENDING, then UNKNOWN if the response is lost. Inspect the browser network log: there must be no automatic repeated POST. The last received values must be marked stale on read failure.
-- Double-click a mutation. Only one non-Stop request may be in flight. While it is pending, Stop must remain available; a second pending Stop must be suppressed. A delayed earlier response must not replace the newer Stop result.
+- Double-click a mutation. Only one non-Stop request may be in flight. While it is pending, close any open modal with Close/Cancel/Escape, then use Stop; dismissal must not cancel the sent request. A second pending Stop must be suppressed. A delayed earlier response must not replace the newer Stop result.
 - Reconnect and refresh. Current state may recover while the earlier unknown command outcome remains explicitly visible. Retrying a mutation must require an explicit user action.
 - Restart the renderer while seek/mode/save-current is drafted. The previous session's draft must be rejected. If state and favorites responses straddle the restart, favorite controls must remain stale/disabled until their session IDs agree.
 - Confirm a stale queue selection is rejected instead of playing a different entry after replacement. Read failures or another open controller's changes must not silently become optimistic success.
@@ -44,7 +44,7 @@ Record browser/version, viewport, server revision, passes/failures, and screensh
   submissions must reject without silently rebasing. Restart, Escape and Cancel
   must not resurrect old drafts or let a late response wipe newer inputs.
 - Check that PENDING/UNKNOWN hides unconfirmed current editor values, that Stop
-  remains available during a pending apply, and that a lost response is never
+  remains enabled during a pending apply (close any modal first), and that a lost response is never
   automatically retried. Physical/audible validation remains separate.
 
 ## Stopped playlist workflow

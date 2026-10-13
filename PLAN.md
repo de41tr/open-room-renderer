@@ -51,7 +51,10 @@ in docs/STRATEGIC_REVIEW.md; no speculative new audio engine or core rewrite.
 UNKNOWN-gain recovery gaps. Correct those using existing browser lifecycle and
 checked volume commands, with narrow review/native wiring evidence. No extra
 status panel or core rewrite is warranted. Retain genuine browser/hardware gates
-and verify complete exact-head CI before describing a new checkpoint as green.
+and verify complete exact-head CI before describing a new checkpoint as green. Recovery head `0668209` now passes every hosted step.
+One final evidence-led same-process selector balance and modal-use clarification
+follow; no more timing changes without a failed gate. Next assess an explicit
+private-file export workflow, retaining ordinary URL redaction and existing limits.
 
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
 and independent review precede milestone publication. Full native CI follows

@@ -53,9 +53,13 @@ successful playback, gain or DSP values.
 Mutations are single-shot. A timeout may occur after the command took effect;
 there is no automatic retry. Inspect current state before explicitly trying
 again. Earlier unknown outcomes remain visible even after a later read succeeds.
-Stop stays available during another pending request and without a stale queue
-generation, so it can serve as explicit recovery. It is still a checked backend
-operation, not a promise of silence before acknowledgement/readback.
+Stop remains enabled during another pending request and does not require a
+current queue generation. If a favorite, preset or playlist dialog is open,
+first choose **Close** or **Cancel**, or press **Escape**, then choose **Stop**.
+A native modal dialog makes background controls inert while it is open.
+Dismissing it clears the local draft without cancelling an already-sent request
+or hiding its later outcome. Stop still requires backend acknowledgement/readback;
+choosing it does not itself confirm silence.
 
 When gain is UNKNOWN, **Set volume to 0** sends the existing typed volume
 command without starting playback or changing an unsent slider draft. It is

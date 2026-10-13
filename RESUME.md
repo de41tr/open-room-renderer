@@ -57,14 +57,25 @@ local selector-order finding is closed by focused correction and hosted success.
 Floor groups pass 4538+509 /74 in 149.89s/105.22s under the unchanged 165s cap.
 Keep subsequent private recovery changes distinct from that green checkpoint.
 
-Operator review adds only two concrete follow-through fixes: pagehide scrubs all
-private dialogs, and UNKNOWN gain has an explicit typed volume=0 recovery. Both
-are independently reviewed, with 87 Node/334 focused Web checks and actual
-0.37/0.40 recovery runs passing. Publish frontend/native/docs separately after
-prior CI is terminal; verify the new head without cancelling the older evidence.
-No broader diagnostic panel, core rewrite or new provider is justified by this
-review. Keep looking for concrete operator issues rather than filling the window
-with speculative changes; next value assessment is due around 01:12–01:42 UTC.
+Operator follow-through is published at `0668209`, fully green in run
+38326558265: pagehide scrubs private dialogs, and UNKNOWN gain has explicit
+checked volume=0 recovery. Both native architectures confirm actual readback
+and cleanup. Browser and physical-silence acceptance remain separate.
+
+The following workflow/docs-only checkpoint moves two measured independent test
+modules into the existing second process; all 5,121 nodes/skip metadata and caps
+are unchanged. Final selectors have independent review and 13 focused checks on
+both Python versions; exact new-head hosted scheduling must still pass. This is
+the last timing change unless a gate fails, not an optimization loop. Modal docs
+now tell users to Close/Cancel/Escape before using background Stop; sent requests
+continue and outcomes remain visible.
+
+Next: assess a bounded explicit private-file playlist/favorites export workflow
+against existing offline contracts. Keep ordinary polling/errors redacted,
+require an informed download choice, and do not imply durable save completion or
+new authentication. No implementation is justified if private-data handling or
+scope costs outweigh usefulness. Spotify remains deferred on existing gates.
+Next value assessment is due around 01:12–01:42 UTC.
 Do not repeat old soak tests or known blocked browser routes. Genuine browser,
 physical ARMv7/DAC/original-app and account acceptance remain pending.
 

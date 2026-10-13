@@ -35,6 +35,13 @@ new-head CI is separate. No further useful installation/format/restart blocker
 was found by that review. Continue only evidence-led follow-through, not a broad
 new feature or architecture search simply to use the remaining time.
 
+That recovery checkpoint is fully green at `0668209`. A second near-cap floor
+run justifies one final two-file same-process balancing change, based on a
+focused measurement and exact coverage parity; stop timing work unless a gate
+actually fails. Assess deliberate private-file export next as a practical
+workflow, with redacted ordinary state and explicit disclosure, rather than
+reopening the blocked Spotify integration or inventing another status panel.
+
 ## Architecture checkpoint and pivot
 
 Two bounded, cohesive extractions remove saved-DSP-library ownership and pure

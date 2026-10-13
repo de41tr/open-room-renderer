@@ -29,7 +29,9 @@ checks with exact coverage parity; its earlier local timing-replay failure and
 order-only correction remain documented explicitly in TESTING.md.
 The subsequent frontend-only recovery delta scrubs private dialogs on navigation
 and exposes explicit checked volume=0 for UNKNOWN gain. Focused/native readback
-checks pass; physical silence and genuine browser lifecycle remain unverified.
+checks and exact-head hosted CI pass at `0668209` (run 38326558265); physical
+silence and genuine browser lifecycle remain unverified. Subsequent selector/docs
+changes require their own CI while retaining identical tests and caps.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.

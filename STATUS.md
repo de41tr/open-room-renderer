@@ -66,8 +66,18 @@ and independently reviewed: navigation scrubs all private dialogs, and UNKNOWN
 gain exposes an explicit checked Set volume to 0 action without starting Play.
 The renderer/backend/controller logic is unchanged. Focused checks pass 87 Node
 and 334 Python Web cases; short actual native 0.37/0.40 recovery flows pass in
-4.26s/4.07s with a single test-transport reply loss. New-head CI remains separate;
-no genuine browser or physical-silence claim is made.
+4.26s/4.07s with a single test-transport reply loss. Exact recovery head `0668209`
+passed all three jobs/every step in
+[run 38326558265](https://github.com/de41tr/open-room-renderer/actions/runs/38326558265).
+Both native architectures confirm the recovery/readback sequence; no genuine
+browser or physical-silence claim is made.
+
+The next documentation/workflow checkpoint clarifies closing native modals before
+using background Stop and makes one final evidence-led same-process balance.
+A focused timing measured 15.95s across two independent process-test modules;
+only their group assignment changes. Exact 5,121-node/skip parity and focused
+helper review pass; new-head hosted scheduling remains PENDING. No cap or gate
+changes, and no further timing adjustments unless a gate fails.
 
 BROWSER_ACCEPTANCE_PENDING: no real browser/layout/focus acceptance is claimed.
 The complete UI is locally reproducible at the renderer's existing `/ui/` path;
