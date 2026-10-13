@@ -240,13 +240,40 @@ CONFIG_STRUCTURE_ERROR = (
     "Configuration structure is invalid. Compare supported settings and preset/source "
     "entries with the example YAML."
 )
+CONFIG_DUPLICATE_ERROR = (
+    "Configuration contains duplicate top-level settings. "
+    "Keep only one explicit value for each setting."
+)
+
+
+class _StartupSafeLoader(yaml.SafeLoader):
+    """Reject repeated explicit root settings before constructing YAML values."""
+
+    def construct_document(self, node: yaml.Node) -> Any:
+        if isinstance(node, yaml.MappingNode):
+            seen: set[str] = set()
+            # Inspect the original root pairs before SafeLoader flattens merges.
+            # A merged default plus one explicit override is not a duplicate;
+            # nested mappings retain their existing SafeLoader behavior.
+            for key, _value in node.value:
+                # SafeLoader also normalizes YAML's value-tag mapping keys to
+                # strings while flattening; include that spelling here too.
+                if isinstance(key, yaml.ScalarNode) and key.tag in {
+                    "tag:yaml.org,2002:str", "tag:yaml.org,2002:value",
+                }:
+                    if key.value in seen:
+                        raise StartupConfigError(CONFIG_DUPLICATE_ERROR)
+                    seen.add(key.value)
+        return super().construct_document(node)
 
 
 def parse_startup_yaml(source: str) -> Any:
-    """Keep SafeLoader syntax and scalar-constructor diagnostics private."""
+    """Reject duplicate root settings and keep parser diagnostics private."""
 
     try:
-        return yaml.safe_load(source)
+        return yaml.load(source, Loader=_StartupSafeLoader)
+    except StartupConfigError:
+        raise
     except (yaml.YAMLError, ValueError, TypeError, AttributeError, KeyError, IndexError,
             OverflowError, RecursionError):
         # Explicit !!int/!!bool/!!timestamp tags can raise ordinary Python

@@ -134,6 +134,19 @@ still fall back to INFO; accepted numeric volume coercions and clamping are
 unchanged. Empty files, YAML null, and `{}` still mean default settings. Other
 scalars and sequences (including `false`, `0`, and `[]`) are rejected. This is not
 a complete field type/range schema or a backend, port, or saved-state health check.
+
+**Duplicate-setting compatibility change:** startup and `config check` reject a
+string setting explicitly written more than once at the top level, even if both
+values are the same or the later value is null. Previously YAML silently used the
+last value, which could clear an output choice or change the state directory or
+port. Keep one explicit value per setting. Rejection is before Config construction
+or identity/state/backend effects, with status **2** and fixed guidance that does
+not echo the key, values, source, or path. YAML aliases and merge defaults with a
+single explicit override keep their existing behavior; this is a root-only
+check, not recursive duplicate validation. The public `load_config()` loader
+retains its historical last-value behavior. This is an intentional input/error
+policy change, separate from diagnostic-only refactoring.
+
 An invalid `default_volume` now fails before saved gain is read, even when a valid
 saved gain would previously have masked that malformed setting. Fix the YAML;
 do not delete the saved gain. Valid startup settings still restore saved gain as
