@@ -8,13 +8,13 @@
 based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
 squash-merged. No main push, merge or release is authorized for this phase.
 
-Latest fully CI-verified checkpoint **`4fd1607a39e94b7f6fa715d7e8229d01eb515e32`**
-passes **all four jobs/every step** in **run 38359036576**, verified **07:07 UTC**.
-Hosted floor groups **4872+708 /75 skips** pass **118.93s/94.21s** under 165s:
-**5580 passed /75 skipped** total. Genuine Chrome and all prior native gates pass.
-Both native architectures prove explicit null selection, ignored ambient config,
-disabled null fallback, reaped child, and read-only diagnosis preserving player
-and socket. Physical DAC remains pending. Later room-rename code needs its own CI.
+Latest fully CI-verified checkpoint **`e9fd18acd77e96a4d38edef89532a3bbc577521a`**
+passes **all four jobs/every step** in **run 38361339841**, verified **07:27 UTC**.
+Hosted floor groups **4886+708 /75 skips** pass **147.26s/141.59s** under 165s:
+**5594 passed /75 skipped** total. The existing real Chrome and all native gates
+pass. This includes room-name source but does not add a dedicated browser rename
+scenario. The later installer retention checkpoint `70d9308` has its own pending
+run 38362764862; offline migration is a subsequent separately reviewed change.
 
 ## Active corrected work
 
@@ -74,6 +74,17 @@ software work; no report/CI wait is used instead of useful independent work.
   even against older manifest claims. Root focused checks pass 58 on each Python
   version, with independent review. Updated-checkout invocation is required for
   old installed uninstall scripts; no actual user installation was touched.
+
+- **Offline upgrade preparation:** the new installed Python can prepare a
+  separate migrated-profile from an explicitly offline native installation or
+  relocated snapshot. Seven state files remain byte-identical; Plex identity and
+  session files are omitted without reading contents. Only state/socket config
+  paths are rebased; fresh config/state remain untouched. Private no-clobber
+  output publishes config last, with committed/durability uncertainty distinguished.
+  Root integration passes 250 +1 declared native opt-in skip on both Python
+  versions; independent review and an installed-wheel smoke pass. Genuine
+  installed-native/socket proof remains hosted pending. No activation or live
+  user migration occurred. See GETTING_STARTED for restrictions and recovery.
 
 ## Implemented scope
 

@@ -10,13 +10,13 @@ stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 Work exclusively on `dot/renderer-next-phase-20261013` in
 [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
 `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest fully CI-verified checkpoint **`4fd1607a39e94b7f6fa715d7e8229d01eb515e32`**
-passes **all four jobs/every step** in **run 38359036576**, verified **07:07 UTC**.
-Hosted floor groups **4872+708 /75 skips** pass **118.93s/94.21s** under 165s:
-**5580 passed /75 skipped** total. Genuine Chrome and all prior native gates pass.
-Both native architectures prove explicit null selection, ignored ambient config,
-disabled null fallback, reaped child, and read-only diagnosis preserving player
-and socket. Physical DAC remains pending. Later room-rename code needs its own CI.
+Latest fully CI-verified checkpoint **`e9fd18acd77e96a4d38edef89532a3bbc577521a`**
+passes **all four jobs/every step** in **run 38361339841**, verified **07:27 UTC**.
+Hosted floor groups **4886+708 /75 skips** pass **147.26s/141.59s** under 165s:
+**5594 passed /75 skipped** total. The existing real Chrome and all native gates
+pass. This includes room-name source but does not add a dedicated browser rename
+scenario. The later installer retention checkpoint `70d9308` has its own pending
+run 38362764862; offline migration is a subsequent separately reviewed change.
 
 ## What is already delivered
 
@@ -62,11 +62,12 @@ Maintain three useful potential packages and work independently during CI.
    output selection, pure config checking and no-start output diagnosis are
    published and fully green at `4fd1607`. Native output/null proof passes on both
    architectures. No provider-account, shared-DSP or physical-output claim.
-3. **Next three useful packages:** publish the reviewed Web room-name workflow
-   (249 focused passes per interpreter); protect installer user config/state from
-   uninstall ownership; prepare an offline new-prefix profile without replacing
-   or activating the fresh root config. The last package must remain bounded,
-   preserve bytes and omit provider credentials. No in-place updater/framework.
+3. **Next three useful packages:** verify the published installer retention
+   checkpoint; publish the reviewed offline migration preparer (250 focused passes
+   per interpreter plus one declared native skip); finish a credential-free
+   Spotify config/service bundle with explicit manual handover and no activation.
+   A static systemd failure additionally warrants a narrow executable-path
+   validation fix. No in-place updater or automatic provider supervisor.
 4. **Honor the corrected Spotify choice.** [ADR001](docs/adr/001-spotify-sidecar.md)
    ranks go-librespot 76 / librespot 69 / Soloist 61. Build expiry is not key renewal.
    No actual account/client/provider operation occurred. A separately accepted

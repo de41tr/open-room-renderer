@@ -13,11 +13,20 @@ Firefox and wider manual accessibility acceptance remain separate.
 The Web room-name workflow adds typed literal-percent names, lock-protected
 session/name revision checks and committed-error UNKNOWN without changing legacy
 decoding. Local 249-case checks pass on both interpreters; exact-head CI at
-`e9fd18a` is pending. Its new dialog is not separately real-browser accepted.
+`e9fd18a` passes all four jobs/every step in run 38361339841. Its new dialog is not
+separately real-browser accepted.
 The subsequent installer retention fix explicitly protects root config.yaml,
 state/ and migrated-profile/ even if an older manifest lists them; synthetic
 58-case checks pass on Python 3.11/3.12. Existing installed uninstall.py copies
 need the documented updated-checkout invocation to gain that protection.
+
+Offline migration prepares only a separate private profile for supported native
+layouts. It preserves seven state files and explicit config settings, rebases
+state/socket paths, omits Plex session/identity files and never activates services.
+Malformed storage is not repaired; copying bytes does not certify their validity.
+Focused and installed-wheel evidence passes; hosted installed/socket proof and
+any real-user migration remain pending. Existing destinations need fresh initial-
+config digest metadata; unsupported layouts require deliberate manual migration.
 
 Spotify remains a passive optional REST/WS diagnostic, with no client/account
 activation or shared-DSP claim. Config checking covers startup input only.

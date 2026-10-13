@@ -1,5 +1,33 @@
 # Test evidence and limits
 
+## Offline native migration preparation
+
+Captured-config validation and the unchanged default unit template are separate
+prerequisite commits. The feature adds initial-config receipt verification and
+an offline, new-prefix-only profile with bounded same-user descriptor reads,
+byte-preserving state capture, strict YAML, explicit offline acknowledgment and
+config-last no-clobber publication. Source/destination mutation, unsafe types,
+relocated snapshots, two-hop profiles, fsync/publication/close failures and
+unchanged original settings are covered. Independent review found and fixed
+leading-double-slash aliasing, scientific-float round-trip and committed close
+error classification before freezing the patch.
+
+Root integration with the installer ownership fix passes **250 +1 declared native
+opt-in skip** on Python 3.12 (**14.08s**) and 3.11 (**13.78s**). The worker's focused
+slice passes 80/1; an exact-candidate installed wheel smoke imports from isolated
+site-packages with staged synthetic receipts. It is not a full native-install or
+live-service migration claim. A genuine fresh installed-prefix smoke is attached
+to the existing hosted install step; the real socket-refusal case is required in
+native CI and explicitly skipped locally. One normal and one escalated local
+socket construction were blocked by EPERM before this constraint was correctly
+propagated; neither created/contacted a socket, and no further retry occurred.
+No provider files were read, no user installation was migrated, and no service,
+backend or physical audio was activated. New exact-head CI remains required.
+
+Room head `e9fd18a` is fully green in run 38361339841, all four jobs/every step,
+verified 07:27 UTC. Floor **5594/75**, groups **147.26s/141.59s**. The later retention
+head `70d9308` has independent CI pending and does not include migration.
+
 ## Native user-data ownership correction
 
 The installer no longer inventories root config.yaml, state/ or migrated-profile/.

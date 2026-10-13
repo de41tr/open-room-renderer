@@ -434,11 +434,73 @@ preservation rules on those installations, run this checkout's
 `scripts/install-native.py --prefix /path/to/old-prefix --uninstall`, first adding
 `--dry-run` to review the proposed removal.
 
-For upgrades, install into a new prefix, stop the old instance, and migrate a
-backup of its state and chosen settings. Update state/socket paths and the user
-unit for the new prefix before starting. Do not run the old and new instances
-with the same identity at the same time. Keep the old receipt and installation
-until the new version's local playback/API/discovery checks pass.
+### Optional Offline Upgrade Profile
+
+Install the new version into a fresh prefix first. Stop every source/destination
+renderer and its mpv process yourself, including manually enabled units; keep them
+stopped throughout preparation. A missing IPC socket cannot prove they are stopped.
+The optional preparer does not contact, start, stop, install, enable or reload any
+service. It creates a separate profile for your review and leaves NEW/config.yaml
+and NEW/state untouched.
+
+Use the new installation's Python, an explicit old installation (or offline
+snapshot), and the actual config used by that old instance:
+
+```bash
+NEW="$HOME/.local/share/open-room-renderer-new"
+OLD="$HOME/.local/share/open-room-renderer"
+"$NEW/venv/bin/python" -I -m fake_linkplay.migration_profile \
+  --source "$OLD" --source-config "$OLD/config.yaml" --destination "$NEW" \
+  --acknowledge-offline --dry-run
+# Review the dry run, then repeat without --dry-run to prepare the profile.
+```
+
+This is a narrow same-user native workflow. Both prefixes must have complete
+native receipts; staged-only receipts are accepted for offline review but do not
+supply a runnable installation. NEW must be newly installed with initial-config
+digest metadata, unchanged default config, empty state/run, and no prior
+migrated-profile. Older destinations without that metadata need a fresh install.
+The config must be inside SOURCE and explicitly name an absolute state directory
+inside its original prefix, the native original-prefix/run/mpv.sock, and an owned
+(auto-spawn) mpv. A configured identity or existing nonempty state UUID is required.
+
+For a relocated offline backup, point --source and --source-config at its current
+location and add --original-prefix /absolute/original/installation. This rebases
+the original config's state and socket locations; it does not connect to the old
+host or establish whether any original instance is stopped. External state/socket
+layouts, symlink components, special files, hardlinks, other users' files, writable-
+by-others inputs, and unexpected state entries are refused. Prefix/state/run
+folders must be private (0700); existing ordinary 0644 input files are accepted
+inside those private roots. Reads are capped at one MiB per file. Use a deliberate
+manual migration for unsupported layouts; do not weaken ownership or permissions
+merely to bypass a refusal.
+
+Preparation copies existing uuid, device_name, channel_balance, gain.json,
+active_dsp.json, eq_presets.json and favorites.json byte-for-byte into
+NEW/migrated-profile/state. Absent optional files stay absent. It skips
+plex_client_id and plex_user_info.json without reading their contents; provider sign-in/session setup may need to be repeated separately by you. There is no persisted playback queue. All other parsed
+config settings, including audio output, discovery, ports, presets and URLs, are
+retained; only state_dir and mpv_socket are rebased. YAML comments/formatting are
+not retained, and duplicate keys, anchors/aliases and merges are refused. This is
+configuration-shape validation, not a guarantee that every saved state file is
+valid or that the selected audio device exists on the new machine.
+
+The output contains private config.yaml, state/ and an open-room-renderer.service
+review template. State and unit bytes are synced before config is published last
+with no overwrite. Errors before publication may leave a private incomplete
+migrated-profile without config.yaml. Keep it offline, inspect/remove only that
+partial profile manually, and use a fresh destination; automatic resume/merge is
+never attempted. Exit status 3 means config was committed but final directory
+sync failed: preserve and inspect it rather than retrying or treating it as absent.
+The source is never modified; observed source changes abort preparation.
+
+Review the separate config and unit. When you choose to activate, use its explicit
+config path and review/copy that unit through the normal user-service procedure;
+the default NEW/config.yaml is still the fresh default. Never run old and new
+instances with the same identity at once. Keep the old receipt, installation and
+backup until the new profile's local playback/API/discovery checks pass. Neither
+preparation nor these checks prove physical audio, login lingering or reboot
+behavior. Uninstall preserves both default and migrated user config/state.
 
 ## Discovery On A Chosen IPv4 Interface
 

@@ -24,8 +24,10 @@ independent work while CI, hardware or provider prerequisites are pending.
 4. Side-effect-free `config check --config PATH` and bounded no-start
    `audio diagnose --config PATH` are implemented and reviewed. Complete their
    hosted proof (fully green at `4fd1607`). Next publish Web room-name editing,
-   protect installer user-data ownership, then prepare a bounded offline
-   new-prefix migration profile with explicit activation left to the operator.
+   protect installer user-data ownership (published `70d9308`), then publish the
+   reviewed offline new-prefix migration profile. Continue the credential-free
+   Spotify preparation bundle and demonstrated native path-validation fix.
+   All service activation remains explicit operator work.
 
 Do not grow a universal engine framework, broad E2E suite, or timing campaign.
 07:10 value decision: continue these practical workflows; next review
