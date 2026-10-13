@@ -19,7 +19,9 @@
    operator reproduction/handover gaps. Existing mute validation and intentional
    volume coercions are not reasons to invent a broad schema: 85 guarded pure
    probes confirm those existing protections, so further gain validation is
-   DEFERRED. Spotify account,
+   DEFERRED. The subsequent review did justify two small fixes: preserve an
+   observable implicit-config leaf instead of defaults, and qualify the generated
+   native handover executable. No further operator mismatch was found. Spotify account,
    provider, physical-output and effective-unit acceptance remain pending.
 5. **BOUND:** next value review **11:40–12:10 UTC**. Continue independent useful
    work during CI, but do not manufacture features or test counts. No new large/

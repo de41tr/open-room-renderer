@@ -2,6 +2,14 @@
 
 ## Current next-phase scope
 
+The implicit startup-config fallback now distinguishes an absent leaf from an
+observable dangling/uninspectable leaf. This deliberately changes degraded bare-
+serve behavior only; explicit errors, successful input, true absence, captured
+text and legacy public/print loading stay compatible. No ancestor/path-integrity
+guarantee. The generated Spotify handover uses its selected native executable,
+with shell quoting; provider/account/service/physical-output gates are unchanged.
+These subsequent corrections require their own exact-head CI.
+
 Managed-favorites private backup/restore uses the existing v1 seven-field format
 and preserves exact logical values/IDs/order. Only healthy empty managed storage
 can receive it; configured rows are untouched. No merge/overwrite/reset, larger
@@ -10,7 +18,7 @@ dangling/uninspectable entries instead of choosing defaults, including public
 loader calls; healthy/absent state, writers, UUID and precedence stay unchanged.
 Exact no-effect queue-row rejection gains explicit Refresh review and a separate
 new click, without re-arming uncertain outcomes or retrying from polls. Focused
-root checks and independent reviews pass; combined exact-head CI remains pending.
+root checks and independent reviews pass; exact `322139c` CI is fully green.
 New transfer/recovery interactions have synthetic coverage, not dedicated browser
 or physical-device acceptance.
 

@@ -36,7 +36,9 @@ Single saved-DSP-curve transfer is fully green at `52ccf01`. The assessed privat
 managed-favorites backup/empty-only restore is now reviewed and integrated,
 alongside two demonstrated corrections: unavailable saved-audio entries must not
 select defaults, and a no-effect queue-edit rejection needs an explicit review
-path. Publish these separately and verify their combined exact-head CI. Preserve
+path. These now pass all four exact-head CI jobs at `322139c`. Two subsequent
+operator corrections preserve implicit-config intent and use the proper native
+executable in generated handover guidance; verify their own CI. Preserve
 all UNKNOWN, privacy, atomicity and single-writer limits.
 
 Do not grow a universal engine framework, broad E2E suite, or timing campaign.

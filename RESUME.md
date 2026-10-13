@@ -10,15 +10,16 @@ stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 Work exclusively on `dot/renderer-next-phase-20261013` in
 [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
 `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest fully CI-verified checkpoint **`52ccf01f904ab50ccb5ae0d8a0565007c1ba580a`**
-passes **all four jobs/every step** in **run 38376589573**, verified **09:44 UTC**.
-Floor groups **5705+708 /76 skips** pass **130.07s/106.97s** under 165s:
-**6413 passed /76 skipped**; native defaults **6414/75** on both architectures.
+Latest fully CI-verified checkpoint **`322139c6ac74a8446e3e25a2d73204b6ecc185ac`**
+passes **all four jobs/every step** in **run 38382292288**, verified **10:31 UTC**.
+Floor groups **5948+708 /76 skips** pass **156.60s/143.82s** under 165s:
+**6656 passed /76 skipped**; native defaults **6657/75** on both architectures.
 Standard Chrome and all native/Unix, installed, discovery and Snapcast gates pass.
-This includes saved-curve transfer. Prior `70d9308` run 38362764862 stays FAILED
-with unresolved zero-run cause. The subsequent favorites-transfer, saved-state
-preservation and rejected-queue recovery package requires its own exact-head CI.
-New workflow dialogs have no dedicated browser or physical-audio acceptance claim.
+This includes private favorites transfer, saved-audio-state preservation and
+rejected queue-edit recovery. Prior `70d9308` remains FAILED with unresolved
+zero-run cause. The subsequent implicit-config and native-guide corrections
+require their own exact-head CI. New workflow interactions still have no
+dedicated browser or physical-audio acceptance claim.
 
 ## What is already delivered
 
@@ -64,10 +65,11 @@ Maintain three useful potential packages and work independently during CI.
    output selection, pure config checking and no-start output diagnosis are
    published and fully green at `4fd1607`. Native output/null proof passes on both
    architectures. No provider-account, shared-DSP or physical-output claim.
-3. **Next ranked packages:** verify the reviewed managed-favorites private
-   backup/empty-only restore, saved-audio-state absence fence and explicit rejected
-   queue-edit recovery. Keep one-shot uncertainty and all existing gates. Then
-   assess only demonstrated startup/configuration or operator-handover gaps.
+3. **Next ranked packages:** the favorites transfer and two recovery corrections
+   are fully green at `322139c`. Verify the subsequent implicit-config leaf fence
+   and prefix-qualified Spotify handover command through exact-head CI. Keep
+   one-shot uncertainty and all existing gates; assess further work only from
+   demonstrated startup/configuration or operator-handover gaps.
    Whole-library DSP transfer and general favorites merge/overwrite stay deferred.
    No format/cap expansion merely to create work.
 4. **Honor the corrected Spotify choice.** [ADR001](docs/adr/001-spotify-sidecar.md)

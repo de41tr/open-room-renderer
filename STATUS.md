@@ -8,15 +8,16 @@
 based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
 squash-merged. No main push, merge or release is authorized for this phase.
 
-Latest fully CI-verified checkpoint **`52ccf01f904ab50ccb5ae0d8a0565007c1ba580a`**
-passes **all four jobs/every step** in **run 38376589573**, verified **09:44 UTC**.
-Floor groups **5705+708 /76 skips** pass **130.07s/106.97s** under 165s:
-**6413 passed /76 skipped**; native defaults **6414/75** on both architectures.
+Latest fully CI-verified checkpoint **`322139c6ac74a8446e3e25a2d73204b6ecc185ac`**
+passes **all four jobs/every step** in **run 38382292288**, verified **10:31 UTC**.
+Floor groups **5948+708 /76 skips** pass **156.60s/143.82s** under 165s:
+**6656 passed /76 skipped**; native defaults **6657/75** on both architectures.
 Standard Chrome and all native/Unix, installed, discovery and Snapcast gates pass.
-This includes saved-curve transfer. Prior `70d9308` run 38362764862 stays FAILED
-with unresolved zero-run cause. The subsequent favorites-transfer, saved-state
-preservation and rejected-queue recovery package requires its own exact-head CI.
-New workflow dialogs have no dedicated browser or physical-audio acceptance claim.
+This includes private favorites transfer, saved-audio-state preservation and
+rejected queue-edit recovery. Prior `70d9308` remains FAILED with unresolved
+zero-run cause. The subsequent implicit-config and native-guide corrections
+require their own exact-head CI. New workflow interactions still have no
+dedicated browser or physical-audio acceptance claim.
 
 ## Active corrected work
 
@@ -154,6 +155,14 @@ software work; no report/CI wait is used instead of useful independent work.
   the new edit. Polls never retry, and UNKNOWN/ERROR/lost/malformed/committed
   responses stay latched. Raw duplicate fields fail closed. Merged Node checks
   pass 270; source/DOM proofs do not establish a new browser interaction check.
+
+- **Implicit config intent:** bare serve no longer substitutes defaults for an
+  observable dangling implicit-config leaf or failed inspection. Genuine absence,
+  explicit-config errors, captured input and legacy loaders remain compatible;
+  ancestors are not walked. Independent review and focused checks pass.
+- **Native handover command:** the offline Spotify guide now quotes the selected
+  installation's own executable, avoiding a missing/wrong global PATH command.
+  Manual provider/account/service/output acceptance gates are unchanged.
 
 ## Implemented scope
 

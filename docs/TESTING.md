@@ -1,5 +1,30 @@
 # Test evidence and limits
 
+## Implicit-config intent and native handover correction
+
+Bare serve's compatibility fallback now requires a missing selected leaf after
+read failure, rather than treating an observable dangling config as new absence.
+The existing fixed private error handles an existing entry or lstat uncertainty;
+no path reselection, read retry, ancestor walk or state/backend effect is added.
+Genuine absence/missing parents, successful regular/link reads, explicit errors,
+captured input and legacy public/print behavior remain. Worker checks pass
+154 on Python 3.11/3.12 with one unrelated subprocess case deselected; fresh
+independent review passes all 48 new guarded cases. CLI coroutine stepping and
+wrapper stubs prove the pre-hydration boundary without actual services/sockets.
+The root's broader startup/config/saved-entry checks pass **385** on each Python
+(**23.04s/23.24s**); contributor documentation checks pass **5**.
+
+The generated Spotify handover now names the shell-quoted native-prefix
+executable rather than assuming a global PATH entry. Five new assertions fail
+on baseline and pass corrected; shlex tokenization covers spaces, percent signs
+and allowed shell metacharacters without executing output. Root generator checks
+pass **122**, one existing static unit verifier deselected, on both Python versions
+(**0.57s/0.55s**). Host/port and manual acceptance gates remain unchanged.
+
+Preceding **322139c** is fully green in **38382292288**, all four jobs/every step,
+verified **10:31 UTC**: floor **6656/76**, groups **156.60s/143.82s** under unchanged
+165s caps; native defaults **6657/75**. New source requires its own exact-head CI.
+
 ## Managed-favorites transfer and bounded recovery corrections
 
 The paired private favorites workflow exports only managed records and restores
@@ -46,7 +71,8 @@ and passes 26 focused overlap controls; no dropped cleanup or uncertainty branch
 The latest preceding exact head **52ccf01** passes all four jobs/every step in
 **38376589573**, verified **09:44 UTC**: floor **6413/76**, groups
 **130.07s/106.97s**, native defaults **6414/75**, unchanged caps. The combined
-successor requires its own CI; do not infer green from these local checks.
+successor `322139c` now passes all four jobs/every step in 38382292288; this does
+not add dedicated browser coverage for the new dialogs/recovery interaction.
 
 ## Single saved DSP curve transfer
 
