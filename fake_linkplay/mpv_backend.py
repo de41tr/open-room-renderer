@@ -384,6 +384,155 @@ class MpvBackend:
         """Bound connection/write time; success here means sent, not acknowledged."""
         return await self._send_command(args, timeout, wait_response=False)
 
+    async def diagnose_audio_output(self, timeout: float = 2.0) -> dict[str, Any]:
+        """Read two output properties on one connection, without startup or logging.
+
+        This deliberately bypasses start/command and all playback/state helpers.
+        Only a fresh no-spawn backend may use it. Cleanup only closes this client
+        transport; it sends no shutdown command/signal and removes no socket. Values are sequential
+        observations, not an atomic snapshot or proof of renderer ownership.
+        """
+        result: dict[str, Any] = {
+            "connection": "not_attempted", "socket_path_check": "not_checked",
+            "audio_device": {"status": "not_read"},
+            "current_ao": {"status": "not_read"},
+        }
+        if (self.auto_spawn is not False or self.process is not None
+                or self._owned_process is not None or self._startup_task is not None
+                or self._closed):
+            raise ValueError("Audio diagnosis requires a fresh no-spawn backend")
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Audio diagnosis requires a positive finite timeout")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        writer: asyncio.StreamWriter | None = None
+        current: str | None = None
+        frames = received = 0
+
+        def unique_object(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError
+                value[key] = item
+            return value
+
+        def check_deadline():
+            # Buffered awaits need not yield to asyncio.timeout_at. Never send
+            # a later request or accept a late reply after a synchronous overrun.
+            if loop.time() >= deadline:
+                raise TimeoutError
+
+        def check_path(identity):
+            # An unchanged inode at these instants is only an advisory check.
+            # In particular, it cannot certify ownership or rule out an ABA race.
+            observed = self._socket_identity()
+            check_deadline()
+            if observed != identity:
+                result["socket_path_check"] = "changed"
+                return False
+            result["socket_path_check"] = "unchanged_at_checks"
+            return True
+
+        try:
+            async with asyncio.timeout_at(deadline):
+                identity = self._socket_identity()
+                check_deadline()
+                if identity is None:
+                    result["connection"] = "socket_missing"
+                    return result
+                reader, writer = await asyncio.open_unix_connection(self.socket_path, limit=8192)
+                result["connection"] = "connected"
+                if not check_path(identity):
+                    return result
+                for request_id, (prop, key) in enumerate((
+                    ("audio-device", "audio_device"), ("current-ao", "current_ao"),
+                ), 1):
+                    current = key
+                    check_deadline()
+                    writer.write((json.dumps({"command": ["get_property", prop],
+                                              "request_id": request_id}) + "\n").encode())
+                    await writer.drain()
+                    check_deadline()
+                    while True:
+                        if frames >= 16:
+                            result[key] = {"status": "response_limit"}
+                            return result
+                        line = await reader.readline()
+                        check_deadline()
+                        if not line:
+                            result["connection"] = "transport_error"
+                            result[key] = {"status": "transport_error"}
+                            return result
+                        frames += 1
+                        received += len(line)
+                        if len(line) > 8192 or received > 32768:
+                            result[key] = {"status": "response_limit"}
+                            return result
+                        if not line.endswith(b"\n"):
+                            raise ValueError
+                        response = json.loads(line.decode("utf-8"), object_pairs_hook=unique_object)
+                        check_deadline()
+                        if not isinstance(response, dict):
+                            raise ValueError
+                        response_id = response.get("request_id")
+                        if "request_id" not in response:
+                            if not isinstance(response.get("event"), str):
+                                raise ValueError
+                            continue
+                        if type(response_id) is not int:
+                            raise ValueError
+                        if response_id != request_id:
+                            continue
+                        error = response.get("error")
+                        if not isinstance(error, str):
+                            raise ValueError
+                        if error in {"property unavailable", "property not found"}:
+                            result[key] = {"status": "unavailable" if error == "property unavailable"
+                                           else "unsupported"}
+                        elif error != "success":
+                            result[key] = {"status": "request_failed"}
+                            return result
+                        else:
+                            value = response.get("data")
+                            if not isinstance(value, str):
+                                raise ValueError
+                            if prop == "audio-device":
+                                validate_audio_device(value, auto_spawn=True)
+                            elif re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value) is None:
+                                raise ValueError
+                            result[key] = {"status": "value", "value": value}
+                        break
+                    current = None
+                    if not check_path(identity):
+                        return result
+        except FileNotFoundError:
+            result["connection"] = "socket_missing"
+            if writer is not None:
+                result["socket_path_check"] = "changed"
+        except BackendError:
+            # _socket_identity rejects non-sockets and symlinks, without unlink.
+            result["connection"] = "socket_invalid"
+            if writer is not None:
+                result["socket_path_check"] = "changed"
+        except TimeoutError:
+            result["connection"] = "timed_out"
+            if current is not None:
+                result[current] = {"status": "timed_out"}
+        except OSError:
+            result["connection"] = "transport_error"
+            if current is not None:
+                result[current] = {"status": "transport_error"}
+        except (ValueError, UnicodeError, RecursionError):
+            if current is not None:
+                result[current] = {"status": "malformed_response"}
+            else:
+                result["connection"] = "socket_invalid"
+        finally:
+            if writer is not None:
+                await self._close_writer(writer, deadline)
+        return result
+
     async def _send_command(self, args: list[Any] | dict[str, Any], timeout: float, *, wait_response: bool) -> dict[str, Any]:
         deadline = asyncio.get_running_loop().time() + timeout
         writer: asyncio.StreamWriter | None = None
