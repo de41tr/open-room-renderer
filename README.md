@@ -142,7 +142,14 @@ Local DSP commands inspect active DSP and expose existing balance/EQ bypass cont
 Balance is normalized -1..1. See [DSP controls and unknown-outcome handling](GETTING_STARTED.md#local-dsp-controls)
 before enabling an unfamiliar EQ configuration.
 
-An optional `open-room-renderer spotify diagnose --port PORT` command reads an
+An optional [exclusive Spotify receiver candidate](docs/SPOTIFY_RECEIVER.md)
+now provides pinned client verification/install and an independent receiver
+CLI for Spotify, renderer and off modes. It stops/checks whole owned systemd
+user-service cgroups before selecting one direct-ALSA engine. Spotify bypasses
+ORR EQ/balance; account, provider-policy and physical XU4/KA17 acceptance remain
+open. It is opt-in; setup never activates a client.
+
+The `open-room-renderer spotify diagnose --port PORT` command reads an
 already running local go-librespot sidecar. It does not start a player or control
 audio. See [the read-only Spotify diagnostic](docs/SPOTIFY_DIAGNOSTIC.md) for
 explicit setup requirements, privacy limits and sidecar-reported status meanings.

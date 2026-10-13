@@ -355,6 +355,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "discover":
         return run_discovery(args)
     if args.cmd == "spotify":
+        if args.spotify_cmd in {"receiver", "install-client"}:
+            from .spotify_receiver import run_receiver
+            return run_receiver(args)
         if args.spotify_cmd == "prepare-exclusive":
             from .spotify_exclusive import run_prepare_exclusive
             return run_prepare_exclusive(args)

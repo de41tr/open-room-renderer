@@ -73,6 +73,17 @@ jobs:
             tests/test_legacy_cli_redirect_privacy.py tests/test_dsp_read_client.py \
             tests/test_dsp_client.py tests/test_transport_client.py tests/test_favorites_cli.py
 
+      - name: Verify exclusive receiver with real user systemd and synthetic PCM
+        timeout-minutes: 2
+        # Disposable runner only. No account, provider client or sound device.
+        # This adds no retries and does not relax the existing 165s suite cap.
+        run: |
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          sudo systemctl start "user@$(id -u).service"
+          systemctl --user show --property=Version
+          python tools/acceptance_spotify_receiver.py
+
   browser-smoke:
     name: Real Chrome / desktop and mobile smoke
     # Independent short lane: never take time from either existing native job.
