@@ -497,7 +497,16 @@ def load_persistent_runtime_state(cfg: Config, *, _startup: bool = False) -> Non
 
 
 def _read_optional_persistent_text(path: Path) -> str | None:
-    return path.read_text() if path.exists() else None
+    try:
+        return path.read_text()
+    except FileNotFoundError:
+        # exists() follows links and would treat a saved dangling link as absent.
+        # An uncertain inspection must also fail rather than select defaults.
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return None
+        raise
 
 
 def sanitize_persistent_text(value: str) -> str:

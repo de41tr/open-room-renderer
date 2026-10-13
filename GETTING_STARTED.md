@@ -157,13 +157,22 @@ device name, active DSP, or legacy balance also stop startup with status
 private paths, and exception chains. Check the named file locally and its permissions,
 or restore a known-good backup; do not delete saved sound settings to force startup.
 The active DSP read is checked again during API construction; failure still cleans
-up the acquired backend before any listeners start. Existing state rules and read
-order are unchanged: an identity may already have been published before a later
-failure, and no automatic reset or retry is added. The public configuration/state
-readers and ordinary API construction retain their original exceptions. Favorites'
+up the acquired backend before any listeners start. Read order is unchanged:
+an identity may already have been published before a later failure, and no
+automatic reset or retry is added. Public readers and ordinary API construction
+keep their underlying exceptions rather than the CLI's private wrapper. Favorites'
 unavailable/config fallback remains. A separate saved-EQ protection now preserves
 failed-load storage and blocks saved-library writes while independent active DSP
 stays usable; see [preset recovery](docs/WEB_DSP_EDITOR.md#unavailable-saved-preset-storage).
+Saved gain, active DSP, legacy balance and device-name entries permit defaults
+only when genuinely absent. A dangling saved link or an inspection failure stops
+startup with the existing private diagnostic. Preserve the link and repair or
+restore its target, then explicitly start again. Valid saved links still load;
+valid active DSP still overrides legacy balance. This intentionally changes
+degraded-state read behavior, including public loaders, without automatic repair
+or reload. These are read-time checks under the existing single-writer assumption:
+do not edit state while serving. Later external changes are not fenced, and
+confirmed writes retain their existing atomic-replacement semantics.
 Invalid initial channel balance, selected from configuration or saved state, now
 also exits **2** with a fixed source-neutral startup diagnostic instead of an
 unhandled ValueError traceback (previously exit 1). Check `channel_balance` in
@@ -171,8 +180,9 @@ configuration or saved state locally. Source precedence and numeric normalizatio
 are unchanged: saved balance overrides configuration, and valid active DSP
 overrides both. This check is **after backend acquisition and gain initialization**;
 existing teardown still runs, and identity may already have been published.
-Saved bytes are not reset or repaired. Public loaders, ordinary API construction,
-backend availability, binding and unrelated cleanup diagnostics retain their behavior.
+Saved bytes are not reset or repaired. For invalid initial balance, public loaders
+and ordinary API construction retain their behavior. Backend availability,
+binding and unrelated cleanup diagnostics are unchanged.
 
 For compatibility, bare `serve` still selects `configs/config.example.yaml`
 relative to the current directory and uses built-in defaults if that implicit
