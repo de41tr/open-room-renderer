@@ -28,8 +28,10 @@ import pytest
 
 from fake_linkplay.config import Config
 from fake_linkplay.http_api import HttpApi
+from fake_linkplay.playlist_files import decode_playlist
 from fake_linkplay.queue import PlaybackQueue, QueueItem, serialize_queue_context
 from fake_linkplay.queue_policy import REPEAT_ALL
+from fake_linkplay.queue_playlist import encode_current_playlist
 from fake_linkplay.state import RendererState
 from test_libmpv_integration import _eventually, _write_tone
 from test_libmpv_queue_staging import _StagingBackend
@@ -81,6 +83,7 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
         "lane": "REAL_BACKEND/null/Web-JSON", "decoded": [],
         "control_transport": "aiohttp Web JSON -> HttpApi -> MpvBackend -> test ctypes -> libmpv",
         "output": "null; no physical device or sample measurement",
+        "playlist_export": {"requests": [], "scope": "HTTP bytes in memory; no browser or disk-save claim"},
     }
     try:
         await media_server.start_server()
@@ -129,6 +132,68 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
                     if expected == 200:
                         assert result["request_acknowledged"] is True, result
                     return result
+
+            async def export(action, context, *, expected=200, **fields):
+                # The live handle and real HTTP/media servers remain present.
+                # Compare the owner and native readbacks around every export,
+                # including rejected consent and stale-revision requests.
+                state_before = await snapshot()
+                owned_queue = api.state.queue
+                queue_value = deepcopy(owned_queue)
+                handle = backend._handle
+                assert handle is not None
+                commands_before = len(backend.commands)
+                requests_before = list(media_requests)
+                properties = ("playlist", "idle-active", "pause", "af", "volume", "mute", "track-list")
+                native_before = {key: backend.read_property(key) for key in properties}
+                payload = {"action": action, "expected_session": context["session_id"],
+                           "expected_generation": context["generation"], **fields}
+                async with session.post(server.make_url(BASE + "/playlist/export"), json=payload,
+                    headers={"Origin": origin, "X-ORR-CSRF": token}) as response:
+                    body = await response.read()
+                    assert response.status == expected, (response.status, body)
+                    assert response.content_type == "application/json"
+                    assert response.headers["Cache-Control"] == "no-store"
+                    assert response.headers["Content-Length"] == str(len(body))
+                    if expected == 200 and action == "download":
+                        assert response.headers["Content-Disposition"] == (
+                            'attachment; filename="open-room-renderer-playlist.json"')
+                        assert body == encode_current_playlist(queue_value)
+                        result = decode_playlist(body)
+                        assert result == {"version": 1, "name": owned_queue.name,
+                            "index": owned_queue.index, "mode": state_before["queue"]["mode"],
+                            "urls": [item.url for item in owned_queue.items]}
+                    else:
+                        assert "Content-Disposition" not in response.headers
+                        assert not any(url.encode() in body for url in urls), "Export preview/error leaked a target"
+                        result = json.loads(body)
+                        if expected == 200:
+                            assert set(result) == {"version", "session_id", "generation", "revision",
+                                "name", "count", "index", "mode", "size_bytes", "filename"}
+                            assert re.fullmatch(r"[0-9a-f]{64}", result["revision"])
+                            assert result == {"version": 1, "session_id": context["session_id"],
+                                "generation": context["generation"], "revision": result["revision"],
+                                "name": owned_queue.name, "count": owned_queue.count,
+                                "index": owned_queue.index, "mode": state_before["queue"]["mode"],
+                                "size_bytes": len(encode_current_playlist(queue_value)),
+                                "filename": "open-room-renderer-playlist.json"}
+                        else:
+                            assert result["outcome"] == "REJECTED"
+                after = await snapshot()
+                assert backend._handle == handle
+                assert api.state.queue is owned_queue and api.state.queue == queue_value
+                assert backend.commands[commands_before:] == [] and media_requests == requests_before
+                assert {key: backend.read_property(key) for key in properties} == native_before
+                for key in ("session_id", "generation", "queue", "transport", "gain", "dsp"):
+                    assert after[key] == state_before[key], (key, state_before[key], after[key])
+                if state_before["transport"]["phase"] == "STOPPED":
+                    assert native_before["idle-active"] is True and native_before["playlist"] == []
+                    assert not any(track.get("selected") and track.get("type") == "audio"
+                                   for track in native_before["track-list"])
+                evidence["playlist_export"]["requests"].append({"action": action, "status": expected,
+                    "phase": state_before["transport"]["phase"], "native_mutations": 0,
+                    "media_requests": 0, "queue_generation_dsp_gain_retained": True})
+                return result
 
             async def legacy(value):
                 async with session.get(server.make_url("/httpapi.asp"), params={"command": value}) as response:
@@ -283,6 +348,19 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
             assert backend.read_property("playlist") == native_before
             await decoded(1)
 
+            # Export is read-only even while actual PCM is playing. The
+            # existing same-generation mode edit below must invalidate its
+            # prepared bytes without reloading the selected native source.
+            export_context = await snapshot()
+            prepared_export = await export("prepare", export_context)
+            active_export = await export("download", export_context,
+                expected_export=prepared_export["revision"], private_export_confirmed=True)
+            assert active_export == {"version": 1, "name": queue.name, "index": 1,
+                                    "mode": "repeat-all", "urls": urls}
+            evidence["playlist_export"]["playing_round_trip"] = {
+                "name": active_export["name"], "index": 1, "mode": "repeat-all", "source_order": [1, 2],
+                "exact_codec_bytes": True, "metadata_omitted": True}
+
             before = len(backend.commands)
             generation = (await snapshot())["generation"]
             await command("queue_mode", queue_name=queue.name, mode="normal", guard=True)
@@ -291,6 +369,10 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
             changed = await canonical(1, "PLAYING")
             assert changed["generation"] == generation and changed["queue"]["mode"] == "normal"
             evidence["queue_policy"] = {"normal_without_reload": True, "generation_retained": True}
+            rejected = await export("download", export_context, expected=409,
+                expected_export=prepared_export["revision"], private_export_confirmed=True)
+            assert rejected["error"] == "stale_export"
+            evidence["playlist_export"]["same_generation_mode_staleness"] = 409
             await command("next", guard=True)
             await decoded(2)
             current = await canonical(2, "PLAYING")
@@ -525,6 +607,18 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
             assert backend.commands[before:] == [] and media_requests == requests_before
             assert backend.read_property("playlist") == native_before
             assert backend.read_property("idle-active") is True
+            export_context = await snapshot()
+            prepared_export = await export("prepare", export_context)
+            rejected = await export("download", export_context, expected=400,
+                expected_export=prepared_export["revision"], private_export_confirmed=False)
+            assert rejected["error"] == "invalid_request"
+            stopped_export = await export("download", export_context,
+                expected_export=prepared_export["revision"], private_export_confirmed=True)
+            assert stopped_export == {"version": 1, "name": document["name"], "index": 2,
+                "mode": "repeat-all", "urls": [urls[0], urls[0], urls[1]]}
+            evidence["playlist_export"]["stopped_duplicate_round_trip"] = {
+                "name": stopped_export["name"], "index": 2, "mode": "repeat-all", "source_order": [1, 1, 2],
+                "exact_codec_bytes": True, "consent_required": 400, "no_hidden_playback": True}
             await command("play", guard=True)
             selected_source = await decoded(1)
             await canonical(2, "PLAYING")
@@ -671,6 +765,13 @@ def test_real_libmpv_web_controls(tmp_path: Path) -> None:
     assert evidence["playlist_edits"]["native_mutations_before_explicit_play"] == 0
     assert evidence["playlist_import"]["formats"] == ["json", "m3u", "urls"]
     assert evidence["playlist_import"]["actual_source_after_explicit_play"] == 1
+    assert evidence["playlist_export"]["playing_round_trip"]["exact_codec_bytes"] is True
+    assert evidence["playlist_export"]["stopped_duplicate_round_trip"]["no_hidden_playback"] is True
+    assert evidence["playlist_export"]["same_generation_mode_staleness"] == 409
+    assert len(evidence["playlist_export"]["requests"]) == 6
+    assert all(request["native_mutations"] == request["media_requests"] == 0
+               and request["queue_generation_dsp_gain_retained"]
+               for request in evidence["playlist_export"]["requests"])
     assert evidence["gain_zero_recovery"]["injection"]["count"] == 1
     assert evidence["gain_zero_recovery"]["gain_after_successful_stop"]["status"] == "UNKNOWN"
     assert evidence["gain_zero_recovery"]["gain_after_zero"]["volume"] == 0
