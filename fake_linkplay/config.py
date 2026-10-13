@@ -305,7 +305,20 @@ def read_startup_config(
             raise StartupConfigError(
                 "Configuration file not found. Check --config or ORR_CONFIG."
             ) from None
-        source = ""
+        # A missing target may still have a selected leaf (for example, a
+        # dangling symlink). Fall back only when lstat also reports it missing.
+        try:
+            Path(path).lstat()
+        except FileNotFoundError:
+            source = ""
+        except OSError:
+            raise StartupConfigError(
+                "Configuration file could not be read. Check the path and read permissions."
+            ) from None
+        else:
+            raise StartupConfigError(
+                "Configuration file could not be read. Check the path and read permissions."
+            ) from None
     except IsADirectoryError:
         raise StartupConfigError(
             "Configuration path is a directory. Select a YAML file."

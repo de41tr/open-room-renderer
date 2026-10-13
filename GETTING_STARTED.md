@@ -185,8 +185,12 @@ and ordinary API construction retain their behavior. Backend availability,
 binding and unrelated cleanup diagnostics are unchanged.
 
 For compatibility, bare `serve` still selects `configs/config.example.yaml`
-relative to the current directory and uses built-in defaults if that implicit
-file is missing. It can then create identity/state and start normal services.
+relative to the current directory. Built-in defaults remain available when the
+failed read and a subsequent leaf inspection both report the selected path missing.
+A dangling link at that filename, an entry appearing after the failed read, or
+an inspection error stops startup with a private configuration error instead.
+This is a leaf-only check; it does not walk parent components. A fallback startup
+can still create identity/state and start normal services.
 Use an explicit `--config` for fail-closed operator startup, even when selecting
 that same example path. The library `load_config()` and the two `print-*` config
 commands keep their existing missing-file behavior. Checkout scripts always
