@@ -8,13 +8,13 @@
 based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
 squash-merged. No main push, merge or release is authorized for this phase.
 
-Latest fully CI-verified checkpoint **`66cbe15871d6edec58cc0ad12bae9433ac711f6a`**
-passes **all four jobs/every step** in **run 38356723243**, verified **06:40 UTC**.
-This includes the genuine Chrome smoke and the unchanged floor/native/Unix/
-installed/discovery/Snapcast gates. Hosted floor groups **4784+708 /74 skips**
-pass **145.74s/142.65s** under 165s: **5492 passed /74 skipped** total.
-The browser artifact is verified below. Later operator features need their own
-exact-head CI, including the new short null-device/diagnostic proof.
+Latest fully CI-verified checkpoint **`4fd1607a39e94b7f6fa715d7e8229d01eb515e32`**
+passes **all four jobs/every step** in **run 38359036576**, verified **07:07 UTC**.
+Hosted floor groups **4872+708 /75 skips** pass **118.93s/94.21s** under 165s:
+**5580 passed /75 skipped** total. Genuine Chrome and all prior native gates pass.
+Both native architectures prove explicit null selection, ignored ambient config,
+disabled null fallback, reaped child, and read-only diagnosis preserving player
+and socket. Physical DAC remains pending. Later room-rename code needs its own CI.
 
 ## Active corrected work
 
@@ -47,19 +47,27 @@ software work; no report/CI wait is used instead of useful independent work.
   owned mpv with no ambient config/scripts or null fallback. Unset behavior is
   unchanged; foreign/replaced/unverified sockets refuse commands. Exact device
   discovery/configuration is documented. Focused tests pass; the new bounded
-  production-Unix/null proof is hosted-CI pending. Physical DAC remains pending.
+  production-Unix/null proof passes on both hosted architectures. Physical DAC remains pending.
 - **Output diagnosis:** `audio diagnose --config PATH` makes only two bounded
   read-only IPC property requests, without starting/stopping a player or calling
   playback/status reconciliation. It separates disk intent, live option and
   active driver; null/unavailable/errors and sequential/non-atomic observations
   stay explicit. Root final CLI/output integration passes **208** on both Python
-  versions; the small attached native slice is hosted-CI pending.
+  versions; the attached native slice passes on both hosted architectures.
 - **Config preflight:** `config check --config PATH` uses the existing pure
   startup-input reader without state/UUID creation, saved-state reads, network
   or backend access. Fixed success explicitly excludes full runtime validation.
   The merged config/Spotify/legacy CLI suite passes **56 tests**; combined
   output/startup/Spotify checks pass **416** on each Python 3.11/3.12. No redundant
-  full local suite was run; new exact-head CI remains required.
+  full local suite was run; the exact operator head is fully CI green.
+
+- **Room name:** the Web dialog uses the existing persisted rename transaction,
+  session-bound name revisions compared inside its lock, explicit stale-draft
+  rejection and canonical readback. A committed persistence/discovery failure
+  remains UNKNOWN even when the new name is visible. Typed names preserve literal
+  percent sequences; legacy decoding stays unchanged. Root checks pass 249 on
+  each Python version, including 175 Node cases. This new dialog has not received
+  its own genuine-browser acceptance; the existing browser smoke remains scoped.
 
 ## Implemented scope
 

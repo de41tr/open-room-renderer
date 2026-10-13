@@ -10,11 +10,13 @@ stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 Work exclusively on `dot/renderer-next-phase-20261013` in
 [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
 `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest fully green checkpoint **`66cbe15871d6edec58cc0ad12bae9433ac711f6a`**
-passes all **four jobs/every step** in **run 38356723243**, verified **06:40 UTC**.
-Hosted floor groups **4784+708 /74 skips** pass **145.74s/142.65s**, for **5492/74**.
-Genuine Chrome and all prior native/Unix/installed/discovery/Snapcast gates pass.
-Later operator features still need their own exact-head CI/native proof.
+Latest fully CI-verified checkpoint **`4fd1607a39e94b7f6fa715d7e8229d01eb515e32`**
+passes **all four jobs/every step** in **run 38359036576**, verified **07:07 UTC**.
+Hosted floor groups **4872+708 /75 skips** pass **118.93s/94.21s** under 165s:
+**5580 passed /75 skipped** total. Genuine Chrome and all prior native gates pass.
+Both native architectures prove explicit null selection, ignored ambient config,
+disabled null fallback, reaped child, and read-only diagnosis preserving player
+and socket. Physical DAC remains pending. Later room-rename code needs its own CI.
 
 ## What is already delivered
 
@@ -56,25 +58,22 @@ Maintain three useful potential packages and work independently during CI.
    mpv/null control and downloaded JSON bytes. First two failed focus assumptions
    and the repaired favicon CSP defect stay recorded. No further harness growth
    is needed; later source gets the existing gate, with wider manual scope pending.
-2. **Publish reviewed operator features in separate commits.** The optional
-   read-only go-librespot REST/WS diagnostic has strict loopback/private/bounded
-   contracts and synthetic evidence. Explicit audio-device selection uses an
-   isolated owned-mpv profile; its new short native null proof is still pending.
-   `config check` exposes only pure startup-input validation, not runtime health.
-   `audio diagnose` is a bounded two-property no-start IPC reader; final merged
-   output/config/Spotify/legacy checks pass 208 per interpreter.
-   Combined output/startup/Spotify checks pass 416 per interpreter; integrated
-   config/Spotify/legacy CLI checks pass 56. Preserve source-specific CI claims.
-3. **Continue the concrete pipeline.** Next assess truthful output diagnostics
-   and Web room-name editing through the existing persisted transaction. Offline
-   new-prefix migration is lower priority; never put imported runtime state into
-   the uninstaller's owned-file manifest. No generic framework or artificial tests.
+2. **Keep operator proof exact.** Passive Spotify diagnosis, explicit owned
+   output selection, pure config checking and no-start output diagnosis are
+   published and fully green at `4fd1607`. Native output/null proof passes on both
+   architectures. No provider-account, shared-DSP or physical-output claim.
+3. **Next three useful packages:** publish the reviewed Web room-name workflow
+   (249 focused passes per interpreter); protect installer user config/state from
+   uninstall ownership; prepare an offline new-prefix profile without replacing
+   or activating the fresh root config. The last package must remain bounded,
+   preserve bytes and omit provider credentials. No in-place updater/framework.
 4. **Honor the corrected Spotify choice.** [ADR001](docs/adr/001-spotify-sidecar.md)
    ranks go-librespot 76 / librespot 69 / Soloist 61. Build expiry is not key renewal.
    No actual account/client/provider operation occurred. A separately accepted
    exclusive whole-service mode is possible without shared DSP, but foreign mpv,
    uncertain shutdown, provider terms and physical output remain real boundaries.
-5. **Review value at 07:05–07:35 UTC**, then every 90–120 minutes, without waiting
+5. **07:10 value decision: CONTINUE** the three packages above; review again
+   around 08:40–09:10 UTC, without waiting
    just for reporting, CI or unavailable hardware/accounts. No large/risky work
    after 16:30; stabilize 17:00; stop 18:00 UTC even if CI is pending. Remain on the
    existing branch/Draft PR #2, no main push, merge or release.

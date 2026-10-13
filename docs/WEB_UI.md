@@ -18,6 +18,7 @@ include the four static assets.
 
 ## Controls
 
+- Rename room: a persisted renderer/discovery name from an explicit dialog.
 - Now Playing: safe title/artist/album, optional artwork, live-stream label,
   canonical playback phase and reported position/duration.
 - Play, Pause, Stop, Next, Previous, bounded Seek, volume and mute.
@@ -40,6 +41,36 @@ shuffle modes do not imply an independent shuffle-plus-repeat-one combination.
 Live sources without a seekable timeline do not offer Seek. Some native staged
 queue states temporarily forbid changing mode; the UI follows those core gates.
 
+### Room name
+
+Choose **Rename room** below the room heading, enter a name, then **Save name**.
+The existing name transaction saves `state_dir/device_name`, updates live naming
+and invokes the existing discovery refresh. UUID, mDNS hostname, playback and
+queue ownership do not change. The exact legacy name rule still applies:
+nonempty after Python whitespace stripping, at most 128 Unicode characters, and
+no control/surrogate/invalid XML characters. Typed percent sequences stay literal;
+this JSON action never goes through the legacy URL/hex command decoder.
+
+A draft is tied to its opening renderer session and an opaque name identity.
+Fresh external name changes invalidate it; the server also checks that identity
+inside the existing rename lock immediately before writing. Close and reopen to
+review a changed name. Polling preserves unsent input; Cancel/Escape/navigation
+scrub it. Dismissal does not cancel a rename already sent.
+
+Only an acknowledged request followed by matching canonical name identity closes
+the dialog. Names hidden by the existing private-text redaction can still be
+verified without revealing them; their next edit starts with a blank field.
+A failed disk-durability or discovery step can leave the new stored/live name in
+place. **UNKNOWN remains visible even if the new name is read back**, and later
+commands retain that warning. No automatic retry is sent. A deliberate same-name
+retry uses the original transaction, including another discovery refresh.
+
+The typed action is `device_rename` with `name` and `expected_device` (the opaque
+`device.revision` from the opening snapshot), under the unchanged same-origin and
+CSRF boundary. The ACK includes `device_revision` for canonical verification.
+This dialog has focused HTTP/DOM-double coverage; the existing real-Chrome smoke
+at the preceding checkpoint does not establish acceptance of this new dialog.
+
 ### Honest state and uncertain commands
 
 An HTTP acknowledgement says the request returned, not that music is audible.
@@ -57,7 +88,7 @@ Mutations are single-shot. A timeout may occur after the command took effect;
 there is no automatic retry. Inspect current state before explicitly trying
 again. Earlier unknown outcomes remain visible even after a later read succeeds.
 Stop remains enabled during another pending request and does not require a
-current queue generation. If a favorite, preset or playlist dialog is open,
+current queue generation. If a room-name, favorite, preset or playlist dialog is open,
 first choose **Close** or **Cancel**, or press **Escape**, then choose **Stop**.
 A native modal dialog makes background controls inert while it is open.
 On dismissal, the controller returns keyboard focus to the usable opening
@@ -78,7 +109,7 @@ Displayed queue actions carry the generation they were chosen from. Replacement,
 selection or restart invalidates stale intent rather than interpreting an old
 row as a new track. State and favorites reads also have to agree on the server
 session before favorite controls become fresh. Closed dialogs clear entered
-URLs. Navigation also closes and scrubs private favorite, preset and playlist
+URLs. Navigation also closes and scrubs private room-name, favorite, preset and playlist
 drafts before browser back/forward caching, without cancelling a command already
 sent or erasing its later acknowledgement/unknown outcome.
 

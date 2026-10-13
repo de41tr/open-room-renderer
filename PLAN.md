@@ -20,14 +20,16 @@ independent work while CI, hardware or provider prerequisites are pending.
    go-librespot 76, librespot 69, Soloist 61. Research ended within 14 minutes;
    account/playback/terms acceptance remains separate.
 3. Explicit owned-mpv audio-device selection with deterministic opt-in isolation
-   and no foreign-player control; verify the new short native null-device case.
+   and no foreign-player control; both hosted native null-device lanes now pass.
 4. Side-effect-free `config check --config PATH` and bounded no-start
    `audio diagnose --config PATH` are implemented and reviewed. Complete their
-   hosted proof, then continue Web room-name editing against
-   the real backlog; offline new-prefix migration is lower priority.
+   hosted proof (fully green at `4fd1607`). Next publish Web room-name editing,
+   protect installer user-data ownership, then prepare a bounded offline
+   new-prefix migration profile with explicit activation left to the operator.
 
 Do not grow a universal engine framework, broad E2E suite, or timing campaign.
-Next value review **07:05–07:35 UTC**; the original hard deadline remains.
+07:10 value decision: continue these practical workflows; next review
+**08:40–09:10 UTC**. The original hard deadline remains.
 
 ## Earlier phase plan and checkpoint history
 

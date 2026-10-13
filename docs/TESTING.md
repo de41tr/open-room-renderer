@@ -1,5 +1,25 @@
 # Test evidence and limits
 
+## Room-name workflow and operator CI
+
+The separate pure validator extraction passes 60 existing rename transaction
+cases. The complete Web rename delta passes **249** focused cases on Python 3.12
+in **9.70s**, and Python 3.11 in **9.96s**, including **175 Node** cases. Independent
+review and clean replay pass; a compare-before-lock mutant fails the stale-owner
+case. Literal-percent names, legacy decoding, session changes, redaction, durable
+commit uncertainty, discovery failure and log privacy are covered. No genuine
+browser claim is made for this newly added dialog; the unchanged Chrome smoke
+continues to cover its existing desktop/mobile/control/export workflow.
+
+Operator head `4fd1607` passes every step in all four jobs of run **38359036576**,
+verified **07:07 UTC**. Floor: **5580/75**, groups **118.93s/94.21s**. Both x86_64
+and AArch64 production Unix lanes explicitly report null intent/active output,
+ambient-config isolation, disabled null fallback, child cleanup and read-only
+diagnosis preserving player/socket. Native Unix groups pass seven cases in
+25.74s/25.09s. Existing libmpv, installed, lifecycle, discovery and Snapcast gates
+also pass. This closes the operator pending statements recorded below; it does
+not certify subsequent room-name source or physical audio.
+
 ## Genuine browser and practical operator checkpoint
 
 **Real browser, not a DOM double:** hosted Chrome 154.0.8037.97/ChromeDriver 154

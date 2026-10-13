@@ -1,37 +1,27 @@
 # Next-phase strategic review
 
-## 05:35 corrected priorities / 06:15 active implementation
+## 07:10 value review: CONTINUE practical operator workflows
 
-The later explicit mandate supersedes the 04:12 review/wait decision. Keep at
-least three useful potential packages and continue independent work during CI.
+The explicit 05:35/05:56 mandate supersedes the historical wait decision below.
 
-1. **FINISH BROWSER:** hosted Chrome is available, proven with normal sandbox,
-   production HTTP/Unix IPC and actual mpv/null Play/Pause. Correct the observed
-   favicon CSP defect and native-focus test assumptions, then prove mobile and
-   downloaded bytes. Feasibility was positive at 05:38; total browser cutoff
-   **07:05:39 UTC** is unchanged. Existing gate budgets are retained. The bounded
-   smoke subsequently passed at 06:29 on `66cbe158`, with verified real downloads
-   and screenshots; no further harness work is needed.
-2. **DELIVER SPOTIFY DIAGNOSTICS:** the maintenance-weighted reassessment took
-   about 14 minutes, within the 60-minute limit. go-librespot 76, librespot 69,
-   Soloist 61; Soloist's build expiry is not recurring key expiry. The reviewed
-   read-only REST/WS CLI is concrete, synthetic-tested and independent of mpv.
-   Provider/account/playback gates do not block this safe diagnostic component.
-3. **DELIVER OUTPUT CONFIGURATION:** explicit owned-mpv device selection uses
-   an isolated optional spawn profile and rejects foreign/replaced peers. The
-   omitted setting stays compatible. A bounded hosted null-device proof remains
-   required; physical DAC/ARMv7 acceptance is separate.
-4. **DELIVER CONFIG PREFLIGHT:** expose the existing pure startup-input reader
-   without identity/state/network/backend effects. Keep its limited validation
-   honest. Truthful output diagnosis is now implemented and reviewed; the next
-   candidates are Web room-name editing
-   through the existing transaction, and lower-priority offline upgrade migration;
-   assess risk instead of inventing a generic framework or in-place updater.
-5. **BOUND:** no account login, borrowed credentials, proprietary redistribution,
-   uncontrolled dual audio or weakened gates. Productive Spotify mode remains
-   separately gated, not blocked by a demanded universal player abstraction.
-   Next value review **07:05–07:35 UTC**; risk cutoff 16:30, stabilization 17:00,
-   hard stop 18:00 UTC. Never wait just for a report or CI when useful work exists.
+1. **CLOSE BROWSER PACKAGE:** genuine desktop/mobile Chrome passed at 06:29,
+   within budget, and the unchanged smoke passes again at `4fd1607`. Keep exact
+   scope; do not expand the harness or call new dialogs browser-accepted.
+2. **KEEP SPOTIFY BOUNDED:** go-librespot 76 / librespot 69 / Soloist 61; research
+   completed in 14 minutes. Passive REST/WS diagnosis is implemented and green.
+   Account/provider/lifecycle/arbitration acceptance remains separate. No fake play.
+3. **PUBLISH ROOM WORKFLOW:** existing transaction plus guarded Web rename is
+   reviewed and passes 249 focused cases per interpreter. Useful room identification
+   has higher marginal value than more architecture or timing tests.
+4. **FIX USER-DATA OWNERSHIP, THEN OFFLINE MIGRATION:** unchanged native config
+   could be deleted by uninstall. Protect root config/state/profile paths even
+   against old manifest claims. A new-prefix profile preparer may then remove
+   manual copy/path-edit errors without replacing active config or starting audio.
+   Preserve originals/bytes, refuse ambiguity, exclude provider credentials.
+5. **BOUND AND REASSESS:** operator head `4fd1607` is fully green in all four jobs,
+   including actual output/null/diagnostic proof. Keep at least three ranked
+   candidates and work independently during CI. Next review **08:40–09:10 UTC**;
+   risk cutoff 16:30, stabilize 17:00, hard stop 18:00 UTC.
 
 ## 04:12 UTC value/risk assessment
 
