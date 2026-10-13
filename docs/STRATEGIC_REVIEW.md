@@ -22,6 +22,15 @@
    16:30 risk cutoff, 17:00 stabilization and 18:00 hard stop.
 
 
+**03:24 follow-through:** both preservation and preceding diagnostics are fully
+green; exact preservation run 38339941041 certifies `3e44ad0`, including native
+x86_64/ARM64 no-overwrite evidence. One previously documented initial-balance
+traceback is reproduced with synthetic private input. A ten-line startup-only
+ValueError correction has independent review and 487 focused passes per runtime.
+Integrate with explicit exit-1→2/private-message documentation, preserving source
+precedence, public exceptions and teardown; no redundant native/full replay.
+The next formal review remains 04:12–04:42 UTC.
+
 ## 01:12 UTC value/risk assessment
 
 1. **CONTINUE:** verify exact export head `1dfd642` in hosted CI. Its complete

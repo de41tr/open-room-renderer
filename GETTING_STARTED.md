@@ -131,8 +131,15 @@ readers and ordinary API construction retain their original exceptions. Favorite
 unavailable/config fallback remains. A separate saved-EQ protection now preserves
 failed-load storage and blocks saved-library writes while independent active DSP
 stays usable; see [preset recovery](docs/WEB_DSP_EDITOR.md#unavailable-saved-preset-storage).
-Later legacy-balance normalization, backend availability, binding and cleanup
-diagnostics retain their existing behavior.
+Invalid initial channel balance, selected from configuration or saved state, now
+also exits **2** with a fixed source-neutral startup diagnostic instead of an
+unhandled ValueError traceback (previously exit 1). Check `channel_balance` in
+configuration or saved state locally. Source precedence and numeric normalization
+are unchanged: saved balance overrides configuration, and valid active DSP
+overrides both. This check is **after backend acquisition and gain initialization**;
+existing teardown still runs, and identity may already have been published.
+Saved bytes are not reset or repaired. Public loaders, ordinary API construction,
+backend availability, binding and unrelated cleanup diagnostics retain their behavior.
 
 For compatibility, bare `serve` still selects `configs/config.example.yaml`
 relative to the current directory and uses built-in defaults if that implicit

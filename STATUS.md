@@ -8,10 +8,10 @@
 based on main `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. PR #1 was already
 squash-merged. No main push, merge or release is authorized for this phase.
 
-Latest CI-verified checkpoint **`660cab19a908090660a751e7dbbd7681e3b56637`** passes all three
-jobs and every step in **run 38337365883**, verified **02:47 UTC**. Hosted floor
-groups pass **4807 + 550 /74 opt-in skips** in **153.73s/131.05s** under the
-unchanged 165-second watchdog: **5357 passed /74 skipped** in total. Native,
+Latest CI-verified checkpoint **`3e44ad0abb5af741fdad02418d776370cb57e257`** passes all three
+jobs and every step in **run 38339941041**, verified **03:24 UTC**. Hosted floor
+groups pass **4849 + 550 /74 opt-in skips** in **153.33s/129.02s** under the
+unchanged 165-second watchdog: **5399 passed /74 skipped** in total. Native,
 installed-lifecycle, production Unix and later acceptance gates are successful.
 This evidence applies only to that exact source; later edits need their own CI.
 
@@ -70,7 +70,21 @@ playback with no native/media mutations; all 231 previous native assertions and
 30s/35s caps remain. A one-fence-removed negative probe really overwrites its
 synthetic file and fails. This is not process/systemd restart, unreadable-file
 native proof, repaired-library recovery, browser or physical audio acceptance.
-Exact new-source hosted CI is **PENDING**; `660cab1` does not certify this change.
+Exact preservation head `3e44ad0` is fully green in the run above. Hosted x86_64/
+ARM64 logs independently confirm all seven write refusals, byte preservation,
+usable active DSP and cleanup. Later changes still require their own CI.
+
+### Initial balance startup privacy
+
+A separately reviewed ten-line production correction catches only known initial
+balance ValueError during CLI startup. It prints fixed source-neutral guidance
+and exits 2 instead of exposing the original value in an exit-1 traceback.
+Source precedence, shared normalization, public exceptions and saved bytes stay
+unchanged. Validation remains after backend acquisition/gain initialization;
+existing cleanup runs, and identity may already have been published. Focused
+checks pass 487 per Python 3.11/3.12; 92 new cases include 17 baseline failures
+and 75 compatibility passes. No native/full replay is needed for this error-only
+delta. Its own exact-head hosted CI is **PENDING**.
 
 ### Latest favorite-repair evidence
 
@@ -125,7 +139,7 @@ and combined-provider policy scope. Provider account acceptance is
 **ACCOUNT_PENDING**. No credentials, client/key, provider code or proprietary
 binary was added.
 
-The saved-EQ preservation correction awaits its own exact-head CI. The 02:42
+The initial-balance diagnostic correction awaits its own exact-head CI. The 02:42
 value review prioritizes concrete data-preservation/recovery defects over broad
 feature growth. Next review: **04:12–04:42 UTC**. Avoid redundant endurance,
 timing or known-blocked browser campaigns. Start no large/risky new work after

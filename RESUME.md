@@ -10,9 +10,9 @@ stabilize from **17:00 UTC**. Older task deadlines below are historical only.
 Work exclusively on `dot/renderer-next-phase-20261013` in
 [Draft PR #2](https://github.com/de41tr/open-room-renderer/pull/2), based on main
 `ad21bd4972d4af81dd29d1d952e38313dbe491d9`. Never push main, merge or release.
-Latest CI-verified checkpoint **`660cab19a908090660a751e7dbbd7681e3b56637`** passes all three
-jobs/every step in **run 38337365883**, verified **02:47 UTC**. Its hosted floor
-passes **4807+550 /74 opt-in skips** in **153.73s/131.05s**, for **5357/74** overall.
+Latest CI-verified checkpoint **`3e44ad0abb5af741fdad02418d776370cb57e257`** passes all three
+jobs/every step in **run 38339941041**, verified **03:24 UTC**. Its hosted floor
+passes **4849+550 /74 opt-in skips** in **153.33s/129.02s**, for **5399/74** overall.
 Verify the actual branch/head on resumption; any newer edit needs separate CI.
 
 ## What is already delivered
@@ -37,7 +37,8 @@ not proof of exact URL; UNKNOWN and observed conflict/reopen rules stay explicit
 Saved-favorites read diagnostics are now fully green at the checkpoint above.
 The following separately reviewed saved-EQ data-preservation correction passes
 5399/74 complete local defaults on both interpreters, 164 Node checks and actual
-mpv 0.37/0.40 startup preservation in 5.16s/4.85s. Its own exact-head CI is PENDING.
+mpv 0.37/0.40 startup preservation in 5.16s/4.85s. Its exact-head CI is now green;
+hosted native logs confirm the same seven refusals and byte/active-state retention.
 Observed failed loads fence library persistence; normal storage responses and
 active DSP stay unchanged. Legacy degraded writes now fail, intentionally; this
 is not an extraction-equivalence claim. No automatic repair/reset/migration or
@@ -46,13 +47,15 @@ external-file concurrency policy is added.
 ## Immediate priorities
 
 1. **Keep evidence exact-source.** Recheck the current published head and its
-   own CI before declaring a later checkpoint green. The `660cab1` run is complete;
+   own CI before declaring a later checkpoint green. The `3e44ad0` run is complete;
    old pending export/scheduling instructions are superseded. Retain existing
    native, Unix IPC, installation, PCM, discovery and Snapcast gates and all caps.
-2. **Verify the preservation checkpoint.** Keep its explicit failure-policy
-   correction separate from earlier neutral extractions. Preserve active DSP,
-   valid-storage responses, stored bytes, locks and commit-uncertainty behavior.
-   The native proof is fresh-object startup, not a process restart or repair flow.
+2. **Verify the initial-balance diagnostic checkpoint.** The known CLI startup
+   ValueError now has fixed private guidance and exit 2, rather than traceback/1.
+   Focused review passes 487 cases per interpreter; exact new-head CI is PENDING.
+   Preserve precedence, public exceptions, saved bytes and existing teardown.
+   This remains post-acquisition validation, with possible earlier identity/gain
+   effects. No native/full rerun, automatic repair or broad schema change.
 3. **Review value/risk at 04:12–04:42 UTC**, then every 90–120 minutes within the
    authorized window. Prefer concrete user workflow gaps; stop architecture,
    timing and redundant soak/full-suite campaigns unless new evidence justifies

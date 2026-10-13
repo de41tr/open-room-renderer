@@ -62,7 +62,16 @@ failure, preserving damaged/unreadable storage and independent active DSP. Healt
 responses stay unchanged; legacy degraded writes intentionally become 502/Failed,
 and Web writes reject pre-effect with 409. Existing rollback/committed uncertainty
 stays intact. Complete local 5399/74, 164 Node and short actual native startup
-checks pass; exact new-head CI is separate. No external-file CAS or repair claim.
+checks pass. Exact preservation head `3e44ad0` is fully green in run 38339941041
+(5399/74 hosted defaults), including both native refusal/byte-preservation flows.
+No external-file CAS or repair claim.
+The later initial-balance startup correction intentionally replaces known CLI
+ValueError traceback/exit 1 with fixed source-neutral guidance/exit 2. It retains
+source precedence, shared normalization, public errors and saved bytes; existing
+cleanup runs after already-acquired backend/gain initialization. Earlier identity
+publication remains possible. Independently reviewed focused checks pass 487
+per interpreter; exact new-head CI is PENDING. No new schema, early-validation
+or native/browser acceptance claim.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.

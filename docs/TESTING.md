@@ -1,5 +1,34 @@
 # Test evidence and limits
 
+## Initial balance startup privacy checkpoint
+
+Exact preceding head `3e44ad0` is fully green in
+[run 38339941041](https://github.com/de41tr/open-room-renderer/actions/runs/38339941041),
+verified 03:24 UTC: all three jobs/every step, 5399/74 defaults and all existing
+native/Unix/installed/client/discovery/Snapcast gates. Floor groups 4849+550 /74
+finish in 153.33s/129.02s under the unchanged 165s cap. Both native logs confirm
+seven preset write refusals, exact-byte preservation and active playback/cleanup.
+
+The new startup-only balance diagnostic is independently reviewed. The four-file
+focused scope (`test_startup_state`, `test_startup_config`, `test_backend_lifecycle`,
+`test_dsp_api`) passes **487** on each Python 3.11/3.12, including 92 new cases.
+Root exact-file replay passes in **24.81s (3.12) /25.11s (3.11)**. Against unchanged
+baseline, those additions produce **17 expected failures /75 compatibility passes**;
+clean patch replay passes all 92. Shared normalizer AST, config.py and cli.py are
+unchanged. No default/native/browser sweep or real backend socket was attempted
+for this ten-net-line production correction; new-head hosted CI is **PENDING**.
+
+With a fully stubbed backend, synthetic credential-bearing configuration/saved
+text produces exactly one fixed
+source-neutral stderr line and exit 2, replacing unhandled traceback/exit 1.
+Backend acquisition/gain initialization already happened: existing stop/cleanup
+runs once, listeners/DSP staging/socket requests are unreached, and previously
+published identity may remain. Repeated failure retains identity and saved bytes.
+Compatibility checks preserve saved-over-config and active-DSP-over-both
+precedence, empty/NUL saved text, percentage/encoded/range/nonfinite/rounding
+behavior, public-loader/ordinary-API errors, programmer errors and cancellation.
+This is not early validation, automatic repair or a new schema policy.
+
 ## Failed-load EQ preset preservation checkpoint
 
 Preceding exact head `660cab1` passed all three jobs/every step in
@@ -39,7 +68,10 @@ production Unix transport or physical audio. Unreadable-but-replaceable storage,
 dangling symlink, unavailable lifetime, ordinary valid/missing loads and error
 privacy are synthetic/unit coverage. The protection does not close external-file
 races after healthy/missing load. Healthy write failures retain existing pre-/
-post-replacement uncertainty. Exact new-source hosted CI is initially PENDING.
+post-replacement uncertainty. Exact head `3e44ad0` subsequently passed run
+38339941041, all jobs/every step, verified 03:24 UTC. Hosted x86_64/ARM64 logs
+confirm all seven refusals and exact-byte/active-state retention. That result
+does not certify the later initial-balance diagnostic.
 
 
 ## Saved-favorites read diagnostics checkpoint

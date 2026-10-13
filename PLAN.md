@@ -84,6 +84,11 @@ valid-storage responses and active DSP remain; degraded legacy write failures
 change explicitly. Complete local and short actual native preservation checks
 pass. Verify exact-head CI before moving to another concrete operator defect;
 no automatic repair, broad storage concurrency or speculative feature expansion.
+Preservation head `3e44ad0` is fully green in run 38339941041. A remaining
+reproduced initial-balance traceback justifies a ten-line private startup-error
+correction, with independently reviewed focused checks and unchanged precedence,
+public exceptions, saved bytes and teardown. It is post-acquisition, not early
+validation. Verify its separate exact-head CI; no extra native/full campaign.
 Next value review: 04:12–04:42 UTC.
 
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
