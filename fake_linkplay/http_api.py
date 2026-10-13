@@ -44,6 +44,7 @@ from .web_playlists import PLAYLIST_ACTIONS
 from .web_ui import (WebAdmissionError, WebCommand, WebControlApi, WebDspCommandError,
                      WebRuntime)
 from .config import Config
+from .device_name import validate_device_name
 from .log_safety import redact_media_urls
 from .metadata_formatting import metadata_with_art, metadata_with_duration, metadata_with_url
 from .mpv_backend import LIVE_STATION_HISTORY_OPTIONS, BackendError, MpvBackend
@@ -1753,9 +1754,7 @@ class HttpApi:
         if name in {"setTimezone", "setTuneinLocation"} or name.startswith("setTimezone:") or name.startswith("setTuneinLocation:"):
             return {"error": "Failed", "command": name}
         if name.startswith("setDeviceName:") or name.startswith("setHexDeviceName:"):
-            requested_name = self._decode_device_name_command(name)
-            if not requested_name or len(requested_name) > 128 or re.search(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]", requested_name):
-                raise ValueError("Invalid device name")
+            requested_name = validate_device_name(self._decode_device_name_command(name))
             await self._rename_device(requested_name)
             return "OK"
         if name == "getbtstatus":
