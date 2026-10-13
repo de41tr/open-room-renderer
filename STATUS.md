@@ -83,8 +83,30 @@ Source precedence, shared normalization, public exceptions and saved bytes stay
 unchanged. Validation remains after backend acquisition/gain initialization;
 existing cleanup runs, and identity may already have been published. Focused
 checks pass 487 per Python 3.11/3.12; 92 new cases include 17 baseline failures
-and 75 compatibility passes. No native/full replay is needed for this error-only
-delta. Its own exact-head hosted CI is **PENDING**.
+and 75 compatibility passes. No extra native replay is warranted for this error-
+only delta. Its hosted floor failure and the separately justified correction are
+recorded below.
+
+### Save-current draft recovery and floor gate
+
+A fresh selection/session change now latches an open Save current draft stale,
+preserving its entered name and original intent. Fixed guidance requires Close,
+review and reopen; Refresh cannot silently rebase it. Temporary read loss only
+uses existing freshness gates. PENDING, uncertain outcomes and already-sent
+verified-success closure remain unchanged. The frontend-only correction has
+independent review; root checks pass **169 Node /159 focused Web tests**.
+Actual browser acceptance remains pending.
+
+Initial-balance head `696700c` has a real floor-gate failure in run 38342139978:
+the first Python 3.11 default group hit the unchanged 165s watchdog, without a
+reported assertion failure; the second passed 550 cases in 136.61s. Both native
+jobs subsequently passed every step, but the floor failure means this is not a
+green checkpoint. A one-module transfer moves `test_startup_state.py` (measured
+10.02s) into the smaller group. Independent review and exact collection/skip
+parity pass on both interpreters. One combined Python 3.11 replay passes
+**4784 + 707 /74 skips** in **125.67s/113.01s**, helper exit 0 in 126.98s under
+the same 165s cap. No coverage, assertion, helper, process count or cap changes.
+Exact corrected-head hosted CI is **PENDING**; no further timing run is needed.
 
 ### Latest favorite-repair evidence
 
@@ -139,7 +161,7 @@ and combined-provider policy scope. Provider account acceptance is
 **ACCOUNT_PENDING**. No credentials, client/key, provider code or proprietary
 binary was added.
 
-The initial-balance diagnostic correction awaits its own exact-head CI. The 02:42
+The combined draft-recovery and floor correction needs its own exact-head CI. The 02:42
 value review prioritizes concrete data-preservation/recovery defects over broad
 feature growth. Next review: **04:12–04:42 UTC**. Avoid redundant endurance,
 timing or known-blocked browser campaigns. Start no large/risky new work after

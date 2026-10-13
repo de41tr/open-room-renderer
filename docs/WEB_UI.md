@@ -82,6 +82,15 @@ URLs. Navigation also closes and scrubs private favorite, preset and playlist
 drafts before browser back/forward caching, without cancelling a command already
 sent or erasing its later acknowledgement/unknown outcome.
 
+Save current keeps the selection and renderer session from when its dialog
+opened. A fresh observation of a different selection or session preserves the
+entered name but disables submission, even if the selection later changes back.
+Close the dialog, review the current track or stream, and reopen Save current.
+A temporary read failure only disables controls until fresh reads recover; it
+does not itself invalidate the draft. Pending and uncertain results stay visible,
+and an already-sent save can still close after verified successful readback.
+This is a local draft safeguard; the server's generation check still applies.
+
 ## Repair a saved favorite
 
 Use **Change URL** on an editable managed favorite to replace a moved or expired
@@ -112,7 +121,8 @@ Rename, Delete and unsent Change URL drafts latch a review warning if fresh
 polling observes the selected record changed or removed. Inputs are preserved,
 but submission stays disabled until you close and reopen, even if the displayed
 record later changes back. An unchanged persisted record remains usable after a
-restart; Add is self-contained and Save Current retains its session check.
+restart; Add is self-contained and Save current uses the opening selection/session
+guard described above.
 This is a browser safeguard only: favorites still use last-writer-wins updates,
 so changes after the last read or URL-only repairs hidden by the redacted listing
 may not be detected. It is not an atomic concurrency precondition.

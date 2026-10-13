@@ -31,6 +31,16 @@ Integrate with explicit exit-1→2/private-message documentation, preserving sou
 precedence, public exceptions and teardown; no redundant native/full replay.
 The next formal review remains 04:12–04:42 UTC.
 
+**03:38 observed gate failure:** initial-balance head `696700c` exceeded the
+unchanged floor watchdog in group 1; group 2 passed 550/136.61s. This is concrete
+new evidence permitting one measured module transfer, not broader timing work
+or a cap increase. A separate UI review reproduced an open Save current draft
+that stayed actionable after selection changed and instructed an ineffective
+Refresh. A small frontend-only stale latch now requires explicit Close/reopen,
+preserving names, captured intent and dispatched outcomes. Independent review
+and focused checks pass; combine separate commits with one floor replay and
+exact-head hosted verification, then stop this scheduling thread.
+
 ## 01:12 UTC value/risk assessment
 
 1. **CONTINUE:** verify exact export head `1dfd642` in hosted CI. Its complete

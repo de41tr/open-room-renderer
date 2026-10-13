@@ -89,6 +89,11 @@ reproduced initial-balance traceback justifies a ten-line private startup-error
 correction, with independently reviewed focused checks and unchanged precedence,
 public exceptions, saved bytes and teardown. It is post-acquisition, not early
 validation. Verify its separate exact-head CI; no extra native/full campaign.
+The exact initial-balance floor run then hit its existing 165s watchdog. A single
+measured module transfer is permitted only to correct this observed failure,
+with collection parity and unchanged caps. An independently reviewed frontend
+Save current draft guard also fixes a reproduced Refresh/reject loop without
+rebasing captured intent. Publish separate commits and verify combined CI.
 Next value review: 04:12–04:42 UTC.
 
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests

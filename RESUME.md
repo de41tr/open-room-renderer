@@ -52,10 +52,18 @@ external-file concurrency policy is added.
    native, Unix IPC, installation, PCM, discovery and Snapcast gates and all caps.
 2. **Verify the initial-balance diagnostic checkpoint.** The known CLI startup
    ValueError now has fixed private guidance and exit 2, rather than traceback/1.
-   Focused review passes 487 cases per interpreter; exact new-head CI is PENDING.
+   Focused review passes 487 cases per interpreter. Its `696700c` floor run hit
+   the 165s watchdog; group 2 passed 550/136.61s, with no assertion failure.
+   The measured startup-state module transfer has reviewed exact collection/skip
+   parity on both interpreters. One combined floor replay passes 5491/74 in
+   125.67s/113.01s; corrected-head hosted CI is PENDING. Retain all caps and stop
+   timing work after that gate succeeds.
    Preserve precedence, public exceptions, saved bytes and existing teardown.
    This remains post-acquisition validation, with possible earlier identity/gain
-   effects. No native/full rerun, automatic repair or broad schema change.
+   effects. A separate frontend-only Save current stale-draft correction preserves
+   name/original intent and requires Close/reopen, with no silent retry/rebase.
+   Root 169 Node/159 Web checks pass; genuine browser acceptance stays pending.
+   One combined floor replay is justified by the failed gate, not a new campaign.
 3. **Review value/risk at 04:12–04:42 UTC**, then every 90–120 minutes within the
    authorized window. Prefer concrete user workflow gaps; stop architecture,
    timing and redundant soak/full-suite campaigns unless new evidence justifies

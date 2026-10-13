@@ -70,8 +70,14 @@ ValueError traceback/exit 1 with fixed source-neutral guidance/exit 2. It retain
 source precedence, shared normalization, public errors and saved bytes; existing
 cleanup runs after already-acquired backend/gain initialization. Earlier identity
 publication remains possible. Independently reviewed focused checks pass 487
-per interpreter; exact new-head CI is PENDING. No new schema, early-validation
-or native/browser acceptance claim.
+per interpreter. Exact head `696700c` hit the floor watchdog (group 1 at 165s;
+group 2 550/136.61s), so it is not fully green. A measured one-module partition
+correction retains coverage and caps. No new schema or early-validation claim.
+The separate Save current UI correction latches a freshly observed selection/
+session change, preserves entered name and captured intent, and requires Close/
+reopen. Pending/uncertain outcomes and successful verification remain unchanged.
+Root 169 Node/159 Web checks pass; combined exact-head CI and genuine browser
+acceptance remain separate.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.

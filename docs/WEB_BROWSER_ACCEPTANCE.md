@@ -31,6 +31,14 @@ Use the running renderer's existing HTTP port and open `/ui/` in a real browser 
 - Delay a command response or disconnect after submission. The UI must say PENDING, then UNKNOWN if the response is lost. Inspect the browser network log: there must be no automatic repeated POST. The last received values must be marked stale on read failure.
 - Double-click a mutation. Only one non-Stop request may be in flight. While it is pending, close any open modal with Close/Cancel/Escape, then use Stop; dismissal must not cancel the sent request. A second pending Stop must be suppressed. A delayed earlier response must not replace the newer Stop result.
 - Reconnect and refresh. Current state may recover while the earlier unknown command outcome remains explicitly visible. Retrying a mutation must require an explicit user action.
+- With Save current open and an edited name, let the selected track/stream change
+  through another controller or automatic advancement. After a fresh poll, the
+  name must remain, Save must be disabled, and guidance must say to close, review
+  the current selection and reopen Save current. Returning to the old selection
+  must not re-enable that draft. A failed read alone must recover without this
+  warning. Repeat while a save is pending: PENDING and any later ACK/UNKNOWN
+  outcome must remain honest, with no retry; verified successful saves may close.
+  Close/reopen and Back/Forward must clear the old draft and warning.
 - Restart the renderer while seek/mode/save-current is drafted. The previous session's draft must be rejected. If state and favorites responses straddle the restart, favorite controls must remain stale/disabled until their session IDs agree.
 - Confirm a stale queue selection is rejected instead of playing a different entry after replacement. Read failures or another open controller's changes must not silently become optimistic success.
 

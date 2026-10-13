@@ -1,5 +1,42 @@
 # Test evidence and limits
 
+## Save current draft and observed floor correction
+
+A fresh selection/session change previously left Save current enabled with its
+old captured generation. The backend correctly rejected the stale request, but
+Refresh could not repair that open draft. A small frontend-only latch now blocks
+submission, preserves the entered name/original intent and gives explicit Close/
+review/reopen guidance. Read loss alone does not latch. PENDING, unverified ACK,
+UNKNOWN and rejected outcomes remain; already-sent verified saves still close.
+No server/controller/codec/persistence behavior or atomic guarantee is added.
+
+Five discriminating DOM regressions all fail against baseline app.js. Independent
+review passes 70 distinct related cases; clean replay and exact hashes match.
+Root complete frontend checks pass **169 in 1.51s**, plus **159 focused Web/frontend
+Python cases in 8.76s**. These are DOM doubles/HTTP checks, not genuine browser
+layout/focus acceptance. No native replay was added for this frontend-only delta.
+
+The preceding initial-balance head `696700c` failed the Python 3.11 floor in
+[run 38342139978](https://github.com/de41tr/open-room-renderer/actions/runs/38342139978):
+group 1 was terminated by the unchanged 165s watchdog without a reported assertion
+failure; group 2 passed 550 in 136.61s. Both native jobs subsequently passed
+every step. This is recorded as a failed gate, not
+replaced by local focused passes. A single measured partition correction and
+combined candidate floor replay follow, retaining all tests, opt-in skips,
+assertions, process count and caps. `test_startup_state.py` measures **157 passed
+in 10.02s** on local Python 3.11. Moving only that file to the smaller group in
+both identical default selectors preserves the helper/native lanes and 165s cap.
+Independent review finds no blocker. Collection proofs on both 3.11/3.12 retain
+all **5,565 nodes**, with identical evaluated skip reasons and 74 opt-in skips:
+old groups 5,015+550 become disjoint 4,858+707; their exact multisets and complete
+cross-version records match. No test/assertion/filter is dropped.
+
+The one final candidate replay includes the frozen Save current frontend patch:
+**4,784 passed /74 skipped** in **125.67s**, and **707 passed** in **113.01s**;
+helper exits 0 in **126.976s** under 165s. This is local timing, not a guarantee of
+hosted headroom. No baseline full rerun or further timing campaign was added.
+Exact corrected-head hosted CI remains **PENDING** and decisive.
+
 ## Initial balance startup privacy checkpoint
 
 Exact preceding head `3e44ad0` is fully green in
@@ -16,7 +53,8 @@ Root exact-file replay passes in **24.81s (3.12) /25.11s (3.11)**. Against uncha
 baseline, those additions produce **17 expected failures /75 compatibility passes**;
 clean patch replay passes all 92. Shared normalizer AST, config.py and cli.py are
 unchanged. No default/native/browser sweep or real backend socket was attempted
-for this ten-net-line production correction; new-head hosted CI is **PENDING**.
+for this ten-net-line production correction before publication. Its subsequent
+hosted floor watchdog failure and bounded correction are recorded above.
 
 With a fully stubbed backend, synthetic credential-bearing configuration/saved
 text produces exactly one fixed
