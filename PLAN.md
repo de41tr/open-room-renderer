@@ -44,8 +44,14 @@ canonical append/remove/move are integrated with independent review and short
 actual native explicit-Play checks. Startup errors for explicitly selected config
 files now fail privately before identity/backend/listener effects, preserving the
 public loader and bare-serve fallback. Final combined default/floor verification
-and exact-head CI are separate gates. The first 90-minute assessment is recorded
+and exact-head CI passed at `f7c6ed7` (run 38325071508). The first 90-minute assessment is recorded
 in docs/STRATEGIC_REVIEW.md; no speculative new audio engine or core rewrite.
+
+**Operator follow-through:** bounded review found navigation-private-draft and
+UNKNOWN-gain recovery gaps. Correct those using existing browser lifecycle and
+checked volume commands, with narrow review/native wiring evidence. No extra
+status panel or core rewrite is warranted. Retain genuine browser/hardware gates
+and verify complete exact-head CI before describing a new checkpoint as green.
 
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
 and independent review precede milestone publication. Full native CI follows

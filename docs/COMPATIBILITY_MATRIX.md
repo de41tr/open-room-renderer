@@ -23,10 +23,13 @@ Stopped-only browser playlist import/editing is implemented with canonical
 metadata/duplicate selection and existing replacement semantics; no durable
 queue store or seamless live reorder. Explicit-config startup uses fixed private
 errors before effects; implicit missing-default/public-loader behavior remains.
-Both have combined runtime checks and require their own exact-head hosted
-verification. The final same-runner selector rebalance has exact coverage parity
-and focused workflow checks; its earlier timing replay failure is documented
-explicitly in TESTING.md.
+Both are fully green at `f7c6ed7` in run 38325071508, including native installed
+lifecycle on both architectures. The final same-runner rebalance passes hosted
+checks with exact coverage parity; its earlier local timing-replay failure and
+order-only correction remain documented explicitly in TESTING.md.
+The subsequent frontend-only recovery delta scrubs private dialogs on navigation
+and exposes explicit checked volume=0 for UNKNOWN gain. Focused/native readback
+checks pass; physical silence and genuine browser lifecycle remain unverified.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.

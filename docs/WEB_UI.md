@@ -57,11 +57,21 @@ Stop stays available during another pending request and without a stale queue
 generation, so it can serve as explicit recovery. It is still a checked backend
 operation, not a promise of silence before acknowledgement/readback.
 
+When gain is UNKNOWN, **Set volume to 0** sends the existing typed volume
+command without starting playback or changing an unsent slider draft. It is
+available only with fresh state and no pending command. Current volume/mute
+remain hidden until canonical readback confirms them; acknowledgement alone is
+not confirmation of zero gain or audible silence. An unknown response remains
+visible after later polls. A new explicit zero-volume choice is allowed when
+fresh and idle, but there is no automatic retry. Stop remains independent.
+
 Displayed queue actions carry the generation they were chosen from. Replacement,
 selection or restart invalidates stale intent rather than interpreting an old
 row as a new track. State and favorites reads also have to agree on the server
 session before favorite controls become fresh. Closed dialogs clear entered
-URLs; closing a dialog does not cancel a command already sent.
+URLs. Navigation also closes and scrubs private favorite, preset and playlist
+drafts before browser back/forward caching, without cancelling a command already
+sent or erasing its later acknowledgement/unknown outcome.
 
 ## Ten-band EQ and presets
 

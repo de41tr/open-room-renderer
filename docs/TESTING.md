@@ -1,5 +1,45 @@
 # Test evidence and limits
 
+## Operator recovery and navigation privacy delta
+
+End-to-end operator review reproduced two concrete gaps: favorite/preset private
+input survived page navigation, and UNKNOWN gain left no fresh Web-only quiet
+recovery after Stop. A composed pagehide handler now scrubs all three private
+dialogs, including displayed names, while preserving sent requests, later
+outcomes and reopened drafts. An UNKNOWN-only **Set volume to 0** button reuses
+the existing checked volume command; it never fabricates gain, starts playback,
+changes backend/controller logic or silently retries. Fresh state and idle
+command admission are still required; Stop remains available while pending.
+
+Final focused checks pass **87 Node/DOM cases** and **334 Python Web cases**.
+The new lifecycle/recovery regressions fail against their respective original
+source. Native Web acceptance retains every previous assertion and its 30s/35s
+caps, discards one real native volume-readback reply in the existing test
+transport to induce uncertainty, then proves actual Stop leaves gain UNKNOWN
+and unmodified native volume=0/mute readbacks restore CONFIRMED while remaining
+stopped. Queue, generation, DSP, native playlist and media-request counts remain
+unchanged during recovery. Final integrated libmpv 0.37/0.40 runs pass in
+**4.26s/4.07s**. This is real native/null/readback with one synthetic transport
+fault, not a browser, physical silence or a new digital-PCM capture.
+
+No full local default rerun was added for this small frontend/test delta. Earlier
+complete-source results retain their own scope; exact new-head hosted CI remains
+required. Current supported browser capabilities were checked without repeating
+blocked probes; there is no new fixture bridge. BROWSER_ACCEPTANCE_PENDING and
+HARDWARE_PENDING remain explicit.
+
+## Published playlist/startup checkpoint
+
+Exact head `f7c6ed7` passed all three jobs and every step in
+[run 38325071508](https://github.com/de41tr/open-room-renderer/actions/runs/38325071508),
+verified at 00:14 UTC on 13 October. The final floor partition passes
+**4538+509 /74** in **149.89s/105.22s**, closing the earlier local selector-order
+finding under the unchanged 165-second watchdog. Both native jobs pass the
+complete defaults and all **23+44** native checks, followed by production Unix,
+client, repeated lifetime, actual installed CLI/assets, clocked, discovery and
+Snapcast stages. This certifies that exact software checkpoint, not the newer
+navigation/quiet-gain delta or genuine browser/physical acceptance.
+
 ## Published DSP and native-install checkpoint
 
 Exact head `7d68d79` passed all three jobs and every step in

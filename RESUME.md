@@ -49,16 +49,22 @@ installed-CLI lifecycle on x86_64/ARM64 confirm the new route assertions. Shared
 favorite/preset delayed-close races are fixed; final Node checks pass 50/50.
 
 Stopped-only playlist loading/editing and private-safe explicit-config startup
-are integrated and independently reviewed as the next checkpoint. Pure playlist
-capability validation avoids redundant deep copying/URL validation but retains
-full per-call bounds and no cache. Combined local defaults pass 5047/74 on both 3.12/3.11; 75 Node checks and final
-actual native Web flows pass. Publish separate feature/native/startup/docs commits
-after the reviewed same-runner group rebalance. Exact 5,121-node/skip parity and
-13 final helper checks pass; the one timing replay failed an unchanged selector-
-order assertion before its order-only correction. No second full replay or cap
-relaxation. Final scheduling is still a hosted CI gate. Preceding DSP run
-38323337010 is fully green. Keep candidate evidence distinct from published
-checkpoints.
+are published at `f7c6ed7`, fully green in run 38325071508 (all three jobs/every
+step). Combined local defaults pass 5047/74 on both 3.12/3.11; 75 Node checks and
+actual native Web flows pass. Full validation retains per-call bounds and no
+cache. Final group rebalance preserves all 5,121 nodes/skips; the documented
+local selector-order finding is closed by focused correction and hosted success.
+Floor groups pass 4538+509 /74 in 149.89s/105.22s under the unchanged 165s cap.
+Keep subsequent private recovery changes distinct from that green checkpoint.
+
+Operator review adds only two concrete follow-through fixes: pagehide scrubs all
+private dialogs, and UNKNOWN gain has an explicit typed volume=0 recovery. Both
+are independently reviewed, with 87 Node/334 focused Web checks and actual
+0.37/0.40 recovery runs passing. Publish frontend/native/docs separately after
+prior CI is terminal; verify the new head without cancelling the older evidence.
+No broader diagnostic panel, core rewrite or new provider is justified by this
+review. Keep looking for concrete operator issues rather than filling the window
+with speculative changes; next value assessment is due around 01:12–01:42 UTC.
 Do not repeat old soak tests or known blocked browser routes. Genuine browser,
 physical ARMv7/DAC/original-app and account acceptance remain pending.
 

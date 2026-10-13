@@ -23,6 +23,18 @@ and stabilization from 17:00. Published DSP/package head `7d68d79` has final loc
 checks green; exact-head hosted CI is still running. Private candidates are not
 covered by earlier published green results.
 
+## Operator-path follow-through
+
+A bounded final-path review found two concrete issues rather than recommending
+another diagnostic panel: private favorite/preset drafts survived navigation,
+and a stopped renderer with UNKNOWN gain offered no fresh quiet Web recovery.
+Small browser-only corrections reuse existing cleanup and checked volume=0
+transactions. They add no playback owner, backend changes, automatic retry or
+silence claim. Independent review and focused/native wiring checks pass; exact
+new-head CI is separate. No further useful installation/format/restart blocker
+was found by that review. Continue only evidence-led follow-through, not a broad
+new feature or architecture search simply to use the remaining time.
+
 ## Architecture checkpoint and pivot
 
 Two bounded, cohesive extractions remove saved-DSP-library ownership and pure

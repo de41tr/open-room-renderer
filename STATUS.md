@@ -52,12 +52,22 @@ bad default_volume. This is bounded startup validation, not a comprehensive sche
 Independent review reproduced/fixed SafeLoader scalar-tag exception leaks and
 recursive wrapper copying. Final combined defaults pass **5047/74** on Python
 3.12 and 3.11; 75 Node checks pass. Final actual native Web flows pass on
-0.37/0.40 in 4.25s/4.06s, including stopped edits and explicit Play. New-head CI
-remains PENDING; earlier green checkpoints do not certify these changes.
+0.37/0.40 in 4.25s/4.06s, including stopped edits and explicit Play. Exact head
+`f7c6ed7` passed all three jobs/every step in
+[run 38325071508](https://github.com/de41tr/open-room-renderer/actions/runs/38325071508).
 The floor's measured 159.50s/165s headroom also prompted a same-runner two-file
 rebalance. Exact collection/skip parity holds. Its one timing replay exposed an
 unchanged selector-order assertion; order was fixed, all 13 focused workflow
-checks pass, and final hosted scheduling is PENDING. No cap/assertion was relaxed.
+checks pass, and final hosted scheduling now passes: floor groups 149.89s/105.22s
+under the same 165-second watchdog. No cap/assertion was relaxed.
+
+A final operator-path review found two bounded recovery/privacy gaps, now fixed
+and independently reviewed: navigation scrubs all private dialogs, and UNKNOWN
+gain exposes an explicit checked Set volume to 0 action without starting Play.
+The renderer/backend/controller logic is unchanged. Focused checks pass 87 Node
+and 334 Python Web cases; short actual native 0.37/0.40 recovery flows pass in
+4.26s/4.07s with a single test-transport reply loss. New-head CI remains separate;
+no genuine browser or physical-silence claim is made.
 
 BROWSER_ACCEPTANCE_PENDING: no real browser/layout/focus acceptance is claimed.
 The complete UI is locally reproducible at the renderer's existing `/ui/` path;
