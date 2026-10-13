@@ -1,5 +1,46 @@
 # Test evidence and limits
 
+## Browser favorite target repair checkpoint
+
+Exact preceding head `5534c4d` passed all three jobs/every step in
+[run 38332263993](https://github.com/de41tr/open-room-renderer/actions/runs/38332263993),
+verified 01:42 UTC. Its floor passes 4774+548 /74 in 150.56s/128.84s under the
+unchanged 165s watchdog. Installed/native/Unix and later acceptance gates all
+pass on x86_64/ARM64. This scopes the startup/focus checkpoint, not later changes.
+
+The observed favorite-conflict correction separately passes 136 Node checks and
+157 focused Python cases with independent review. The subsequent Change URL UI
+passes 149 Node checks and 159 focused Python Web/frontend checks on each 3.12
+and 3.11. These include two actual loopback HTTP keep/clear cases with a synthetic
+backend: exact same-host URL bytes and nonempty title/artist/album/artwork policy,
+unchanged canonical queue/generation/media and zero backend calls. Root integrated
+syntax/Node checks pass (149 cases, 1.42s); integrated Web/frontend/installer
+checks pass 195 in 9.34s. No production Python
+server/store code or command schema changed, so no redundant full local suite
+is substituted for exact-head hosted CI, which remains PENDING.
+
+Independent review corrected UTF-8 byte counting before the private draft is
+cleared. A multibyte over-limit URL now rejects locally without sending or losing
+its draft. ACK remains ACKNOWLEDGED even with fresh same-host redacted readback;
+failed rereads and sticky UNKNOWN remain explicit. Single-use submission, private
+cleanup, conflict/reversion, focus and late-response paths use DOM doubles, not
+real-browser acceptance.
+
+The existing short native Web flow now repairs a playing managed favorite with
+keep (fixture 2 to 1), then clear (1 to 2). Final actual mpv 0.37/0.40 runs pass
+in 4.32s/4.19s, preserving all 208 previous assertions (231 total) and unchanged
+30s/35s caps. Each request proves persisted/reloaded exact records, stable
+ID/name/order/sibling, detached queue/current-item identity/value, generation,
+transport, DSP/gain, handle and ten native properties, with zero native mutations
+or media fetches. Nonempty native title/artist/album are exercised; artwork starts
+empty there, with nonempty artwork covered by the HTTP integration above.
+A review strengthened clear to replace a different URL rather than reuse keep's
+already-stored target; final code passed once per library after that correction.
+Four short executions total, no extra native case, Unix retry or long campaign.
+This is real same-origin/CSRF HTTP/ctypes/null evidence, not a browser, repaired-
+target playback, physical audio, sample-level or crash-durability claim.
+
+
 ## Saved-state diagnostics and logical focus follow-through
 
 Exact export head `1dfd642` passed all three jobs/every step in

@@ -66,6 +66,12 @@ Both have independent review and complete local coverage; verify exact-head
 hosted CI, without expanding persistence, playback or browser claims. Export
 head `1dfd642` is already fully green in run 38330676949.
 
+**Favorite workflow follow-through:** expose existing stable-ID URL repair with
+explicit metadata policy and honest ACK-only target status, plus observed-conflict
+protection. No new server contract or playback authority. Independent review,
+focused checks and short actual native no-mutation evidence precede publication.
+Developer maps are updated to remove obsolete next-extraction/UI-priority claims.
+
 Review usefulness, risk and marginal return every 90–120 minutes. Focused tests
 and independent review precede milestone publication. Full native CI follows
 cohesive milestones; unchanged older endurance evidence is not rerun without

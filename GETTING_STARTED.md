@@ -438,6 +438,10 @@ The CLI reports `request_acknowledged`, not a claim that audio is still
 playing. A timeout leaves the outcome unconfirmed: check status before deciding
 whether to try again. The CLI never retries or follows a redirect.
 
+The browser also offers **Change URL** for managed favorites, with a blank private
+input and explicit keep/clear choice. Its redacted view reports ACKNOWLEDGED rather
+than proving the exact saved target; see [browser favorite repair](docs/WEB_UI.md#repair-a-saved-favorite).
+
 `favorites set-url ID URL --metadata keep|clear` repairs a managed favorite while
 preserving its stable ID, library name and position. The metadata choice is
 required: `keep` retains title, artist, album and artwork; `clear` empties all four.

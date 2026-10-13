@@ -23,7 +23,8 @@ include the four static assets.
 - Play, Pause, Stop, Next, Previous, bounded Seek, volume and mute.
 - Current queue, explicit track selection, and the five supported modes:
   in order, repeat one, repeat all, shuffle once, shuffle with repeat all.
-- Favorites: add a direct HTTP(S) URL, save current, play, rename and delete.
+- Favorites: add a direct HTTP(S) URL, save current, play, rename, change URL
+  and delete.
   Configuration-owned favorites remain read-only. Selecting a queue entry plays
   it; Next/Previous on a stopped queue preserve stopped selection semantics.
 - Confirmed channel balance, EQ enable/bypass, all ten EQ bands and preset
@@ -80,6 +81,41 @@ session before favorite controls become fresh. Closed dialogs clear entered
 URLs. Navigation also closes and scrubs private favorite, preset and playlist
 drafts before browser back/forward caching, without cancelling a command already
 sent or erasing its later acknowledgement/unknown outcome.
+
+## Repair a saved favorite
+
+Use **Change URL** on an editable managed favorite to replace a moved or expired
+address without deleting its stable ID. The name and order remain unchanged;
+configured favorites stay read-only. Enter the replacement in the initially blank
+field and explicitly choose whether to **keep** or **clear** saved title, artist,
+album and artwork. The stored URL is never loaded into this browser view.
+
+The change affects future playback only. It neither fetches the new address nor
+replaces the detached item already playing. Choose Play separately if you want
+to test the repaired favorite. Submitted URL bytes are not normalized; existing
+URL and complete request-size rules remain. No new API route or server behavior
+is introduced.
+
+After local validation, one send is admitted and the private input is cleared
+and disabled. Each dialog opening sends at most once, including rejected or
+UNKNOWN outcomes. Done/Close/Escape/navigation scrubs local references; it cannot
+retract a sent request and does not promise secure memory erasure.
+
+A successful response remains **ACKNOWLEDGED**. A refreshed hostname, name, ID or
+cleared metadata cannot prove the exact saved URL in this redacted view. A lost
+response remains **UNKNOWN** and may have taken effect; no retry is sent. If the
+favorites/current-state reread fails, that limitation remains explicit. The
+result stays open for review rather than auto-closing as confirmed. For stronger
+exact-target response validation, use the existing `favorites set-url` CLI.
+
+Rename, Delete and unsent Change URL drafts latch a review warning if fresh
+polling observes the selected record changed or removed. Inputs are preserved,
+but submission stays disabled until you close and reopen, even if the displayed
+record later changes back. An unchanged persisted record remains usable after a
+restart; Add is self-contained and Save Current retains its session check.
+This is a browser safeguard only: favorites still use last-writer-wins updates,
+so changes after the last read or URL-only repairs hidden by the redacted listing
+may not be detected. It is not an atomic concurrency precondition.
 
 ## Ten-band EQ and presets
 

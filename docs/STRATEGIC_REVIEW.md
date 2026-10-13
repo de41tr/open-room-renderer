@@ -19,6 +19,14 @@
    evidence. Reassess practical value in 90–120 minutes, by 03:12 UTC.
 
 
+The preceding corrections are now fully green at `5534c4d` in run 38332263993.
+A focused review justified one small remaining favorite workflow: repair its URL
+using the existing stable-ID API instead of delete/recreate. The browser does not
+read back the secret URL, so it deliberately reports ACKNOWLEDGED, with a separate
+explicit metadata choice and single-use private draft. Observed conflict guards
+are local safeguards, not a new revision framework. No server contract or audio
+engine is added. The next formal review remains due 02:42–03:12 UTC.
+
 ## 23:42 UTC value/risk assessment (first 90 minutes)
 
 1. **CONTINUE:** integrate stopped-only local playlist loading/editing and verify

@@ -38,14 +38,17 @@ aiohttp app in fake_linkplay.http_api
 
 - `fake_linkplay/cli.py`: command-line entry point, config loading, startup/shutdown orchestration.
 - `fake_linkplay/config.py`: YAML config model, generated UUID, persisted device name, persisted channel balance.
+- `fake_linkplay/startup_state.py`: diagnostic-only wrapper for known persisted-state failures during explicit CLI startup.
 - `fake_linkplay/http_api.py`: HTTP/SOAP endpoints and current playback, queue, event payload projection, settings and DSP orchestration.
 - `fake_linkplay/eventing.py`: GENA admission/leases, registry, sequence numbers, coalescing, bounded delivery/retry tasks and cancellation/drain; consumes only a synchronous XML snapshot provider.
 - `fake_linkplay/metadata_formatting.py`: pure metadata artwork/live-tag, resource-URI and duration edits; no state, network or backend access.
 - `fake_linkplay/state.py`: in-memory renderer state and status payload generation.
 - `fake_linkplay/queue.py` and `queue_policy.py`: canonical items/indices and pure repeat/shuffle traversal; backend admission stays in HttpApi.
 - `fake_linkplay/queue_protocol.py`: pure authored queue/URL validation and bounded request framing, shared without client transport imports.
+- `fake_linkplay/queue_client.py`: HTTP transport, response parsing, uncertain-outcome policy and queue CLI adapter.
 - `fake_linkplay/eq_presets.py`: saved preset-library ownership and pure EQ request/record utilities; active transactions stay in HttpApi.
-- `fake_linkplay/web_ui.py` and `web_assets/`: same-origin browser admission, detached safe state projection, local assets and single-shot frontend control flow; no playback authority or observer.
+- `fake_linkplay/web_ui.py` and `web_assets/`: same-origin browser admission, detached safe state projection, private queue export, packaged assets and single-shot frontend control flow; no playback authority or observer.
+- `fake_linkplay/web_playlists.py`: pure bounded import/stopped-edit preparation; actual admission and queue replacement remain in HttpApi.
 - `fake_linkplay/favorites.py`: bounded renderer-owned library, atomic storage and its JSON routes; edits do not control playback.
 - `fake_linkplay/mpv_backend.py`: mpv process startup, JSON IPC commands, snapshots, volume/mute/seek, balance and PEQ filter graph.
 - `fake_linkplay/ssdp.py`: UDP multicast responder and periodic NOTIFY packets.
@@ -124,8 +127,8 @@ separate and unchanged.
 | Candidate | Cohesion and coupling benefit | Risk / interface / effort | Decision |
 | --- | --- | --- | --- |
 | GENA lifecycle/delivery | High: one protocol lifecycle and its own state; removes delivery/admission policy from renderer | Low-to-moderate: one synchronous string provider plus notify/prune/close; rich existing real-loopback and native coverage | Implemented |
-| Pure protocol contracts | Clear but mostly already separated into soap/schema/description; smaller ownership improvement | Low; chiefly representation work, little controller state removed | Useful later if duplication grows |
-| DSP preset library | Cohesive storage, but active vs desired state and committed-write failures cross restore/transaction logic | Moderate: carefully distinguish library edits from active DSP commits | Best next bounded candidate after explicit contract analysis |
+| Pure protocol contracts | SOAP/schema/description plus shared authored-queue validation and framing | Low: pure reuse removes client-transport dependencies | Existing; queue_protocol boundary described below |
+| DSP preset library | Cohesive saved-state storage; active vs desired state and committed-write failures remain renderer concerns | Moderate: distinguish library edits from active DSP commits | Implemented as EqPresetLibrary; see below |
 | Playback/recovery/native staging | Large potential benefit but tightly coupled generations, backend identity and cancellation | High: would require wider ownership/lock-order design | Not changed in this task |
 
 The structural gain is real but deliberately limited: subscription policy can
@@ -139,10 +142,9 @@ protocol cohesion, rather than adding a second request/result abstraction.
 
 HttpApi remains a large orchestrator for HTTP/SOAP, playback, native staging,
 stream recovery, DSP transactions, metadata and service adapters. This extraction
-does not make it a finished player-core architecture. Next investigate a DSP
-preset-library boundary with pure validation/storage and a detached result;
-keep active backend transactions and restore ordering in the renderer initially.
-Moving playback ownership, generations, queue/backend control, asynchronous
+does not make it a finished player-core architecture. The saved preset-library
+boundary below leaves active backend transactions and restore ordering in the
+renderer. Moving playback ownership, generations, queue/backend control, asynchronous
 lock order, or introducing a broader service framework requires a separate user
 decision and a wider design/test plan. New providers/authentication or changes to
 supported protocols likewise remain outside this refactor.
@@ -186,9 +188,9 @@ Dependency direction is renderer/client/playlist adapter → pure queue contract
 contract module. Both extractions reduce actual responsibility/dependency
 coupling while leaving playback generations and scheduling untouched.
 
-The architecture phase deliberately stops here before a player-core rewrite.
-Further work prioritizes a useful browser controller. Stateful source ownership,
-recovery and native staging still warrant a wider design before extraction.
+These boundaries stop short of a player-core rewrite. The implemented browser
+controller below reuses them. Stateful source ownership, recovery and native
+staging still warrant a wider design before extraction.
 
 ## Browser controller boundary
 
@@ -196,8 +198,8 @@ One `WebControlApi` is constructed beside the existing favorites and eventing
 components and shared by the renderer's existing listeners. It receives narrow
 current-state/device/runtime/DSP snapshot callbacks, the existing FavoritesStore,
 a typed WebCommand dispatch callback and admitted host names. It never receives
-HttpApi or MpvBackend. Its only owned mutable values are a CSRF secret, session ID
-and monotonically increasing presentation snapshot revision.
+HttpApi or MpvBackend. Its presentation state is a CSRF secret, session ID,
+process-local DSP/export HMAC keys and monotonically increasing snapshot revision.
 
 The existing backend monitor remains the sole observer. State reads are detached
 synchronous projections without an await between queue, generation and metadata.
@@ -213,8 +215,9 @@ DSP proposals are hidden while the existing transaction lock is held; otherwise
 validated readback gates the copied active snapshot. Unconfirmed gain values are
 null, never labeled as a known previous confirmation from startup configuration.
 
-The browser owns only local form drafts and request/read ordering. It cannot
-claim playback success from an ACK. Non-Stop mutations are serialized locally;
+The browser owns local form drafts, private download references and request/read
+ordering. It cannot claim playback success from an ACK. Non-Stop mutations are
+serialized locally;
 Stop can supersede a pending UI request without implying that the old server
 operation was cancelled. Lost responses remain explicitly unknown and are never
 automatically retried. All metadata uses text insertion rather than HTML.
@@ -224,6 +227,22 @@ browser commands. Only inert top-level HTML GET navigation may originate from
 another site; cross-site data/script/frame requests and mutations remain blocked.
 This does not authenticate or retrofit the existing legacy control routes.
 See [Web security and operation](WEB_UI.md) for precise boundaries.
+
+The four local assets are included by `pyproject.toml` and the native installer;
+`/` and `/ui/` serve the functional controller on existing listeners. It includes
+transport, queue, favorites, DSP and stopped-playlist editing. Real-browser and
+physical hardware acceptance remain pending; DOM-double and libmpv/null checks
+are narrower evidence. See [the browser checklist](WEB_BROWSER_ACCEPTANCE.md).
+
+Private queue export is a separate guarded read, outside command dispatch. It
+captures once without awaiting, checks session/generation and a process-keyed
+HMAC over exact codec bytes, and requires explicit private-data consent for the
+download. The exact file must fit the existing Web import envelope, including
+nested JSON escaping; there is no truncation or larger request cap. Export adds
+no server cache, file save, media fetch or playback effect. The browser offers a
+user-clicked link and clears private references on dismissal/navigation; this
+cannot establish durable saving or retract a downloaded file. See
+[the export contract](WEB_PLAYLIST_EXPORT.md).
 
 ### Web DSP editing without another state owner
 
@@ -248,7 +267,7 @@ not a new lock or independent DSP service. See [the exact contract](WEB_DSP_EDIT
 open-room-renderer serve --config ...
         |
         v
-load_config()
+load_startup_config()
         |
         +--> create/load UUID under state_dir
         +--> load persisted device name and balance
@@ -266,6 +285,12 @@ aiohttp AppRunner starts HTTP API and description ports
         v
 wait for SIGINT/SIGTERM/SIGHUP
 ```
+
+`startup_state._read_state` wraps only known persisted-state operations with an
+explicit startup opt-in. Expected `OSError`/`ValueError` failures become fixed
+private-safe CLI guidance. The helper neither owns storage nor repairs, resets
+or retries it; programming errors/cancellation and ordinary library-call
+exceptions remain unchanged. See `tests/test_startup_state.py`.
 
 At startup the backend starts or connects to `mpv`, then immediately stops playback so stale audio does not continue across restarts.
 
@@ -411,7 +436,8 @@ Experimental:
 7. Relevant tests under `tests/`
 
 The renderer-owned queue and authored-playlist CLI keeps new responsibilities
-outside HttpApi: `queue_client.py` frames and validates existing SOAP operations;
+outside HttpApi: `queue_protocol.py` validates and frames existing SOAP operations,
+while `queue_client.py` owns their HTTP transport and response handling;
 `playlist_files.py` owns the strict authored format and safe local publication;
 `playlist_m3u.py` decodes the strict offline URL-list subset without I/O;
 `playlist_cli.py` composes validation/file/client steps. `transport_client.py`

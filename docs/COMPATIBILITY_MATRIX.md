@@ -45,6 +45,11 @@ reader diagnostics intentionally change expected CLI failures from traceback/exi
 Logical dialog focus return is covered by DOM doubles, with genuine browser
 acceptance still pending. Combined local defaults pass 5322/74 on both Python
 versions and 128 frontend checks; exact subsequent-head CI is separately pending.
+Head `5534c4d` is fully green in run 38332263993. The next browser-only favorite
+target-repair workflow uses the unchanged typed API and keeps ACK distinct from
+exact saved-URL verification. Focused HTTP/DOM and actual native keep/clear checks
+pass without playback effects; exact new-head CI remains separate. Observed
+favorite conflicts are guarded locally, not atomically.
 HARDWARE_PENDING remains: Odroid XU4/ARMv7, physical audio/LAN and original app.
 
 The older matrix below retains its own checkpoint/evidence scope.

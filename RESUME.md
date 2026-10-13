@@ -1,5 +1,25 @@
 # Resume the new next-phase task
 
+## Managed-favorite repair checkpoint
+
+The browser now exposes the existing managed-favorite target repair: blank
+private URL input, explicit keep/clear metadata choice, retained name/ID/order,
+and no audio fetch or change to the current detached playback. Each opening
+admits one send, clears its private input, and keeps ACKNOWLEDGED/UNKNOWN visible.
+The redacted view never claims exact-URL verification. Observed Rename/Delete/
+unsent Change URL conflicts require reopening; this is not atomic concurrency.
+No server/store/API contract changed. Architecture/developer navigation now
+reflects the completed extractions and shipped browser workflows.
+
+Independent reviews and focused frontend/HTTP checks pass; actual libmpv 0.37/
+0.40 keep and clear flows pass in 4.32s/4.19s with no native/media side effects.
+All prior native assertions and caps remain. Exact new-head CI remains PENDING.
+Preceding head `5534c4d` passes all three jobs/every step in run 38332263993,
+verified 01:42 UTC; its complete default coverage is 5322/74. No redundant full
+local replay is claimed for this frontend-only extension. Browser/physical and
+provider-account acceptance remain pending. Next value review: 02:42–03:12 UTC.
+
+
 ## Current operator follow-through
 
 Export head `1dfd642` is fully green in run 38330676949 (all three jobs/every

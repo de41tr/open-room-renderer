@@ -96,3 +96,21 @@ Record browser/version, viewport, server revision, passes/failures, and screensh
   and Stop remain independent (close the modal before choosing Stop).
 - A Blob/link click is not evidence of a filesystem save. Record actual browser
   version, downloaded bytes and interaction results before closing this gate.
+
+## Favorite address repair and observed conflicts
+
+- At narrow widths and 200% zoom, verify the extra Change URL row action, wrapping,
+  native URL input, required metadata choice, dialog scrolling and keyboard focus.
+  Configured favorites must have no Change URL action.
+- Open Change URL: its field must be blank and keep/clear must require an explicit
+  choice. Submit a same-host replacement. Input should clear immediately; the
+  result must stay ACKNOWLEDGED, never exact-target CONFIRMED. No request may fetch
+  the replacement or change active playback. Check the stored result separately.
+- Repeat both metadata policies. Lose a response or its readback, then try repeated
+  Enter/clicks: one opening must send at most once and UNKNOWN must stay honest.
+  Done/Close/Escape/navigation and late responses must not restore private input
+  or erase a newer dialog's draft. Check actual focus return on the rebuilt row.
+- While Rename/Delete/unsent Change URL is open, rename/remove that record from
+  another controller. Fresh observation must preserve the draft but disable its
+  stale submission. Changing it back must not silently re-enable it. Reopen to
+  review. This does not prove atomic protection against unobserved URL changes.
