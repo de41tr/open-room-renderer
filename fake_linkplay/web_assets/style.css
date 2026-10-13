@@ -13,3 +13,6 @@
 
 /* Export owns only a transient private Blob; the download stays a real link. */
 #export-dialog{max-width:560px;max-height:calc(100dvh - 36px);overflow:auto}#export-dialog .dialog-actions{flex-wrap:wrap}#export-download{display:inline-flex;align-items:center;text-decoration:none}#export-summary:empty{display:none}@media(max-width:430px){#export-dialog{padding:19px}}
+
+/* The target-repair choice and retained result must remain scrollable. */
+#favorite-dialog{max-height:calc(100dvh - 36px);overflow:auto}#favorite-dialog .dialog-actions{flex-wrap:wrap}

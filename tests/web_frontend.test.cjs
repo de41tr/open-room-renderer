@@ -1457,3 +1457,173 @@ test('logical favorite focus skips a rebuilt matching action hidden with its lis
   const before = h.focusCalls.length; await h.ids.get('favorite-cancel').fire('click');
   assert.deepEqual(h.focusCalls.slice(before), [h.ids.get('add-favorite')]); assert.equal(h.posts().length, 0);
 });
+
+/* Change URL is intentionally weaker than an exact saved-target readback. */
+const targetACK = 'Target-change request acknowledged. The exact saved URL is not verified by this redacted view.';
+const targetUNKNOWN = 'Target-change outcome unknown. The change may have taken effect. No retry was sent. The exact saved URL cannot be verified from this redacted view.';
+const replacementURL = 'HTTPS://example.com:443/%2fMiXeD?token=PRIVATE%2b+&x=%41#Keep';
+const targetBody = metadata => ({action: 'favorite_target', id: 'favorite-id', url: replacementURL, metadata});
+async function targetDraft(h, metadata = 'keep', url = replacementURL) {
+  await favoriteAction(h, 'target').fire('click');
+  h.ids.get('favorite-url').value = url; h.ids.get('favorite-metadata').value = metadata;
+}
+test('target ACK remains acknowledged with redacted or unavailable readbacks; other commands are unchanged', async () => {
+  for (const failed of ['none', 'favorites', 'state', 'both']) {
+    const h = harness(); h.setFavorites(favorites([favorite()])); await h.controller.refresh();
+    if (['favorites', 'both'].includes(failed)) h.hooks.favorites = () => {throw new Error('offline');};
+    if (['state', 'both'].includes(failed)) h.hooks.state = () => {throw new Error('offline');};
+    const result = await h.controller.mutate(targetBody('keep'), 'Change URL');
+    assert.equal(result.kind, 'acknowledged'); assert.equal(h.controller.notice.kind, 'acknowledged'); assert.ok(result.text.startsWith(targetACK));
+    if (failed !== 'none') assert.match(result.text, /favorites list could not be refreshed/);
+    if (['state', 'both'].includes(failed)) assert.match(result.text, /Current renderer state is unavailable/);
+    await h.controller.refresh(); assert.equal(h.controller.notice.kind, 'acknowledged'); assert.equal(h.posts().length, 1);
+  }
+  const h = harness(); await h.controller.refresh(); await h.controller.mutate({action: 'favorite_rename', id: 'favorite-id', name: 'Renamed'}, 'Rename favorite');
+  assert.equal(h.controller.notice.kind, 'confirmed');
+});
+test('target lost, malformed, error-after-apply and committed responses remain sticky private-safe UNKNOWN', async () => {
+  for (const reply of [null, {status: 200, body: {ok: true}}, {status: 502, body: {outcome: 'ERROR', message: replacementURL}}, {status: 503, body: {outcome: 'UNKNOWN', committed: true, message: replacementURL}}]) {
+    const h = harness(); await h.controller.refresh(); h.hooks.post = () => {if (!reply) throw new Error(replacementURL); return reply;};
+    const result = await h.controller.mutate(targetBody('clear'), 'Change URL');
+    assert.equal(result.kind, 'unknown'); assert.equal(result.text, targetUNKNOWN); assert.equal(h.controller.notice.text, targetUNKNOWN);
+    await h.controller.refresh(); await h.controller.refresh(); assert.equal(h.controller.notice.kind, 'unknown'); assert.equal(h.controller.unknownOutcomes.length, 1);
+    assert.equal(h.controller.unknownOutcomes[0].committed, reply?.body.committed === true); assert.equal(h.posts().length, 1);
+    h.hooks.post = null; await h.controller.mutate({action: 'stop'}, 'Stop'); assert.equal(h.controller.unknownOutcomes.length, 1);
+  }
+});
+test('Change URL is managed-only, safely named, initially blank and requires an explicit metadata policy', async () => {
+  const h = await appHarness(); const safeName = '<img src=x onerror=bad()> station';
+  h.setFavorites(favorites([{...favorite(), name: safeName}, {...favorite(), id: 'configured', editable: false}])); await h.refresh();
+  assert.equal(favoriteAction(h, 'target', 'configured'), undefined);
+  assert.equal(favoriteAction(h, 'target').textContent, 'Change URL'); await favoriteAction(h, 'target').fire('click');
+  assert.equal(h.ids.get('favorite-delete-name').textContent, safeName); assert.equal(h.ids.get('favorite-delete-name').children.length, 0);
+  assert.equal(h.ids.get('favorite-name-field').hidden, true); assert.equal(h.ids.get('favorite-name').required, false);
+  assert.equal(h.ids.get('favorite-url').value, ''); assert.equal(h.ids.get('favorite-url').required, true);
+  assert.equal(h.ids.get('favorite-metadata').value, ''); assert.equal(h.ids.get('favorite-metadata').required, true);
+  assert.equal(h.ids.get('favorite-metadata').disabled, false); assert.equal(h.focused(), h.ids.get('favorite-url'));
+  assert.match(h.ids.get('favorite-dialog-hint').textContent, /future playback.*name and ID.*Does not fetch audio or change current playback/);
+  await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 0);
+  h.ids.get('favorite-url').value = replacementURL;
+  for (const policy of ['', 'auto']) {
+    h.ids.get('favorite-metadata').value = policy; await h.ids.get('favorite-form').fire('submit');
+    assert.equal(h.posts().length, 0); assert.match(h.ids.get('favorite-dialog-status').textContent, /Choose whether/); assert.equal(h.ids.get('favorite-url').value, replacementURL);
+  }
+});
+test('Change URL retains invalid private drafts without sending and enforces UTF-8 byte and request bounds', async () => {
+  for (const url of ['', ' https://example.com/a', 'https://user:pass@example.com/a', 'https://example.com/\nprivate', 'https://example.com/' + 'x'.repeat(8192), 'https://example.com/' + 'é'.repeat(4100)]) {
+    const h = await appHarness(); await targetDraft(h, 'keep', url); await h.ids.get('favorite-form').fire('submit');
+    assert.equal(h.posts().length, 0); assert.equal(h.ids.get('favorite-url').value, url); assert.equal(h.ids.get('favorite-url').disabled, false);
+  }
+  const h = await appHarness(), id = 'x'.repeat(MAX_REQUEST_BYTES); h.setFavorites(favorites([{...favorite(), id}])); await h.refresh();
+  await favoriteAction(h, 'target', id).fire('click'); h.ids.get('favorite-url').value = replacementURL; h.ids.get('favorite-metadata').value = 'clear'; await h.ids.get('favorite-form').fire('submit');
+  assert.equal(h.posts().length, 0); assert.equal(h.ids.get('favorite-url').value, replacementURL); assert.match(h.ids.get('favorite-dialog-status').textContent, /32,768/);
+});
+test('Change URL sends exact URL bytes and explicit keep or clear once, immediately clearing its input', async () => {
+  for (const policy of ['keep', 'clear']) for (const readback of [favorite(), {...favorite(), title: 'New title', target_label: 'elsewhere.example.test'}, null]) {
+    const h = await appHarness(), wait = deferred(); h.setPost(() => wait.promise); await targetDraft(h, policy);
+    const sending = h.ids.get('favorite-form').fire('submit');
+    assert.equal(h.ids.get('favorite-url').value, ''); assert.equal(h.ids.get('favorite-url').disabled, true); assert.equal(h.ids.get('favorite-metadata').disabled, true);
+    assert.equal(h.ids.get('favorite-metadata').value, policy); assert.equal(h.ids.get('favorite-cancel').textContent, 'Done'); assert.equal(h.focused(), h.ids.get('favorite-cancel'));
+    await h.ids.get('favorite-form').fire('submit'); assert.deepEqual(h.posts(), [targetBody(policy)]);
+    h.setFavorites(favorites(readback ? [readback] : [])); await h.refresh(); assert.match(h.ids.get('favorite-dialog-status').textContent, /^PENDING/);
+    wait.resolve({request_acknowledged: true}); await sending;
+    assert.equal(h.ids.get('favorite-dialog').open, true); assert.equal(h.ids.get('favorite-dialog-status').textContent, 'ACKNOWLEDGED · ' + targetACK);
+    assert.equal(h.ids.get('notice-kind').textContent, 'ACKNOWLEDGED'); assert.equal(h.ids.get('favorite-submit').disabled, true);
+    await h.refresh(); await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 1);
+    assert.ok(h.requests.every(item => ['/orr/v1/web/state', '/orr/v1/web/favorites', '/orr/v1/web/command'].includes(item.url)));
+    assert.equal(h.ids.get('favorite-close').disabled, false); assert.equal(h.ids.get('favorite-cancel').disabled, false);
+  }
+});
+test('Change URL distinguishes ACK from failed favorites or state reread and never becomes CONFIRMED', async () => {
+  for (const failed of ['favorites', 'state']) {
+    const h = await appHarness(); await targetDraft(h);
+    h.setPost(() => {if (failed === 'favorites') h.setFavorites({}); else h.setState({}); return {request_acknowledged: true};});
+    await h.ids.get('favorite-form').fire('submit');
+    assert.equal(h.ids.get('notice-kind').textContent, 'ACKNOWLEDGED'); assert.match(h.ids.get('favorite-dialog-status').textContent, /^ACKNOWLEDGED.*favorites list could not be refreshed/);
+    if (failed === 'state') assert.match(h.ids.get('favorite-dialog-status').textContent, /Current renderer state is unavailable/);
+    h.setState(state()); h.setFavorites(favorites([favorite()])); await h.refresh(); await h.ids.get('favorite-form').fire('submit');
+    assert.equal(h.ids.get('notice-kind').textContent, 'ACKNOWLEDGED'); assert.equal(h.posts().length, 1);
+  }
+});
+test('Change URL rejection and UNKNOWN keep private-safe results, disable retries, and require a deliberate reopen', async () => {
+  for (const reply of [null, {}, {__status: 503, outcome: 'UNKNOWN', committed: true, message: replacementURL}, {__status: 409, outcome: 'REJECTED', message: replacementURL}]) {
+    const h = await appHarness(); await targetDraft(h); h.setPost(() => {h.setFavorites(favorites([{...favorite(), target_label: 'changed.example.test'}])); if (!reply) throw new Error(replacementURL); return {...reply};});
+    await h.ids.get('favorite-form').fire('submit'); const message = h.ids.get('favorite-dialog-status').textContent;
+    assert.match(message, reply?.outcome === 'REJECTED' ? /^ERROR.*request rejected/ : /^UNKNOWN.*may have taken effect.*No retry.*cannot be verified/);
+    assert.doesNotMatch(message, /PRIVATE|This favorite changed/); assert.equal(h.ids.get('favorite-url').value, '');
+    await h.refresh(); await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 1); assert.equal(h.ids.get('favorite-dialog-status').textContent, message);
+    await h.ids.get('favorite-cancel').fire('click'); await favoriteAction(h, 'target').fire('click');
+    assert.equal(h.ids.get('favorite-url').value, ''); assert.equal(h.ids.get('favorite-url').disabled, false); assert.equal(h.ids.get('favorite-metadata').value, '');
+    assert.equal(h.ids.get('favorite-submit').disabled, false); assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+  }
+});
+test('unsent Change URL drafts latch observed changes or removal across restart and reverted observations', async () => {
+  for (const change of [null, {name: 'Remote'}, {editable: false}, {title: 'Remote'}, {artist: 'Remote'}, {album: 'Remote'}, {artwork: 'https://example.test/a.jpg'}, {target_label: 'new.example.test'}]) for (const restart of [false, true]) {
+    const h = await appHarness(); await targetDraft(h, 'clear'); const session = restart ? 'restarted' : 'session-one';
+    if (restart) h.setState(state({session_id: session}));
+    h.setFavorites(favorites(change ? [{...favorite(), ...change}] : [], session)); await h.refresh();
+    assert.equal(h.ids.get('favorite-submit').disabled, true); assert.equal(h.ids.get('favorite-url').value, replacementURL); assert.equal(h.ids.get('favorite-metadata').value, 'clear');
+    assert.match(h.ids.get('favorite-dialog-status').textContent, /review the favorites list before reopening Change URL/);
+    h.setFavorites(favorites([favorite()], session)); await h.refresh(); await h.ids.get('favorite-form').fire('submit'); assert.equal(h.posts().length, 0);
+  }
+});
+test('unchanged Change URL record and unrelated rows remain allowed after restart; mixed sessions cannot invalidate a draft', async () => {
+  const h = await appHarness(); await targetDraft(h);
+  h.setFavorites(favorites([], 'mixed-session')); await h.refresh(); assert.equal(h.ids.get('favorite-submit').disabled, true); assert.equal(h.ids.get('favorite-dialog-status').textContent, '');
+  h.setState(state({session_id: 'restarted'})); h.setFavorites(favorites([{...favorite(), id: 'other-id'}, Object.fromEntries(Object.entries(favorite()).reverse())], 'restarted')); await h.refresh();
+  assert.equal(h.ids.get('favorite-submit').disabled, false); assert.equal(h.ids.get('favorite-url').value, replacementURL);
+  await h.ids.get('favorite-form').fire('submit'); assert.deepEqual(h.posts(), [targetBody('keep')]);
+});
+test('Change URL Close, Cancel and Escape clear private drafts and restore logical row focus', async () => {
+  for (const dismiss of ['close', 'cancel', 'escape']) {
+    const h = await appHarness(); await targetDraft(h); h.setFavorites(favorites([{...favorite(), name: 'Remote rename'}])); await h.refresh();
+    const expected = favoriteAction(h, 'target'); await dismissDialog(h, focusDialogs[0], dismiss);
+    assert.equal(h.ids.get('favorite-dialog').open, false); assert.equal(h.ids.get('favorite-url').value, ''); assert.equal(h.ids.get('favorite-metadata').value, '');
+    assert.equal(h.focused(), expected); assert.equal(h.posts().length, 0);
+  }
+});
+test('Change URL pagehide clears drafts without restoring focus; late replies never clear a newer opening', async () => {
+  for (const hide of [false, true]) for (const lost of [false, true]) {
+    const h = await appHarness(), first = deferred(), stop = deferred(); await targetDraft(h); h.setPost(body => body.action === 'stop' ? stop.promise : first.promise);
+    const sending = h.ids.get('favorite-form').fire('submit'); await h.settle();
+    if (hide) {const count = h.focusCalls.length; h.pagehide(); assert.equal(h.focusCalls.length, count); h.pageshow();}
+    else await h.ids.get('favorite-close').fire('click');
+    assert.equal(h.ids.get('favorite-url').value, ''); assert.equal(h.ids.get('favorite-metadata').value, '');
+    // Stop supersedes the outcome but leaves the first operation in flight.
+    const stopping = h.ids.get('stop').fire('click'); stop.resolve({request_acknowledged: true}); await stopping;
+    // Controller busy correctly blocks reopening until the original command ends.
+    await favoriteAction(h, 'target').fire('click'); assert.equal(h.ids.get('favorite-dialog').open, false);
+    h.ids.get('stop').focus(); const count = h.focusCalls.length;
+    if (lost) first.reject(new Error('lost')); else first.resolve({request_acknowledged: true}); await sending;
+    assert.equal(h.focusCalls.length, count); assert.equal(h.ids.get('favorite-dialog-status').textContent, ''); assert.equal(h.ids.get('favorite-dialog').open, false);
+    await targetDraft(h, 'clear', 'https://example.com/new?private=new'); await h.ids.get('favorite-dialog').fire('close');
+    assert.equal(h.ids.get('favorite-dialog').open, true); assert.equal(h.ids.get('favorite-url').value, 'https://example.com/new?private=new'); assert.equal(h.ids.get('favorite-metadata').value, 'clear');
+    assert.deepEqual(h.posts().map(body => body.action), ['favorite_target', 'stop']); assert.match(h.ids.get('notice-text').textContent, /^Stop:/);
+  }
+});
+test('Change URL Done restores the rebuilt row or a safe fallback without changing ACK outcome', async () => {
+  for (const readback of ['changed', 'deleted', 'restarted', 'failed']) {
+    const h = await appHarness(); await targetDraft(h);
+    h.setPost(() => {
+      if (readback === 'changed') h.setFavorites(favorites([{...favorite(), target_label: 'new.example.test'}]));
+      if (readback === 'deleted') h.setFavorites(favorites([]));
+      if (readback === 'restarted') {h.setState(state({session_id: 'restarted'})); h.setFavorites(favorites([favorite()], 'restarted'));}
+      if (readback === 'failed') h.setState({});
+      return {request_acknowledged: true};
+    });
+    await h.ids.get('favorite-form').fire('submit'); assert.equal(h.ids.get('favorite-dialog').open, true); assert.match(h.ids.get('favorite-dialog-status').textContent, /^ACKNOWLEDGED/);
+    await h.ids.get('favorite-cancel').fire('click');
+    const expected = readback === 'changed' ? favoriteAction(h, 'target') : h.ids.get(readback === 'failed' ? 'refresh' : 'add-favorite');
+    assert.equal(h.focused(), expected); assert.equal(h.ids.get('favorite-dialog-status').textContent, ''); assert.equal(h.posts().length, 1);
+  }
+});
+test('Change URL pending outcome cannot replace or resend a reopened draft after an old queued close', async () => {
+  const h = await appHarness(), wait = deferred(); await targetDraft(h); h.setPost(() => wait.promise);
+  const sending = h.ids.get('favorite-form').fire('submit'); await h.settle();
+  const dialog = h.ids.get('favorite-dialog'); dialog.close = () => {dialog.open = false;};
+  await h.ids.get('favorite-cancel').fire('click'); wait.resolve({request_acknowledged: true}); await sending;
+  await targetDraft(h, 'clear', 'https://example.com/new?new=private'); const before = h.focusCalls.length;
+  await dialog.fire('close'); await h.refresh();
+  assert.equal(h.focusCalls.length, before); assert.equal(dialog.open, true); assert.equal(h.ids.get('favorite-url').value, 'https://example.com/new?new=private');
+  assert.equal(h.ids.get('favorite-metadata').value, 'clear'); assert.equal(h.ids.get('favorite-dialog-status').textContent, ''); assert.equal(h.posts().length, 1);
+});

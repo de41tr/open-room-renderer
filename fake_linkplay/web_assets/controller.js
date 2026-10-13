@@ -347,17 +347,34 @@
         // Never echo a server error that could contain private source text.
         result.text = result.kind === "error" ? "Playlist request rejected. Review the source, current queue and stopped state before starting again." : "Playlist request outcome unknown. It may have taken effect. Check the current queue before starting again. No retry was sent.";
       }
+      if (body.action === "favorite_target") {
+        // The redacted library cannot verify the exact URL, even with a fresh
+        // matching hostname/name/ID. Never echo potentially private errors.
+        result.text = result.kind === "acknowledged"
+          ? "Target-change request acknowledged. The exact saved URL is not verified by this redacted view."
+          : result.kind === "error"
+            ? "Target-change request rejected. Review the replacement URL and metadata choice before starting again."
+            : "Target-change outcome unknown. The change may have taken effect. No retry was sent. The exact saved URL cannot be verified from this redacted view.";
+      }
       this.active.delete(id);
       this.fresh = false;
       if (result.kind === "unknown") this.unknownOutcomes = this.unknownOutcomes.concat({id, label, committed: result.committed === true}).slice(-20);
       if (id === this.operation) this.notice = {...result, kind: result.kind === "acknowledged" ? "pending" : result.kind};
       this.changed();
       await this.refresh();
+      if (body.action === "favorite_target" && result.kind === "acknowledged") {
+        if (!this.favoritesFresh) result.text += " The favorites list could not be refreshed.";
+        if (!this.fresh) result.text += " Current renderer state is unavailable. Refresh before another command.";
+      }
       if (id === this.operation && result.kind === "acknowledged") {
         // An ACK is not a playback observation. State badges remain canonical.
-        this.notice = this.fresh
-          ? {kind: "confirmed", text: `${label}: request acknowledged; current renderer state received.`, id}
-          : {kind: "unknown", text: `${label}: request acknowledged, but current state is unavailable. Refresh before another command.`, id};
+        if (body.action === "favorite_target") {
+          this.notice = {...result};
+        } else {
+          this.notice = this.fresh
+            ? {kind: "confirmed", text: `${label}: request acknowledged; current renderer state received.`, id}
+            : {kind: "unknown", text: `${label}: request acknowledged, but current state is unavailable. Refresh before another command.`, id};
+        }
       }
       this.changed();
       return result;

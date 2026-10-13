@@ -260,6 +260,57 @@ async def test_real_http_favorites_crud_uses_stable_ids_and_no_raw_targets(api):
         assert api.mpv.url == "https://media.example.test/other.wav?token=NEW_SECRET"
 
 
+@pytest.mark.parametrize("metadata_policy", ["keep", "clear"])
+async def test_real_http_favorite_target_preserves_playback_and_exact_saved_url(api, metadata_policy):
+    original_url = "https://media.example.test/original%2fStream?token=OLD_SECRET"
+    replacement_url = ("https://media.example.test/repaired%2fStream"
+                       "?b=2&a=NEW_SECRET%2bValue&a=second+value#part%2fOne")
+    metadata = {"title": "Synthetic title", "artist": "Synthetic artist",
+                "album": "Synthetic album", "artwork": "https://art.example.test/cover.png"}
+    favorite = api.favorites.add({"name": "Saved station", "url": original_url, **metadata})
+    identifier = favorite["id"]
+    async with serving(api) as (session, base):
+        csrf = (await state(session, base))["csrf_token"]
+        assert (await command(session, base, csrf, {"action": "favorite_play", "id": identifier})) == (
+            200, {"request_acknowledged": True})
+        before = await state(session, base)
+        assert before["transport"]["phase"] == "PLAYING"
+        queue = api.state.queue
+        queue_before = deepcopy(queue)
+        backend_calls = list(api.mpv.calls)
+        backend_before = await api.mpv.snapshot()
+
+        code, result = await command(session, base, csrf, {
+            "action": "favorite_target", "id": identifier,
+            "url": replacement_url, "metadata": metadata_policy})
+        assert (code, result) == (200, {"request_acknowledged": True})
+
+        expected_metadata = metadata if metadata_policy == "keep" else {field: "" for field in metadata}
+        expected = {**favorite, "url": replacement_url, **expected_metadata}
+        assert api.favorites.document()["favorites"] == [expected]
+        persisted = json.loads(api.favorites.path.read_text(encoding="utf-8"))
+        assert persisted == {"version": 1, "favorites": [{
+            "id": identifier, "name": favorite["name"], "url": replacement_url, **expected_metadata}]}
+        assert persisted["favorites"][0]["url"].encode("utf-8") == replacement_url.encode("utf-8")
+
+        after = await state(session, base)
+        assert after["generation"] == before["generation"] == api.state.generation
+        for field in ("transport", "media", "queue"):
+            assert after[field] == before[field]
+        assert api.state.queue is queue and queue == queue_before
+        assert api.state.current_url == api.state.backend_url == api.mpv.url == original_url
+        assert await api.mpv.snapshot() == backend_before
+        assert api.mpv.calls == backend_calls
+        async with session.get(base + PREFIX + "/favorites") as response:
+            assert response.status == 200
+            safe = await response.json()
+        assert safe["favorites"][0]["id"] == identifier
+        assert safe["favorites"][0]["name"] == favorite["name"]
+        assert safe["favorites"][0]["target_label"] == "media.example.test"
+        assert "url" not in safe["favorites"][0]
+        assert "SECRET" not in json.dumps(safe)
+
+
 async def test_backend_gain_uncertain_and_pending_never_claim_success(api):
     api.mpv.gain_confirmed = False
     async with serving(api) as (session, base):
