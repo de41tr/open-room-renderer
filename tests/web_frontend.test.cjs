@@ -1,7 +1,7 @@
 /* Dependency-free control-flow tests; these are not browser/layout tests. */
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {Controller, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_MODES, validateEditor, MODES, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError} = require('../fake_linkplay/web_assets/controller.js');
+const {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_MODES, validateEditor, MODES, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError} = require('../fake_linkplay/web_assets/controller.js');
 const clone = value => JSON.parse(JSON.stringify(value));
 const revisionID = letter => letter.repeat(64);
 function editor(overrides = {}) {
@@ -151,8 +151,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 async function appHarness() {
   const ids = new Map();
-  let current = state(), library = favorites([favorite()]), revision = 0, postHook = null;
-  const requests = [], events = new Map(), timers = new Map(); let timerId = 0;
+  let current = state(), library = favorites([favorite()]), revision = 0, postHook = null, exportHook = null;
+  const requests = [], events = new Map(), timers = new Map(), blobs = new Map(), created = [], revoked = [], syntheticClicks = []; let timerId = 0;
   class Element {
     constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attributes = {}; this.listeners = new Map(); this.textContent = ''; this.value = ''; this.hidden = false; this.disabled = false; this.checked = false; this.classList = {toggle() {}}; this.open = false; }
     get value() {return this._value || '';}
@@ -161,7 +161,8 @@ async function appHarness() {
     getAttribute(key) {return this.attributes[key];}
     removeAttribute(key) {delete this.attributes[key];}
     addEventListener(name, callback) {if (!this.listeners.has(name)) this.listeners.set(name, []); this.listeners.get(name).push(callback);}
-    async fire(name) {for (const callback of this.listeners.get(name) || []) await callback({preventDefault() {}});}
+    async fire(name) {const event = {defaultPrevented: false, preventDefault() {this.defaultPrevented = true;}}; for (const callback of this.listeners.get(name) || []) await callback(event); return event;}
+    click() {syntheticClicks.push(this.id); return this.fire('click');}
     append(...children) {this.children.push(...children.flatMap(child => child.tagName === 'FRAGMENT' ? child.children : [child]));}
     replaceChildren(...children) {this.children = []; this.append(...children);}
     querySelectorAll(tag) {const found = []; for (const child of this.children) {if (child.tagName.toLowerCase() === tag) found.push(child); found.push(...child.querySelectorAll(tag));} return found;}
@@ -175,22 +176,28 @@ async function appHarness() {
   for (const match of html.matchAll(/<([a-z][a-z0-9]*)\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
     const element = new Element(match[1]); element.id = match[3]; element.hidden = /\bhidden\b/.test(match[2]); element.disabled = /\bdisabled\b/.test(match[2]);
     const type = match[2].match(/\btype="([^"]*)"/); if (type) element.type = type[1];
-    const value = match[2].match(/\bvalue="([^"]*)"/); if (value) element.value = value[1]; ids.set(element.id, element);
+    const value = match[2].match(/\bvalue="([^"]*)"/); if (value) element.value = value[1];
+    const download = match[2].match(/\bdownload="([^"]*)"/); if (download) element.setAttribute('download', download[1]); ids.set(element.id, element);
   }
   const document = {activeElement: null, hidden: false, getElementById: id => {assert.ok(ids.has(id), `Unknown element ${id}`); return ids.get(id);}, createElement: tag => new Element(tag), createDocumentFragment: () => new Element('fragment'), addEventListener: (name, callback) => events.set(name, callback)};
   const window = {RendererControl: require('../fake_linkplay/web_assets/controller.js'), setTimeout: (callback, delay) => {timers.set(++timerId, {callback, delay}); return timerId;}, clearTimeout: id => timers.delete(id), addEventListener: (name, callback) => events.set(name, callback)};
   const fetch = async (url, options) => {
     requests.push({url, options}); let payload;
+    if (url.endsWith('/playlist/export')) return exportHook ? exportHook(JSON.parse(options.body), options) : exportResponse(JSON.parse(options.body).action === 'prepare' ? exportSummary(current) : privateJSON(), {attachment: JSON.parse(options.body).action === 'download'});
     if (options.method === 'POST') payload = postHook ? await postHook(JSON.parse(options.body)) : {request_acknowledged: true};
     else if (url.endsWith('/favorites')) payload = library;
     else payload = {...clone(current), revision: ++revision};
     const status = payload.__status || 200; delete payload.__status;
     return new Response(JSON.stringify(payload), {status, headers: {'Content-Type': 'application/json'}});
   };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/app.js'), 'utf8'), {window, document, fetch, AbortController, TextEncoder, TextDecoder, Uint8Array, URL, Date, console});
+  class TestURL extends URL {
+    static createObjectURL(blob) {const url = 'blob:owned-' + (created.length + 1); blobs.set(url, blob); created.push(url); return url;}
+    static revokeObjectURL(url) {assert.ok(blobs.has(url), 'Only revoke a live, owned URL'); blobs.delete(url); revoked.push(url);}
+  }
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/app.js'), 'utf8'), {window, document, fetch, AbortController, TextEncoder, TextDecoder, Uint8Array, URL: TestURL, Blob, Date, console});
   async function settle() {for (let i = 0; i < 10; i += 1) await tick();}
   await settle();
-  return {ids, timers, requests, pagehide: (persisted = true) => events.get('pagehide')?.({type: 'pagehide', persisted}), pageshow: () => events.get('pageshow')?.({type: 'pageshow', persisted: true}), setState: value => {current = value;}, setFavorites: value => {library = value;}, setPost: fn => {postHook = fn;}, settle, refresh: async () => {await ids.get('refresh').fire('click'); await settle();}, posts: () => requests.filter(item => item.options.method === 'POST').map(item => JSON.parse(item.options.body))};
+  return {ids, timers, requests, blobs, created, revoked, syntheticClicks, setExport: fn => {exportHook = fn;}, exports: () => requests.filter(item => item.url.endsWith('/playlist/export')), pagehide: (persisted = true) => events.get('pagehide')?.({type: 'pagehide', persisted}), pageshow: () => events.get('pageshow')?.({type: 'pageshow', persisted: true}), setState: value => {current = value;}, setFavorites: value => {library = value;}, setPost: fn => {postHook = fn;}, settle, refresh: async () => {await ids.get('refresh').fire('click'); await settle();}, posts: () => requests.filter(item => item.options.method === 'POST').map(item => JSON.parse(item.options.body))};
 }
 test('app renders metadata as text, and polling preserves favorite form edits', async () => {
   const h = await appHarness();
@@ -885,4 +892,295 @@ test('lost zero response stays UNKNOWN even when fresh canonical gain later conf
   assert.equal(h.ids.get('volume-current').textContent, '0%'); assert.equal(h.ids.get('volume-recovery').hidden, true);
   assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN'); assert.match(h.ids.get('notice-text').textContent, /outcome unknown/);
   assert.equal(h.ids.get('playback-state').textContent, 'STOPPED');
+});
+
+
+/* Export tests use synthetic fetch, stream, Blob-URL and DOM doubles. They do
+ * not establish browser downloads, focus, native modality, BFCache or CSP QA. */
+function privateJSON(changes = {}) {
+  return JSON.stringify({version: 1, name: 'Private original queue ?token=queue-secret', index: 1, mode: 'normal', urls: ['https://example.test/a?token=private-one&nested=%22x%22', 'https://example.test/a?token=private-one&nested=%22x%22'], ...changes}, null, 2) + '\n';
+}
+const encoded = value => new TextEncoder().encode(value);
+function exportSummary(current = state(), changes = {}) {
+  return {version: 1, session_id: current.session_id, generation: current.generation, revision: revisionID('e'), name: current.queue.name, count: current.queue.count, index: current.queue.index, mode: current.queue.mode, size_bytes: encoded(privateJSON()).length, filename: EXPORT_FILENAME, ...changes};
+}
+function exportResponse(value, {status = 200, headers = {}, attachment = false} = {}) {
+  const bytes = value instanceof Uint8Array ? value : encoded(typeof value === 'string' ? value : JSON.stringify(value));
+  return new Response(bytes, {status, headers: {'Content-Type': 'application/json', 'Content-Length': String(bytes.length), ...(attachment ? {'Content-Disposition': `attachment; filename="${EXPORT_FILENAME}"`} : {}), ...headers}});
+}
+async function consentExport(h) {h.ids.get('export-confirm').checked = true; await h.ids.get('export-confirm').fire('change');}
+async function readyExport(h) {await h.ids.get('playlist-export').fire('click'); await consentExport(h); await h.ids.get('export-form').fire('submit');}
+function assertExportCleared(h) {
+  assert.equal(h.ids.get('export-dialog').open, false);
+  assert.equal(h.ids.get('export-confirm').checked, false);
+  assert.equal(h.ids.get('export-download').hidden, true);
+  assert.equal(h.ids.get('export-download').getAttribute('href'), undefined);
+  assert.equal(h.ids.get('export-summary').textContent, ''); assert.equal(h.ids.get('export-status').textContent, '');
+  assert.equal(h.blobs.size, 0);
+}
+test('export validators reject unexpected summary fields, mismatched context, unsafe numbers and duplicate JSON fields', () => {
+  assert.equal(validateExportSummary(exportSummary(), state()).filename, EXPORT_FILENAME);
+  for (const changes of [{version: true}, {version: 2}, {session_id: 'other'}, {generation: true}, {generation: 8}, {generation: 2 ** 53}, {revision: 'E'.repeat(64)}, {revision: 'e'.repeat(63)}, {name: 'https://example.test/?token=secret'}, {count: true}, {count: 0}, {count: 1001}, {index: true}, {index: 0}, {index: 2}, {mode: 'bad'}, {size_bytes: true}, {size_bytes: 0}, {size_bytes: 32769}, {size_bytes: 1.5}, {filename: '../private.json'}, {urls: ['https://example.test/private']}]) assert.throws(() => validateExportSummary(exportSummary(state(), changes), state()));
+  const missing = exportSummary(); delete missing.name; assert.throws(() => validateExportSummary(missing, state()));
+  for (const source of ['{"x":1,"x":2}', '{"x":1,"\\u0078":2}', '{"version":1,}', 'null', '[]', '{"x":NaN}', '{"version":1.0}', '{"index":1e0}', '\ufeff{"version":1}']) assert.throws(() => exportObject(encoded(source)));
+  assert.throws(() => exportObject(new Uint8Array([0xff])));
+  const tricky = {name: 'a \"version\": 4, \\ \"name\": 5', version: 1};
+  assert.deepEqual(exportObject(encoded(JSON.stringify(tricky))), tricky);
+  assert.throws(() => exportObject(new Uint8Array(32769)));
+});
+test('export document validation preserves exact UTF-8, signed URLs and duplicates without previewing source', () => {
+  const source = privateJSON({name: '🎵 Café "queue" \u00e9'}), bytes = encoded(source), summary = exportSummary(state(), {size_bytes: bytes.length});
+  assert.equal(validateExportDocument(bytes, summary), bytes); assert.equal(new TextDecoder().decode(bytes), source);
+  for (const changes of [{version: true}, {extra: 'private'}, {name: ''}, {name: 'a'.repeat(257)}, {name: 'bad\nname'}, {index: 2}, {mode: 'repeat-one'}, {urls: ['https://example.test/a']}, {urls: [null, 'https://example.test/a']}, {urls: ['https://example.test/\uffff', 'https://example.test/a']}]) {
+    const bad = encoded(privateJSON(changes)); assert.throws(() => validateExportDocument(bad, {...summary, size_bytes: bad.length}));
+  }
+  const duplicate = encoded(privateJSON().replace('"version": 1,', '"version": 1, "version": 1,'));
+  assert.throws(() => validateExportDocument(duplicate, {...summary, size_bytes: duplicate.length}));
+  assert.throws(() => validateExportDocument(bytes, {...summary, size_bytes: bytes.length + 1}));
+});
+test('bounded export reader enforces strict type, exact length and fixed attachment headers', async () => {
+  const source = privateJSON(), size = encoded(source).length;
+  const read = (response, expected = size) => readExportResponse(response, new AbortController().signal, expected);
+  const good = await read(exportResponse(source, {attachment: true, headers: {'Content-Type': 'application/json; charset=utf-8'}}));
+  assert.equal(new TextDecoder().decode(good.bytes), source);
+  for (const headers of [ {'Content-Type': 'text/html'}, {'Content-Type': 'application/json; charset=latin1'}, {'Content-Type': 'application/json; unknown=x'}, {'Content-Length': '0'}, {'Content-Length': '32769'}, {'Content-Length': '-1'}, {'Content-Length': '01'}, {'Content-Length': '1e2'}, {'Content-Length': '2, 2'}, {'Content-Length': String(size + 1)}, {'Content-Length': String(size - 1)}, {'Content-Disposition': 'attachment; filename="other.json"'}, {'Content-Disposition': ''}]) await assert.rejects(read(exportResponse(source, {attachment: true, headers})));
+  const missing = exportResponse(source, {attachment: true}); missing.headers.delete('Content-Length'); await assert.rejects(read(missing));
+  const empty = exportResponse(''); await assert.rejects(read(empty, undefined));
+  const invalidUTF8 = await readExportResponse(exportResponse(new Uint8Array([0xff])), new AbortController().signal);
+  assert.throws(() => exportObject(invalidUTF8.bytes));
+});
+test('export reader cancels oversize and uncooperative late streams without retaining their bytes', async () => {
+  let cancelled = 0, reads = 0;
+  const pending = deferred(), abort = new AbortController();
+  const response = {status: 200, headers: new Headers({'Content-Type': 'application/json', 'Content-Length': '3'}), body: {getReader: () => ({read: () => {reads++; return pending.promise;}, cancel: () => {cancelled++; return Promise.resolve();}})}};
+  const reading = readExportResponse(response, abort.signal); await tick(); abort.abort();
+  await assert.rejects(reading); assert.equal(cancelled, 1); assert.equal(reads, 1);
+  pending.resolve({done: false, value: encoded('late private bytes')}); await tick(); assert.equal(reads, 1);
+  const oversize = {...response, body: {getReader: () => ({read: async () => ({done: false, value: new Uint8Array(32769)}), cancel: async () => {cancelled++;}})}};
+  await assert.rejects(readExportResponse(oversize, new AbortController().signal)); assert.equal(cancelled, 2);
+});
+test('export prepares only a redacted summary, requires unchecked consent and never automatically downloads', async () => {
+  const h = await appHarness(); assert.equal(h.ids.get('playlist-export').disabled, false);
+  await h.ids.get('playlist-export').fire('click');
+  assert.equal(h.ids.get('export-dialog').open, true); assert.equal(h.ids.get('export-confirm').checked, false); assert.equal(h.ids.get('export-prepare').disabled, true);
+  assert.equal(h.exports().length, 1); assert.deepEqual(JSON.parse(h.exports()[0].options.body), {action: 'prepare', expected_session: 'session-one', expected_generation: 7});
+  assert.match(h.ids.get('export-summary').textContent, /My queue · 2 entries · Start at 1 · In order/);
+  assert.doesNotMatch(h.ids.get('export-summary').textContent, /private-one|queue-secret|https:/);
+  await h.ids.get('export-form').fire('submit'); assert.equal(h.exports().length, 1);
+  await consentExport(h); assert.equal(h.ids.get('export-prepare').disabled, false);
+  await h.ids.get('export-form').fire('submit');
+  assert.equal(h.exports().length, 2); assert.deepEqual(JSON.parse(h.exports()[1].options.body), {action: 'download', expected_session: 'session-one', expected_generation: 7, expected_export: revisionID('e'), private_export_confirmed: true});
+  for (const request of h.exports()) {assert.equal(request.options.credentials, 'same-origin'); assert.equal(request.options.mode, 'same-origin'); assert.equal(request.options.redirect, 'error'); assert.equal(request.options.cache, 'no-store'); assert.equal(request.options.referrerPolicy, 'no-referrer'); assert.equal(request.options.headers['X-ORR-CSRF'], 'test-csrf-token');}
+  assert.equal(h.created.length, 1); assert.equal(h.blobs.size, 1);
+  const link = h.ids.get('export-download'); assert.equal(link.tagName, 'A'); assert.equal(link.getAttribute('download'), EXPORT_FILENAME); assert.equal(link.hidden, false);
+  assert.equal(await h.blobs.get(link.getAttribute('href')).text(), privateJSON());
+  assert.match(h.ids.get('export-status').textContent, /Private file ready/); assert.equal(h.syntheticClicks.length, 0);
+  await h.refresh(); await h.ids.get('export-form').fire('submit'); assert.equal(h.exports().length, 2); assert.equal(h.syntheticClicks.length, 0);
+  assert.equal((await link.fire('click')).defaultPrevented, false);
+  assert.match(h.ids.get('export-status').textContent, /Download requested; check your browser/);
+  assert.doesNotMatch(h.ids.get('export-status').textContent, /saved|durabl|backed up/i);
+});
+test('export availability is read-only, works while playing and defers unsupported queues to prepare', async () => {
+  const h = await appHarness();
+  h.setState(state({transport: {...state().transport, phase: 'PLAYING'}, queue: {...state().queue, playlist_edit_reason: 'unsupported_queue'}, actions: {...state().actions, playlist_replace: false, playlist_append: false}})); await h.refresh();
+  assert.equal(h.ids.get('playlist-load').disabled, true); assert.equal(h.ids.get('playlist-export').disabled, false);
+  h.setExport(() => exportResponse({error: 'export_unavailable', message: 'must not echo https://example.test/?token=private', outcome: 'REJECTED'}, {status: 409}));
+  await h.ids.get('playlist-export').fire('click');
+  assert.match(h.ids.get('export-status').textContent, /playlist save-current FILE/); assert.match(h.ids.get('export-status').textContent, /32,768/); assert.doesNotMatch(h.ids.get('export-status').textContent, /example.test|token=private/);
+  assert.equal(h.ids.get('export-prepare').disabled, true); assert.equal(h.ids.get('export-confirm').disabled, true); assert.equal(h.created.length, 0);
+  await h.ids.get('export-close').fire('click');
+  h.setState(state({queue: {...state().queue, count: 0, index: 0, items: []}})); await h.refresh(); await h.ids.get('playlist-export').fire('click'); assert.equal(h.exports().length, 1);
+  h.setState({}); await h.refresh(); assert.equal(h.ids.get('playlist-export').disabled, true);
+});
+test('export duplicate prepare and file requests are suppressed while dismissal stays usable', async () => {
+  for (const action of ['prepare', 'download']) {
+    const h = await appHarness(), pending = deferred();
+    h.setExport(body => body.action === action ? pending.promise : exportResponse(exportSummary()));
+    let request;
+    if (action === 'prepare') request = h.ids.get('playlist-export').fire('click');
+    else {await h.ids.get('playlist-export').fire('click'); await consentExport(h); request = h.ids.get('export-form').fire('submit');}
+    await h.settle();
+    await h.ids.get('playlist-export').fire('click'); await h.ids.get('export-form').fire('submit');
+    assert.equal(h.exports().length, action === 'prepare' ? 1 : 2); assert.equal(h.ids.get('export-close').disabled, false); assert.equal(h.ids.get('export-cancel').disabled, false); assert.equal(h.ids.get('stop').disabled, false);
+    pending.resolve(exportResponse(action === 'prepare' ? exportSummary() : privateJSON(), {attachment: action === 'download'})); await request;
+    assert.equal(h.syntheticClicks.length, 0);
+  }
+});
+test('export errors and malformed responses show only fixed text and never create a Blob', async () => {
+  const scenarios = [
+    () => exportResponse({...exportSummary(), urls: ['https://example.test/?token=private']}),
+    () => exportResponse({...exportSummary(), name: 'private-secret'}),
+    () => exportResponse({...exportSummary(), size_bytes: 32769}),
+    () => exportResponse('{"version":1,"version":1}'),
+    () => exportResponse('https://example.test/?token=private', {headers: {'Content-Type': 'text/html'}}),
+    () => exportResponse(new Uint8Array(32769)),
+    () => exportResponse({outcome: 'REJECTED', error: 'forbidden', message: 'private-secret'}, {status: 403}),
+    () => exportResponse({outcome: 'UNKNOWN', error: 'stale_export', message: 'private-secret'}, {status: 409}),
+    () => {throw new Error('private-secret');}
+  ];
+  for (const scenario of scenarios) {
+    const h = await appHarness(); h.setExport(scenario); const notice = h.ids.get('notice-text').textContent;
+    await h.ids.get('playlist-export').fire('click');
+    assert.match(h.ids.get('export-status').textContent, /Could not prepare/); assert.doesNotMatch(h.ids.get('export-status').textContent, /private-secret|token=private/);
+    assert.equal(h.ids.get('export-summary').textContent, ''); assert.equal(h.ids.get('export-prepare').disabled, true); assert.equal(h.created.length, 0); assert.equal(h.ids.get('notice-text').textContent, notice);
+  }
+  const h = await appHarness(); h.setExport(body => body.action === 'prepare' ? exportResponse(exportSummary()) : exportResponse({error: 'stale_export', outcome: 'REJECTED', message: 'private-secret'}, {status: 409})); await readyExport(h);
+  assert.match(h.ids.get('export-status').textContent, /reopen Export JSON/); assert.doesNotMatch(h.ids.get('export-status').textContent, /private-secret/); assert.equal(h.created.length, 0);
+});
+test('invalid private-file responses cannot become download links or expose source in status', async () => {
+  for (const response of [() => exportResponse(privateJSON()), () => exportResponse(privateJSON(), {attachment: true, headers: {'Content-Length': '32769'}}), () => exportResponse('private-secret', {attachment: true}), () => exportResponse(new Uint8Array(encoded(privateJSON()).length).fill(0xff), {attachment: true}), () => exportResponse(privateJSON({index: 2}), {attachment: true})]) {
+    const h = await appHarness(); h.setExport(body => body.action === 'prepare' ? exportResponse(exportSummary()) : response()); await readyExport(h);
+    assert.match(h.ids.get('export-status').textContent, /Could not prepare/); assert.doesNotMatch(h.ids.get('export-status').textContent, /private-secret|private-one/); assert.equal(h.created.length, 0); assert.equal(h.ids.get('export-download').hidden, true);
+  }
+});
+test('Close, Cancel, Escape, native close and pagehide revoke only owned export URLs and clear consent', async () => {
+  for (const dismiss of ['export-close', 'export-cancel', 'escape', 'native-close', 'pagehide']) {
+    const h = await appHarness(); await readyExport(h); const owned = h.created[0];
+    if (dismiss === 'escape') await h.ids.get('export-dialog').fire('cancel');
+    else if (dismiss === 'native-close') h.ids.get('export-dialog').close();
+    else if (dismiss === 'pagehide') h.pagehide(); else await h.ids.get(dismiss).fire('click');
+    assertExportCleared(h); assert.deepEqual(h.revoked, [owned]);
+    h.pagehide(); h.pageshow(); await h.refresh(); assertExportCleared(h); assert.deepEqual(h.revoked, [owned]);
+    await h.ids.get('export-form').fire('submit'); assert.equal(h.exports().length, 2); assert.equal(h.syntheticClicks.length, 0);
+  }
+});
+test('clearing export consent revokes the prepared private file and requires a new review', async () => {
+  const h = await appHarness(); await readyExport(h); h.ids.get('export-confirm').checked = false; await h.ids.get('export-confirm').fire('change');
+  assert.equal(h.blobs.size, 0); assert.equal(h.revoked.length, 1); assert.equal(h.ids.get('export-download').getAttribute('href'), undefined); assert.match(h.ids.get('export-status').textContent, /Consent cleared/);
+  await consentExport(h); await h.ids.get('export-form').fire('submit'); assert.equal(h.exports().length, 2);
+});
+test('late export fetches after dismissal are aborted and cannot populate a reopened modal', async () => {
+  for (const action of ['prepare', 'download']) for (const dismiss of ['export-close', 'export-cancel', 'escape', 'pagehide']) {
+    const h = await appHarness(), pending = deferred(); let lateCancelled = 0;
+    h.setExport(body => body.action === action ? pending.promise : exportResponse(exportSummary()));
+    let request;
+    if (action === 'prepare') request = h.ids.get('playlist-export').fire('click');
+    else {await h.ids.get('playlist-export').fire('click'); await consentExport(h); request = h.ids.get('export-form').fire('submit');}
+    await h.settle(); const sent = h.exports().at(-1);
+    if (dismiss === 'escape') await h.ids.get('export-dialog').fire('cancel'); else if (dismiss === 'pagehide') h.pagehide(); else await h.ids.get(dismiss).fire('click');
+    assert.equal(sent.options.signal.aborted, true); await request; assertExportCleared(h);
+    h.setExport(() => exportResponse(exportSummary())); await h.ids.get('playlist-export').fire('click'); const status = h.ids.get('export-status').textContent;
+    pending.resolve({body: {cancel: async () => {lateCancelled++;}}}); await h.settle();
+    assert.equal(lateCancelled, 1); assert.equal(h.ids.get('export-dialog').open, true); assert.equal(h.ids.get('export-status').textContent, status); assert.equal(h.ids.get('export-confirm').checked, false); assert.equal(h.created.length, 0);
+  }
+});
+test('late export body reads after dismissal never create a Blob or repopulate private state', async () => {
+  for (const reopen of [false, true]) {
+    const h = await appHarness(), late = deferred(); let cancelled = 0;
+    h.setExport(body => body.action === 'prepare' ? exportResponse(exportSummary()) : {status: 200, headers: new Headers({'Content-Type': 'application/json', 'Content-Length': String(encoded(privateJSON()).length), 'Content-Disposition': `attachment; filename="${EXPORT_FILENAME}"`}), body: {getReader: () => ({read: () => late.promise, cancel: async () => {cancelled++;}})}});
+    await h.ids.get('playlist-export').fire('click'); await consentExport(h); const reading = h.ids.get('export-form').fire('submit'); await h.settle();
+    h.pagehide(); await reading; assertExportCleared(h); assert.equal(cancelled, 1);
+    if (reopen) {h.setExport(() => exportResponse(exportSummary())); await h.ids.get('playlist-export').fire('click');}
+    late.resolve({done: false, value: encoded(privateJSON())}); await h.settle(); assert.equal(h.created.length, 0);
+    if (reopen) {assert.equal(h.ids.get('export-dialog').open, true); assert.equal(h.ids.get('export-confirm').checked, false);} else assertExportCleared(h);
+  }
+});
+test('export timeout covers both ignored-abort fetch and body reads without retry or command notices', async () => {
+  for (const stream of [false, true]) {
+    const h = await appHarness(), pending = deferred(); let cancelled = 0;
+    h.setExport(() => stream ? {status: 200, headers: new Headers({'Content-Type': 'application/json', 'Content-Length': '3'}), body: {getReader: () => ({read: () => pending.promise, cancel: async () => {cancelled++;}})}} : pending.promise);
+    const notice = h.ids.get('notice-text').textContent, preparing = h.ids.get('playlist-export').fire('click'); await h.settle();
+    const timer = [...h.timers.values()].find(item => item.delay === 20000); assert.ok(timer); timer.callback(); await preparing;
+    assert.equal(h.exports()[0].options.signal.aborted, true); assert.match(h.ids.get('export-status').textContent, /Could not prepare/); assert.equal(h.created.length, 0); assert.equal(h.ids.get('notice-text').textContent, notice); assert.equal(h.ids.get('stop').disabled, false);
+    await h.refresh(); await h.ids.get('export-form').fire('submit'); assert.equal(h.exports().length, 1); assert.equal([...h.timers.values()].filter(item => item.delay === 20000).length, 0);
+    if (stream) {assert.equal(cancelled, 1); pending.resolve({done: false, value: encoded('old')});} else pending.resolve(exportResponse(exportSummary()));
+    await h.settle(); assert.equal(h.created.length, 0);
+  }
+});
+test('known session, generation and same-generation queue edits latch export staleness and revoke ready files', async () => {
+  for (const changed of [state({session_id: 'session-two'}), state({generation: 8}), state({queue: {...state().queue, mode: 'repeat-all'}}), state({queue: {...state().queue, name: 'Changed'}}), state({queue: {...state().queue, index: 2}}), state({queue: {...state().queue, count: 1, items: [state().queue.items[0]]}})]) {
+    const h = await appHarness(); await readyExport(h); h.setState(changed); await h.refresh();
+    assert.equal(h.blobs.size, 0); assert.equal(h.revoked.length, 1); assert.equal(h.ids.get('export-confirm').checked, false); assert.equal(h.ids.get('export-download').hidden, true); assert.match(h.ids.get('export-status').textContent, /queue or renderer session changed/);
+    h.setState(state()); await h.refresh(); await consentExport(h); await h.ids.get('export-form').fire('submit'); assert.equal(h.exports().length, 2); assert.equal(h.ids.get('export-prepare').disabled, true); assert.equal((await h.ids.get('export-download').fire('click')).defaultPrevented, true);
+  }
+});
+test('known context changes abort pending export reads and refuse late old-session results', async () => {
+  for (const action of ['prepare', 'download']) {
+    const h = await appHarness(), pending = deferred(); h.setExport(body => body.action === action ? pending.promise : exportResponse(exportSummary()));
+    let request;
+    if (action === 'prepare') request = h.ids.get('playlist-export').fire('click'); else {await h.ids.get('playlist-export').fire('click'); await consentExport(h); request = h.ids.get('export-form').fire('submit');}
+    await h.settle(); h.setState(state({session_id: 'restarted', csrf_token: 'new-token'})); await h.refresh(); await request;
+    assert.equal(h.exports().at(-1).options.signal.aborted, true); assert.match(h.ids.get('export-status').textContent, /session changed/);
+    pending.resolve(exportResponse(action === 'prepare' ? exportSummary() : privateJSON(), {attachment: action === 'download'})); await h.settle(); assert.equal(h.created.length, 0);
+    await h.ids.get('export-close').fire('click'); h.setExport(() => exportResponse(exportSummary(state({session_id: 'restarted'})))); await h.ids.get('playlist-export').fire('click'); assert.equal(h.exports().at(-1).options.headers['X-ORR-CSRF'], 'new-token');
+  }
+});
+test('metadata-only polls preserve a ready export but stale readback disables its anchor', async () => {
+  const h = await appHarness(); await readyExport(h); const owned = h.created[0];
+  h.setState(state({media: {...state().media, title: 'New metadata'}, queue: {...state().queue, items: state().queue.items.map(item => ({...item, title: 'New title'}))}})); await h.refresh();
+  assert.equal(h.ids.get('export-download').getAttribute('href'), owned); assert.equal(h.revoked.length, 0);
+  h.setState({}); await h.refresh(); assert.equal(h.ids.get('export-download').getAttribute('href'), undefined); assert.equal(h.ids.get('export-download').hidden, true); assert.equal((await h.ids.get('export-download').fire('click')).defaultPrevented, true);
+  h.setState(state()); await h.refresh(); assert.equal(h.ids.get('export-download').getAttribute('href'), owned); assert.equal(h.exports().length, 2);
+});
+test('delayed export close events and old read completions cannot erase a new dialog or its Blob', async () => {
+  const h = await appHarness(), dialog = h.ids.get('export-dialog'); dialog.close = () => {dialog.open = false;};
+  await readyExport(h); const old = h.created[0]; await h.ids.get('export-close').fire('click'); await readyExport(h); const current = h.created[1];
+  await dialog.fire('close'); assert.equal(dialog.open, true); assert.equal(h.ids.get('export-confirm').checked, true); assert.equal(h.ids.get('export-download').getAttribute('href'), current); assert.deepEqual(h.revoked, [old]); assert.equal(h.blobs.size, 1);
+  await h.ids.get('export-close').fire('click'); assertExportCleared(h); assert.deepEqual(h.revoked, [old, current]);
+});
+test('export leaves pending, Stop and UNKNOWN command outcomes untouched and never dispatches playback', async () => {
+  for (const kind of ['pending', 'stop', 'unknown']) {
+    const h = await appHarness(), pending = deferred(); let command;
+    if (kind === 'pending') {h.setPost(() => pending.promise); command = h.ids.get('play').fire('click'); await h.settle(); await h.refresh();}
+    else if (kind === 'stop') await h.ids.get('stop').fire('click');
+    else {h.setPost(() => {throw new Error('lost');}); await h.ids.get('stop').fire('click');}
+    const notice = h.ids.get('notice-text').textContent, badge = h.ids.get('notice-kind').textContent;
+    await readyExport(h); assert.equal(h.ids.get('notice-text').textContent, notice); assert.equal(h.ids.get('notice-kind').textContent, badge);
+    assert.equal(h.requests.filter(item => item.url.endsWith('/command')).length, 1); assert.equal(h.ids.get('export-close').disabled, false);
+    await h.ids.get('export-close').fire('click');
+    if (kind === 'pending') {h.setPost(() => ({request_acknowledged: true})); await h.ids.get('stop').fire('click'); pending.reject(new Error('lost')); await command; assert.match(h.ids.get('notice-text').textContent, /^Stop:/); assert.match(h.ids.get('notice-text').textContent, /Earlier request outcome unknown/);}
+    else assert.equal(h.ids.get('notice-text').textContent, notice);
+  }
+});
+test('export markup provides the complete private warning, fixed download name and modal Stop guidance', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/index.html'), 'utf8');
+  const modal = html.slice(html.indexOf('<dialog id="export-dialog"'), html.indexOf('<dialog id="dsp-dialog"'));
+  for (const phrase of ['original source URLs', 'original queue name', 'private tokens', 'Keep it private', 'Signed links can expire', 'track metadata', 'playback position and state', 'provider and account state', 'shuffle history', 'No media is fetched', 'playability is not checked', 'Close this dialog first', 'including Stop', 'Prepare private file', 'Download JSON', '32,768', 'nested JSON escaping']) assert.ok(modal.includes(phrase), phrase);
+  assert.match(modal, /<input id="export-confirm" type="checkbox" disabled>/); assert.doesNotMatch(modal, /<input[^>]*\bchecked\b/);
+  assert.match(modal, /<a id="export-download"[^>]*download="open-room-renderer-playlist.json" hidden>/);
+  const source = fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/app.js'), 'utf8');
+  assert.doesNotMatch(source, /\.click\(|localStorage|sessionStorage|clipboard|console\./);
+});
+
+test('private export retains server-validated scoped IPv6 references without WHATWG navigation parsing', async () => {
+  const source = privateJSON({urls: ['http://[fe80::1%25eth0]/audio.mp3', 'https://example.test/a?case=%2f&case=%2F']}), bytes = encoded(source), summary = exportSummary(state(), {size_bytes: bytes.length});
+  assert.equal(validateExportDocument(bytes, summary), bytes);
+  const h = await appHarness(); h.setExport(body => body.action === 'prepare' ? exportResponse(summary) : exportResponse(source, {attachment: true})); await readyExport(h);
+  assert.equal(h.blobs.size, 1); assert.equal(await h.blobs.values().next().value.text(), source); assert.equal(h.syntheticClicks.length, 0);
+});
+
+test('private export preserves server-valid U+FEFF queue names while rejecting a document BOM', async () => {
+  for (const name of ['\ufeffQueue', '\ufeff']) {
+    const source = privateJSON({name}), bytes = encoded(source), summary = exportSummary(state(), {size_bytes: bytes.length});
+    assert.equal(validateExportDocument(bytes, summary), bytes);
+    assert.throws(() => exportObject(encoded('\ufeff' + source)));
+    const h = await appHarness(); h.setExport(body => body.action === 'prepare' ? exportResponse(summary) : exportResponse(source, {attachment: true})); await readyExport(h);
+    assert.equal(await h.blobs.values().next().value.text(), source); assert.equal(h.syntheticClicks.length, 0);
+  }
+});
+
+test('export reader accepts exact 32,768-byte bounded streaming but rejects a one-byte overflow', async () => {
+  for (const size of [32768, 32769]) {
+    let part = 0, cancelled = 0;
+    const response = {status: 200, headers: new Headers({'Content-Type': 'application/json', 'Content-Length': '32768'}), body: {getReader: () => ({read: async () => ++part === 1 ? {done: false, value: new Uint8Array(16384)} : part === 2 ? {done: false, value: new Uint8Array(size - 16384)} : {done: true}, cancel: async () => {cancelled++;}})}};
+    const reading = readExportResponse(response, new AbortController().signal);
+    if (size === 32768) {assert.equal((await reading).bytes.length, 32768); assert.equal(cancelled, 0);}
+    else {await assert.rejects(reading); assert.equal(cancelled, 1);}
+  }
+});
+test('a private response arriving during unavailable readback is discarded rather than restored later', async () => {
+  const h = await appHarness(), pending = deferred(); h.setExport(body => body.action === 'prepare' ? exportResponse(exportSummary()) : pending.promise);
+  await h.ids.get('playlist-export').fire('click'); await consentExport(h); const preparing = h.ids.get('export-form').fire('submit'); await h.settle();
+  h.setState({}); await h.refresh(); pending.resolve(exportResponse(privateJSON(), {attachment: true})); await preparing;
+  assert.equal(h.created.length, 0); h.setState(state()); await h.refresh();
+  assert.match(h.ids.get('export-status').textContent, /Could not prepare/); assert.equal(h.ids.get('export-download').hidden, true);
+  await h.ids.get('export-form').fire('submit'); assert.equal(h.exports().length, 2);
+});
+test('an old private read cannot revoke or replace a newer dialog-owned Blob', async () => {
+  const h = await appHarness(), late = deferred();
+  h.setExport(body => body.action === 'prepare' ? exportResponse(exportSummary()) : {status: 200, headers: new Headers({'Content-Type': 'application/json', 'Content-Length': String(encoded(privateJSON()).length), 'Content-Disposition': `attachment; filename="${EXPORT_FILENAME}"`}), body: {getReader: () => ({read: () => late.promise, cancel: async () => {}})}});
+  await h.ids.get('playlist-export').fire('click'); await consentExport(h); const old = h.ids.get('export-form').fire('submit'); await h.settle();
+  await h.ids.get('export-close').fire('click'); await old; h.setExport(null); await readyExport(h); const owned = h.created[0];
+  late.resolve({done: false, value: encoded(privateJSON({name: 'Old private document'}))}); await h.settle();
+  assert.equal(h.ids.get('export-download').getAttribute('href'), owned); assert.equal(h.created.length, 1); assert.equal(h.revoked.length, 0); assert.equal(await h.blobs.get(owned).text(), privateJSON());
 });

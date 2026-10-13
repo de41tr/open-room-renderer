@@ -284,9 +284,10 @@ async def test_http_import_is_stopped_only_acknowledges_without_fetch_and_does_n
         assert not api.mpv.calls
         assert not any(private in json.dumps(after) + json.dumps(result) + caplog.text
                        for private in ["SECRET", "media.example.test", "PRIVATE TITLE", "second.wav"])
-        for route in ("/playlist", "/playlist/export", "/queue/playlist"):
+        for route, expected_status in (("/playlist", 404), ("/playlist/export", 405),
+                                       ("/queue/playlist", 404)):
             async with session.get(base + PREFIX + route) as response:
-                assert response.status == 404
+                assert response.status == expected_status
 
 
 async def test_http_append_remove_move_preserve_canonical_metadata_and_reset_position_shuffle(api):

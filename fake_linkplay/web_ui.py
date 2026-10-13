@@ -30,6 +30,7 @@ from .mpv_backend import BackendError
 from .persistence import AtomicWriteCommittedError, validate_eq_records
 from .queue import PlaybackQueue
 from .queue_protocol import MODES, validate_url
+from .queue_playlist import encode_current_playlist
 from .web_playlists import (PLAYLIST_ACTIONS, WebPlaylistError, availability as playlist_availability,
                             prepare_edit, prepare_source, prepare_urls)
 from .radio import RadioResolutionError
@@ -74,6 +75,13 @@ _SCHEMAS = {
     "dsp_preset_rename": {"expected_dsp", "preset_id", "name"},
     "dsp_preset_delete": {"expected_dsp", "preset_id"},
 }
+_EXPORT_FILENAME = "open-room-renderer-playlist.json"
+_EXPORT_DOMAIN = b"orr:web-playlist-export:v1\0"
+_EXPORT_SCHEMAS = {
+    "prepare": {"action", "expected_session", "expected_generation"},
+    "download": {"action", "expected_session", "expected_generation", "expected_export",
+                 "private_export_confirmed"},
+}
 _DSP_TOKEN = re.compile(r"[0-9a-f]{64}\Z")
 _BUILTIN_PRESETS = ("Flat", "Bass Boost", "Treble Boost")
 _ID = re.compile(r"(?:[0-9a-f]{32}|configured:[1-9][0-9]{0,5})\Z")
@@ -103,6 +111,16 @@ class WebCommand:
     from_index: int | None = None
     to_index: int | None = None
     prepared_queue: PlaybackQueue | None = field(default=None, repr=False)
+
+
+@dataclass(frozen=True)
+class WebPlaylistExport:
+    """An explicit private read, kept outside playback command dispatch."""
+    action: str
+    expected_session: str
+    expected_generation: int
+    expected_export: str = ""
+    private_export_confirmed: bool = False
 
 
 @dataclass(frozen=True)
@@ -251,6 +269,48 @@ def _decode_request(encoded: bytes) -> dict[str, object]:
         raise WebAdmissionError() from None
 
 
+def decode_playlist_export(encoded: bytes) -> WebPlaylistExport:
+    try:
+        payload = _decode_request(encoded)
+        action = payload["action"]
+        if action not in _EXPORT_SCHEMAS or payload.keys() != _EXPORT_SCHEMAS[action]:
+            raise ValueError
+        _integer(payload["expected_generation"], 0, MAX_SAFE_INTEGER)
+        session = payload["expected_session"]
+        if not isinstance(session, str) or not session.isascii():
+            raise ValueError
+        if action == "download":
+            revision = payload["expected_export"]
+            if not isinstance(revision, str) or not _DSP_TOKEN.fullmatch(revision):
+                raise ValueError
+            if payload["private_export_confirmed"] is not True:
+                raise ValueError
+        return WebPlaylistExport(**payload)
+    except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError):
+        raise WebAdmissionError() from None
+
+
+def prepare_playlist_export(queue: PlaybackQueue) -> tuple[bytes, PlaybackQueue]:
+    """Keep codec bytes intact and require a worst-generation Web round trip.
+
+    The nested JSON text and complete command envelope, rather than just the
+    downloaded file, must fit the unchanged browser request limit. No I/O.
+    """
+    try:
+        encoded = encode_current_playlist(queue)
+        source = {"format": "json", "text": encoded.decode("utf-8")}
+        restored = prepare_source(source)
+        envelope = {"action": "playlist_replace", "expected_generation": MAX_SAFE_INTEGER,
+                    "source": source}
+        size = len(json.dumps(envelope, ensure_ascii=False, allow_nan=False,
+                              separators=(",", ":")).encode("utf-8"))
+        if size > MAX_REQUEST_BYTES:
+            raise ValueError
+        return encoded, restored
+    except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError):
+        raise WebAdmissionError("export_unavailable", 409) from None
+
+
 def decode_command(encoded: bytes) -> WebCommand:
     try:
         payload = _decode_request(encoded)
@@ -343,6 +403,7 @@ class WebControlApi:
         # Keyed presentation tokens conceal raw plugin/name identifiers; they
         # are derived views, not a second revision counter or state authority.
         self._dsp_key = secrets.token_bytes(32)
+        self._export_key = secrets.token_bytes(32)
 
     def _dsp_digest(self, kind: str, value: object) -> str:
         encoded = json.dumps([kind, value], sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -385,6 +446,8 @@ class WebControlApi:
                effect: str | None = None) -> web.Response:
         messages = {
             "stale_generation": "Selection changed. Refresh before choosing again.",
+            "export_unavailable": "This queue cannot be exported for browser import. For supported larger queues, use playlist save-current FILE in the CLI.",
+            "stale_export": "The queue or renderer session changed. Reopen Export and review it again.",
             "stale_dsp": "DSP settings or saved presets changed. Refresh and review before choosing again.",
             "preset_conflict": "That preset name already exists. Choose another name.",
             "forbidden": "Browser request was not admitted.",
@@ -491,6 +554,26 @@ class WebControlApi:
         except TimeoutError:
             raise WebAdmissionError("request_timeout", 408) from None
         return encoded
+
+    def _playlist_export(self, request: WebPlaylistExport) -> web.Response:
+        """Capture once after body read; no await, cache, dispatch or state sync."""
+        state = self._current_state()
+        queue = state.queue
+        if (not secrets.compare_digest(request.expected_session, self._session_id)
+                or request.expected_generation != state.generation):
+            raise WebAdmissionError("stale_export", 409)
+        encoded, restored = prepare_playlist_export(queue)
+        revision = hmac.new(self._export_key, _EXPORT_DOMAIN + encoded, hashlib.sha256).hexdigest()
+        if request.action == "download":
+            if not secrets.compare_digest(request.expected_export, revision):
+                raise WebAdmissionError("stale_export", 409)
+            return web.Response(body=encoded, content_type="application/json", headers={
+                **_HEADERS, "Content-Length": str(len(encoded)),
+                "Content-Disposition": f'attachment; filename="{_EXPORT_FILENAME}"'})
+        return web.json_response({"version": 1, "session_id": self._session_id,
+            "generation": state.generation, "revision": revision, "name": _queue_label(restored.name),
+            "count": restored.count, "index": restored.index, "mode": _MODE_NAMES[restored.loop],
+            "size_bytes": len(encoded), "filename": _EXPORT_FILENAME}, headers=_HEADERS)
 
     def snapshot(self) -> dict[str, object]:
         """Detach one complete projection without awaiting or performing I/O."""
@@ -612,11 +695,13 @@ class WebControlApi:
                 self._bodyless(request)
                 value = self.snapshot() if path.endswith("/state") else self.favorites_snapshot()
                 return web.json_response(value, headers=_HEADERS)
-            if path != PREFIX + "/command":
+            if path not in {PREFIX + "/command", PREFIX + "/playlist/export"}:
                 raise WebAdmissionError("not_found", 404)
             if request.method != "POST":
                 raise WebAdmissionError("method_not_allowed", 405)
             encoded = await self._body(request, origin)
+            if path == PREFIX + "/playlist/export":
+                return self._playlist_export(decode_playlist_export(encoded))
             command = self._admit(decode_command(encoded))
             dispatched = True
             result = await self._dispatch(command)

@@ -66,6 +66,86 @@
   const PLAYLIST_ACTIONS = Object.freeze(["playlist_replace", "playlist_append", "playlist_remove", "playlist_move"]);
   const MAX_REQUEST_BYTES = 32768;
   function requestBytes(body) { return new TextEncoder().encode(JSON.stringify(body)).length; }
+  const EXPORT_FILENAME = "open-room-renderer-playlist.json";
+  function exportIdentity(state) {
+    return JSON.stringify([state.session_id, state.generation, state.queue.name, state.queue.count, state.queue.index, state.queue.mode]);
+  }
+  function exportObject(bytes) {
+    if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > MAX_REQUEST_BYTES) throw new Error("Invalid export response");
+    const source = new TextDecoder("utf-8", {fatal: true, ignoreBOM: true}).decode(bytes), value = JSON.parse(source);
+    if (!isObject(value)) throw new Error("Invalid export response");
+    // The export schemas have one object with scalar fields (plus a URL array).
+    // Tokenize valid JSON strings intact so duplicate keys cannot be hidden by
+    // escapes. Nested objects are rejected by the exact schema validators.
+    const tokens = source.match(/"(?:\\.|[^"\\])*"|[{}\[\],:]|[^ \t\r\n{}\[\],:]+/g), keys = new Set();
+    tokens.forEach((token, index) => {
+      if (/^-?[0-9]/.test(token) && !/^(0|[1-9][0-9]*)$/.test(token)) throw new Error("Invalid export response");
+      if (tokens[index + 1] !== ":") return;
+      const key = JSON.parse(token);
+      if (keys.has(key)) throw new Error("Invalid export response");
+      keys.add(key);
+    });
+    return value;
+  }
+  function exactFields(value, fields) { return isObject(value) && Object.keys(value).length === fields.length && fields.every(key => Object.hasOwn(value, key)); }
+  function validateExportSummary(value, state) {
+    if (!exactFields(value, ["version", "session_id", "generation", "revision", "name", "count", "index", "mode", "size_bytes", "filename"]) || value.version !== 1 || value.session_id !== state.session_id || value.generation !== state.generation || !integer(value.generation) || !opaqueID(value.revision) || value.filename !== EXPORT_FILENAME || !integer(value.size_bytes) || value.size_bytes < 1 || value.size_bytes > MAX_REQUEST_BYTES || !string(value.name) || value.name !== state.queue.name || value.count !== state.queue.count || !integer(value.count) || value.count < 1 || value.count > 1000 || value.index !== state.queue.index || !integer(value.index) || value.index < 1 || value.index > value.count || value.mode !== state.queue.mode || !Object.hasOwn(MODES, value.mode)) throw new Error("Invalid export summary");
+    return value;
+  }
+  function validateExportDocument(bytes, summary) {
+    const value = exportObject(bytes);
+    if (bytes.length !== summary.size_bytes || !exactFields(value, ["version", "name", "index", "mode", "urls"]) || value.version !== 1 || !string(value.name) || !value.name.length || /[\x00-\x1f\x7f\ud800-\udfff\ufffe\uffff]/u.test(value.name) || new TextEncoder().encode(value.name).length > 256 || value.index !== summary.index || value.mode !== summary.mode || !Array.isArray(value.urls) || value.urls.length !== summary.count || value.urls.some(url => !string(url) || !url.length || /[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]/u.test(url))) throw new Error("Invalid export document");
+    // Validate the authored schema without rewriting the codec bytes or using
+    // WHATWG URL parsing: the server alone checks URL/import eligibility,
+    // including references (such as scoped IPv6) browsers cannot navigate.
+    return bytes;
+  }
+  function exportFailure(status, value) {
+    if (status === 409 && exactFields(value, ["error", "message", "outcome"]) && value.outcome === "REJECTED") {
+      if (value.error === "export_unavailable") return "This queue cannot be exported here. Use playlist save-current FILE in the CLI for unsupported or larger queues. Web import still requires the complete escaped request to fit 32,768 bytes.";
+      if (value.error === "stale_export") return "The queue or renderer session changed. Close this dialog, reopen Export JSON and review it again.";
+    }
+    return "Could not prepare the private export. Close this dialog and review current state before trying again. No download was started.";
+  }
+  async function readExportResponse(response, signal, expectedSize) {
+    let reader = null, complete = false, onAbort;
+    const aborted = new Promise((_, reject) => {
+      onAbort = () => reject(new Error("Export cancelled"));
+      signal.addEventListener("abort", onAbort, {once: true});
+    });
+    const chunks = [];
+    try {
+      if (signal.aborted) throw new Error("Export cancelled");
+      const length = response.headers.get("Content-Length"), type = response.headers.get("Content-Type") || "";
+      if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(type) || !/^(0|[1-9][0-9]*)$/.test(length || "")) throw new Error("Invalid export response");
+      const size = Number(length);
+      if (!integer(size) || size < 1 || size > MAX_REQUEST_BYTES) throw new Error("Invalid export size");
+      if (response.status === 200 && expectedSize !== undefined && (size !== expectedSize || response.headers.get("Content-Disposition") !== `attachment; filename="${EXPORT_FILENAME}"`)) throw new Error("Invalid export attachment");
+      reader = response.body.getReader();
+      let total = 0;
+      while (true) {
+        const {done, value} = await Promise.race([reader.read(), aborted]);
+        if (signal.aborted) throw new Error("Export cancelled");
+        if (done) break;
+        if (!(value instanceof Uint8Array) || value.length > size - total) throw new Error("Invalid export size");
+        total += value.length; if (value.length) chunks.push(value);
+      }
+      if (total !== size) throw new Error("Invalid export size");
+      const bytes = new Uint8Array(total); let offset = 0;
+      chunks.forEach(chunk => { bytes.set(chunk, offset); offset += chunk.length; });
+      complete = true;
+      return {status: response.status, bytes};
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+      if (!complete) {
+        // Do not await cancellation: an uncooperative read must not block Close
+        // or the independent timeout. Late read results are never retained.
+        if (reader) reader.cancel().catch(() => {});
+        else if (response.body) response.body.cancel().catch(() => {});
+      }
+      chunks.length = 0;
+    }
+  }
   function playlistAvailable(state, action) {
     if (!state || !PLAYLIST_ACTIONS.includes(action) || state.transport.status !== "CONFIRMED" || state.transport.phase !== "STOPPED" || state.actions[action] !== true) return false;
     if (action === "playlist_replace") return true;
@@ -283,5 +363,5 @@
       return result;
     }
   }
-  return {Controller, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
+  return {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
 });

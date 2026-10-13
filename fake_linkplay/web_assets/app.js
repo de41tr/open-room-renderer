@@ -1,13 +1,13 @@
 /* Same-origin UI. Canonical snapshots are the only source of displayed state. */
 (function () {
   "use strict";
-  const {Controller, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
+  const {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
   const $ = id => document.getElementById(id);
   const drafts = {seek: false, volume: false, mode: false, balance: false};
   let snapshot = null, queueSignature = "", favoritesSignature = "", artworkURL = null;
   let dialogContext = null, dialogSerial = 0, pollTimer = null, pollRun = 0;
   const soundDraft = new DspDraft();
-  let playlistDraft = null, queueEditing = null;
+  let playlistDraft = null, queueEditing = null, exportContext = null;
   const queueIntents = new WeakMap();
   let presetSignature = "", presetContext = null, presetSerial = 0, soundSubmission = null;
   const text = (id, value) => { const element = $(id); if (element.textContent !== value) element.textContent = value; };
@@ -109,7 +109,7 @@
     text("eq", !dspKnown || dsp.eq_enabled === null ? "EQ unavailable" : dsp.eq_enabled ? "Bypass EQ" : "Enable EQ");
     $("eq").setAttribute("aria-pressed", dspKnown && dsp.eq_enabled === true ? "true" : "false");
     $("eq").disabled = !ready || !dspKnown || dsp.eq_enabled === null;
-    renderSoundEditor(); renderQueue(ready); renderPlaylist(); renderFavorites(ready);
+    renderSoundEditor(); renderQueue(ready); renderPlaylist(); renderExport(); renderFavorites(ready);
     text("freshness", control.lastReadAt ? `${control.fresh ? "State received" : "Last state received"} ${new Date(control.lastReadAt).toLocaleTimeString()}. Playback status comes from the renderer.` : "No state received yet.");
     $("add-favorite").disabled = !ready || !control.favoritesFresh;
     $("save-current").disabled = !ready || !control.favoritesFresh || !snapshot.actions.save_current;
@@ -337,6 +337,128 @@
     if (result.kind === "acknowledged" && control.fresh && snapshot.session_id === draft.session && snapshot.generation !== draft.generation && snapshot.transport.status === "CONFIRMED" && snapshot.transport.phase === "STOPPED") closePlaylist();
     else { draft.status = result.kind === "acknowledged" ? "Request acknowledged, but the stopped queue change has not been verified. Close this dialog and review the current queue before another request." : `${result.kind.toUpperCase()} · ${result.text}`; renderPlaylist(); }
   });
+  // A private export is a separate read, never a playback command or notice.
+  // The modal owns its request and Blob URL; neither survives dismissal.
+  function releaseExportFile(context) {
+    if (context?.url) { URL.revokeObjectURL(context.url); context.url = null; }
+    $("export-download").removeAttribute("href"); $("export-download").hidden = true;
+  }
+  function clearExport() {
+    const context = exportContext; exportContext = null;
+    context?.abort?.abort(); releaseExportFile(context);
+    $("export-confirm").checked = false;
+    text("export-summary", ""); text("export-status", "");
+    $("export-prepare").disabled = true; $("export-confirm").disabled = true;
+  }
+  function closeExport() { clearExport(); $("export-dialog").close(); }
+  function exportCurrent(context) {
+    return exportContext === context && $("export-dialog").open && !context.stale && control.fresh && snapshot && context.identity === exportIdentity(snapshot);
+  }
+  function renderExport() {
+    $("playlist-export").disabled = !control.fresh || !snapshot?.queue.count;
+    const context = exportContext;
+    if (!context) return;
+    if (control.fresh && context.identity !== exportIdentity(snapshot) && !context.stale) {
+      context.stale = true; context.summary = null; context.abort?.abort(); releaseExportFile(context);
+      $("export-confirm").checked = false;
+      context.status = "The queue or renderer session changed. Close this dialog, reopen Export JSON and review it again.";
+    }
+    const ready = exportCurrent(context), summary = context.summary;
+    text("export-summary", summary ? `${summary.name} · ${summary.count} ${summary.count === 1 ? "entry" : "entries"} · Start at ${summary.index} · ${MODES[summary.mode]} · ${summary.size_bytes.toLocaleString()} UTF-8 file bytes` : "");
+    text("export-status", !control.fresh && !context.stale ? "Current state is unavailable. Wait for fresh state or close this dialog." : context.status);
+    $("export-confirm").disabled = !ready || !summary || context.pending || context.failed;
+    $("export-prepare").disabled = !ready || !summary || context.pending || context.failed || context.sent || !$("export-confirm").checked;
+    const downloadable = ready && context.url && $("export-confirm").checked;
+    $("export-download").hidden = !downloadable;
+    if (downloadable) $("export-download").setAttribute("href", context.url);
+    else $("export-download").removeAttribute("href");
+  }
+  async function fetchExport(context, body, expectedSize) {
+    const abort = new AbortController(); context.abort = abort;
+    const timer = window.setTimeout(() => abort.abort(), 20000);
+    let onAbort;
+    const aborted = new Promise((_, reject) => {
+      onAbort = () => reject(new Error("Export cancelled"));
+      abort.signal.addEventListener("abort", onAbort, {once: true});
+    });
+    try {
+      const fetching = fetch("/orr/v1/web/playlist/export", {
+        method: "POST", credentials: "same-origin", mode: "same-origin", redirect: "error", cache: "no-store", referrerPolicy: "no-referrer",
+        headers: {"Accept": "application/json", "Content-Type": "application/json", "X-ORR-CSRF": context.state.csrf_token},
+        body: JSON.stringify(body), signal: abort.signal
+      }).then(response => {
+        // A late fetch double (or adapter) may ignore abort. Discard its stream.
+        if (abort.signal.aborted) { response.body?.cancel().catch(() => {}); throw new Error("Export cancelled"); }
+        return response;
+      });
+      const response = await Promise.race([fetching, aborted]);
+      return await readExportResponse(response, abort.signal, expectedSize);
+    } finally {
+      abort.signal.removeEventListener("abort", onAbort); window.clearTimeout(timer);
+      if (context.abort === abort) context.abort = null;
+    }
+  }
+  async function prepareExport(context, download) {
+    context.pending = true;
+    if (download) context.sent = true;
+    context.status = download ? "Preparing the private file…" : "Reading a redacted queue summary…";
+    renderExport();
+    const body = {action: download ? "download" : "prepare", expected_session: context.state.session_id, expected_generation: context.state.generation};
+    if (download) { body.expected_export = context.summary.revision; body.private_export_confirmed = true; }
+    let bytes;
+    try {
+      const response = await fetchExport(context, body, download ? context.summary.size_bytes : undefined);
+      bytes = response.bytes;
+      if (!exportCurrent(context)) throw new Error("Export context changed");
+      if (response.status !== 200) {
+        context.failed = true; context.status = exportFailure(response.status, exportObject(bytes));
+      } else if (download) {
+        validateExportDocument(bytes, context.summary);
+        context.url = URL.createObjectURL(new Blob([bytes], {type: "application/json"}));
+        context.status = "Private file ready. Choose Download JSON to request a browser download.";
+      } else {
+        context.summary = validateExportSummary(exportObject(bytes), context.state);
+        context.status = "Review the summary and privacy warning before preparing the private file.";
+      }
+    } catch (_) {
+      if (exportContext === context && !context.stale) { context.failed = true; context.status = exportFailure(); }
+    } finally {
+      if (bytes) bytes.fill(0); // Blob construction copies the unchanged bytes.
+      context.pending = false;
+      if (exportContext === context) renderExport();
+    }
+  }
+  $("playlist-export").addEventListener("click", () => {
+    if (!control.fresh || !snapshot?.queue.count || $("export-dialog").open) return;
+    clearExport();
+    exportContext = {state: snapshot, identity: exportIdentity(snapshot), summary: null, pending: false, failed: false, sent: false, stale: false, url: null, abort: null, status: ""};
+    $("export-dialog").showModal(); $("export-close").focus();
+    return prepareExport(exportContext, false);
+  });
+  ["export-close", "export-cancel"].forEach(id => $(id).addEventListener("click", closeExport));
+  $("export-dialog").addEventListener("cancel", event => { event.preventDefault(); closeExport(); });
+  $("export-dialog").addEventListener("close", () => { if (!$("export-dialog").open) clearExport(); });
+  $("export-confirm").addEventListener("change", () => {
+    if (exportContext && !$("export-confirm").checked) {
+      releaseExportFile(exportContext);
+      if (exportContext.sent) { exportContext.failed = true; exportContext.abort?.abort(); exportContext.status = "Consent cleared. Close this dialog and review the export again if needed."; }
+    }
+    renderExport();
+  });
+  $("export-form").addEventListener("submit", event => {
+    event.preventDefault(); renderExport();
+    const context = exportContext;
+    if (!context || !exportCurrent(context) || context.pending || context.failed || context.sent || !context.summary || !$("export-confirm").checked) return;
+    return prepareExport(context, true);
+  });
+  $("export-download").addEventListener("click", event => {
+    const context = exportContext;
+    if (!context || !exportCurrent(context) || !context.url || !$("export-confirm").checked) { event.preventDefault(); renderExport(); return; }
+    // Leave the real anchor's default action to this user click. A delayed
+    // response never clicks it, and a click does not prove a durable save.
+    context.status = "Download requested; check your browser’s downloads. Keep the private file safe.";
+    renderExport();
+  });
   function renderFavorites(ready) {
     text("favorites-count", String(control.favorites.length));
     $("favorites-empty").hidden = control.favorites.length > 0;
@@ -534,7 +656,7 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
   // Scrub private dialog input before navigation/BFCache, even if already closed.
   // Only local drafts are dismissed; sent commands and their outcomes stay live.
-  window.addEventListener("pagehide", () => { closePlaylist(); closeFavorite(); closePreset(); });
+  window.addEventListener("pagehide", () => { closePlaylist(); closeFavorite(); closePreset(); closeExport(); });
   window.addEventListener("online", () => poll());
   window.addEventListener("offline", () => { control.fresh = false; control.favoritesFresh = false; render(); });
   poll();
