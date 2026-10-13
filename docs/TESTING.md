@@ -1,5 +1,28 @@
 # Test evidence and limits
 
+## Latest integrated operator package and unresolved hosted failure
+
+Root Spotify/diagnostic/config/CLI/migration/installer integration passes **279 +1
+explicit native skip** on both Python 3.12 and 3.11 (**9.51s** each). The subsequent
+separate native executable-path fix passes **167 +1 native skip** on both
+interpreters (**1.47s/1.23s**), with independent review. Static systemd verification
+rejects both literal quote types/DEL in executable prefixes while accepting
+spaces/percent and quoted config arguments. New install/destination preflight
+refuses before effects; legacy manifest-aware cleanup still works for old paths.
+Default unit/config bytes remain unchanged. No runtime service claim follows.
+
+Hosted ARM run **38362764862** at head `70d9308` **FAILED** Snapcast
+joined_group_gain_50: all four channel measurements matched only 5/7 windows,
+despite correct median gain and passing RMS. Both clients showed the same
+431-frame (~9 ms) zero-run pattern; phase evidence is consistent with inserted
+silence, but its origin is unresolved. Acceptance/audio code, gates, runner image
+and tested package versions were unchanged from passing run 38361339841. Other
+jobs and all ARM preceding steps, including installed/uninstall, passed. Keep
+this run failed; the next feature-head CI supplies a fresh observation without
+changing thresholds, windows, warmup or caps. A later pass does not establish the
+cause. Recurrence warrants focused common-path capture attribution, not retries
+until green. No extra replay was started for this read-only diagnosis.
+
 ## Offline native migration preparation
 
 Captured-config validation and the unchanged default unit template are separate
@@ -26,7 +49,7 @@ backend or physical audio was activated. New exact-head CI remains required.
 
 Room head `e9fd18a` is fully green in run 38361339841, all four jobs/every step,
 verified 07:27 UTC. Floor **5594/75**, groups **147.26s/141.59s**. The later retention
-head `70d9308` has independent CI pending and does not include migration.
+head `70d9308` has the recorded ARM Snapcast failure and does not include migration.
 
 ## Native user-data ownership correction
 
@@ -3044,3 +3067,23 @@ discovery and Snapcast gates. Native groups take 235.66s/230.77s on x86_64 and
 revision still requires its own exact-head CI verification in the draft PR.
 Native ctypes/null/PCM and production Unix-IPC evidence remain distinct. This
 refactor does not claim physical XU4/DAC/ALSA, original-app or two-host acceptance. Those remain **HARDWARE_ACCEPTANCE_PENDING**.
+
+## Offline exclusive Spotify proposal
+
+`tests/test_spotify_exclusive.py` uses only inert Linux executable fixtures and
+private native-profile data. It covers deterministic receipts, 0700/0600 output,
+exact canonical unit proposals, migrated-profile selection, strict routes and
+ports, no-overwrite/no-symlink traversal, Linux double-leading-slash aliases,
+explicit YAML scalar constructor error privacy, parser dispatch and snapshot
+inclusion. Socket/subprocess/device operations are forbidden in the generator
+side-effect test. Optional `systemd-analyze --user verify` checks generated
+units with inert binaries; it never starts services. Space/percent executable
+paths and literal-quote config arguments pass; quoted executable paths are
+rejected before output. The pinned upstream listener requires the generator's
+IPv4-only restriction, even though the read-only diagnostic also supports IPv6.
+
+This remains **OFFLINE_ARTIFACT_ONLY**. No go-librespot client was installed or
+run; no account, pairing, provider traffic, mpv service, DAC or physical handover
+was tested. The installed-package CI smoke checks the shipped module and parser
+without invoking client execution or service activation. This is a focused
+addition to existing lanes, not a new endurance campaign or full-suite result.

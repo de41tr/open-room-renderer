@@ -28,8 +28,17 @@ Focused and installed-wheel evidence passes; hosted installed/socket proof and
 any real-user migration remain pending. Existing destinations need fresh initial-
 config digest metadata; unsupported layouts require deliberate manual migration.
 
-Spotify remains a passive optional REST/WS diagnostic, with no client/account
-activation or shared-DSP claim. Config checking covers startup input only.
+Spotify now includes passive REST/WS diagnostics and an optional offline
+credential-free direct-ALSA config/unit/drop-in generator. The generator supports
+one canonical native user profile and numeric IPv4 loopback; manual effective-unit,
+ownership/output-release and provider/account checks remain mandatory. Static
+systemd/pinned-schema checks pass, without client execution or runtime arbitration.
+Separate audio bypasses ORR EQ/balance. Config checking remains startup-input only.
+New native executable prefixes containing either quote or DEL refuse before effects;
+old-prefix cleanup and quoted non-executable arguments remain supported.
+The later retention head `70d9308` failed ARM Snapcast on a shared short zero-run
+pattern; all other jobs/preceding steps passed. No threshold was weakened and
+new operator code still requires exact-head CI.
 The following paragraphs retain earlier checkpoint-specific acceptance records;
 current browser/operator results above supersede their pending status only for
 the scopes actually exercised. See STATUS and TESTING for exact source/CI scope.

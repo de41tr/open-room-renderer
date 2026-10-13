@@ -145,6 +145,10 @@ An optional `open-room-renderer spotify diagnose --port PORT` command reads an
 already running local go-librespot sidecar. It does not start a player or control
 audio. See [the read-only Spotify diagnostic](docs/SPOTIFY_DIAGNOSTIC.md) for
 explicit setup requirements, privacy limits and sidecar-reported status meanings.
+`spotify prepare-exclusive` can separately write a credential-free, offline
+manual service proposal for a supported native direct-ALSA installation. It
+never installs, activates or pairs a client. See [the exclusive-mode proposal](docs/SPOTIFY_EXCLUSIVE.md);
+terms, account, hardware and arbitration gates remain pending.
 
 ## Trying The Phone App
 

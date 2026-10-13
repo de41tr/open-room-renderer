@@ -101,6 +101,16 @@ automatic mpv takeover. Unknown command outcomes are reconciled, not replayed.
 Use bounded restart/cache/log/resource policies and measure them on XU4; the
 assessment includes initial guardrails, not fabricated benchmarks.
 
+### Offline preparation only
+
+`spotify prepare-exclusive` now emits the bounded [manual native proposal](../SPOTIFY_EXCLUSIVE.md):
+a credential-free pinned-client config, Spotify user unit, drop-in for the
+existing canonical renderer, receipt and stop/release runbook. This is
+**OFFLINE_ARTIFACT_ONLY**, not the single supervisor or physical interlock
+described above. No client execution, service activation, pairing or output test
+is performed. Effective-unit review and bidirectional physical release checks
+remain manual; all four terms/account/hardware/arbitration gates remain pending.
+
 ## Hard gates and stopping rule
 
 1. **TERMS_PENDING:** open-source licensing does not authorize Spotify access.

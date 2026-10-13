@@ -13,8 +13,11 @@ passes **all four jobs/every step** in **run 38361339841**, verified **07:27 UTC
 Hosted floor groups **4886+708 /75 skips** pass **147.26s/141.59s** under 165s:
 **5594 passed /75 skipped** total. The existing real Chrome and all native gates
 pass. This includes room-name source but does not add a dedicated browser rename
-scenario. The later installer retention checkpoint `70d9308` has its own pending
-run 38362764862; offline migration is a subsequent separately reviewed change.
+scenario. Installer retention checkpoint `70d9308` failed ARM Snapcast in run 38362764862;
+all other jobs and ARM preceding steps passed. Correct median gain accompanied
+a shared 431-frame zero run and only 5/7 matching windows. Its origin is unresolved;
+keep the failure recorded and gates unchanged. Subsequent operator code needs
+its own CI; no green claim extends past `e9fd18a`.
 
 ## Active corrected work
 
@@ -85,6 +88,20 @@ software work; no report/CI wait is used instead of useful independent work.
   versions; independent review and an installed-wheel smoke pass. Genuine
   installed-native/socket proof remains hosted pending. No activation or live
   user migration occurred. See GETTING_STARTED for restrictions and recovery.
+
+- **Optional Spotify preparation:** `spotify prepare-exclusive` writes private,
+  credential-free direct-ALSA config, a sidecar user-unit proposal, a drop-in for
+  the existing canonical renderer and a manual stop/check/start guide. It never
+  installs, executes clients, contacts providers or activates services. Numeric
+  IPv4 loopback only; separate status/volume and bypassed ORR DSP are explicit.
+  Independent review, pinned-schema and static systemd checks pass. Root combined
+  operator integration passes 279 +1 declared native skip on both interpreters.
+  TERMS/ACCOUNT/HARDWARE/ARBITRATION remain pending; this is OFFLINE_ARTIFACT_ONLY.
+- **Executable-path correction:** actual static systemd verification rejects
+  quote/DEL executable prefixes. New installs/migration destinations now refuse
+  them before effects; cleanup of old prefixes and quoted source/config arguments
+  remains supported. Root affected-file checks pass 167 +1 native skip on each
+  interpreter. This is a separate behavior fix, not part of template extraction.
 
 ## Implemented scope
 

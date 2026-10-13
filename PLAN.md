@@ -25,8 +25,10 @@ independent work while CI, hardware or provider prerequisites are pending.
    `audio diagnose --config PATH` are implemented and reviewed. Complete their
    hosted proof (fully green at `4fd1607`). Next publish Web room-name editing,
    protect installer user-data ownership (published `70d9308`), then publish the
-   reviewed offline new-prefix migration profile. Continue the credential-free
-   Spotify preparation bundle and demonstrated native path-validation fix.
+   reviewed offline new-prefix migration profile. The credential-free Spotify
+   preparation bundle and demonstrated native path-validation fix are integrated;
+   verify their new native packaging checks while reviewing remaining operator
+   usability gaps. Retain the prior Snapcast failure without weakening gates.
    All service activation remains explicit operator work.
 
 Do not grow a universal engine framework, broad E2E suite, or timing campaign.

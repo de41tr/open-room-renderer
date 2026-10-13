@@ -15,8 +15,11 @@ passes **all four jobs/every step** in **run 38361339841**, verified **07:27 UTC
 Hosted floor groups **4886+708 /75 skips** pass **147.26s/141.59s** under 165s:
 **5594 passed /75 skipped** total. The existing real Chrome and all native gates
 pass. This includes room-name source but does not add a dedicated browser rename
-scenario. The later installer retention checkpoint `70d9308` has its own pending
-run 38362764862; offline migration is a subsequent separately reviewed change.
+scenario. Installer retention checkpoint `70d9308` failed ARM Snapcast in run 38362764862;
+all other jobs and ARM preceding steps passed. Correct median gain accompanied
+a shared 431-frame zero run and only 5/7 matching windows. Its origin is unresolved;
+keep the failure recorded and gates unchanged. Subsequent operator code needs
+its own CI; no green claim extends past `e9fd18a`.
 
 ## What is already delivered
 
@@ -62,12 +65,12 @@ Maintain three useful potential packages and work independently during CI.
    output selection, pure config checking and no-start output diagnosis are
    published and fully green at `4fd1607`. Native output/null proof passes on both
    architectures. No provider-account, shared-DSP or physical-output claim.
-3. **Next three useful packages:** verify the published installer retention
-   checkpoint; publish the reviewed offline migration preparer (250 focused passes
-   per interpreter plus one declared native skip); finish a credential-free
-   Spotify config/service bundle with explicit manual handover and no activation.
-   A static systemd failure additionally warrants a narrow executable-path
-   validation fix. No in-place updater or automatic provider supervisor.
+3. **Next useful work:** verify the new installed migration/socket and Spotify
+   parser packaging checks in the next feature-head CI; retain the unresolved
+   prior Snapcast failure and investigate common-path silence only if it recurs;
+   rank actual remaining Web/operator recovery gaps before selecting another
+   feature. Offline migration, Spotify artifact generation and the narrow systemd
+   path fix are reviewed and integrated. No active provider/service operation.
 4. **Honor the corrected Spotify choice.** [ADR001](docs/adr/001-spotify-sidecar.md)
    ranks go-librespot 76 / librespot 69 / Soloist 61. Build expiry is not key renewal.
    No actual account/client/provider operation occurred. A separately accepted

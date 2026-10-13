@@ -9,7 +9,9 @@ The explicit 05:35/05:56 mandate supersedes the historical wait decision below.
    scope; do not expand the harness or call new dialogs browser-accepted.
 2. **KEEP SPOTIFY BOUNDED:** go-librespot 76 / librespot 69 / Soloist 61; research
    completed in 14 minutes. Passive REST/WS diagnosis is implemented and green.
-   Account/provider/lifecycle/arbitration acceptance remains separate. No fake play.
+   A credential-free offline config/unit/drop-in generator is now implemented,
+   with a manual handover guide and no activation. Account/provider/lifecycle/
+   arbitration acceptance remains separate. No fake play.
 3. **PUBLISH ROOM WORKFLOW:** existing transaction plus guarded Web rename is
    reviewed and passes 249 focused cases per interpreter. Useful room identification
    has higher marginal value than more architecture or timing tests.
@@ -18,8 +20,10 @@ The explicit 05:35/05:56 mandate supersedes the historical wait decision below.
    against old manifest claims. A new-prefix profile preparer may then remove
    manual copy/path-edit errors without replacing active config or starting audio.
    Preserve originals/bytes, refuse ambiguity, exclude provider credentials.
-5. **BOUND AND REASSESS:** operator head `4fd1607` is fully green in all four jobs,
-   including actual output/null/diagnostic proof. Keep at least three ranked
+5. **BOUND AND REASSESS:** room head `e9fd18a` is fully green; retention head
+   `70d9308` subsequently failed ARM Snapcast on shared short inserted-silence
+   evidence. Keep that failure and unchanged gates; the next feature CI supplies
+   a fresh observation, not a retries-until-green campaign. Keep at least three ranked
    candidates and work independently during CI. Next review **08:40–09:10 UTC**;
    risk cutoff 16:30, stabilize 17:00, hard stop 18:00 UTC.
 
