@@ -69,6 +69,12 @@ software work; no report/CI wait is used instead of useful independent work.
   each Python version, including 175 Node cases. This new dialog has not received
   its own genuine-browser acceptance; the existing browser smoke remains scoped.
 
+- **Native data retention:** unchanged config was previously installer-owned.
+  Root config.yaml, state/ and migrated-profile/ are now excluded and protected
+  even against older manifest claims. Root focused checks pass 58 on each Python
+  version, with independent review. Updated-checkout invocation is required for
+  old installed uninstall scripts; no actual user installation was touched.
+
 ## Implemented scope
 
 - **Architecture:** `EqPresetLibrary` owns saved-curve validation/storage and

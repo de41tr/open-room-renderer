@@ -2,18 +2,28 @@
 
 ## Current next-phase scope
 
-**Current operator/browser delta:** genuine hosted Chrome has passed desktop
-rendering/navigation and real Play/Pause, but the first two jobs failed on native
-focus assertions. Corrected BODY-boundary checks and the observed favicon CSP
-fix passed the bounded desktop/mobile/download smoke at `66cbe158` (run
-38356723243/job 115161233008, verified artifact 11792544975). Existing CSP/sandbox/gates
-remain intact. Optional `spotify diagnose` is read-only REST/WS with synthetic
-privacy/security evidence; `config check` is input-only and has no startup effects.
-`audio diagnose` separates disk intent, live option and active driver with two
-no-start property reads; its attached native proof is still pending.
-Optional `mpv_audio_device` selects an isolated owned player and refuses foreign
-peers; new hosted null-device proof and physical output acceptance are distinct.
-See the exact pending/failed/green source scopes in STATUS and TESTING.
+**Current operator/browser delta:** bounded genuine Chrome desktop/mobile,
+keyboard/focus, production control and actual JSON downloads passed at `66cbe158`;
+the unchanged gate also passes at operator head `4fd1607`. Both native architectures
+at `4fd1607` prove explicit owned-player null output, isolated ambient config,
+disabled null fallback and no-start diagnostic reads preserving player/socket.
+All four jobs/every step pass in run 38359036576 (07:07 UTC). Physical DAC/ARMv7,
+Firefox and wider manual accessibility acceptance remain separate.
+
+The Web room-name workflow adds typed literal-percent names, lock-protected
+session/name revision checks and committed-error UNKNOWN without changing legacy
+decoding. Local 249-case checks pass on both interpreters; exact-head CI at
+`e9fd18a` is pending. Its new dialog is not separately real-browser accepted.
+The subsequent installer retention fix explicitly protects root config.yaml,
+state/ and migrated-profile/ even if an older manifest lists them; synthetic
+58-case checks pass on Python 3.11/3.12. Existing installed uninstall.py copies
+need the documented updated-checkout invocation to gain that protection.
+
+Spotify remains a passive optional REST/WS diagnostic, with no client/account
+activation or shared-DSP claim. Config checking covers startup input only.
+The following paragraphs retain earlier checkpoint-specific acceptance records;
+current browser/operator results above supersede their pending status only for
+the scopes actually exercised. See STATUS and TESTING for exact source/CI scope.
 
 The new phase starts from merged main `ad21bd4` and works only in Draft PR #2.
 DSP library and pure queue contracts now have separate responsibility boundaries;

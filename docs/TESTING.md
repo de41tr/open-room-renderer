@@ -1,5 +1,19 @@
 # Test evidence and limits
 
+## Native user-data ownership correction
+
+The installer no longer inventories root config.yaml, state/ or migrated-profile/.
+Uninstall protects those paths even under older format-1 ownership claims, after
+validating the complete manifest before effects. Synthetic checks prove exact-root
+boundaries, nested files/empty directories, dry run, symlinks, partial-install
+recovery and modified-owned-file retention. Root runs pass **58** on Python 3.12
+in **0.73s** and Python 3.11 in **0.60s**; independent review independently passes
+all 58. An unneeded worker full-default run was stopped at 76% without observed
+failures; it is **UNCOMPLETED**, not full-suite evidence. No real user installation
+or services were changed. Old installed uninstall scripts are not retroactively
+updated; the documented updated-checkout command is required for old prefixes.
+Exact new-head hosted CI remains required.
+
 ## Room-name workflow and operator CI
 
 The separate pure validator extraction passes 60 existing rename transaction
