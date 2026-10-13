@@ -192,6 +192,13 @@ renderer state failed. Previously displayed rows may be stale and all favorite
 controls remain disabled; unrelated playback controls retain their normal gates.
 No partial configured/managed list is presented as a healthy library.
 
+A saved-favorites link whose target is missing now counts as unavailable
+storage, rather than a new empty library. If a failed read cannot establish
+that the file entry is genuinely absent, managed writes stay blocked for that
+store's lifetime. A genuinely missing file still supports first-run saves.
+This deliberate error-policy correction leaves valid-link loading and normal
+successful atomic saves unchanged; it does not detect later external writers.
+
 Stop the renderer **service** (not just audio playback), repair or restore its
 saved favorites library from a known-good backup, then restart the service.
 Do not delete/reset the library to force startup. The renderer preserves the

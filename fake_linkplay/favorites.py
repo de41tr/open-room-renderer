@@ -167,7 +167,13 @@ class FavoritesStore:
             with self.path.open("rb") as stream:
                 encoded = stream.read(MAX_FAVORITES_BYTES + 1)
         except FileNotFoundError:
-            return ()
+            # A dangling file symlink is existing storage that an atomic save
+            # could replace. Treat only a genuinely absent entry as new.
+            try:
+                self.path.lstat()
+            except FileNotFoundError:
+                return ()
+            raise
         if len(encoded) > MAX_FAVORITES_BYTES:
             raise ValueError("Persisted favorites exceeds its size limit")
         payload = _decode(encoded)
