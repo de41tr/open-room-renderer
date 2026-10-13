@@ -42,6 +42,8 @@ def test_web_assets_are_local_accessible_and_no_inline_handlers():
     assert all("defer" in script for script in document.scripts)
     assert all(label in document.ids for label in document.labels)
     assert "no-referrer" in (ASSETS / "index.html").read_text()
+    assert '<link rel="icon" href="/ui/favicon.ico">' in (ASSETS / "index.html").read_text()
+    assert 'href="data:' not in (ASSETS / "index.html").read_text()
     assert "Trusted LAN only" in (ASSETS / "index.html").read_text()
 
 

@@ -45,7 +45,8 @@ _ASSETS = {"/": ("index.html", "text/html"), "/ui/": ("index.html", "text/html")
            "/ui/index.html": ("index.html", "text/html"),
            "/ui/style.css": ("style.css", "text/css"),
            "/ui/controller.js": ("controller.js", "text/javascript"),
-           "/ui/app.js": ("app.js", "text/javascript")}
+           "/ui/app.js": ("app.js", "text/javascript"),
+           "/ui/favicon.ico": (None, "image/x-icon")}
 _HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
@@ -695,6 +696,10 @@ class WebControlApi:
                     raise WebAdmissionError("method_not_allowed", 405)
                 self._bodyless(request)
                 filename, content_type = _ASSETS[path]
+                if filename is None:
+                    # Explicit empty same-origin favicon. A data: favicon is
+                    # blocked by our intentionally unchanged image CSP.
+                    return web.Response(status=204, content_type=content_type, headers=_HEADERS)
                 body = files("fake_linkplay").joinpath("web_assets", filename).read_bytes()
                 return web.Response(body=body, content_type=content_type, charset="utf-8", headers=_HEADERS)
             if path in {PREFIX + "/state", PREFIX + "/favorites"}:

@@ -532,7 +532,7 @@ async def test_real_http_browser_admission_rejects_without_effects(api, kind):
         assert not api.mpv.calls and api.state.volume == 50
 
 
-@pytest.mark.parametrize("path", ["/", "/ui/", "/ui/index.html", "/ui/style.css", "/ui/app.js", "/ui/controller.js",
+@pytest.mark.parametrize("path", ["/", "/ui/", "/ui/index.html", "/ui/style.css", "/ui/app.js", "/ui/controller.js", "/ui/favicon.ico",
                                   PREFIX + "/state", PREFIX + "/favorites", PREFIX + "/command"])
 async def test_host_guard_covers_every_new_route_before_asset_read_or_state(api, path):
     async with serving(api) as (session, base):
@@ -676,19 +676,29 @@ async def test_static_assets_are_exact_packaged_resources_without_inline_bootstr
     from importlib.resources import files
     expected = {"/": ("index.html", "text/html"), "/ui/": ("index.html", "text/html"),
                 "/ui/index.html": ("index.html", "text/html"), "/ui/style.css": ("style.css", "text/css"),
-                "/ui/controller.js": ("controller.js", "text/javascript"), "/ui/app.js": ("app.js", "text/javascript")}
+                "/ui/controller.js": ("controller.js", "text/javascript"), "/ui/app.js": ("app.js", "text/javascript"),
+                "/ui/favicon.ico": (None, "image/x-icon")}
     async with serving(api) as (session, base):
         token = (await state(session, base))["csrf_token"]
         for route, (filename, content_type) in expected.items():
             async with session.get(base + route, allow_redirects=False) as response:
-                assert response.status == 200
+                assert response.status == (204 if filename is None else 200)
                 assert response.content_type == content_type
                 body = await response.read()
-                assert body == files("fake_linkplay").joinpath("web_assets", filename).read_bytes()
+                assert body == (b"" if filename is None else files("fake_linkplay").joinpath("web_assets", filename).read_bytes())
                 assert token.encode() not in body
                 assert response.headers["Cache-Control"] == "no-store"
                 assert "Content-Security-Policy" in response.headers
-        for route in ("/ui/index.html?x=1", "/ui/app.js?x=1", "/ui/missing.js", "/ui/secret.json"):
+                assert "img-src 'self' http: https:" in response.headers["Content-Security-Policy"]
+                assert "data:" not in response.headers["Content-Security-Policy"]
+                assert not any(key.lower().startswith("access-control-allow-") for key in response.headers)
+        for site in ("same-site", "cross-site"):
+            async with session.get(base + "/ui/favicon.ico", headers={"Sec-Fetch-Site": site}) as response:
+                assert response.status == 403
+        for method in ("POST", "HEAD", "OPTIONS"):
+            async with session.request(method, base + "/ui/favicon.ico") as response:
+                assert response.status == 405
+        for route in ("/ui/favicon.ico?x=1", "/ui/index.html?x=1", "/ui/app.js?x=1", "/ui/missing.js", "/ui/secret.json"):
             async with session.get(base + route) as response:
                 assert response.status in {400, 404}
         assert not api.mpv.calls
@@ -697,7 +707,7 @@ async def test_static_assets_are_exact_packaged_resources_without_inline_bootstr
 async def test_unsupported_encoded_asset_spelling_has_no_file_access(api):
     from yarl import URL
     async with serving(api) as (session, base):
-        for path in ("/ui/%61pp.js", "/ui/%2e%2e/pyproject.toml", "/ui/%2fetc/passwd"):
+        for path in ("/ui/%66avicon.ico", "/ui/%61pp.js", "/ui/%2e%2e/pyproject.toml", "/ui/%2fetc/passwd"):
             async with session.get(URL(base + path, encoded=True)) as response:
                 assert response.status == 404
                 assert (await response.json())["outcome"] == "REJECTED"
