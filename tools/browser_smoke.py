@@ -67,6 +67,14 @@ class Browser:
         element = await self.call("POST", "/element", {"using": "css selector", "value": selector})
         await self.call("POST", f"/element/{element[ELEMENT]}/click", {})
 
+    async def blocked_click(self, selector: str):
+        element = await self.call("POST", "/element", {"using": "css selector", "value": selector})
+        path = f"/session/{self.id}/element/{element[ELEMENT]}/click"
+        async with self.http.post(self.base + path, json={}) as response:
+            result = await response.json()
+            assert response.status == 400 and result["value"]["error"] == "element click intercepted", result
+        return "element click intercepted"
+
     async def key(self, value: str, *, shift=False):
         keys = ([{"type": "keyDown", "value": "\ue008"}] if shift else [])
         keys += [{"type": "keyDown", "value": value}, {"type": "keyUp", "value": value}]
@@ -184,17 +192,40 @@ async def exercise(browser: Browser, api: HttpApi, backend, base: str,
     before_export = (len(evidence["http_commands"]), evidence["media_requests"])
     await browser.click("#playlist-export")
     await browser.wait("document.querySelector('#export-dialog').open && !document.querySelector('#export-confirm').disabled")
-    assert await browser.inspect("document.activeElement.id") == "export-close"
+    evidence[label]["focus_trace"] = []
+    async def focused(expected: str, *, boundary=False, shift=False):
+        async def record():
+            state = await browser.inspect("""(() => {
+              const active = document.activeElement, dialog = document.querySelector('#export-dialog');
+              return {id: active.id, tag: active.tagName, document_focused: document.hasFocus(),
+                in_dialog: dialog.contains(active), modal: dialog.matches(':modal')};
+            })()""")
+            evidence[label]["focus_trace"].append(state)
+            return state
+        state = await record()
+        assert state["modal"], state
+        if boundary and state["id"] != expected:
+            # Native dialogs may hand focus to browser chrome at either end of
+            # the tab sequence (HTML sequential-focus-navigation, step 8).
+            # Never permit a background page control, or silently skip focus.
+            assert state == {"id": "", "tag": "BODY", "document_focused": False,
+                             "in_dialog": False, "modal": True}, state
+            await browser.key("\ue004", shift=shift)
+            state = await record()
+        assert state["id"] == expected and state["in_dialog"] and state["document_focused"], state
+    await focused("export-close")
     await browser.key("\ue004")  # Tab
-    assert await browser.inspect("document.activeElement.id") == "export-confirm"
+    await focused("export-confirm")
     await browser.key("\ue004")
-    assert await browser.inspect("document.activeElement.id") == "export-cancel"
+    await focused("export-cancel")
     await browser.key("\ue004")
-    assert await browser.inspect("document.activeElement.id") == "export-close", "Native modal must contain Tab focus"
+    await focused("export-close", boundary=True)
     await browser.key("\ue004", shift=True)
-    assert await browser.inspect("document.activeElement.id") == "export-cancel"
+    await focused("export-cancel", boundary=True, shift=True)
     await browser.key("\ue004", shift=True)
-    assert await browser.inspect("document.activeElement.id") == "export-confirm"
+    await focused("export-confirm")
+    evidence[label]["background_click"] = await browser.blocked_click("#play")
+    await focused("export-confirm")
     await browser.key("\ue00c")  # Escape, handled by the real dialog cancel event.
     await browser.wait("!document.querySelector('#export-dialog').open && document.activeElement.id === 'playlist-export'")
     await browser.click("#playlist-export")
@@ -240,7 +271,7 @@ async def exercise(browser: Browser, api: HttpApi, backend, base: str,
     assert list(downloads.iterdir()) == [downloaded]
     assert before_export == (len(evidence["http_commands"]), evidence["media_requests"]), "Export must not send playback commands or fetch media"
     assert await _property(backend, "pause") is True
-    evidence[label]["dialog"] = "Tab containment, Shift+Tab, Escape, opener focus, fresh consent, navigation and close cleanup"
+    evidence[label]["dialog"] = "Native Tab order/browser-chrome boundary, blocked background click, Shift+Tab, Escape, opener focus, fresh consent, navigation and close cleanup"
     evidence[label]["download"] = {"filename": FILENAME, "size_bytes": len(raw), "sha256": digest,
         "verified": "browser disk bytes == renderer response bytes == canonical JSON"}
     console = await browser.call("POST", "/log", {"type": "browser"})
