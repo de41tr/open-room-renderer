@@ -606,6 +606,14 @@ The browser also offers **Change URL** for managed favorites, with a blank priva
 input and explicit keep/clear choice. Its redacted view reports ACKNOWLEDGED rather
 than proving the exact saved target; see [browser favorite repair](docs/WEB_UI.md#repair-a-saved-favorite).
 
+For a small managed library, the browser's **Backup JSON** and **Restore JSON**
+provide a private paired transfer. Restore requires an empty, healthy managed
+library; configured favorites may remain. Saved IDs, order, exact targets and
+metadata survive without affecting playback. The complete escaped Web request
+must fit 32,768 bytes; larger libraries and corrupt-library repair still require
+an offline preservation workflow. See [favorites backup and restore](docs/WEB_UI.md#back-up-and-restore-managed-favorites)
+for privacy, limits and uncertain-write handling.
+
 `favorites set-url ID URL --metadata keep|clear` repairs a managed favorite while
 preserving its stable ID, library name and position. The metadata choice is
 required: `keep` retains title, artist, album and artwork; `clear` empties all four.

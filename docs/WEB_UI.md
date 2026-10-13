@@ -28,7 +28,7 @@ include the four static assets.
 - Current queue, explicit track selection, and the five supported modes:
   in order, repeat one, repeat all, shuffle once, shuffle with repeat all.
 - Favorites: add a direct HTTP(S) URL, save current, play, rename, change URL
-  and delete.
+  and delete; privately back up managed entries and restore into an empty library.
   Configuration-owned favorites remain read-only. Selecting a queue entry plays
   it; Next/Previous on a stopped queue preserve stopped selection semantics.
 - Confirmed channel balance, EQ enable/bypass, all ten EQ bands and preset
@@ -211,6 +211,62 @@ The admitted `GET /orr/v1/web/favorites` now returns the fixed three-field
 503 / ERROR envelope with `error: favorites_unavailable` for this one condition.
 No raw exception, filename, path or URL is copied into it. Other reads and all
 mutating error/UNKNOWN classifications retain their existing behavior.
+
+## Back up and restore managed favorites
+
+In Favorites, choose **Backup JSON**, review the managed-only count and file
+size, and explicitly consent to sending the private contents to this browser.
+Choose **Prepare private backup**, then click **Download JSON** yourself. The
+fixed filename is `open-room-renderer-favorites.json`. A download request does
+not prove the file was saved; check your browser's downloads and keep it private.
+
+On a room with a fresh, healthy, empty **managed** library, choose **Restore
+JSON**, select the local file, review its count/size and consent to sending its
+private contents to this renderer. Configuration-owned favorites may remain:
+they are neither exported nor overwritten. Restore performs one atomic library
+write and never changes the queue, playback, gain or active/saved DSP. It does
+not fetch media or check playability. Existing managed entries cannot be merged,
+replaced or cleared through this workflow; an empty file is a no-write no-op
+only when the managed target is already empty.
+
+The file is persisted v1 JSON: `{"version":1,"favorites":[...]}`. Each record
+requires a unique lowercase 32-hex `id`, `name` and direct HTTP(S) `url`;
+`title`, `artist`, `album` and `artwork` are optional and default to empty strings.
+Backups use all seven fields. IDs, ordering, repeated names/URLs, signed queries,
+percent escapes, Unicode and allowed metadata whitespace remain exact. This is
+a logical backup, not preservation of source JSON indentation, escapes or
+omitted fields. Unknown fields, configured IDs, duplicate keys/IDs, unsupported
+targets, malformed text and invalid types fail as a whole.
+
+The existing limits remain **100 managed entries**, **1 MiB persisted storage**
+and **32,768 UTF-8 bytes for the complete escaped Web restore request**. A file
+can fit alone but exceed the request after JSON escaping; unsupported whole
+exports are refused. The private preview shows only count, size and scope,
+never the chosen filename, original labels, URLs or metadata. The actual file
+contains those private values, including any tokens or expiring signed links.
+
+`POST /orr/v1/web/favorites/export` has `prepare` and consented `download`
+actions, under the unchanged Host/Origin/CSRF/body checks. Prepare returns an
+opaque session-bound revision of the exact managed snapshot; download must
+match it. The single typed restore command is `favorite_restore` with
+`expected_session`, `text` and `private_import_confirmed: true`. A competing
+in-process add/restore or already-visible external nonempty/corrupt/unreadable
+file is refused. The fresh disk check is not filesystem compare-and-swap:
+keep one running writer and never edit its state file while serving. This does
+not repair an unavailable startup library; stop, repair/restore offline and
+restart as described above.
+
+Close, Escape, navigation and consent withdrawal scrub drafts and revoke private
+download links. No delayed response starts a download or retries a restore.
+An acknowledged restore does not prove exact private values through the redacted
+list. After replacement followed by a directory-durability failure, the new
+library remains visible and the response is **UNKNOWN, committed: true**.
+Readback cannot prove crash durability; a lost acknowledgement also remains
+UNKNOWN. No rollback or automatic retry is attempted.
+
+Focused Python storage/adapter and Node DOM-double checks cover this workflow.
+Dedicated real-browser/layout acceptance for these new dialogs remains pending;
+the earlier browser smoke does not establish it.
 
 ## Ten-band EQ and presets
 

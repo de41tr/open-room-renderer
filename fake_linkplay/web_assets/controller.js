@@ -238,6 +238,92 @@
       }
     }
   }
+  const FAVORITES_EXPORT_FILENAME = "open-room-renderer-favorites.json";
+  const FAVORITES_TRANSFER_CHANGED = "Favorites or renderer availability changed. Close this dialog and review current state before starting again.";
+  function favoritesRestoreBody(session, source) {
+    return {action: "favorite_restore", expected_session: session, text: source, private_import_confirmed: true};
+  }
+  function validateFavoritesExportSummary(value, session, count) {
+    if (!exactFields(value, ["version", "session_id", "revision", "count", "size_bytes", "filename", "scope"]) || value.version !== 1 || value.session_id !== session || !opaqueID(value.revision) || !integer(value.count) || value.count > 100 || value.count !== count || !integer(value.size_bytes) || value.size_bytes < 1 || value.size_bytes > MAX_REQUEST_BYTES || value.filename !== FAVORITES_EXPORT_FILENAME || value.scope !== "managed_only") throw new Error("Invalid favorites backup summary");
+    return value;
+  }
+  function validateFavoritesDocument(bytes, complete = false) {
+    if (!(bytes instanceof Uint8Array) || !bytes.length || bytes.length > MAX_REQUEST_BYTES) throw new Error("Invalid favorites file");
+    const source = new TextDecoder("utf-8", {fatal: true, ignoreBOM: true}).decode(bytes), value = JSON.parse(source);
+    // JSON.parse owns syntax validation. A bounded token walk checks each
+    // object's decoded keys independently, including escaped duplicates. The
+    // flat exportObject scanner cannot accept repeated fields across records.
+    const tokens = source.match(/"(?:\\.|[^"\\])*"|[{}\[\],:]|[^ \t\r\n{}\[\],:]+/g), stack = [];
+    tokens.forEach((token, index) => {
+      if (token === "{") stack.push(new Set());
+      else if (token === "[") stack.push(null);
+      else if (token === "}" || token === "]") stack.pop();
+      else if (tokens[index + 1] === ":") {
+        const key = JSON.parse(token), keys = stack[stack.length - 1];
+        if (!keys || keys.has(key)) throw new Error("Invalid favorites file");
+        keys.add(key);
+        if (stack.length === 1 && key === "version" && tokens[index + 2] !== "1") throw new Error("Invalid favorites version");
+      }
+      if (stack.length > 3) throw new Error("Invalid favorites nesting");
+    });
+    if (!exactFields(value, ["version", "favorites"]) || value.version !== 1 || !Array.isArray(value.favorites) || value.favorites.length > 100) throw new Error("Invalid favorites file");
+    const fields = ["id", "name", "url", "title", "artist", "album", "artwork"], ids = new Set();
+    // Python's persisted-text whitespace set differs from String.trim():
+    // U+FEFF is valid nonblank content, while U+0085 is whitespace there.
+    const blank = /^[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*$/u;
+    const validText = (item, limit, required = false) => string(item) && (!required || !blank.test(item)) && !/[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]/u.test(item) && new TextEncoder().encode(item).length <= limit;
+    value.favorites.forEach(record => {
+      if (!isObject(record) || !["id", "name", "url"].every(key => Object.hasOwn(record, key)) || Object.keys(record).some(key => !fields.includes(key)) || complete && !exactFields(record, fields) || !string(record.id) || !/^[0-9a-f]{32}$/.test(record.id) || ids.has(record.id) || !validText(record.name, 256, true) || !validText(record.url, 8192, true) || ["title", "artist", "album", "artwork"].some(key => Object.hasOwn(record, key) && !validText(record[key], key === "artwork" ? 8192 : 1024))) throw new Error("Invalid favorites record");
+      ids.add(record.id);
+    });
+    // Preserve the exact source, Unicode and signed URL bytes. URL eligibility
+    // is authoritative on the renderer; never normalize with browser URL APIs.
+    return {text: source, count: value.favorites.length};
+  }
+  function validateFavoritesExportDocument(bytes, summary) {
+    const document = validateFavoritesDocument(bytes, true);
+    if (bytes.length !== summary.size_bytes || document.count !== summary.count || requestBytes(favoritesRestoreBody(summary.session_id, document.text)) > MAX_REQUEST_BYTES) throw new Error("Invalid favorites backup attachment");
+    return bytes;
+  }
+  function favoritesTransferFailure(code) {
+    const messages = {
+      favorites_export_unavailable: "This managed favorites library cannot be backed up here. The complete escaped restore request must fit 32,768 bytes. Review the library before starting again.",
+      stale_favorites_transfer: FAVORITES_TRANSFER_CHANGED,
+      favorites_not_empty: "Restore requires an empty managed favorites library. Existing managed entries cannot be merged or overwritten.",
+      favorites_unavailable: "Managed favorites could not be loaded. Stop the renderer service, repair or restore its saved favorites library, then restart it."
+    };
+    return Object.hasOwn(messages, code) ? messages[code] : "The favorites transfer request was rejected. Review the file and current managed favorites before starting again.";
+  }
+  class FavoritesRestoreDraft {
+    constructor(state) {
+      this.session = state.session_id;
+      this.serial = 0; this.text = ""; this.size = 0; this.count = 0; this.reading = false; this.error = "";
+      this.sent = false; this.stale = false; this.cancelled = false; this.status = "";
+    }
+    clearSource() { this.serial += 1; this.text = ""; this.size = 0; this.count = 0; this.reading = false; this.error = ""; }
+    cancel() { this.clearSource(); this.cancelled = true; }
+    async readFile(file) {
+      if (this.sent || this.stale || this.cancelled) return;
+      this.clearSource(); const serial = this.serial; this.reading = true;
+      let bytes;
+      try {
+        if (!file || !integer(file.size) || !file.size || file.size > MAX_REQUEST_BYTES) throw new Error();
+        const size = file.size, reading = file.arrayBuffer(); file = null;
+        const buffer = await reading;
+        bytes = new Uint8Array(buffer);
+        if (this.serial !== serial || this.cancelled) return;
+        if (bytes.length !== size) throw new Error();
+        const document = validateFavoritesDocument(bytes);
+        if (requestBytes(favoritesRestoreBody(this.session, document.text)) > MAX_REQUEST_BYTES) throw new Error();
+        this.text = document.text; this.size = size; this.count = document.count;
+      } catch (_) {
+        if (this.serial === serial && !this.cancelled) this.error = "Choose a UTF-8 v1 favorites JSON file containing up to 100 managed entries with unique IDs. The complete escaped request must fit 32,768 bytes.";
+      } finally {
+        if (bytes) bytes.fill(0);
+        if (this.serial === serial && !this.cancelled) this.reading = false;
+      }
+    }
+  }
   function playlistAvailable(state, action) {
     if (!state || !PLAYLIST_ACTIONS.includes(action) || state.transport.status !== "CONFIRMED" || state.transport.phase !== "STOPPED" || state.actions[action] !== true) return false;
     if (action === "playlist_replace") return true;
@@ -358,6 +444,7 @@
     const body = {action, ...values};
     if (["play", "pause", "next", "previous", "seek", "queue_select", "queue_mode", "favorite_current", ...PLAYLIST_ACTIONS].includes(action)) body.expected_generation = state.generation;
     if (["queue_select", "queue_mode"].includes(action)) body.queue_name = state.queue.name;
+    if (action === "favorite_restore") body.expected_session = state.session_id;
     if (action.startsWith("dsp_")) {
       if (state.dsp.status !== "CONFIRMED" || !state.dsp.editor) throw new Error("Read confirmed sound state first");
       if (DSP_LIBRARY_ACTIONS.includes(action) && state.dsp.editor.library_unavailable === true) throw new Error(DSP_LIBRARY_UNAVAILABLE_MESSAGE);
@@ -451,7 +538,7 @@
     changed() { this.onChange(this); }
     get busy() { return this.active.size > 0; }
     get stopBusy() { return Array.from(this.active.values()).some(item => item.action === "stop"); }
-    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (action !== "device_rename" || /^[0-9a-f]{64}$/.test(this.state.device.revision || "")) && (!action.startsWith("favorite_") || this.favoritesFresh) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor && (!DSP_LIBRARY_ACTIONS.includes(action) || this.state.dsp.editor.library_unavailable !== true))) && (!action.startsWith("playlist_") || playlistAvailable(this.state, action) && (action === "playlist_replace" || this.playlistEditable))); }
+    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (action !== "device_rename" || /^[0-9a-f]{64}$/.test(this.state.device.revision || "")) && (!action.startsWith("favorite_") || this.favoritesFresh && (action !== "favorite_restore" || !this.favorites.some(item => item.editable))) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor && (!DSP_LIBRARY_ACTIONS.includes(action) || this.state.dsp.editor.library_unavailable !== true))) && (!action.startsWith("playlist_") || playlistAvailable(this.state, action) && (action === "playlist_replace" || this.playlistEditable))); }
     refresh() {
       this.readAgain = true;
       if (!this.readPromise) {
@@ -515,6 +602,7 @@
         const response = await this.request("/orr/v1/web/command", {method: "POST", headers: {"X-ORR-CSRF": this.state.csrf_token}, body});
         if (response.status === 200 && isObject(response.body) && response.body.request_acknowledged === true) result = {kind: "acknowledged", text: `${label}: request acknowledged. Reading the current state…`, id, favoriteId: response.body.favorite_id || null, deviceRevision: response.body.device_revision};
         else result = {...commandError(response), id};
+        if (body.action === "favorite_restore" && result.kind === "unknown" && response.status === 502 && response.body?.error === "command_failed" && response.body.outcome === "UNKNOWN" && response.body.committed === true) result.favoritesLibraryDurabilityUnknown = true;
         if (body.action === "dsp_preset_import" && result.kind === "unknown" && response.status === 502 && response.body?.error === "command_failed" && response.body.outcome === "UNKNOWN" && response.body.effect === "LIBRARY_COMMITTED_DURABILITY_UNKNOWN") {
           result.curveLibraryDurabilityUnknown = true; result.committed = true;
         }
@@ -535,6 +623,18 @@
             : result.curveLibraryDurabilityUnknown
               ? "The saved preset library was replaced, but disk durability is unconfirmed. Matching readback cannot confirm durability. No retry was sent."
               : "Saved curve import outcome unknown. The library may have changed. Review saved presets before another import. No retry was sent.";
+      }
+      if (body.action === "favorite_restore") {
+        // Private file contents and server error details never reach the UI.
+        // A redacted matching readback cannot verify exact restored targets or
+        // establish crash durability after a failed persistence step.
+        result.text = result.kind === "acknowledged"
+          ? "Favorites restore acknowledged. Review managed favorites; exact private contents are not verified by this redacted view."
+          : result.kind === "error"
+            ? favoritesTransferFailure(result.code)
+            : result.favoritesLibraryDurabilityUnknown
+              ? "The managed favorites library was replaced, but disk durability is unconfirmed. Matching readback cannot confirm durability. No retry was sent."
+              : "Favorites restore outcome unknown. The library may have changed. Review managed favorites before another restore. No retry was sent.";
       }
       if (body.action === "favorite_target") {
         // The redacted library cannot verify the exact URL, even with a fresh
@@ -558,7 +658,7 @@
       }
       this.active.delete(id);
       this.fresh = false;
-      if (result.kind === "unknown") this.unknownOutcomes = this.unknownOutcomes.concat({id, label: body.action === "device_rename" ? "Rename room (persistence/discovery unconfirmed)" : result.curveLibraryDurabilityUnknown ? "Import saved EQ curve (library replaced; durability unconfirmed)" : label, committed: result.committed === true}).slice(-20);
+      if (result.kind === "unknown") this.unknownOutcomes = this.unknownOutcomes.concat({id, label: body.action === "device_rename" ? "Rename room (persistence/discovery unconfirmed)" : result.favoritesLibraryDurabilityUnknown ? "Restore managed favorites (library replaced; durability unconfirmed)" : result.curveLibraryDurabilityUnknown ? "Import saved EQ curve (library replaced; durability unconfirmed)" : label, committed: result.committed === true}).slice(-20);
       if (id === this.operation) this.notice = {...result, kind: result.kind === "acknowledged" ? "pending" : result.kind};
       this.changed();
       await this.refresh();
@@ -578,7 +678,7 @@
         // An ACK is not a playback observation. State badges remain canonical.
         if (body.action === "device_rename") {
           this.notice = {...result, kind: result.deviceVerified ? "confirmed" : "acknowledged"};
-        } else if (body.action === "favorite_target") {
+        } else if (["favorite_target", "favorite_restore"].includes(body.action)) {
           this.notice = {...result};
         } else {
           this.notice = this.fresh
@@ -590,5 +690,5 @@
       return result;
     }
   }
-  return {CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveDocument, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
+  return {FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesDocument, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveDocument, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
 });

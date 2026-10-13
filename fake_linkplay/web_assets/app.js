@@ -1,13 +1,13 @@
 /* Same-origin UI. Canonical snapshots are the only source of displayed state. */
 (function () {
   "use strict";
-  const {CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
+  const {FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
   const $ = id => document.getElementById(id);
   const drafts = {seek: false, volume: false, mode: false, balance: false};
   let snapshot = null, queueSignature = "", favoritesSignature = "", artworkURL = null;
   let dialogContext = null, dialogSerial = 0, pollTimer = null, pollRun = 0;
   const soundDraft = new DspDraft();
-  let playlistDraft = null, queueEditing = null, exportContext = null, roomContext = null, curveExportContext = null, curveImportDraft = null;
+  let playlistDraft = null, queueEditing = null, exportContext = null, roomContext = null, curveExportContext = null, curveImportDraft = null, favoritesExportContext = null, favoritesRestoreDraft = null;
   const queueIntents = new WeakMap();
   let presetSignature = "", presetContext = null, presetSerial = 0, soundSubmission = null;
   const text = (id, value) => { const element = $(id); if (element.textContent !== value) element.textContent = value; };
@@ -24,7 +24,7 @@
       clear();
       if (!wasOpen) return;
       dialog.close();
-      if (restore === false || !target || ["favorite-dialog", "dsp-dialog", "playlist-dialog", "export-dialog", "room-dialog", "curve-export-dialog", "curve-import-dialog"].some(other => $(other).open)) return;
+      if (restore === false || !target || ["favorite-dialog", "dsp-dialog", "playlist-dialog", "export-dialog", "room-dialog", "curve-export-dialog", "curve-import-dialog", "favorites-export-dialog", "favorites-restore-dialog"].some(other => $(other).open)) return;
       const available = item => item?.isConnected && !item.disabled && !item.closest("[hidden], [inert], details:not([open])");
       const replacement = target.favoriteKey && target.session === snapshot?.session_id
         ? Array.from($("favorites-list").querySelectorAll("button")).find(button => button.dataset.favoriteKey === target.favoriteKey) : null;
@@ -49,6 +49,8 @@
   const exportDialog = dialogLifecycle("export-dialog", clearExport);
   const curveExportDialog = dialogLifecycle("curve-export-dialog", clearCurveExport, "dsp-export");
   const curveImportDialog = dialogLifecycle("curve-import-dialog", clearCurveImport, "dsp-import");
+  const favoritesExportDialog = dialogLifecycle("favorites-export-dialog", clearFavoritesExport, "favorites-backup");
+  const favoritesRestoreDialog = dialogLifecycle("favorites-restore-dialog", clearFavoritesRestore, "favorites-restore");
   const roomDialog = dialogLifecycle("room-dialog", clearRoomForm, "rename-room");
   async function request(path, options) {
     const abort = new AbortController();
@@ -165,7 +167,7 @@
     text("eq", !dspKnown || dsp.eq_enabled === null ? "EQ unavailable" : dsp.eq_enabled ? "Bypass EQ" : "Enable EQ");
     $("eq").setAttribute("aria-pressed", dspKnown && dsp.eq_enabled === true ? "true" : "false");
     $("eq").disabled = !ready || !dspKnown || dsp.eq_enabled === null;
-    renderSoundEditor(); renderQueue(ready); renderPlaylist(); renderExport(); renderFavorites(ready);
+    renderSoundEditor(); renderQueue(ready); renderPlaylist(); renderExport(); renderFavorites(ready); renderFavoritesTransfer();
     text("freshness", control.lastReadAt ? `${control.fresh ? "State received" : "Last state received"} ${new Date(control.lastReadAt).toLocaleTimeString()}. Playback status comes from the renderer.` : "No state received yet.");
     $("add-favorite").disabled = !ready || !control.favoritesFresh;
     $("save-current").disabled = !ready || !control.favoritesFresh || !snapshot.actions.save_current;
@@ -677,6 +679,167 @@
     else if (currentEditor()?.library_unavailable === true) draft.status += " " + DSP_LIBRARY_UNAVAILABLE_MESSAGE;
     renderCurveTransfer();
   });
+  // Private managed-library transfer. Configured favorites are never restored.
+  function favoritesTransferIdentity() { return JSON.stringify([snapshot?.session_id, control.favorites]); }
+  function favoritesTransferAvailable() { return control.canMutate("favorite_add"); }
+  function favoritesContextCurrent(context, restore = false) {
+    return Boolean(context && favoritesTransferAvailable() && snapshot.session_id === context.session && context.identity === favoritesTransferIdentity() && (!restore || control.canMutate("favorite_restore")));
+  }
+  function releaseFavoritesExport(context) {
+    if (context?.url) { URL.revokeObjectURL(context.url); context.url = null; }
+    $("favorites-export-download").removeAttribute("href"); $("favorites-export-download").hidden = true;
+  }
+  function clearFavoritesExport() {
+    const context = favoritesExportContext; favoritesExportContext = null;
+    context?.abort?.abort(); releaseFavoritesExport(context);
+    $("favorites-export-confirm").checked = false; $("favorites-export-confirm").disabled = true;
+    $("favorites-export-prepare").disabled = true;
+    text("favorites-export-summary", ""); text("favorites-export-status", "");
+  }
+  function clearFavoritesRestore() {
+    favoritesRestoreDraft?.cancel(); favoritesRestoreDraft = null;
+    $("favorites-restore-file").value = ""; $("favorites-restore-confirm").checked = false;
+    $("favorites-restore-file").disabled = true; $("favorites-restore-confirm").disabled = true; $("favorites-restore-submit").disabled = true;
+    text("favorites-restore-summary", ""); text("favorites-restore-status", "");
+  }
+  function currentFavoritesExport(context) {
+    return favoritesExportContext === context && $("favorites-export-dialog").open && !context.stale && !context.failed && favoritesContextCurrent(context);
+  }
+  function renderFavoritesTransfer() {
+    $("favorites-backup").disabled = !favoritesTransferAvailable();
+    $("favorites-restore").disabled = !control.canMutate("favorite_restore");
+    const context = favoritesExportContext;
+    if (context) {
+      if (!context.stale && !favoritesContextCurrent(context)) {
+        context.stale = true; context.summary = null; context.abort?.abort(); releaseFavoritesExport(context);
+        $("favorites-export-confirm").checked = false; context.status = FAVORITES_TRANSFER_CHANGED;
+      }
+      const ready = currentFavoritesExport(context), summary = context.summary;
+      text("favorites-export-summary", summary ? `Managed favorites only · ${summary.count} ${summary.count === 1 ? "entry" : "entries"} · ${summary.size_bytes.toLocaleString()} UTF-8 file bytes. Configured favorites are excluded.` : "");
+      text("favorites-export-status", context.status);
+      $("favorites-export-confirm").disabled = !ready || !summary || context.pending;
+      $("favorites-export-prepare").disabled = !ready || !summary || context.pending || context.sent || !$("favorites-export-confirm").checked;
+      const downloadable = ready && context.url && $("favorites-export-confirm").checked;
+      $("favorites-export-download").hidden = !downloadable;
+      if (downloadable) $("favorites-export-download").setAttribute("href", context.url);
+      else $("favorites-export-download").removeAttribute("href");
+    }
+    const draft = favoritesRestoreDraft;
+    if (draft) {
+      if (!draft.sent && !draft.stale && !favoritesContextCurrent(draft, true)) {
+        draft.stale = true; draft.clearSource(); $("favorites-restore-file").value = "";
+        $("favorites-restore-confirm").checked = false; draft.status = FAVORITES_TRANSFER_CHANGED;
+      }
+      const ready = !draft.sent && !draft.stale && !draft.cancelled && favoritesContextCurrent(draft, true);
+      $("favorites-restore-file").disabled = !ready;
+      $("favorites-restore-confirm").disabled = !ready || draft.reading || !draft.text;
+      $("favorites-restore-submit").disabled = !ready || draft.reading || !draft.text || Boolean(draft.error) || !$("favorites-restore-confirm").checked;
+      text("favorites-restore-summary", draft.text ? `Managed favorites only · ${draft.count} ${draft.count === 1 ? "entry" : "entries"} · ${draft.size.toLocaleString()} UTF-8 file bytes · ${requestBytes(favoritesRestoreBody(draft.session, draft.text)).toLocaleString()} / 32,768 escaped request bytes. Local structural preview only; the renderer validates private targets.` : "");
+      text("favorites-restore-status", draft.sent || draft.stale ? draft.status : draft.error || (draft.reading ? "Reading the local file. Nothing has been sent." : draft.status));
+    }
+  }
+  async function prepareFavoritesExport(context, download) {
+    context.pending = true; if (download) context.sent = true;
+    context.status = download ? "Preparing the private favorites backup…" : "Reading a private-detail-free summary…";
+    renderFavoritesTransfer();
+    const body = {action: download ? "download" : "prepare", expected_session: context.session};
+    if (download) { body.expected_export = context.summary.revision; body.private_export_confirmed = true; }
+    let bytes;
+    try {
+      const response = await fetchExport(context, body, download ? context.summary.size_bytes : undefined, "/orr/v1/web/favorites/export", FAVORITES_EXPORT_FILENAME);
+      bytes = response.bytes;
+      if (!currentFavoritesExport(context) || download && !$("favorites-export-confirm").checked) throw new Error("Favorites context changed");
+      if (response.status !== 200) {
+        const error = exportObject(bytes);
+        context.failed = true;
+        context.status = [409, 503].includes(response.status) && error.outcome === "REJECTED" ? favoritesTransferFailure(error.error) : "Could not prepare the favorites backup. Close this dialog and review current state. No download was started.";
+      } else if (download) {
+        validateFavoritesExportDocument(bytes, context.summary);
+        context.url = URL.createObjectURL(new Blob([bytes], {type: "application/json"}));
+        context.status = "Private favorites backup ready. Choose Download JSON to request a browser download.";
+      } else {
+        context.summary = validateFavoritesExportSummary(exportObject(bytes), context.session, context.count);
+        context.status = "Review the managed-only scope and privacy warning before preparing the file.";
+      }
+    } catch (_) {
+      if (favoritesExportContext === context && !context.stale && !context.failed) {
+        context.failed = true; context.status = "Could not prepare the favorites backup. Close this dialog and review current state. No download was started.";
+      }
+    } finally {
+      if (bytes) bytes.fill(0);
+      context.pending = false; if (favoritesExportContext === context) renderFavoritesTransfer();
+    }
+  }
+  $("favorites-backup").addEventListener("click", () => {
+    if (!favoritesTransferAvailable() || $("favorites-export-dialog").open) return;
+    clearFavoritesExport();
+    favoritesExportContext = {state: snapshot, session: snapshot.session_id, identity: favoritesTransferIdentity(), count: control.favorites.filter(item => item.editable).length, summary: null, pending: false, sent: false, stale: false, failed: false, url: null, abort: null, status: ""};
+    favoritesExportDialog.open($("favorites-backup")); $("favorites-export-close").focus();
+    return prepareFavoritesExport(favoritesExportContext, false);
+  });
+  ["favorites-export-close", "favorites-export-cancel"].forEach(id => $(id).addEventListener("click", () => favoritesExportDialog.close()));
+  $("favorites-export-confirm").addEventListener("change", () => {
+    const context = favoritesExportContext;
+    if (context && !$("favorites-export-confirm").checked) {
+      releaseFavoritesExport(context);
+      if (context.sent) { context.failed = true; context.abort?.abort(); context.status = "Consent cleared. Close this dialog and review the export again if needed."; }
+    }
+    renderFavoritesTransfer();
+  });
+  $("favorites-export-form").addEventListener("submit", event => {
+    event.preventDefault(); renderFavoritesTransfer();
+    const context = favoritesExportContext;
+    if (!context || !currentFavoritesExport(context) || context.pending || context.sent || !context.summary || !$("favorites-export-confirm").checked) return;
+    return prepareFavoritesExport(context, true);
+  });
+  $("favorites-export-download").addEventListener("click", event => {
+    const context = favoritesExportContext;
+    if (!context || !currentFavoritesExport(context) || !context.url || !$("favorites-export-confirm").checked) { event.preventDefault(); renderFavoritesTransfer(); return; }
+    context.status = "Download requested; check your browser’s downloads. Keep the private favorites backup safe.";
+    renderFavoritesTransfer();
+  });
+  $("favorites-restore").addEventListener("click", () => {
+    if (!control.canMutate("favorite_restore") || $("favorites-restore-dialog").open) return;
+    clearFavoritesRestore(); favoritesRestoreDraft = new FavoritesRestoreDraft(snapshot); favoritesRestoreDraft.identity = favoritesTransferIdentity();
+    favoritesRestoreDialog.open($("favorites-restore")); renderFavoritesTransfer(); $("favorites-restore-file").focus();
+  });
+  ["favorites-restore-close", "favorites-restore-cancel"].forEach(id => $(id).addEventListener("click", () => favoritesRestoreDialog.close()));
+  $("favorites-restore-file").addEventListener("change", async () => {
+    const draft = favoritesRestoreDraft; let file = $("favorites-restore-file").files?.[0];
+    $("favorites-restore-file").value = ""; $("favorites-restore-confirm").checked = false;
+    if (!draft || draft.sent || draft.stale || !favoritesContextCurrent(draft, true)) { renderFavoritesTransfer(); return; }
+    draft.status = "";
+    const reading = draft.readFile(file); file = null; renderFavoritesTransfer(); await reading;
+    if (favoritesRestoreDraft === draft) renderFavoritesTransfer();
+  });
+  $("favorites-restore-confirm").addEventListener("change", () => {
+    const draft = favoritesRestoreDraft;
+    if (draft && !$("favorites-restore-confirm").checked) {
+      draft.clearSource(); $("favorites-restore-file").value = "";
+      if (!draft.sent) draft.status = "Consent cleared. Choose the file again to review a new restore.";
+    }
+    renderFavoritesTransfer();
+  });
+  $("favorites-restore-form").addEventListener("submit", async event => {
+    event.preventDefault(); renderFavoritesTransfer();
+    const draft = favoritesRestoreDraft;
+    if (!draft || draft.sent || draft.stale || draft.cancelled || draft.reading || !draft.text || draft.error || !favoritesContextCurrent(draft, true) || !$("favorites-restore-confirm").checked) return;
+    const body = favoritesRestoreBody(draft.session, draft.text);
+    if (requestBytes(body) > MAX_REQUEST_BYTES) return;
+    draft.sent = true; draft.clearSource(); $("favorites-restore-file").value = ""; $("favorites-restore-confirm").checked = false;
+    draft.status = "PENDING · Restoring the managed favorites library. Playback and configured favorites stay unchanged.";
+    renderFavoritesTransfer();
+    const waiting = run(body, "Restore managed favorites"); body.text = "";
+    const result = await waiting;
+    if (favoritesRestoreDraft !== draft) return;
+    draft.status = result.kind === "acknowledged"
+      ? "Restore acknowledged. Review managed favorites; exact private contents are not verified by this redacted view."
+      : `${result.kind.toUpperCase()} · ${result.text}`;
+    if (!control.fresh) draft.status += " Current renderer state is unavailable.";
+    else if (snapshot.session_id !== draft.session) draft.status += " The renderer restarted; review its current managed favorites.";
+    else if (!control.favoritesFresh) draft.status += " The favorites list could not be refreshed.";
+    renderFavoritesTransfer();
+  });
   function renderFavorites(ready) {
     text("favorites-count", String(control.favorites.length));
     $("favorites-empty").hidden = control.favorites.length > 0;
@@ -968,7 +1131,7 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
   // Scrub private dialog input before navigation/BFCache, even if already closed.
   // Only local drafts are dismissed; sent commands and their outcomes stay live.
-  window.addEventListener("pagehide", () => { outputInspection.dismiss(); renderOutputInspection(); closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); curveExportDialog.close(false); curveImportDialog.close(false); });
+  window.addEventListener("pagehide", () => { outputInspection.dismiss(); renderOutputInspection(); closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); curveExportDialog.close(false); curveImportDialog.close(false); favoritesExportDialog.close(false); favoritesRestoreDialog.close(false); });
   window.addEventListener("online", () => poll());
   window.addEventListener("offline", () => { control.fresh = false; control.favoritesFresh = false; control.favoritesReadFailure = null; render(); });
   poll();
