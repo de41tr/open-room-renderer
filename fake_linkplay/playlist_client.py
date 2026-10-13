@@ -24,6 +24,9 @@ def fetch_current_playlist(host: str, port: int) -> dict[str, object]:
     endpoint = _endpoint(host, port, path=PATH)
     try:
         with requests.Session() as session:
+            # allow_redirects=False still prepares Response.next and reads its body.
+            # Skip that work so status/size checks remain before any body read.
+            session.resolve_redirects = lambda *_args, **_kwargs: iter(())
             # Default adapters have zero retries. Never inherit proxy/netrc
             # credentials or redirect the request to another destination.
             session.trust_env = False

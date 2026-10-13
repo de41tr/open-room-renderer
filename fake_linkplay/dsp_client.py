@@ -84,6 +84,9 @@ class DspClient:
         failure = _UNKNOWN if mutation else _READ_FAILED
         try:
             with requests.Session() as session:
+                # allow_redirects=False still prepares Response.next and reads its body.
+                # Skip that work so status/size checks remain before any body read.
+                session.resolve_redirects = lambda *_args, **_kwargs: iter(())
                 session.trust_env = False
                 # Requests' default adapters perform zero retries. Ten seconds
                 # bounds connect/read inactivity, not the overall elapsed time.

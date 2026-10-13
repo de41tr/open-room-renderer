@@ -129,6 +129,9 @@ class QueueClient:
             # Avoid environment proxy/netrc credentials and implicit redirects.
             # requests' default adapters perform zero retries.
             with requests.Session() as session:
+                # allow_redirects=False still prepares Response.next and reads its body.
+                # Skip that work so status/size checks remain before any body read.
+                session.resolve_redirects = lambda *_args, **_kwargs: iter(())
                 session.trust_env = False
                 # Ten seconds per connect/read inactivity, not a total deadline.
                 with session.post(self.endpoint, data=body, headers={
