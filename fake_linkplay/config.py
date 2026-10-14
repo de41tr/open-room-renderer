@@ -1,8 +1,7 @@
 """Configuration loading and small persisted runtime settings.
 
-The public examples use neutral values. Some compatibility profiles still use
-specific protocol-facing strings because client behavior depends on them; keep
-those changes behind explicit config flags.
+New installations use WiiM-compatible discovery. Existing identities retain
+their effective neutral defaults unless the operator explicitly changes profile.
 """
 
 from __future__ import annotations
@@ -23,6 +22,14 @@ from .audio_device import validate_audio_device
 from .utils import detect_lan_ip, ensure_dir
 from .persistence import load_active_dsp, load_gain
 from .startup_state import _read_state
+
+
+LEGACY_DISCOVERY_DEFAULTS = {
+    "wiim_home_profile": False,
+    "upnp_port": 8080,
+    "enable_mdns": False,
+    "mirror_http_on_upnp_port": False,
+}
 
 
 @dataclass(slots=True)
@@ -120,6 +127,11 @@ class Config:
     channel_balance: str = "0.0"
     podcast_presets: list[PodcastPreset] = field(default_factory=list)
     experimental_sources: list[ExperimentalSource] = field(default_factory=list)
+    # Loader provenance only, never an accepted YAML setting. Omitted settings
+    # can retain legacy defaults once the configured or saved identity is known.
+    _implicit_discovery_settings: tuple[str, ...] = field(
+        default=tuple(LEGACY_DISCOVERY_DEFAULTS), init=False, repr=False, compare=False,
+    )
 
     def __post_init__(self) -> None:
         """Normalize configured IDs without replacing their identity."""
@@ -355,9 +367,30 @@ def load_startup_config(path: str | Path, *, missing_ok: bool = False) -> Config
 
 
 def _config_from_mapping(raw: dict[str, Any]) -> Config:
+    implicit = tuple(name for name in LEGACY_DISCOVERY_DEFAULTS if name not in raw)
     presets = [PodcastPreset(**item) for item in raw.pop("podcast_presets", [])]
     experimental_sources = [ExperimentalSource(**item) for item in raw.pop("experimental_sources", [])]
-    return Config(**raw, podcast_presets=presets, experimental_sources=experimental_sources)
+    cfg = Config(**raw, podcast_presets=presets, experimental_sources=experimental_sources)
+    cfg._implicit_discovery_settings = implicit
+    preserve_discovery_identity(cfg)
+    return cfg
+
+
+def preserve_discovery_identity(cfg: Config) -> None:
+    """Keep omitted legacy defaults if automatic WiiM conversion changes an ID.
+
+    An explicit profile choice remains authoritative. Newly generated compact
+    identities already round-trip unchanged, without relying on an FF prefix.
+    Call again after loading a saved identity; offline readers do not probe it.
+    Config and UUID files are never rewritten to record this effective choice.
+    """
+
+    if "wiim_home_profile" not in cfg._implicit_discovery_settings or not cfg.uuid:
+        return
+    if cfg.upnp_uuid == normalize_uuid(cfg.uuid):
+        return
+    for name in cfg._implicit_discovery_settings:
+        setattr(cfg, name, LEGACY_DISCOVERY_DEFAULTS[name])
 
 
 def _load_config_state(cfg: Config, *, _startup: bool = False) -> Config:
@@ -365,6 +398,7 @@ def _load_config_state(cfg: Config, *, _startup: bool = False) -> Config:
         lambda: load_or_create_uuid(cfg.state_dir, wiim_home_profile=cfg.wiim_home_profile),
         "identity", startup=_startup,
     )
+    preserve_discovery_identity(cfg)
     load_persistent_runtime_state(cfg, _startup=_startup)
     return cfg
 

@@ -164,7 +164,7 @@ async def test_real_multicast_two_renderers_and_http_descriptions(monkeypatch, t
 @pytest.mark.asyncio
 async def test_generic_explicit_interface_real_owned_socket_isolation():
     import zeroconf
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000004", enable_mdns=True,
+    cfg = Config(uuid="00000000-0000-4000-8000-000000000004", wiim_home_profile=False, enable_mdns=True,
                  advertise_ip="127.0.0.1", discovery_interface="127.0.0.1")
     advertiser = MdnsAdvertiser(cfg)
     sockets = []
@@ -194,7 +194,7 @@ async def test_real_loopback_unregister_failure_closes_owned_sockets(monkeypatch
     from unittest.mock import AsyncMock
 
     advertiser = MdnsAdvertiser(Config(
-        uuid="00000000-0000-4000-8000-000000000009", enable_mdns=True,
+        uuid="00000000-0000-4000-8000-000000000009", wiim_home_profile=False, enable_mdns=True,
         advertise_ip="127.0.0.1", discovery_interface="127.0.0.1",
         mdns_instance_name="Synthetic teardown fixture",
     ))

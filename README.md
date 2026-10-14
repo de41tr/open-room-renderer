@@ -225,7 +225,10 @@ location). The default prefix is
 `~/.local/share/open-room-renderer`. Keep that state across restarts.
 
 For checkout development, `configs/config.example.yaml` enables WiiM-compatible
-discovery by default. Set `wiim_home_profile: false` explicitly for neutral
+discovery for fresh state. Existing implicit profiles preserve identities whose
+conversion would change their advertised UUID, along with omitted legacy
+discovery defaults; see [upgrade behavior](GETTING_STARTED.md#explicit-neutral-discovery).
+Set `wiim_home_profile: false` explicitly for neutral
 discovery metadata; `enable_mdns: false` disables mDNS separately.
 The profile wrappers write a derived `runner-config.yaml` inside their `.state/`
 directory on each launch; do not edit that generated file for lasting changes.

@@ -387,7 +387,7 @@ Setup selects `python3` and verifies Python 3.11+. Override with
 extras; the native installation deliberately omits them. Curl alone is diagnostic;
 the acceptance helper uses a real open-source client and local SSDP.
 
-`run.sh` / `run-dev.sh` enable WiiM-compatible discovery, high ports, and persistent
+With fresh state, `run.sh` / `run-dev.sh` enable WiiM-compatible discovery, high ports, and persistent
 `.state`. `./scripts/run-app-compat.sh` additionally selects the implemented
 TuneIn-style service surface, with HTTP 8080, SOAP/UPnP 59152, and stable
 `.state/app-compat`. Some proprietary controllers insist on TCP 80 despite the
@@ -399,6 +399,16 @@ Set `wiim_home_profile: false` in a custom YAML file to select neutral UUID and
 discovery metadata. `enable_mdns: false` disables mDNS separately. Explicit
 configuration and existing saved identity are retained; no identity file is
 reset when changing profiles.
+
+When `wiim_home_profile` is omitted, an existing configured or saved identity
+whose WiiM conversion would change its advertised UUID keeps the neutral
+profile. Omitted SOAP, mDNS and HTTP-mirror settings then retain their earlier
+defaults (8080, false and false); explicit settings still win, including mDNS
+enabled by older native installs. The portable runner uses the same rule.
+Fresh identities use the new WiiM defaults and keep them across restarts.
+Neither the input YAML nor the saved UUID is rewritten. Explicitly setting
+`wiim_home_profile: true` opts into the compatibility representation and can
+change a legacy advertised UUID; controllers may need to rediscover it.
 
 ### Optional App-Compatible Port-80 Service
 
@@ -522,7 +532,10 @@ active_dsp.json, eq_presets.json and favorites.json byte-for-byte into
 NEW/migrated-profile/state. Absent optional files stay absent. It skips
 plex_client_id and plex_user_info.json without reading their contents; provider sign-in/session setup may need to be repeated separately by you. There is no persisted playback queue. All other parsed
 config settings, including audio output, discovery, ports, presets and URLs, are
-retained; only state_dir and mpv_socket are rebased. YAML comments/formatting are
+retained; state_dir and mpv_socket are rebased. Missing discovery settings are
+pinned in the new profile after resolving them against the captured identity,
+so the migrated instance retains its effective identity and discovery defaults.
+The source configuration and state remain untouched. YAML comments/formatting are
 not retained, and duplicate keys, anchors/aliases and merges are refused. This is
 configuration-shape validation, not a guarantee that every saved state file is
 valid or that the selected audio device exists on the new machine.

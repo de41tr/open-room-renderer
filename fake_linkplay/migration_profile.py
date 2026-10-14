@@ -17,7 +17,7 @@ import sys
 
 import yaml
 
-from .config import normalize_uuid, read_startup_config
+from .config import LEGACY_DISCOVERY_DEFAULTS, normalize_uuid, preserve_discovery_identity, read_startup_config
 from .native_profile import user_unit
 
 STATE_FILES = frozenset({"uuid", "device_name", "channel_balance", "gain.json",
@@ -307,7 +307,13 @@ def prepare_profile(*, source: str | Path, source_config: str | Path,
                     identity = ""
                 if not identity:
                     raise PreparationError("A configured identity or existing nonempty UUID is required; preparation never creates one.")
+                cfg.uuid = identity
+            preserve_discovery_identity(cfg)
             migrated = dict(source_raw)
+            # Pin only omitted discovery settings in this new output profile,
+            # using the captured identity. Never rewrite the source config.
+            for name in LEGACY_DISCOVERY_DEFAULTS:
+                migrated.setdefault(name, getattr(cfg, name))
             migrated["state_dir"] = str(profile / "state")
             migrated["mpv_socket"] = str(destination / "run/mpv.sock")
             encoded = yaml.safe_dump(migrated, sort_keys=False, allow_unicode=True).encode("utf-8")

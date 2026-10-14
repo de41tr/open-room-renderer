@@ -41,6 +41,7 @@ INVALID_DOCUMENTS = [
     pytest.param("false\n", STRUCTURE, id="false-scalar"),
     pytest.param("0\n", STRUCTURE, id="zero-scalar"),
     pytest.param(yaml.safe_dump({SECRET_URL: True}), STRUCTURE, id="unknown-setting"),
+    pytest.param(yaml.safe_dump({"_implicit_discovery_settings": [SECRET_URL]}), STRUCTURE, id="internal-provenance"),
     pytest.param(yaml.safe_dump({1: SECRET_URL}), STRUCTURE, id="non-string-key"),
     pytest.param(yaml.safe_dump({"podcast_presets": SECRET_URL}), STRUCTURE, id="presets-shape"),
     pytest.param(yaml.safe_dump({"podcast_presets": [{"url": SECRET_URL}]}), STRUCTURE, id="preset-missing-name"),

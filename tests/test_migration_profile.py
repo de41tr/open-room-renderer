@@ -15,7 +15,7 @@ import pytest
 import yaml
 
 from fake_linkplay import migration_profile as migration
-from fake_linkplay.config import read_startup_config
+from fake_linkplay.config import load_startup_config, read_startup_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -112,6 +112,33 @@ def test_dry_run_never_writes_or_loads_runtime_state(pair, monkeypatch):
     assert _prepare(pair, dry_run=True)["status"] == "dry-run"
     assert not (pair[1] / migration.PROFILE).exists()
     assert [_snapshot(p) for p in pair] == before
+
+
+def test_legacy_native_migration_pins_effective_discovery_and_reloads_same_identity(pair):
+    old, new = pair
+    raw = json.loads((old / "config.yaml").read_text())
+    raw.pop("wiim_home_profile")
+    raw.pop("mirror_http_on_upnp_port")
+    raw["upnp_port"] = 8080
+    (old / "config.yaml").write_text(json.dumps(raw))
+    saved = b"00000000-0000-4000-8000-000000000001\n"
+    (old / "state/uuid").write_bytes(saved)
+    before = _snapshot(old)
+    original = load_startup_config(old / "config.yaml")
+    _prepare(pair)
+    output = new / migration.PROFILE
+    migrated = yaml.safe_load((output / "config.yaml").read_text())
+    assert migrated["wiim_home_profile"] is False
+    assert migrated["mirror_http_on_upnp_port"] is False
+    assert migrated["upnp_port"] == 8080 and migrated["enable_mdns"] is True
+    for _ in range(2):
+        cfg = load_startup_config(output / "config.yaml")
+        assert cfg.upnp_uuid == original.upnp_uuid == saved.decode().strip()
+        assert cfg.mdns_hostname == original.mdns_hostname
+        assert cfg.wiim_mac == original.wiim_mac
+        assert not cfg.wiim_home_profile and cfg.enable_mdns and cfg.upnp_port == 8080
+    assert (output / "state/uuid").read_bytes() == saved
+    assert _snapshot(old) == before
 
 
 @pytest.mark.parametrize("character", ["'", '"', "\x7f"])

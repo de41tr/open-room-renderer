@@ -171,6 +171,7 @@ def test_rejects_nonexclusive_audio_routes(profile, route):
     {"auto_spawn_mpv": False}, {"auto_spawn_mpv": "true"}, {"mpv_socket": "/tmp/mpv.sock"},
     {"state_dir": "/tmp/state"}, {"mirror_port_80": True}, {"http_api_port": 80},
     {"upnp_port": 3678}, {"unknown_secret": SECRET},
+    {"_implicit_discovery_settings": [SECRET]},
     {"podcast_presets": [{"name": "n", "url": "u", "secret": SECRET}]},
     {"experimental_sources": [{"name": "n", "unknown": SECRET}]},
 ])

@@ -106,6 +106,17 @@ def test_native_optional_alsa_gate(installer, monkeypatch):
         installer.environment(require_alsa=True)
 
 
+@pytest.mark.parametrize("port,soap_port", [(8080, 59152), (8081, 8081), (59152, 59152), (65535, 65535)])
+def test_native_default_split_and_custom_single_port_contract(installer, tmp_path, port, soap_port):
+    # The default has a separate SOAP listener; --port keeps custom installs
+    # on one explicitly selected port, including two renderers on one host.
+    from fake_linkplay.config import Config
+    config = Config(**installer.user_config(tmp_path, port))
+    assert config.http_api_port == port and config.upnp_port == soap_port
+    assert config.wiim_home_profile and config.enable_mdns and config.enable_ssdp
+    assert config.mirror_http_on_upnp_port and not config.mirror_port_80
+
+
 def test_native_rejects_privileged_port_and_unsafe_paths(installer, tmp_path):
     with pytest.raises(ValueError, match="unprivileged port"):
         installer.user_config(tmp_path, 80)
@@ -340,6 +351,19 @@ def test_protected_subtrees_still_reject_symlink_traversal_before_deletion(insta
         installer.uninstall(prefix, dry_run=False)
     assert safe.read_text() == "owned file"
     assert (outside / "file").read_text() == "outside user data"
+
+
+def test_portable_runner_upgrade_keeps_existing_neutral_discovery(runner):
+    state = runner.ROOT / ".state"
+    state.mkdir()
+    saved = "00000000-0000-4000-8000-000000000001\n"
+    (state / "uuid").write_text(saved)
+    for _ in range(2):
+        cfg = load_config(runner.prepare("portable"))
+        assert cfg.upnp_uuid == saved.strip() and not cfg.wiim_home_profile
+        assert cfg.http_api_port == cfg.upnp_port == 8080
+        assert not cfg.enable_mdns and not cfg.mirror_http_on_upnp_port
+        assert (state / "uuid").read_text() == saved
 
 
 def test_portable_and_compat_runners_keep_identity(runner, monkeypatch):

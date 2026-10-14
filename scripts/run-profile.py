@@ -80,7 +80,7 @@ def preflight(path: Path) -> dict:
                     "with CAP_NET_BIND_SERVICE in GETTING_STARTED.md."
                 ) from None
     # Do not recursively copy unrelated user values (YAML aliases can be cyclic).
-    return {field.name: getattr(data, field.name) for field in fields(data)}
+    return {field.name: getattr(data, field.name) for field in fields(data) if field.init}
 
 
 def main() -> int:
@@ -100,7 +100,7 @@ def main() -> int:
         return 2
     print(f"Starting Open Room Renderer ({sys.argv[1]})", flush=True)
     print(f"Config: {path}", flush=True)
-    print(f"HTTP API port: {data['http_api_port']}; UPnP port: {data['upnp_port']}", flush=True)
+    print("The service resolves discovery/UPnP defaults against the saved identity at startup.", flush=True)
     print("No automatic sudo or system setting changes. Use a trusted LAN only.", flush=True)
     executable = ROOT / ".venv/bin/open-room-renderer"
     os.execv(str(executable), [str(executable), "serve", "--config", str(path)])

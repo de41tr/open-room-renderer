@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from fake_linkplay.config import Config, load_config
+from fake_linkplay.config import Config, load_config, read_startup_config
 from fake_linkplay.mdns import CustomMdnsProtocol, DNS_CLASS_IN, DNS_TYPE_PTR, DnsQuestion
 from fake_linkplay.ssdp import response_packet
 
@@ -22,7 +22,9 @@ def test_minimal_config_publishes_stable_app_identity(tmp_path: Path) -> None:
     path.write_text(yaml.safe_dump({'state_dir': str(tmp_path / 'state'), 'advertise_ip': '192.0.2.10'}))
     cfg = load_config(path)
     assert cfg.upnp_uuid.startswith('FF')
-    assert load_config(path).upnp_uuid == cfg.upnp_uuid
+    restarted = load_config(path)
+    assert restarted.upnp_uuid == cfg.upnp_uuid
+    assert restarted.wiim_home_profile and restarted.enable_mdns and restarted.upnp_port == 59152
     packet = response_packet(cfg, 'urn:schemas-upnp-org:device:MediaRenderer:1').decode()
     assert 'ServiceName: ##hexStr##' in packet and 'Bootid.upnp.org:' in packet
     mdns = CustomMdnsProtocol(cfg)._response_for(0, DnsQuestion('_linkplay._tcp.local.', DNS_TYPE_PTR, DNS_CLASS_IN))
@@ -43,6 +45,6 @@ def test_explicit_neutral_discovery_is_preserved(tmp_path: Path) -> None:
 @pytest.mark.parametrize('name', ['configs/config.example.yaml', 'examples/config.example.yaml'])
 def test_public_default_templates_match_runtime_discovery(name: str) -> None:
     path = Path(__file__).resolve().parents[1] / name
-    values = yaml.safe_load(path.read_text())
-    assert values['wiim_home_profile'] and values['enable_ssdp'] and values['enable_mdns']
-    assert values['http_api_port'] == 8080 and values['upnp_port'] == 59152
+    cfg = read_startup_config(path)
+    assert cfg.wiim_home_profile and cfg.enable_ssdp and cfg.enable_mdns
+    assert cfg.http_api_port == 8080 and cfg.upnp_port == 59152
