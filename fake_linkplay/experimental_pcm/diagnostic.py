@@ -24,13 +24,15 @@ def generated_pcm(frames: int, *, phase: int) -> bytes:
                     for value in [(((i + phase) % 97) - 48) * 100])
 
 
-def consume(playout: PcmPlayout, pcm: bytes, *, first_frame: int) -> None:
+def consume(playout: PcmPlayout, pcm: bytes, *, first_frame: int,
+            deadline: float | None = None) -> None:
     """Consumer owns backpressure/deadline; the adapter holds one bounded block."""
     playout.submit(pcm, first_frame=first_frame, generation=playout.generation)
-    deadline = time.monotonic() + 1.0
+    block_deadline = time.monotonic() + 1.0
+    deadline = min(deadline, block_deadline) if deadline is not None else block_deadline
     while playout.pending_frames:
         if time.monotonic() >= deadline:
-            raise TimeoutError("generated PCM consumer made insufficient progress")
+            raise TimeoutError("PCM consumer made insufficient progress")
         if playout.step() == 0:
             time.sleep(0.001)
 

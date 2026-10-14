@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+import time
 
 import pytest
 
@@ -242,3 +243,132 @@ def test_installed_cli_shape_and_missing_native_library_are_private(monkeypatch,
     output = capsys.readouterr()
     assert secret not in output.out + output.err
     assert "not verified" in output.err and "Traceback" not in output.err
+
+
+def _flac_header(frames=3, rate=48000, channels=2, bits=16):
+    """Only a synthetic STREAMINFO header; never passed off as encoded audio."""
+    packed = (rate << 44) | ((channels - 1) << 41) | ((bits - 1) << 36) | frames
+    return b"fLaC\x80\0\0\x22" + b"\0" * 10 + packed.to_bytes(8, "big") + b"\0" * 16
+
+
+def test_flac_source_bounds_and_private_cli_errors(tmp_path, monkeypatch, capsys):
+    from fake_linkplay import cli
+    from fake_linkplay.experimental_pcm import flac
+
+    source = tmp_path / "private-source.flac"
+    source.write_bytes(_flac_header(rate=44100, channels=1))
+    fd = os.open(source, os.O_RDONLY)
+    try:
+        assert flac._streaminfo(fd) == (PcmFormat(44100, 1), 3, 16)
+    finally:
+        os.close(fd)
+    # Reject before loading native output or starting a decoder.
+    monkeypatch.setattr(flac, "AlsaPcmSink", lambda *_a, **_k: pytest.fail("source was not rejected"))
+    for header in (b"not FLAC" * 10, _flac_header(frames=0), _flac_header(bits=3),
+                   _flac_header(frames=flac.MAX_OUTPUT_FRAMES + 1)):
+        source.write_bytes(header)
+        assert cli.main(["audio", "pcm-decode", "--flac", str(source)]) == 1
+    source.write_bytes(_flac_header())
+    monkeypatch.setattr(flac, "MAX_INPUT_BYTES", 41)
+    assert cli.main(["audio", "pcm-decode", "--flac", str(source)]) == 1
+    fifo = tmp_path / "private-fifo"
+    os.mkfifo(fifo)
+    assert cli.main(["audio", "pcm-decode", "--flac", str(fifo)]) == 1
+    link = tmp_path / "private-link.flac"
+    link.symlink_to(source)
+    assert cli.main(["audio", "pcm-decode", "--flac", str(link)]) == 1
+    assert cli.main(["audio", "pcm-decode", "--flac", "https://example.test/private.flac"]) == 1
+    output = capsys.readouterr()
+    assert not output.out and "private" not in output.err and "Traceback" not in output.err
+
+
+@pytest.mark.parametrize("failure", [None, "exit", "timeout", "cancel", "excess"])
+def test_flac_pipe_alignment_deadline_and_owned_child_cleanup(tmp_path, monkeypatch, failure):
+    from fake_linkplay.experimental_pcm import flac
+
+    popen = subprocess.Popen
+    children = []
+    data = generated_pcm(3, phase=0)
+
+    def launch(command, **kwargs):
+        assert command[0] == "ffmpeg"
+        assert command[command.index("-i") + 1] == "pipe:0"
+        assert command[command.index("-f") + 1] == "flac"
+        assert command[command.index("-protocol_whitelist") + 1] == "pipe"
+        assert str(tmp_path) not in " ".join(command)
+        assert "FFREPORT" not in kwargs["env"]
+        output = data + (b"\0" * 4 if failure == "excess" else b"")
+        script = f"import os,time; os.write(1, {output!r}); "
+        script += "time.sleep(30)" if failure in {"timeout", "cancel"} else f"raise SystemExit({3 if failure == 'exit' else 0})"
+        process = popen([sys.executable, "-c", script], **kwargs)
+        children.append(process)
+        return process
+
+    monkeypatch.setattr(flac.subprocess, "Popen", launch)
+    monkeypatch.setenv("FFREPORT", "file=private-report.log")
+    # Force non-frame-aligned pipe reads, independent of OS pipe coalescing.
+    read = os.read
+    monkeypatch.setattr(flac.os, "read", lambda fd, size: read(fd, min(size, 3)))
+    sink = ScriptedSink()
+    if failure == "cancel":
+        def interrupt(*_args, **_kwargs):
+            raise KeyboardInterrupt
+        monkeypatch.setattr(flac, "consume", interrupt)
+    with (tmp_path / "input").open("wb") as source, PcmPlayout(sink) as playout:
+        before = time.monotonic()
+        if failure is None:
+            assert flac._decode(source.fileno(), playout, 3, before + 2)
+            assert sink.output == data
+        else:
+            expected = KeyboardInterrupt if failure == "cancel" else TimeoutError if failure == "timeout" else PlayoutError
+            with pytest.raises(expected):
+                flac._decode(source.fileno(), playout, 3, before + (0.2 if failure == "timeout" else 2))
+        assert time.monotonic() - before < 3
+    assert len(children) == 1 and children[0].poll() is not None
+    assert children[0].stdout.closed
+
+
+@pytest.mark.skipif(os.environ.get("ORR_TEST_PCM_OUTPUT") != "1", reason="explicit real libasound/FFmpeg lane")
+def test_real_alsa_flac_file_consumer_and_incomplete_input(tmp_path):
+    source = tmp_path / "private-original.flac"
+    capture = tmp_path / "decoded.pcm"
+    original = generated_pcm(10000, phase=13)
+    # Original fixture, actually losslessly encoded by distribution FFmpeg.
+    encoded = subprocess.run([
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "s16le",
+        "-ar", "48000", "-ac", "2", "-i", "pipe:0", "-c:a", "flac",
+        "-metadata", "title=private-fixture-title", str(source),
+    ], input=original, capture_output=True, timeout=5)
+    assert encoded.returncode == 0, encoded.stderr
+    command = [sys.executable, "-m", "fake_linkplay.cli", "audio", "pcm-decode",
+               "--flac", str(source), "--capture", str(capture)]
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1]))
+    process = subprocess.run(command, capture_output=True, text=True, timeout=5, env=env)
+    assert process.returncode == 0, process.stderr
+    report = json.loads(process.stdout)
+    assert report["capture_verified"] is True
+    assert report["written_frames"] == report["final_observation"]["accepted_frame"] == 10000
+    assert (report["sample_format"], report["sample_rate"], report["channels"]) == ("S16_LE", 48000, 2)
+    assert report["source_bits_per_sample"] == 16
+    assert capture.read_bytes() == original
+    assert capture.stat().st_mode & 0o777 == 0o600
+    assert "private" not in process.stdout + process.stderr
+    again = subprocess.run(command, capture_output=True, text=True, timeout=5, env=env)
+    assert again.returncode == 2 and capture.read_bytes() == original
+
+    encoded_bytes = source.read_bytes()
+    # Both a broken final encoded frame and a complete-frame-count shortfall
+    # must fail, even when FFmpeg might regard an early EOF as normal.
+    extra_declared_frame = bytearray(encoded_bytes)
+    packed = int.from_bytes(extra_declared_frame[18:26], "big")
+    extra_declared_frame[18:26] = (packed + 1).to_bytes(8, "big")
+    corrupt = bytearray(encoded_bytes)
+    corrupt[-10] ^= 0x40
+    for index, invalid in enumerate((encoded_bytes[:-10], extra_declared_frame, corrupt)):
+        source.write_bytes(invalid)
+        failed_capture = tmp_path / f"failed-{index}.pcm"
+        failed = subprocess.run(command[:-1] + [str(failed_capture)], capture_output=True,
+                                text=True, timeout=5, env=env)
+        assert failed.returncode == 1
+        assert not failed.stdout and "may be partial" in failed.stderr
+        assert "private" not in failed.stderr and "Traceback" not in failed.stderr

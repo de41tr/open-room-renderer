@@ -32,17 +32,31 @@ def add_audio_parser(subparsers) -> None:
         ),
     )
     pcm.add_argument("--capture", help="create a new raw stereo S16_LE/48 kHz file; never overwrite")
+    decode = commands.add_parser(
+        "pcm-decode", help="decode one finite local standard FLAC through ALSA null/file output",
+        description=(
+            "Experimental Linux/FFmpeg consumer for a regular local FLAC file with a known "
+            "STREAMINFO frame count. Preserves rate/channels, converts to S16_LE, and opens "
+            "only ALSA null or file-on-null. Maximum 64 MiB input, 2880000 frames and 15 seconds "
+            "decode time. No URLs, physical output, renderer control or native packet framing."
+        ),
+    )
+    decode.add_argument("--flac", required=True, help="explicit finite standard FLAC file")
+    decode.add_argument("--capture", help="create a new raw S16_LE file; never overwrite")
 
 
 def run_audio_diagnostic(args: argparse.Namespace) -> int:
     """Keep config/socket paths and raw backend diagnostics out of all output."""
-    if args.audio_cmd == "pcm-check":
+    if args.audio_cmd in {"pcm-check", "pcm-decode"}:
         if not sys.platform.startswith("linux"):
             print("PCM check requires Linux libasound.", file=sys.stderr)
             return 1
         # Keep the optional native dependency out of normal renderer startup.
-        from .experimental_pcm.diagnostic import run_pcm_check
-        return run_pcm_check(args)
+        if args.audio_cmd == "pcm-check":
+            from .experimental_pcm.diagnostic import run_pcm_check
+            return run_pcm_check(args)
+        from .experimental_pcm.flac import run_pcm_decode
+        return run_pcm_decode(args)
     try:
         cfg = read_startup_config(args.config)
         if (not isinstance(cfg.mpv_socket, str) or not cfg.mpv_socket
