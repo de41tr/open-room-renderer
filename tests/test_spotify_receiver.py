@@ -10,10 +10,12 @@ from pathlib import Path
 import shutil
 
 import pytest
+from aiohttp import web
 
 from fake_linkplay import cli, spotify_client as client, spotify_receiver as receiver
 from fake_linkplay.spotify_exclusive import ExclusiveProfileError
 from test_spotify_exclusive import profile  # existing canonical native fixture
+from test_spotify_diagnostic import peer, STATUS, SECRET
 
 
 @pytest.fixture
@@ -248,6 +250,60 @@ def test_status_does_not_call_transition_or_failure_off(ready, monkeypatch):
         def validate(self): return {'renderer': stopped(), 'spotify': stopped() | {'ActiveState': 'failed', 'Result': 'exit-code'}}
     monkeypatch.setattr(receiver, 'UserServices', Manager)
     assert receiver.status(str(ready))['selected_service'] == 'UNKNOWN'
+
+
+def test_playback_snapshot_is_opt_in_and_skipped_when_spotify_is_not_selected(ready, services, monkeypatch):
+    monkeypatch.setattr(receiver, 'SpotifyDiagnosticClient',
+                        lambda *_args: pytest.fail('unrequested API read'))
+    services.calls = [('started', 'spotify')]
+    assert 'provider_playback' not in receiver.status(str(ready))
+    services.calls = [('started', 'renderer')]
+    result = receiver.status(str(ready), playback=True)
+    assert result['selected_service'] == 'renderer'
+    assert result['provider_playback']['observation'] == 'not_observed'
+    assert result['provider_playback']['status'] is None
+    assert result['connect_session'] == 'UNKNOWN'
+    assert services.calls == [('started', 'renderer')]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('response_code', [200, 204, 503])
+async def test_receiver_playback_snapshot_uses_profile_and_preserves_services(
+        ready, services, monkeypatch, capsys, response_code):
+    async def handler(request):
+        if request.path == '/':
+            return web.json_response({'playback_ready': True})
+        assert request.path == '/status'
+        return (web.json_response(STATUS) if response_code == 200 else
+                web.Response(status=response_code, text=SECRET if response_code == 503 else None))
+
+    monkeypatch.setattr(cli, 'api_get', lambda *_args: pytest.fail('renderer HTTP contacted'))
+    services.calls = [('started', 'spotify')]
+    async with peer(handler) as (port, requests):
+        data = receiver._json(ready / 'receiver.json')
+        receiver._write(ready / 'receiver.json', data | {'port': port})
+        code = await asyncio.to_thread(cli.main, ['spotify', 'receiver', '--directory', str(ready),
+                                                  'status', '--playback'])
+    captured = capsys.readouterr()
+    assert SECRET not in captured.out + captured.err
+    assert captured.err == ''
+    result = json.loads(captured.out)
+    observed = result['provider_playback']
+    assert result['selected_service'] == 'spotify'
+    assert result['services']['spotify']['ActiveState'] == 'active'
+    assert result['audio_output'] == 'UNVERIFIED'
+    assert observed['audio_output'] == observed['listener_ownership'] == 'unverified'
+    assert [(method, path) for method, path, _ in requests] == [('GET', '/'), ('GET', '/status')]
+    assert services.calls == [('started', 'spotify')]
+    if response_code == 503:
+        assert code == 1 and observed['observation'] == 'unavailable'
+        assert observed['status'] is None and result['connect_session'] == 'UNKNOWN'
+    else:
+        assert code == 0 and observed['observation'] == 'sidecar_reported'
+        assert observed['snapshot_freshness'] == 'snapshot_only'
+        assert result['connect_session'] == ('SESSION_PRESENT' if response_code == 200 else 'NO_SESSION')
+        assert (observed['status']['paused'] is True and observed['status']['volume'] == 25
+                if response_code == 200 else observed['status'] is None)
 
 
 def test_receiver_dispatch_does_not_contact_renderer_http(ready, monkeypatch):

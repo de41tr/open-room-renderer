@@ -7,6 +7,7 @@ Unknown stop outcomes never authorize a competing start.
 from __future__ import annotations
 
 import argparse
+import asyncio
 from contextlib import contextmanager
 import ctypes
 import ctypes.util
@@ -25,6 +26,7 @@ import time
 
 from .native_profile import systemd_quote, user_unit
 from .spotify_client import fail, install_client, verify_client
+from .spotify_diagnostic import SpotifyDiagnosticClient, SpotifyDiagnosticError
 from .spotify_exclusive import (ExclusiveProfileError, RENDERER_SERVICE,
                                 SPOTIFY_SERVICE, _directory, _path,
                                 _private_directory, _read, _renderer,
@@ -460,17 +462,37 @@ def recover(directory: str) -> dict:
         return result
 
 
-def status(directory: str) -> dict:
+def status(directory: str, *, playback: bool = False) -> dict:
     root, profile = load_profile(directory)
-    states = UserServices(root, profile).validate()
+    services = UserServices(root, profile)
+    states = services.validate()
     active = [mode for mode, info in states.items() if info["ActiveState"] == "active"]
-    all_stopped = all(UserServices(root, profile).stopped(info) for info in states.values())
+    all_stopped = all(services.stopped(info) for info in states.values())
     selected = active[0] if len(active) == 1 else "off" if all_stopped else "UNKNOWN"
-    return {"selected_service": selected if len(active) < 2 else "CONFLICT",
+    result = {"selected_service": selected if len(active) < 2 else "CONFLICT",
             "services": {mode: {key: info[key] for key in ("ActiveState", "SubState", "Result")}
                          for mode, info in states.items()},
             "audio_output": "UNVERIFIED", "connect_session": "USE_SEPARATE_SPOTIFY_DIAGNOSE",
             "spotify_bypasses_orr_dsp": True, "gates": GATES}
+    if playback:
+        # Read only when Spotify is the sole selected service. A loopback API
+        # report is still not proof that the owned process supplied it, nor an
+        # atomic snapshot with systemd or evidence of audible output.
+        observed = {"observation": "not_observed", "session_observation": "UNKNOWN",
+                    "status": None, "snapshot_freshness": "unknown", "audio_output": "unverified",
+                    "reason": "spotify_service_not_exclusive"}
+        if selected == "spotify" and services.stopped(states["renderer"]):
+            try:
+                client = SpotifyDiagnosticClient(profile.get("host"), profile.get("port"))
+                observed = asyncio.run(client.diagnose())
+            except SpotifyDiagnosticError as exc:
+                # Preserve the useful service snapshot even when the optional
+                # API is unavailable or its response cannot be interpreted.
+                observed.update(observation="unavailable", reason=str(exc))
+        observed["listener_ownership"] = "unverified"
+        result["provider_playback"] = observed
+        result["connect_session"] = observed["session_observation"]
+    return result
 
 
 def setup(args: argparse.Namespace) -> dict:
@@ -660,7 +682,10 @@ def add_receiver_parser(commands) -> None:
     receiver = commands.add_parser("receiver", help="explicit exclusive receiver user-service lifecycle")
     receiver.add_argument("--directory", required=True, help="private receiver setup directory")
     actions = receiver.add_subparsers(dest="receiver_cmd", required=True)
-    for action in ("status", "install", "uninstall", "recover"):
+    inspect = actions.add_parser("status", help="show service state without contacting either player")
+    inspect.add_argument("--playback", action="store_true",
+                         help="also read a sanitized snapshot from the configured Spotify loopback API")
+    for action in ("install", "uninstall", "recover"):
         actions.add_parser(action)
     change = actions.add_parser("switch", help="stop both complete services before starting one; off starts neither")
     change.add_argument("mode", choices=("renderer", "spotify", "off"))
@@ -682,7 +707,7 @@ def run_receiver(args: argparse.Namespace) -> int:
         elif args.receiver_cmd == "switch":
             result = switch(args.directory, args.mode)
         elif args.receiver_cmd == "status":
-            result = status(args.directory)
+            result = status(args.directory, playback=args.playback)
         elif args.receiver_cmd == "recover":
             result = recover(args.directory)
         elif args.receiver_cmd == "run":
@@ -695,7 +720,7 @@ def run_receiver(args: argparse.Namespace) -> int:
         else:
             result = uninstall(args.directory)
         print(json.dumps(result, sort_keys=True))
-        return 0
+        return 1 if result.get("provider_playback", {}).get("observation") == "unavailable" else 0
     except ExclusiveProfileError as exc:
         if getattr(args, "receiver_cmd", None) == "run":
             try:

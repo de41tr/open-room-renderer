@@ -125,8 +125,21 @@ operator, request one mode:
 ```sh
 "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" switch spotify
 "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" status
-"$ORR" spotify diagnose --port 3678
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" status --playback
 ```
+
+Plain `status` only inspects the services. `status --playback` also reads one
+sanitized [provider snapshot](SPOTIFY_DIAGNOSTIC.md#what-the-json-means) from the
+setup's configured loopback API, only while Spotify is the sole selected
+service. `provider_playback.status` contains stopped/paused/buffering,
+repeat/shuffle booleans and volume/volume_steps/volume_fraction. A 204 response
+reports `NO_SESSION`; an unavailable or invalid API preserves service results,
+reports `observation: unavailable` with unknown session state, and exits 1.
+When Spotify is not exclusively selected, no API is contacted and the snapshot
+is `not_observed`. Exit 0 never establishes playback. These are separate,
+non-atomic service and provider observations: the loopback listener's ownership
+and actual audio remain unverified. No metadata, authentication or playback
+commands are requested; no snapshot is saved.
 
 The first command can begin upstream's device-auth flow. **No login or account
 operation is performed by the installer or acceptance tests.** The operator
