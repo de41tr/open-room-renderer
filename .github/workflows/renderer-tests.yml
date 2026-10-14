@@ -56,7 +56,8 @@ jobs:
         timeout-minutes: 3
         # Preserve every default test and the existing cap on this same runner.
         # Three bounded processes share one deadline; the first discovers all others.
-        # Isolate client subprocess work instead of overfilling either existing group.
+        # Share Spotify playback across groups 2/3: read-only observations, then controls.
+        # Explicit deselections keep each collected test in exactly one group.
         run: |
           python scripts/run-native-groups.py --groups 3 --timeout 165 \
             --log-dir "$RUNNER_TEMP/orr-default-python311" -- \
@@ -66,12 +67,33 @@ jobs:
             --ignore=tests/test_native_group_runner.py --ignore=tests/test_cli_commands.py \
             --ignore=tests/test_startup_state.py --ignore=tests/test_legacy_cli_redirect_privacy.py \
             --ignore=tests/test_dsp_read_client.py --ignore=tests/test_dsp_client.py \
-            --ignore=tests/test_transport_client.py \
+            --ignore=tests/test_transport_client.py --ignore=tests/test_spotify_playback.py \
             ::: tests/test_queue_cli.py tests/test_playlist_cli.py tests/test_favorite_play_cli.py \
             tests/test_startup_config.py tests/test_startup_state.py tests/test_web_ui.py \
+            tests/test_spotify_playback.py::test_owned_now_playing_cli_reads_only_status_and_never_saves_metadata \
+            tests/test_spotify_playback.py::test_now_playing_keeps_absent_data_unknown \
+            tests/test_spotify_playback.py::test_now_playing_projection_rejects_wrong_types_and_ignores_unrequested_fields \
+            tests/test_spotify_playback.py::test_now_playing_decoded_file_reports_only_supplied_fields \
+            tests/test_spotify_playback.py::test_now_playing_decoded_file_null_and_empty_remain_unknown \
+            tests/test_spotify_playback.py::test_now_playing_decoded_file_rejects_invalid_fields_without_private_details \
+            tests/test_spotify_playback.py::test_now_playing_decoded_file_cli_is_one_private_read \
+            tests/test_spotify_playback.py::test_now_playing_invocation_change_discards_metadata \
+            tests/test_spotify_playback.py::test_now_playing_service_fences_block_unselected_or_changed_client \
+            tests/test_spotify_playback.py::test_now_playing_failure_has_no_metadata_raw_error_or_retry \
             ::: tests/test_native_group_runner.py tests/test_cli_commands.py \
             tests/test_legacy_cli_redirect_privacy.py tests/test_dsp_read_client.py \
-            tests/test_dsp_client.py tests/test_transport_client.py tests/test_favorites_cli.py
+            tests/test_dsp_client.py tests/test_transport_client.py tests/test_favorites_cli.py \
+            tests/test_spotify_playback.py \
+            --deselect=tests/test_spotify_playback.py::test_owned_now_playing_cli_reads_only_status_and_never_saves_metadata \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_keeps_absent_data_unknown \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_projection_rejects_wrong_types_and_ignores_unrequested_fields \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_decoded_file_reports_only_supplied_fields \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_decoded_file_null_and_empty_remain_unknown \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_decoded_file_rejects_invalid_fields_without_private_details \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_decoded_file_cli_is_one_private_read \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_invocation_change_discards_metadata \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_service_fences_block_unselected_or_changed_client \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_failure_has_no_metadata_raw_error_or_retry
 
       - name: Verify exclusive receiver with real user systemd and synthetic PCM
         timeout-minutes: 2
@@ -195,12 +217,33 @@ jobs:
             --ignore=tests/test_native_group_runner.py --ignore=tests/test_cli_commands.py \
             --ignore=tests/test_startup_state.py --ignore=tests/test_legacy_cli_redirect_privacy.py \
             --ignore=tests/test_dsp_read_client.py --ignore=tests/test_dsp_client.py \
-            --ignore=tests/test_transport_client.py \
+            --ignore=tests/test_transport_client.py --ignore=tests/test_spotify_playback.py \
             ::: tests/test_queue_cli.py tests/test_playlist_cli.py tests/test_favorite_play_cli.py \
             tests/test_startup_config.py tests/test_startup_state.py tests/test_web_ui.py \
+            tests/test_spotify_playback.py::test_owned_now_playing_cli_reads_only_status_and_never_saves_metadata \
+            tests/test_spotify_playback.py::test_now_playing_keeps_absent_data_unknown \
+            tests/test_spotify_playback.py::test_now_playing_projection_rejects_wrong_types_and_ignores_unrequested_fields \
+            tests/test_spotify_playback.py::test_now_playing_decoded_file_reports_only_supplied_fields \
+            tests/test_spotify_playback.py::test_now_playing_decoded_file_null_and_empty_remain_unknown \
+            tests/test_spotify_playback.py::test_now_playing_decoded_file_rejects_invalid_fields_without_private_details \
+            tests/test_spotify_playback.py::test_now_playing_decoded_file_cli_is_one_private_read \
+            tests/test_spotify_playback.py::test_now_playing_invocation_change_discards_metadata \
+            tests/test_spotify_playback.py::test_now_playing_service_fences_block_unselected_or_changed_client \
+            tests/test_spotify_playback.py::test_now_playing_failure_has_no_metadata_raw_error_or_retry \
             ::: tests/test_native_group_runner.py tests/test_cli_commands.py \
             tests/test_legacy_cli_redirect_privacy.py tests/test_dsp_read_client.py \
-            tests/test_dsp_client.py tests/test_transport_client.py tests/test_favorites_cli.py
+            tests/test_dsp_client.py tests/test_transport_client.py tests/test_favorites_cli.py \
+            tests/test_spotify_playback.py \
+            --deselect=tests/test_spotify_playback.py::test_owned_now_playing_cli_reads_only_status_and_never_saves_metadata \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_keeps_absent_data_unknown \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_projection_rejects_wrong_types_and_ignores_unrequested_fields \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_decoded_file_reports_only_supplied_fields \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_decoded_file_null_and_empty_remain_unknown \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_decoded_file_rejects_invalid_fields_without_private_details \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_decoded_file_cli_is_one_private_read \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_invocation_change_discards_metadata \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_service_fences_block_unselected_or_changed_client \
+            --deselect=tests/test_spotify_playback.py::test_now_playing_failure_has_no_metadata_raw_error_or_retry
 
       - name: Run explicit real libmpv null and digital-PCM lanes
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
