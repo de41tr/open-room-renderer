@@ -157,7 +157,7 @@ def _renderer(prefix: Path, config: Path, unit: Path, port: int) -> dict:
         _fail("The selected unit is customized or unsupported; use the exact canonical native unit proposal.")
     source = _read(config)
     raw = _document(source)
-    if set(raw) - {field.name for field in fields(Config)}:
+    if set(raw) - {field.name for field in fields(Config) if field.init}:
         _fail("Renderer configuration contains unsupported settings.")
     for key, model in (("podcast_presets", PodcastPreset), ("experimental_sources", ExperimentalSource)):
         items = raw.get(key, [])

@@ -127,7 +127,7 @@ def test_utf8_label_lengths_use_bytes_and_never_cut_a_character() -> None:
 
 
 def test_neutral_profile_has_bounded_neutral_instance_names() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000001", friendly_name="Küche. 🔊" * 40)
+    cfg = Config(wiim_home_profile=False, uuid="00000000-0000-4000-8000-000000000001", friendly_name="Küche. 🔊" * 40)
     services = list(MdnsAdvertiser(cfg)._services())
     assert [service[0] for service in services] == ["_linkplay._tcp.local.", "_http._tcp.local."]
     for _service, _port, name, _props in services:
@@ -204,7 +204,7 @@ async def test_zeroconf_refresh_unregisters_cached_names_and_registers_current_n
     fake = AsyncMock()
     monkeypatch.setattr(zeroconf, "Zeroconf", lambda: object())
     monkeypatch.setattr(zeroconf.asyncio, "AsyncZeroconf", lambda **_kwargs: fake)
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000001", enable_mdns=True, advertise_ip="192.0.2.10")
+    cfg = Config(wiim_home_profile=False, uuid="00000000-0000-4000-8000-000000000001", enable_mdns=True, advertise_ip="192.0.2.10")
     advertiser = MdnsAdvertiser(cfg)
     await advertiser.start()
     old_infos = list(advertiser._infos)

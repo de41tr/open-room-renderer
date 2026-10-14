@@ -2,6 +2,8 @@
 
 The default installation runs as your normal Linux user on **port 8080**. It
 keeps its identity across restarts and never automatically invokes sudo.
+WiiM-compatible SSDP and mDNS discovery are enabled by default; SOAP/UPnP
+control is also available on **port 59152**. Port 80 remains an explicit option.
 
 ## Browser controls
 
@@ -355,9 +357,10 @@ audio behavior have not been verified here. No low-port capability is required.
 ## 5. Network And DHCP
 
 The API has no authentication. Use a trusted LAN and do not forward its ports to
-the internet. The neutral checkout profile enables SSDP; native installation and
-app-compat additionally enable mDNS. Controllers need the same reachable network:
-TCP 8080 (or the chosen port), SSDP UDP 1900, and mDNS UDP 5353 where enabled.
+the internet. Default checkout and native profiles enable WiiM-compatible SSDP
+and mDNS. Controllers need the same reachable network: TCP 8080 for the API/Web
+controller, TCP 59152 for SOAP/UPnP control, SSDP UDP 1900, and mDNS UDP 5353.
+A custom installer `--port` selects that port for both HTTP and SOAP/UPnP.
 Check existing firewall and AP isolation policy rather than disabling it broadly.
 
 `bind_address` controls HTTP listeners; `advertise_ip: null` chooses an address
@@ -384,11 +387,38 @@ Setup selects `python3` and verifies Python 3.11+. Override with
 extras; the native installation deliberately omits them. Curl alone is diagnostic;
 the acceptance helper uses a real open-source client and local SSDP.
 
-`run.sh` / `run-dev.sh` use the neutral YAML, high ports, and persistent `.state`.
-`./scripts/run-app-compat.sh` explicitly selects app-shaped discovery and only the
-implemented TuneIn-style service surface, also on port 8080 with stable
+With fresh state, `run.sh` / `run-dev.sh` enable WiiM-compatible discovery, high ports, and persistent
+`.state`. `./scripts/run-app-compat.sh` additionally selects the implemented
+TuneIn-style service surface, with HTTP 8080, SOAP/UPnP 59152, and stable
 `.state/app-compat`. Some proprietary controllers insist on TCP 80 despite the
 advertised discovery port; their acceptance remains untested.
+
+### Explicit Neutral Discovery
+
+Set `wiim_home_profile: false` in a custom YAML file to select neutral UUID and
+discovery metadata. `enable_mdns: false` disables mDNS separately. Explicit
+configuration and existing saved identity are retained; no identity file is
+reset when changing profiles.
+
+When `wiim_home_profile` is omitted, an existing configured identity or a saved
+identity without matching first-install provenance keeps the neutral profile.
+This includes compact IDs whose UUID spelling would be unchanged but whose
+mDNS instance name and discovery behavior would change. Omitted SOAP, mDNS and
+HTTP-mirror settings then retain their earlier
+defaults (8080, false and false); explicit settings still win, including mDNS
+enabled by older native installs. The portable runner uses the same rule.
+Fresh WiiM identities record their profile in `state_dir/uuid.wiim` before
+publishing `uuid`, so they keep the new defaults across restarts. Preserve both
+files when backing up or moving state; the offline migration tool copies both.
+Neither the input YAML nor an existing saved UUID is rewritten. Explicitly setting
+`wiim_home_profile: true` opts into the compatibility representation and can
+change a legacy advertised UUID; controllers may need to rediscover it.
+
+If you already tried an unreleased default-WiiM version that did not create
+`uuid.wiim`, explicitly set `wiim_home_profile: true` in your persistent YAML to
+retain that discovery profile. An unmarked compact ID cannot safely distinguish
+that trial from an older neutral installation, so omission conservatively keeps
+the legacy defaults. UUID prefixes are never used to guess its origin.
 
 ### Optional App-Compatible Port-80 Service
 
@@ -425,7 +455,7 @@ both profiles on the same port.
 ### Migrating Earlier Checkout Runners
 
 Earlier `run.sh` used app-compat, port 80, and a newly generated identity every
-start. It now uses the neutral stable 8080 profile. An explicit `APP_COMPAT_*`
+start. It now uses stable WiiM-compatible discovery with HTTP 8080 and SOAP/UPnP 59152. An explicit `APP_COMPAT_*`
 variable still routes `run.sh` to the app runner, but fresh identity is opt-in:
 `APP_COMPAT_FRESH=1`. Port 80 is separately opt-in: `APP_COMPAT_PORT80=1`.
 
@@ -507,12 +537,15 @@ inside those private roots. Reads are capped at one MiB per file. Use a delibera
 manual migration for unsupported layouts; do not weaken ownership or permissions
 merely to bypass a refusal.
 
-Preparation copies existing uuid, device_name, channel_balance, gain.json,
+Preparation copies existing uuid, uuid.wiim, device_name, channel_balance, gain.json,
 active_dsp.json, eq_presets.json and favorites.json byte-for-byte into
 NEW/migrated-profile/state. Absent optional files stay absent. It skips
 plex_client_id and plex_user_info.json without reading their contents; provider sign-in/session setup may need to be repeated separately by you. There is no persisted playback queue. All other parsed
 config settings, including audio output, discovery, ports, presets and URLs, are
-retained; only state_dir and mpv_socket are rebased. YAML comments/formatting are
+retained; state_dir and mpv_socket are rebased. Missing discovery settings are
+pinned in the new profile after resolving them against the captured identity,
+so the migrated instance retains its effective identity and discovery defaults.
+The source configuration and state remain untouched. YAML comments/formatting are
 not retained, and duplicate keys, anchors/aliases and merges are refused. This is
 configuration-shape validation, not a guarantee that every saved state file is
 valid or that the selected audio device exists on the new machine.
@@ -584,6 +617,8 @@ explicit owner control succeeds. Keep the option false where that boundary is
 unacceptable. No synchronized multiroom capability follows from staging.
 
 ## Editable local favorites
+
+The `preset_key` field is the effective local favorites count as a string. Both HTTP `getStatusEx` and the JSON `Status` inside SOAP `GetControlDeviceInfo` expose it, including the service-owned favorites view. This field is a count, not the currently selected favorite; clients may require it while initializing a discovered renderer.
 
 With the renderer running, manage its own local library through the CLI:
 

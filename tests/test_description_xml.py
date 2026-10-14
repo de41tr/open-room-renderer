@@ -14,7 +14,7 @@ from fake_linkplay.upnp_description import (
 
 
 def test_description_contains_media_renderer_and_playqueue() -> None:
-    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1")
+    cfg = Config(wiim_home_profile=False, uuid="00000000-0000-4000-8000-000000000000", advertise_ip="127.0.0.1")
     xml = description_xml(cfg)
     assert "urn:schemas-upnp-org:device:MediaRenderer:1" in xml
     assert "urn:schemas-wiimu-com:service:PlayQueue:1" in xml

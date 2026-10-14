@@ -7,7 +7,7 @@ from uuid import UUID
 import pytest
 import yaml
 
-from fake_linkplay.config import Config, load_config, load_or_create_uuid
+from fake_linkplay.config import Config, load_config, load_or_create_uuid, load_startup_config, read_startup_config
 from fake_linkplay.mdns import CustomMdnsProtocol, DNS_CLASS_IN, DNS_TYPE_PTR, DnsQuestion, MdnsAdvertiser
 from fake_linkplay.ssdp import SsdpServer, response_packet
 from fake_linkplay.state import RendererState
@@ -25,8 +25,8 @@ def config_file(tmp_path: Path, **values: object) -> Path:
     return path
 
 
-def test_builtin_identity_is_neutral() -> None:
-    cfg = Config()
+def test_explicit_neutral_profile_keeps_independent_metadata() -> None:
+    cfg = Config(wiim_home_profile=False)
     assert cfg.friendly_name == "Open Room Renderer"
     assert cfg.manufacturer == "Independent"
     assert cfg.model_name == "Linux Room Renderer"
@@ -37,7 +37,7 @@ def test_builtin_identity_is_neutral() -> None:
 
 def test_new_neutral_install_retains_standard_uuid_entropy(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("fake_linkplay.config.uuidlib.uuid4", lambda: UUID(NATIVE_UUID))
-    path = config_file(tmp_path)
+    path = config_file(tmp_path, wiim_home_profile=False)
     cfg = load_config(path)
     assert cfg.uuid == NATIVE_UUID
     assert cfg.upnp_uuid == NATIVE_UUID
@@ -84,6 +84,69 @@ def test_existing_persisted_identity_is_not_migrated(tmp_path, persisted) -> Non
     assert cfg.upnp_uuid == expected
     assert load_config(path).upnp_uuid == expected
     assert (state / "uuid").read_text() == saved
+
+
+@pytest.mark.parametrize("native_config", [False, True])
+@pytest.mark.parametrize("identity_value", [NATIVE_UUID, "A" * 36, COMPAT_UUID])
+def test_upgrade_preserves_implicit_legacy_identity_and_discovery_defaults(tmp_path, native_config, identity_value):
+    # Previous native installs explicitly enabled generic mDNS and shared8080;
+    # minimal configs inherited mDNS=false. Both omitted the profile flag.
+    values = {"http_api_port": 8080, "upnp_port": 8080, "enable_mdns": True} if native_config else {}
+    path = config_file(tmp_path, advertise_ip="192.0.2.10", friendly_name="Study", **values)
+    (tmp_path / "state").mkdir()
+    saved = f"uuid:{identity_value}\n"
+    identity = tmp_path / "state/uuid"
+    identity.write_text(saved)
+    original = path.read_bytes()
+    before = Config(uuid=identity_value, friendly_name="Study", wiim_home_profile=False, upnp_port=8080,
+                    enable_mdns=native_config, mirror_http_on_upnp_port=False)
+    for loader in (load_config, load_startup_config):
+        cfg = loader(path)
+        assert not cfg.wiim_home_profile and not cfg.mirror_http_on_upnp_port
+        assert cfg.http_api_port == cfg.upnp_port == 8080
+        assert cfg.enable_mdns is native_config
+        for name in ("upnp_uuid", "wiim_mac", "mdns_hostname", "linkplay_instance_name"):
+            assert getattr(cfg, name) == getattr(before, name)
+        assert f"<UDN>uuid:{identity_value}</UDN>" in description_xml(cfg)
+        assert json.loads(control_device_info_json(cfg, "192.0.2.10"))["uuid"] == identity_value
+        assert f"USN: uuid:{identity_value}" in response_packet(cfg, "urn:schemas-upnp-org:device:MediaRenderer:1").decode()
+        assert list(MdnsAdvertiser(cfg)._services())[0][3]["uuid"] == identity_value
+    assert path.read_bytes() == original and identity.read_text() == saved
+
+
+@pytest.mark.parametrize("identity_value", ["FFLEGACY", "A" * 36, COMPAT_UUID])
+def test_configured_legacy_identity_is_preserved_without_prefix_guess_or_state_read(tmp_path, identity_value):
+    path = config_file(tmp_path, uuid=identity_value, friendly_name="Study")
+    cfg = read_startup_config(path)
+    assert cfg.upnp_uuid == identity_value and not cfg.wiim_home_profile
+    assert cfg.linkplay_instance_name == Config(uuid=identity_value, friendly_name="Study", wiim_home_profile=False).linkplay_instance_name
+    assert cfg.upnp_port == 8080 and not cfg.enable_mdns and not cfg.mirror_http_on_upnp_port
+    assert not (tmp_path / "state").exists()
+    path.write_text(path.read_text() + "wiim_home_profile: true\n")
+    opted_in = read_startup_config(path)
+    assert opted_in.wiim_home_profile and opted_in.enable_mdns
+    assert opted_in.upnp_port == 59152 and opted_in.upnp_uuid == identity_value.ljust(36, "0")
+    assert not (tmp_path / "state").exists()
+
+
+def test_discovery_provenance_only_applies_to_its_saved_identity(tmp_path):
+    path = config_file(tmp_path, friendly_name="Study")
+    first = load_config(path)
+    marker = tmp_path / "state/uuid.wiim"
+    provenance = marker.read_bytes()
+    assert marker.read_text().strip() == first.uuid
+    # An unrelated old provenance record cannot opt a different saved ID in.
+    saved = "A" * 36 + "\n"
+    (tmp_path / "state/uuid").write_text(saved)
+    assert not load_config(path).wiim_home_profile
+    # An explicitly configured ID has no inferred provenance, even if it matches.
+    path = config_file(tmp_path, uuid=first.uuid)
+    assert not load_config(path).wiim_home_profile
+    for profile in (False, True):
+        path = config_file(tmp_path, wiim_home_profile=profile)
+        assert load_config(path).wiim_home_profile is profile
+    assert marker.read_bytes() == provenance
+    assert (tmp_path / "state/uuid").read_text() == saved
 
 
 def test_explicit_configured_identity_wins_without_rewriting_saved_id(tmp_path) -> None:

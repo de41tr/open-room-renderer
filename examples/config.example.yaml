@@ -4,8 +4,9 @@ friendly_name: "Open Room Renderer"
 manufacturer: "Independent"
 model_name: "Linux Room Renderer"
 uuid: null
+# Implicit discovery defaults preserve existing neutral identities on upgrade.
+# Fresh state uses WiiM discovery and SOAP port 59152; explicit true opts in.
 http_api_port: 8080
-upnp_port: 8080
 mirror_port_80: false
 bind_address: "0.0.0.0"
 advertise_ip: null

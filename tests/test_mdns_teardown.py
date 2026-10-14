@@ -10,7 +10,7 @@ from fake_linkplay.mdns import MdnsAdvertiser
 
 @pytest.mark.asyncio
 async def test_unregister_failure_still_closes_owned_zeroconf():
-    advertiser = MdnsAdvertiser(Config(enable_mdns=True, advertise_ip="127.0.0.1"))
+    advertiser = MdnsAdvertiser(Config(wiim_home_profile=False, enable_mdns=True, advertise_ip="127.0.0.1"))
     owner = AsyncMock()
     owner.async_unregister_service.side_effect = OSError("injected unregister failure")
     advertiser._zeroconf = owner
@@ -23,7 +23,7 @@ async def test_unregister_failure_still_closes_owned_zeroconf():
 
 @pytest.mark.asyncio
 async def test_cancelled_unregister_still_closes_and_preserves_cancellation():
-    advertiser = MdnsAdvertiser(Config(enable_mdns=True))
+    advertiser = MdnsAdvertiser(Config(wiim_home_profile=False, enable_mdns=True))
     owner = AsyncMock()
     entered = asyncio.Event()
     async def unregister(_info):
@@ -46,7 +46,7 @@ async def test_cancelled_unregister_still_closes_and_preserves_cancellation():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("unregister_fails", [False, True])
 async def test_failed_close_retains_owned_handle_for_retry(unregister_fails):
-    advertiser = MdnsAdvertiser(Config(enable_mdns=True))
+    advertiser = MdnsAdvertiser(Config(wiim_home_profile=False, enable_mdns=True))
     owner = AsyncMock()
     unregister_error = OSError("injected unregister failure")
     close_error = OSError("injected close failure")
@@ -71,7 +71,7 @@ async def test_failed_close_retains_owned_handle_for_retry(unregister_fails):
 
 @pytest.mark.asyncio
 async def test_cancelled_close_retains_owned_handle_for_retry():
-    advertiser = MdnsAdvertiser(Config(enable_mdns=True))
+    advertiser = MdnsAdvertiser(Config(wiim_home_profile=False, enable_mdns=True))
     owner = AsyncMock()
     entered = asyncio.Event()
     async def close():
@@ -94,7 +94,7 @@ async def test_cancelled_close_retains_owned_handle_for_retry():
 @pytest.mark.asyncio
 async def test_outer_unregister_timeout_cannot_make_close_unbounded(monkeypatch):
     monkeypatch.setattr("fake_linkplay.mdns.ZEROCONF_CLOSE_TIMEOUT", 0.02)
-    advertiser = MdnsAdvertiser(Config(enable_mdns=True))
+    advertiser = MdnsAdvertiser(Config(wiim_home_profile=False, enable_mdns=True))
     owner = AsyncMock()
     async def stalled(*_args):
         await asyncio.Future()
@@ -133,7 +133,7 @@ async def test_partial_start_still_cleans_up_when_unregister_fails(monkeypatch, 
     owner.async_unregister_service.side_effect = unregister_error
     monkeypatch.setattr("zeroconf.Zeroconf", lambda: object())
     monkeypatch.setattr("zeroconf.asyncio.AsyncZeroconf", lambda **_kwargs: owner)
-    advertiser = MdnsAdvertiser(Config(enable_mdns=True, advertise_ip="127.0.0.1"))
+    advertiser = MdnsAdvertiser(Config(wiim_home_profile=False, enable_mdns=True, advertise_ip="127.0.0.1"))
     with pytest.raises(OSError, match="injected unregister failure") as raised:
         await advertiser.start()
     assert raised.value.__context__ is register_error

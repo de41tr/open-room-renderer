@@ -4,10 +4,8 @@ manufacturer_url: ""
 model_name: "Linux Room Renderer"
 model_number: "alpha-0.1"
 
-# Optional proprietary-app compatibility profile.
-# This is not the default config because it uses a more app-shaped discovery
-# surface. Keep configs/config.example.yaml as the portable open-source-client
-# path.
+# Optional TuneIn app service profile; WiiM discovery is also enabled
+# in the default config. Port 80 remains an explicit runner option.
 wiim_home_profile: true
 
 uuid: null
@@ -20,7 +18,7 @@ security: "http"
 # The app-compat path that worked best during local testing used the app-facing
 # HTTP port 80, SSDP, and mDNS.
 http_api_port: 80
-upnp_port: 80
+upnp_port: 59152
 mirror_http_on_upnp_port: true
 mirror_port_80: true
 

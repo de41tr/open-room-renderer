@@ -25,7 +25,8 @@ python3 scripts/install-native.py
 The installer checks prerequisites, installs into a new private prefix, records
 source/dependency versions and owned files, and generates a reviewable user unit.
 It does **not** install distro packages, start services, change firewall settings,
-or use sudo. The default profile uses port **8080** and a stable local identity.
+or use sudo. The default profile enables WiiM-compatible SSDP/mDNS, uses HTTP port **8080**
+and SOAP/UPnP control port **59152**, and keeps a stable local identity.
 
 Once running, open `http://<renderer-ip>:8080/ui/` (or your configured API port)
 for the [local Web controller](docs/WEB_UI.md): playback, queue, repeat/shuffle,
@@ -122,8 +123,8 @@ Both default to port 8080. An explicit `API_PORT` / `UPNP_PORT` overrides it.
 
 ## Running It Day To Day
 
-`./scripts/run.sh` and `./scripts/run-dev.sh` select the neutral, unprivileged
-profile in `configs/config.example.yaml`. Neither invokes sudo or replaces the
+`./scripts/run.sh` and `./scripts/run-dev.sh` select the unprivileged default
+profile in `configs/config.example.yaml`, with WiiM-compatible SSDP and mDNS enabled. Neither invokes sudo or replaces the
 persisted UUID on restart. The native installer also generates a user-service
 unit; review [Getting Started](GETTING_STARTED.md) before enabling it.
 
@@ -153,14 +154,15 @@ terms, account, hardware and arbitration gates remain pending.
 
 ## Trying The Phone App
 
-App compatibility is an explicit experimental profile:
+WiiM-compatible discovery is enabled in the default profile. The optional
+TuneIn app service profile is selected with:
 
 ```bash
 ./scripts/run-app-compat.sh
 ```
 
-This enables app-shaped discovery, SSDP, mDNS, and only the implemented
-TuneIn-style service surface, on port **8080** by default. It keeps a stable,
+This additionally advertises the implemented TuneIn-style service surface.
+HTTP uses **8080** and SOAP/UPnP control uses **59152** by default. It keeps a stable,
 separate identity in `.state/app-compat`. A compatible response shape does not
 prove original Android app acceptance.
 
@@ -184,11 +186,12 @@ no longer do so. Existing invocations of `run.sh` with explicit `APP_COMPAT_*`
 variables route to the separate app runner. To keep an old generated identity,
 use its existing YAML via `ORR_CONFIG`; see the migration notes in Getting Started.
 
-Default neutral ports:
+Default ports:
 
-- HTTP API and UPnP description: TCP `8080`
+- HTTP API, Web controller and device description: TCP `8080`
+- SOAP/UPnP control and device description: TCP `59152`
 - SSDP: UDP `1900`
-- mDNS, when enabled: UDP `5353`
+- mDNS: UDP `5353` (enabled by default)
 - mpv IPC: private per-install socket (checkout: `.state/mpv.sock`)
 
 Use this unauthenticated control service only on a trusted LAN. Do not publish
@@ -203,7 +206,7 @@ Most discovery problems are boring network problems:
 - Wi-Fi client isolation is enabled,
 - firewall blocks UDP multicast or local HTTP,
 - the advertised IP is wrong.
-- mDNS is disabled in the neutral checkout config; the native install and app-compat profiles enable it.
+- mDNS or SSDP was disabled in a custom configuration.
 - the app cached an older failed attempt.
 
 Useful local helper:
@@ -221,7 +224,14 @@ and settings default to `PREFIX/state/` (a custom `state_dir` changes that
 location). The default prefix is
 `~/.local/share/open-room-renderer`. Keep that state across restarts.
 
-For checkout development, `configs/config.example.yaml` is the neutral template.
+For checkout development, `configs/config.example.yaml` enables WiiM-compatible
+discovery for fresh state. Existing implicit profiles preserve their effective
+legacy discovery identity, including compact UUIDs and mDNS instance names.
+New WiiM identities record their profile in `state_dir/uuid.wiim`; keep it with
+`uuid` across restarts and backups. See
+[upgrade behavior](GETTING_STARTED.md#explicit-neutral-discovery).
+Set `wiim_home_profile: false` explicitly for neutral
+discovery metadata; `enable_mdns: false` disables mDNS separately.
 The profile wrappers write a derived `runner-config.yaml` inside their `.state/`
 directory on each launch; do not edit that generated file for lasting changes.
 Use `ORR_CONFIG=/absolute/path/to/custom.yaml ./scripts/run-dev.sh` (or the

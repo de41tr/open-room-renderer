@@ -43,7 +43,8 @@ No dedicated formatter or linter is configured yet. For now:
 - Use type hints for new code.
 - Keep functions small enough to test.
 - Prefer structured logging over ad hoc prints.
-- Run `PYTHONPATH=. .venv/bin/pytest -q` before submitting.
+- Perform only the minimum checks needed for the change. Do not run smoke tests
+  or broad/full test suites unless explicitly requested by the maintainer.
 
 Adding a lightweight formatter/linter configuration is a welcome future contribution.
 

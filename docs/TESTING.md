@@ -1416,6 +1416,15 @@ HTTP, SOAP control and transport reads. All are independent of vendor clouds.
 and eight concurrent subprocess creators with distinct synthetic proposals.
 First-run UUID creation writes and fsyncs a private same-directory file, then
 hard-links it atomically to `uuid` without overwriting an existing destination.
+Fresh WiiM identities first publish the same value as `uuid.wiim`, an explicit
+profile-provenance record, and fsync the directory before publishing `uuid`.
+Concurrent creators reuse and confirm durability of that winning record before
+publishing `uuid`; an interruption between the two publications resumes from
+the complete record. The two permanent files have separate inodes, preserving
+the native migration's no-hardlink safety check and preventing an in-place UUID
+edit from changing its provenance. Only matching saved provenance preserves the
+new implicit WiiM profile; configured and unmarked compact IDs retain legacy
+discovery defaults without guessing from UUID prefixes.
 Both the winner and losing creators remove only their own private link and
 fsync the state directory before returning. A partial write or pre-publication
 file-sync/link failure cannot publish an empty/truncated UUID. Hard-link support
@@ -1429,7 +1438,8 @@ their previous semantics without rewrite or stricter format validation. Existing
 empty or unreadable UUIDs still fail; an old nonempty truncated file cannot be
 distinguished safely from an intentional legacy ID and is not auto-repaired.
 An abruptly killed creator can leave an ignored `.uuid.*` temporary file; only
-the canonical `uuid` is adopted. Tests exercise Linux local filesystem behavior
+the canonical `uuid`, or a completed `uuid.wiim` record if `uuid` is absent, is
+adopted. Tests exercise Linux local filesystem behavior
 and synthetic failures, not power loss, network filesystems or hardware storage
 guarantees. Directory fsync does not certify persistence of newly created ancestor
 directories. Existing-file reads do not recertify durability or modify the file.

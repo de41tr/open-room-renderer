@@ -275,9 +275,11 @@ def test_published_identity_is_preserved_when_later_gain_read_fails(tmp_path):
     with pytest.raises(StartupStateError, match="Saved gain"):
         config.load_startup_config(path)
     identity = (directory / "uuid").read_bytes()
+    assert (directory / "uuid.wiim").read_bytes() == identity
     with pytest.raises(StartupStateError):
         config.load_startup_config(path)
     assert (directory / "uuid").read_bytes() == identity
+    assert (directory / "uuid.wiim").read_bytes() == identity
     assert (directory / "gain.json").read_text() == "invalid"
 
 
@@ -355,9 +357,10 @@ raise SystemExit(result)
         }
         after = {p.name: p.read_bytes() for p in directory.iterdir()}
         assert all(after[name] == data for name, data in before.items())
-        assert set(after) == set(before) | ({"uuid"} if persisted_identity else set())
+        assert set(after) == set(before) | ({"uuid", "uuid.wiim"} if persisted_identity else set())
         if persisted_identity:
             assert after["uuid"].strip()
+            assert after["uuid.wiim"] == after["uuid"]
         before = after  # A published identity survives the same failed retry.
         assert path.read_bytes() == config_bytes
 

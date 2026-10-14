@@ -97,6 +97,7 @@ async def test_discovery_contract_description_handshake_and_two_track_controls(t
             control = await soap("GetControlDeviceInfo", "<InstanceID>0</InstanceID>", "RenderingControl", "/upnp/control/rendercontrol1")
             info = json.loads(control["Status"])
             assert info["uuid"] == cfg.upnp_uuid
+            assert info["preset_key"] == api.state.as_status_ex(cfg.resolved_advertise_ip)["preset_key"] == "0"
             assert control["MultiType"] == "1" and control["SlaveMask"] == "0"
             assert info["streamServicesCapability"]["streamServices"] == []
             assert (await soap("GetInfoEx", "<InstanceID>0</InstanceID>", path="/upnp/transport"))["CurrentTransportState"] == "STOPPED"

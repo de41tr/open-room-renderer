@@ -17,10 +17,13 @@ import sys
 
 import yaml
 
-from .config import normalize_uuid, read_startup_config
+from .config import (
+    LEGACY_DISCOVERY_DEFAULTS, WIIM_IDENTITY_FILE, normalize_uuid,
+    preserve_discovery_identity, read_startup_config,
+)
 from .native_profile import user_unit
 
-STATE_FILES = frozenset({"uuid", "device_name", "channel_balance", "gain.json",
+STATE_FILES = frozenset({"uuid", WIIM_IDENTITY_FILE, "device_name", "channel_balance", "gain.json",
                          "active_dsp.json", "eq_presets.json", "favorites.json"})
 SKIP_FILES = frozenset({"plex_client_id", "plex_user_info.json"})
 MAX_FILE_BYTES = 1024 * 1024
@@ -307,7 +310,19 @@ def prepare_profile(*, source: str | Path, source_config: str | Path,
                     identity = ""
                 if not identity:
                     raise PreparationError("A configured identity or existing nonempty UUID is required; preparation never creates one.")
+                cfg.uuid = identity
+                wiim_identity = None
+                if "wiim_home_profile" in cfg._implicit_discovery_settings:
+                    try:
+                        wiim_identity = captured.get(WIIM_IDENTITY_FILE, b"").decode("utf-8")
+                    except UnicodeError:
+                        raise PreparationError("Saved discovery provenance could not be read.") from None
+                preserve_discovery_identity(cfg, wiim_identity=wiim_identity)
             migrated = dict(source_raw)
+            # Pin only omitted discovery settings in this new output profile,
+            # using the captured identity. Never rewrite the source config.
+            for name in LEGACY_DISCOVERY_DEFAULTS:
+                migrated.setdefault(name, getattr(cfg, name))
             migrated["state_dir"] = str(profile / "state")
             migrated["mpv_socket"] = str(destination / "run/mpv.sock")
             encoded = yaml.safe_dump(migrated, sort_keys=False, allow_unicode=True).encode("utf-8")

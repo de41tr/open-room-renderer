@@ -327,7 +327,8 @@ response_packet() returns LOCATION: http://<advertise_ip>:<port>/description.xml
 client fetches /description.xml and service endpoints
 ```
 
-Optional mDNS is available for compatibility experiments. It is off by default in the safe example config.
+WiiM-compatible mDNS and SSDP are enabled in the default profile. Explicit neutral
+profiles use zeroconf publication; mDNS can be disabled with `enable_mdns: false`.
 
 Control requests arrive mainly at:
 

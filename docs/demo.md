@@ -8,7 +8,8 @@ This is a safe local demo. No app internals, no raw dumps, no secret sauce.
 ./scripts/run.sh
 ```
 
-Keep it running. The neutral profile uses TCP port 8080 and a persistent identity.
+Keep it running. The default profile enables WiiM-compatible discovery, uses HTTP 8080 and
+SOAP/UPnP 59152, and keeps a persistent identity.
 It does not invoke sudo. Install prerequisites first as described in
 [Getting Started](../GETTING_STARTED.md).
 
@@ -34,7 +35,7 @@ This verifies the project through a client-level path, not just curl.
 
 Use a controller app on the same network and look for the renderer name.
 
-To deliberately test app-shaped discovery, stop the neutral runner first and use:
+To additionally try the TuneIn app service profile, stop the default runner first and use:
 
 ```bash
 ./scripts/run-app-compat.sh
