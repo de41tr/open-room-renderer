@@ -1,4 +1,4 @@
-"""Explicit, read-only local output diagnosis; never a playback health check."""
+"""Read-only output diagnosis and a separate experimental digital PCM check."""
 from __future__ import annotations
 
 import argparse
@@ -11,7 +11,7 @@ from .mpv_backend import MpvBackend
 
 
 def add_audio_parser(subparsers) -> None:
-    parser = subparsers.add_parser("audio", help="inspect configured and live output intent")
+    parser = subparsers.add_parser("audio", help="inspect output intent or check experimental PCM")
     commands = parser.add_subparsers(dest="audio_cmd", required=True)
     diagnose = commands.add_parser(
         "diagnose", help="read two mpv output properties without starting playback",
@@ -23,10 +23,26 @@ def add_audio_parser(subparsers) -> None:
         ),
     )
     diagnose.add_argument("--config", required=True, help="explicit readable YAML file; no default fallback")
+    pcm = commands.add_parser(
+        "pcm-check", help="exercise experimental PCM frames through ALSA null/file output",
+        description=(
+            "Finite generated stereo PCM check using Linux libasound. Uses only null or "
+            "file-on-null output and does not start/control the renderer. This verifies "
+            "digital bytes and flush behavior, not physical output or synchronization."
+        ),
+    )
+    pcm.add_argument("--capture", help="create a new raw stereo S16_LE/48 kHz file; never overwrite")
 
 
 def run_audio_diagnostic(args: argparse.Namespace) -> int:
     """Keep config/socket paths and raw backend diagnostics out of all output."""
+    if args.audio_cmd == "pcm-check":
+        if not sys.platform.startswith("linux"):
+            print("PCM check requires Linux libasound.", file=sys.stderr)
+            return 1
+        # Keep the optional native dependency out of normal renderer startup.
+        from .experimental_pcm.diagnostic import run_pcm_check
+        return run_pcm_check(args)
     try:
         cfg = read_startup_config(args.config)
         if (not isinstance(cfg.mpv_socket, str) or not cfg.mpv_socket
