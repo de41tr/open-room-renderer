@@ -175,9 +175,18 @@ def _check_mpv() -> None:
     # The managed service never searches a user-imported PATH. Accept only the
     # distribution's immutable native ELF, not a script or another player.
     path = Path("/usr/bin/mpv")
-    _read(path, binary=True)
-    if path.stat().st_uid != 0:
-        fail("Receiver mode requires the distribution-owned /usr/bin/mpv executable.")
+    hint = ("Install or repair the distribution's mpv package at /usr/bin/mpv "
+            "before receiver setup or start.")
+    try:
+        _read(path, binary=True)
+        if path.stat().st_uid != 0:
+            fail("Receiver mode requires the distribution-owned /usr/bin/mpv executable.")
+    except OSError:
+        raise ExclusiveProfileError("Native mpv is missing or unreadable. " + hint) from None
+    except ExclusiveProfileError:
+        # The shared reader's client wording is not appropriate for native mpv.
+        raise ExclusiveProfileError("Native mpv must be a root-owned regular Linux ELF executable "
+                                    "with safe permissions and no symlinks. " + hint) from None
 
 
 def _check_renderer_socket(profile: dict) -> None:

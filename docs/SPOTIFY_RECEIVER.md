@@ -18,6 +18,9 @@ framework is introduced.
   and the existing completed native ORR installation. No root/system service,
   custom unit, external mpv, shared audio server or foreground runner is adopted.
 - Distribution-owned `/usr/bin/mpv` >=0.37 and native `libasound.so.2`.
+  If receiver setup/start rejects missing, unreadable or unsafe native mpv,
+  install or repair the distribution's mpv package at that exact path; a PATH
+  override or wrapper is not supported. Setup fails before creating its private directory.
 - One explicitly selected, **single-subdevice direct ALSA playback endpoint**.
   `default`, `dmix`, PulseAudio/PipeWire, pipe and null outputs are refused. The
   opened PCM type/card/device is checked too; a user ALSA alias called `hw` is not
