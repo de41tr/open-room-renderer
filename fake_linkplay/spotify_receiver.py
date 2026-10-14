@@ -495,6 +495,33 @@ def status(directory: str, *, playback: bool = False) -> dict:
     return result
 
 
+def playback_control(directory: str, action: str, value: int | None = None) -> dict:
+    from .spotify_playback import control
+    root, profile = load_profile(directory, start="spotify")
+    with _lock(root, "control.lock"):
+        services = UserServices(root, profile)
+        states = services.validate()
+        if states["spotify"]["ActiveState"] != "active" or not services.stopped(states["renderer"]):
+            fail("Select Spotify exclusively before using its playback controls; no control was sent.")
+        try:
+            identity = services.wait_started("spotify")
+        except ExclusiveProfileError:
+            fail("The owned Spotify process could not be confirmed; no control was sent.")
+
+        def validate_invocation() -> None:
+            current = services.validate()
+            spotify = current["spotify"]
+            if (spotify["ActiveState"] != "active" or (spotify["InvocationID"], spotify["MainPID"]) != identity
+                    or not services.stopped(current["renderer"])
+                    or not services.cgroup_empty(current["renderer"]["ControlGroup"])
+                    or (Path("/proc") / identity[1] / "cgroup").read_text().strip()
+                       != "0::" + spotify["ControlGroup"]):
+                fail("The exclusive Spotify service invocation changed during the control request.")
+
+        result = control(profile["host"], profile["port"], identity[1], action, value, validate_invocation)
+        return result | {"spotify_bypasses_orr_dsp": True, "gates": GATES}
+
+
 def setup(args: argparse.Namespace) -> dict:
     root = _path(args.directory)
     prefix, config, unit, client = map(_path, (args.renderer_prefix, args.renderer_config,
@@ -687,6 +714,10 @@ def add_receiver_parser(commands) -> None:
                          help="also read a sanitized snapshot from the configured Spotify loopback API")
     for action in ("install", "uninstall", "recover"):
         actions.add_parser(action)
+    for action in ("pause", "resume"):
+        actions.add_parser(action, help=f"request {action} from the already selected Spotify client")
+    volume = actions.add_parser("volume", help="set Spotify's own absolute volume; raise cautiously from zero")
+    volume.add_argument("value", type=int, metavar="0..100")
     change = actions.add_parser("switch", help="stop both complete services before starting one; off starts neither")
     change.add_argument("mode", choices=("renderer", "spotify", "off"))
     guard = actions.add_parser("run", help=argparse.SUPPRESS)
@@ -708,6 +739,8 @@ def run_receiver(args: argparse.Namespace) -> int:
             result = switch(args.directory, args.mode)
         elif args.receiver_cmd == "status":
             result = status(args.directory, playback=args.playback)
+        elif args.receiver_cmd in {"pause", "resume", "volume"}:
+            result = playback_control(args.directory, args.receiver_cmd, getattr(args, "value", None))
         elif args.receiver_cmd == "recover":
             result = recover(args.directory)
         elif args.receiver_cmd == "run":
@@ -720,7 +753,8 @@ def run_receiver(args: argparse.Namespace) -> int:
         else:
             result = uninstall(args.directory)
         print(json.dumps(result, sort_keys=True))
-        return 1 if result.get("provider_playback", {}).get("observation") == "unavailable" else 0
+        return 1 if (result.get("provider_playback", {}).get("observation") == "unavailable" or
+                     "error" in result or result.get("request_outcome", "ACKNOWLEDGED") != "ACKNOWLEDGED") else 0
     except ExclusiveProfileError as exc:
         if getattr(args, "receiver_cmd", None) == "run":
             try:
@@ -733,5 +767,5 @@ def run_receiver(args: argparse.Namespace) -> int:
         print("Receiver operation failed; inspect private setup and service state. No playback success is claimed.", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print("Receiver interrupted; inspect service state before another start.", file=sys.stderr)
+        print("Receiver interrupted; inspect service and playback status before retrying.", file=sys.stderr)
         return 130

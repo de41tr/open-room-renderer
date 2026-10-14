@@ -160,6 +160,28 @@ Spotify starts at **volume zero** on every service start. Raise its app volume
 carefully to a low listening level. No sound is claimed by an active process,
 API readiness or a retained session report.
 
+Once Spotify is selected and an account/session is already present, the same
+independent CLI can request basic controls:
+
+```sh
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" pause
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" resume
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" volume 5
+```
+
+Volume is absolute, 0..100, for the pinned setup's 100-step Spotify volume.
+Controls validate the existing exclusive service invocation and configuration,
+then verify the established connection's accepted socket belongs to that client
+before sending HTTP. Inaccessible `/proc` ownership data blocks controls. No
+foreign listener receives HTTP, and a closed connection is never reconnected.
+The HTTP exchange has one 12-second deadline, including status and response-body
+reads; service checks retain their existing bounded timeouts. There is no retry.
+`request_outcome: ACKNOWLEDGED` means upstream returned HTTP 200, which does not
+guarantee the requested change: inspect the separately reported `provider_before`
+and `provider_after` states. Errors exit 1; an uncertain POST may already have
+taken effect. Inspect `status --playback` before retrying. Audio remains
+`UNVERIFIED`, and these controls neither pair/activate a device nor start content.
+
 Return to ORR independently of Spotify or the stopped Web server:
 
 ```sh
