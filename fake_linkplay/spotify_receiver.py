@@ -355,6 +355,27 @@ def switch(directory: str, mode: str) -> dict:
     with _lock(root, "control.lock"):
         services = UserServices(root, profile)
         before = services.validate()
+        if mode != "off":
+            # Preserve a healthy exclusive source when the target is already
+            # inadmissible. Unknown/conflicting ownership keeps the stop path.
+            preflight = False
+            try:
+                saved_path = root / "last-cgroups.json"
+                saved = _json(saved_path) if os.path.lexists(saved_path) else dict.fromkeys(UNITS, "")
+                preflight = (set(saved) == set(UNITS)
+                    and sum(info["ActiveState"] == "active" for info in before.values()) <= 1
+                    and all(info["Result"] == "success" and info["ControlPID"] == "0"
+                        and info["Job"] in {"", "0"}
+                        and ((info["ActiveState"] == "active" and info["SubState"] == "running"
+                              and info["MainPID"].isdigit() and int(info["MainPID"]) > 0)
+                             or (services.stopped(info)
+                                 and services.cgroup_empty(info["ControlGroup"])
+                                 and services.cgroup_empty(saved[name])))
+                        for name, info in before.items()))
+            except (ExclusiveProfileError, OSError, ValueError, TypeError, KeyError):
+                pass  # Unavailable ownership proof must not bypass stop/cleanup.
+            if preflight:
+                load_profile(root, start=mode)
         try:
             services.stop_all(before)
             if mode != "off":

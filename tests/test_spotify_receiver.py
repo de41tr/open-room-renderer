@@ -47,6 +47,8 @@ class Services:
         return {mode: stopped() | ({'ActiveState': 'active', 'SubState': 'running', 'MainPID': '42'}
                                  if self.calls and self.calls[-1] == ('started', mode) else {})
                 for mode in receiver.UNITS}
+    def cgroup_empty(self, group):
+        return True
     def stop_all(self, before):
         self.calls.append(('stop_confirmed',))
         if self.failure == 'stop':
@@ -86,6 +88,64 @@ def test_switch_confirms_whole_stop_and_probe_before_one_start(ready, services):
     assert result['service_state'] == 'PROCESS_STARTED' and result['audio_output'] == 'UNVERIFIED'
 
 
+@pytest.mark.parametrize('damage', ['client', 'config'])
+def test_invalid_target_preserves_healthy_renderer(ready, services, monkeypatch, damage):
+    services.calls.append(('started', 'renderer'))
+    previous = {'requested_mode': 'renderer', 'service_state': 'PROCESS_STARTED'}
+    receiver._write(ready / 'last-operation.json', previous)
+    if damage == 'client':
+        monkeypatch.setattr(receiver, 'verify_client', lambda *_args: receiver.fail('Broken Spotify'))
+    else:
+        (ready / 'sidecar/config.yml').write_text('{}')
+    with pytest.raises(ExclusiveProfileError):
+        receiver.switch(str(ready), 'spotify')
+    assert services.calls == [('started', 'renderer')]
+    assert receiver._json(ready / 'last-operation.json') == previous
+
+
+def test_target_change_after_stop_still_blocks_start_and_cleans_up(ready, services, monkeypatch):
+    services.calls.append(('started', 'renderer'))
+    stop_all = services.stop_all
+    def change_after_stop(self, before):
+        stop_all(self, before)
+        (ready / 'sidecar/config.yml').write_text('{}')
+    monkeypatch.setattr(services, 'stop_all', change_after_stop)
+    with pytest.raises(ExclusiveProfileError, match='sidecar configuration changed'):
+        receiver.switch(str(ready), 'spotify')
+    assert services.calls == [('started', 'renderer'), ('stop_confirmed',), ('stop', *receiver.UNITS.values())]
+    assert receiver._json(ready / 'last-operation.json')['service_state'] == 'UNKNOWN'
+
+
+@pytest.mark.parametrize('unsafe', ['conflict', 'pending-job', 'saved-cgroup', 'malformed-saved-cgroup'])
+def test_invalid_target_keeps_stop_path_for_unproven_source(ready, services, monkeypatch, unsafe):
+    services.calls.append(('started', 'renderer'))
+    (ready / 'sidecar/config.yml').write_text('{}')
+    states = services(ready, {}).validate()
+    if unsafe == 'conflict':
+        states['spotify'] = states['renderer'].copy()
+    elif unsafe == 'pending-job':
+        states['renderer']['Job'] = '17'
+    elif unsafe == 'saved-cgroup':
+        receiver._write(ready / 'last-cgroups.json', {'renderer': '', 'spotify': 'old-descendant'})
+        monkeypatch.setattr(services, 'cgroup_empty', lambda _self, group: group != 'old-descendant')
+    else:
+        (ready / 'last-cgroups.json').write_text('{')
+    monkeypatch.setattr(services, 'validate', lambda _self: states)
+    with pytest.raises(ExclusiveProfileError, match='sidecar configuration changed'):
+        receiver.switch(str(ready), 'spotify')
+    assert services.calls == [('started', 'renderer'), ('stop_confirmed',), ('stop', *receiver.UNITS.values())]
+    assert receiver._json(ready / 'last-operation.json')['service_state'] == 'UNKNOWN'
+
+
+def test_unverified_units_never_enter_switch_transition(ready, services, monkeypatch):
+    services.calls.append(('started', 'renderer'))
+    monkeypatch.setattr(services, 'validate', lambda _self: receiver.fail('Unverified units'))
+    with pytest.raises(ExclusiveProfileError, match='Unverified units'):
+        receiver.switch(str(ready), 'spotify')
+    assert services.calls == [('started', 'renderer')]
+    assert not (ready / 'last-operation.json').exists()
+
+
 def test_unknown_stop_never_starts_and_metadata_failure_cannot_skip_cleanup(ready, services, monkeypatch):
     services.failure = 'stop'
     monkeypatch.setattr(receiver, '_write', lambda *_args: (_ for _ in ()).throw(OSError('disk full')))
@@ -104,11 +164,14 @@ def test_uncertain_start_is_stopped_even_when_error_receipt_cannot_be_written(re
     assert len([call for call in services.calls if call[0] == 'start']) == 1
 
 
-def test_return_starts_renderer_with_broken_spotify(ready, services, monkeypatch):
+@pytest.mark.parametrize('mode', ['renderer', 'off'])
+def test_return_or_off_needs_no_healthy_spotify(ready, services, monkeypatch, mode):
     (ready / 'sidecar/config.yml').write_text('damaged')
     monkeypatch.setattr(receiver, 'verify_client', lambda *_args: (_ for _ in ()).throw(ExclusiveProfileError('Broken Spotify')))
-    assert receiver.switch(str(ready), 'renderer')['requested_mode'] == 'renderer'
-    assert ('start', receiver.RENDERER_SERVICE) in services.calls
+    assert receiver.switch(str(ready), mode)['requested_mode'] == mode
+    assert ('stop_confirmed',) in services.calls
+    assert [call for call in services.calls if call[0] == 'start'] == (
+        [('start', receiver.RENDERER_SERVICE)] if mode == 'renderer' else [])
 
 
 def test_duplicate_or_unsafe_control_locks_fail_closed(ready):
