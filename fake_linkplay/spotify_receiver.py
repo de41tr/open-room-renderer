@@ -87,8 +87,8 @@ def _json(path: Path) -> dict:
     return result
 
 
-def _write(path: Path, value: dict) -> None:
-    # Private mutable control metadata, never account state. Replace only a
+def _write(path: Path, value: dict | str) -> None:
+    # Private control metadata/generated units, never account state. Replace only a
     # regular owned file; do not follow a link left at the destination.
     with _directory(path.parent) as parent:
         try:
@@ -101,8 +101,11 @@ def _write(path: Path, value: dict) -> None:
         fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
         try:
             with os.fdopen(fd, "w") as handle:
-                json.dump(value, handle, sort_keys=True, indent=2)
-                handle.write("\n")
+                if isinstance(value, str):
+                    handle.write(value)
+                else:
+                    json.dump(value, handle, sort_keys=True, indent=2)
+                    handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(name, path.name, src_dir_fd=parent, dst_dir_fd=parent)
@@ -147,8 +150,11 @@ StandardError=null
 UnsetEnvironment=LD_PRELOAD LD_LIBRARY_PATH PYTHONPATH PYTHONHOME ALSA_CONFIG_PATH ALSA_CONFIG_DIR ALSA_PLUGIN_DIR
 Environment=PATH=/usr/bin:/bin
 """
+    binding = (f"# Rebound renderer config: {profile['renderer_config']}\n"
+               f"# Rebound renderer unit: {profile['renderer_unit']}\n"
+               if profile.get("renderer_paths_in_units") is True else "")
     return {
-        SPOTIFY_SERVICE: f"""# Owned by ORR's explicit exclusive receiver setup. No boot enablement.
+        SPOTIFY_SERVICE: binding + f"""# Owned by ORR's explicit exclusive receiver setup. No boot enablement.
 [Unit]
 Description=Open Room Renderer exclusive Spotify receiver
 Conflicts={RENDERER_SERVICE}
@@ -157,7 +163,7 @@ After={RENDERER_SERVICE}
 Type=simple
 ExecStart={call} spotify
 {common}""",
-        RENDERER_SERVICE + ".d/" + DROPIN: f"""# Only this exact drop-in is supported by the receiver controller.
+        RENDERER_SERVICE + ".d/" + DROPIN: binding + f"""# Only this exact drop-in is supported by the receiver controller.
 [Service]
 ExecStart=
 ExecStart={call} renderer
@@ -204,14 +210,21 @@ def _check_spotify(root: Path, profile: dict) -> None:
         fail("The owned sidecar configuration changed or is shadowed by config.yaml.")
 
 
-def load_profile(directory: str | Path, *, start: str | None = None) -> tuple[Path, dict]:
+def _profile_metadata(directory: str | Path) -> tuple[Path, dict]:
     root = _path(directory)
     _private_directory(root)
     profile = _json(root / "receiver.json")
     if profile.get("format") != 1 or profile.get("directory") != str(root):
         fail("Receiver setup metadata is missing or belongs to another directory.")
+    if "renderer_paths_in_units" in profile and profile["renderer_paths_in_units"] is not True:
+        fail("Receiver native-path binding metadata must be the explicit boolean true.")
     for field in ("renderer_prefix", "renderer_config", "renderer_unit", "client_dir"):
         _path(profile.get(field))
+    return root, profile
+
+
+def load_profile(directory: str | Path, *, start: str | None = None) -> tuple[Path, dict]:
+    root, profile = _profile_metadata(directory)
     for name, body in _unit_parts(root, profile).items():
         if _read(root / name).decode() != body:
             fail("Receiver unit proposals changed; stop remains available only with provable service ownership.")
@@ -224,7 +237,8 @@ def load_profile(directory: str | Path, *, start: str | None = None) -> tuple[Pa
         if actual != profile["renderer"]:
             fail("The native renderer profile changed. For same-route YAML edits, stop both services, then run "
                  "open-room-renderer spotify receiver --directory DIR refresh-renderer "
-                 "with DIR set to this receiver setup directory. Changed paths, unit or output require a fresh setup.")
+                 "with DIR set to this receiver setup directory. Changed native paths require uninstall and rebind-renderer; "
+                 "an edited direct ALSA output requires refresh-renderer --accept-output-change while both services are stopped.")
         if start == "spotify":
             _check_spotify(root, profile)
     return root, profile
@@ -553,14 +567,17 @@ def recover(directory: str) -> dict:
         return result
 
 
-def refresh_renderer(directory: str) -> dict:
-    """Admit edited native YAML on the same route, without touching services."""
+def refresh_renderer(directory: str, *, accept_output_change: bool = False) -> dict:
+    """Admit edited native YAML, with explicit opt-in for a new direct route."""
+    if type(accept_output_change) is not bool:
+        fail("Renderer output change requires an explicit boolean opt-in.")
     root = _path(directory)
     with _lock(root, "control.lock"):
         root, profile = load_profile(root)
-        guidance = ("Renderer refresh cannot change native paths, unit or ALSA output. "
-                    "Restore the owned paths/unit before receiver uninstall, then use receiver setup "
-                    "in a new private directory for the new profile.")
+        guidance = ("Renderer refresh cannot change native paths or unit. "
+                    "Restore the owned paths/unit before receiver uninstall, then use rebind-renderer for a same-output "
+                    "native upgrade. To retain this receiver setup with an edited direct ALSA output, "
+                    "explicitly use refresh-renderer --accept-output-change while both services are stopped.")
         try:
             actual = _renderer(Path(profile["renderer_prefix"]), Path(profile["renderer_config"]),
                                Path(profile["renderer_unit"]), profile["port"])
@@ -569,9 +586,28 @@ def refresh_renderer(directory: str) -> dict:
         except ExclusiveProfileError as exc:
             fail(str(exc) + " " + guidance)
         previous = profile["renderer"]
+        allowed = {"config_sha256": actual["config_sha256"]}
+        if accept_output_change:
+            allowed["audio_device"] = actual["audio_device"]
         if (type(previous) is not dict
-                or actual != previous | {"config_sha256": actual["config_sha256"]}):
+                or actual != previous | allowed):
             fail(guidance)
+        updated = profile | {"renderer": actual}
+        if accept_output_change:
+            sidecar = _read_sidecar(root, profile)
+            desired = _sidecar_config(root, updated)
+            # A split write may leave precisely this requested output alongside
+            # the saved profile. Never adopt unrelated sidecar edits on retry.
+            if not (_same_config(sidecar, _sidecar_config(root, profile)) or _same_config(sidecar, desired)):
+                fail("The owned sidecar configuration differs from both saved and requested output. "
+                     "After an interrupted output change, keep the same edited native YAML and explicitly repeat "
+                     "refresh-renderer --accept-output-change.")
+            links = _install_links(root, profile)
+            installation = _json(root / "installation.json")
+            if (installation.get("format") != 1 or installation.get("state") != "INSTALLED"
+                    or installation.get("links") != {str(p): str(t) for p, t in links.items()}
+                    or any(not _exact_link(path, target) for path, target in links.items())):
+                fail("Renderer output change requires this setup's intact installed service links.")
         services = UserServices(root, profile)
         states = services.validate()
         saved_path = root / "last-cgroups.json"
@@ -584,10 +620,108 @@ def refresh_renderer(directory: str) -> dict:
                     or not services.cgroup_empty(saved[mode])):
                 fail("Renderer refresh requires both owned services successfully stopped with empty complete cgroups; "
                      "use receiver switch off, or receiver recover for a failed service, before refreshing.")
+        # Sidecar first; each replacement is atomic and synced, not a combined
+        # transaction. Until metadata commits, edited native YAML blocks starts.
+        if accept_output_change and not _same_config(sidecar, desired):
+            _write(root / "sidecar/config.yml", desired)
         if actual != previous:
-            _write(root / "receiver.json", profile | {"renderer": actual})
+            _write(root / "receiver.json", updated)
         return {"renderer_refresh": "UPDATED" if actual != previous else "UNCHANGED",
                 "service_state": "STOPPED", "services_started": False, "audio_output": "UNVERIFIED"}
+
+
+def rebind_renderer(directory: str, *, renderer_prefix: str, renderer_config: str,
+                    renderer_unit: str) -> dict:
+    """Rebind retained receiver state after an explicit, stopped native handover."""
+    root = _path(directory)
+    with _lock(root, "control.lock"), _lock(root, "output.lock"):
+        # Unlike normal admission, an exact old/requested unit mixture may be
+        # present after interruption. receiver.json is the final commit point.
+        root, profile = _profile_metadata(root)
+        prefix, config, unit = map(_path, (renderer_prefix, renderer_config, renderer_unit))
+        client = Path(profile["client_dir"])
+        if any(prefix == path or prefix in path.parents or path in prefix.parents for path in (root, client)):
+            fail("The new native prefix, receiver setup and client must remain separate private directories.")
+        if any(c in str(prefix) for c in "\"'"):
+            fail("The new native prefix cannot contain literal quote characters.")
+        _check_mpv()
+        previous = _renderer(Path(profile["renderer_prefix"]), Path(profile["renderer_config"]),
+                             Path(profile["renderer_unit"]), profile["port"])
+        if previous != profile["renderer"]:
+            fail("Restore the recorded old native profile before rebinding; neither native installation was changed.")
+        actual = _renderer(prefix, config, unit, profile["port"])
+        if actual["audio_device"] != previous["audio_device"]:
+            fail("Renderer rebind must keep the same direct ALSA output. Complete same-output rebind/install first, "
+                 "then separately edit the bound native YAML and use refresh-renderer --accept-output-change.")
+        updated = profile | {"renderer_prefix": str(prefix), "renderer_config": str(config),
+                             "renderer_unit": str(unit), "renderer": actual, "renderer_paths_in_units": True}
+        _check_spotify(root, profile)
+        _check_renderer_socket(profile)
+        _check_renderer_socket(updated)
+        old_parts, new_parts = _unit_parts(root, profile), _unit_parts(root, updated)
+        for name, body in old_parts.items():
+            if _read(root / name).decode() not in {body, new_parts[name]}:
+                fail("Receiver proposals differ from both saved and requested paths; repeat the exact interrupted rebind or review manually.")
+        links = _install_links(root, profile)
+        installation = _json(root / "installation.json")
+        if (installation.get("format") != 1 or installation.get("state") != "UNINSTALLED"
+                or installation.get("links") != {str(p): str(t) for p, t in links.items()}
+                or any(os.path.lexists(path) for path in links)):
+            fail("Renderer rebind requires a completed receiver uninstall and absent owned receiver service links.")
+        services = UserServices(root, updated)
+        native = _user_units() / RENDERER_SERVICE
+        with _directory(native.parent):
+            info = native.lstat()
+            if (info.st_uid != os.geteuid() or (not _exact_link(native, unit)
+                    and (not stat.S_ISREG(info.st_mode) or _read(native) != _read(unit)))):
+                fail("Select the exact new native unit in the user manager first; rebind never replaces native service links.")
+        saved = _json(root / "last-cgroups.json")
+        if set(saved) != set(UNITS):
+            fail("The saved service cgroup record is incomplete; preserve the uninstalled setup for manual review.")
+        for mode in UNITS:
+            info = services.show(mode)
+            if (info["LoadState"] != ("loaded" if mode == "renderer" else "not-found")
+                    or info["NeedDaemonReload"] != "no" or info["DropInPaths"]
+                    or not services.stopped(info) or info["Result"] != "success"
+                    or not services.cgroup_empty(info["ControlGroup"])
+                    or not services.cgroup_empty(saved[mode])):
+                fail("Complete the stopped native handover and daemon-reload first; rebind requires no receiver unit, jobs or owned processes.")
+            if mode == "renderer" and _path(info["FragmentPath"]).resolve(strict=True) not in {unit, native}:
+                fail("The user manager still selects another native unit; review the handover and reload before rebinding.")
+        # Uninstall restored the original next-session choice. The operator's
+        # handover must preserve it; translate receipt paths, never live links.
+        try:
+            startup_record = _startup_record(root, profile)
+        except ExclusiveProfileError:
+            startup_record = _startup_record(root, updated)
+        observed = _startup_snapshot(services)
+        desired_startup = startup_record
+        if startup_record is not None:
+            if startup_record["state"] != "RESTORED":
+                fail("Receiver startup must have been restored by a completed uninstall before rebinding.")
+            def moved(value: str | None) -> str | None:
+                return str(unit) if value == profile["renderer_unit"] else value
+            desired_startup = startup_record | {
+                "original_renderer": moved(startup_record["original_renderer"]),
+                "from": {mode: moved(value) for mode, value in startup_record["from"].items()},
+                "to": {mode: moved(value) for mode, value in startup_record["to"].items()},
+            }
+            if observed != desired_startup["to"]:
+                fail("The native handover changed the restored startup choice; preserve its enabled/off setting and exact target form before rebinding.")
+        elif observed["spotify"] is not None:
+            fail("Unexpected Spotify startup remains after uninstall; review it manually before rebinding.")
+        changed = updated != profile
+        for name, body in new_parts.items():
+            if _read(root / name).decode() != body:
+                _write(root / name, body)
+        if desired_startup != startup_record:
+            _write(root / "startup.json", desired_startup)
+        if changed:
+            _write(root / "receiver.json", updated)
+        return {"renderer_rebind": "UPDATED" if changed else "UNCHANGED", "installation": "UNINSTALLED",
+                "services_started": False, "audio_output": "UNVERIFIED", "sidecar_state": "RETAINED_IN_PLACE",
+                "startup_choice": "RESTORED_CHOICE_VERIFIED" if startup_record else "CURRENT_LAYOUT_RETAINED",
+                "next": "Review the rebound setup, then run receiver install explicitly; starting a source remains explicit."}
 
 
 def configure(directory: str, *, name: str | None = None, bitrate: int | None = None) -> dict:
@@ -1116,7 +1250,12 @@ def add_receiver_parser(commands) -> None:
     actions.add_parser("last-start-error", help="read the last recorded guard failure; historical, not current health")
     for action in ("install", "uninstall", "recover"):
         actions.add_parser(action)
-    actions.add_parser("refresh-renderer", help="accept same-route native YAML edits after both owned services are stopped")
+    refresh = actions.add_parser("refresh-renderer", help="accept native YAML edits after both owned services are stopped")
+    refresh.add_argument("--accept-output-change", action="store_true",
+                         help="also adopt the edited direct ALSA output in this installed receiver, retaining private state")
+    rebind = actions.add_parser("rebind-renderer", help="reuse retained receiver state after a stopped native installation handover")
+    for name in ("renderer-prefix", "renderer-config", "renderer-unit"):
+        rebind.add_argument("--" + name, required=True)
     settings = actions.add_parser("configure", help="change this receiver's name and/or preferred bitrate while both owned services are stopped")
     settings.add_argument("--name", help="Spotify Connect device name; omission keeps the saved name")
     settings.add_argument("--bitrate", type=int, choices=(96, 160, 320),
@@ -1185,7 +1324,10 @@ def run_receiver(args: argparse.Namespace) -> int:
         elif args.receiver_cmd == "recover":
             result = recover(args.directory)
         elif args.receiver_cmd == "refresh-renderer":
-            result = refresh_renderer(args.directory)
+            result = refresh_renderer(args.directory, accept_output_change=args.accept_output_change)
+        elif args.receiver_cmd == "rebind-renderer":
+            result = rebind_renderer(args.directory, renderer_prefix=args.renderer_prefix,
+                                     renderer_config=args.renderer_config, renderer_unit=args.renderer_unit)
         elif args.receiver_cmd == "configure":
             result = configure(args.directory, name=args.name, bitrate=args.bitrate)
         elif args.receiver_cmd == "run":
@@ -1200,7 +1342,7 @@ def run_receiver(args: argparse.Namespace) -> int:
         print(json.dumps(result, sort_keys=True))
         return 1 if (result.get("provider_playback", {}).get("observation") == "unavailable" or
                      "error" in result or result.get("request_outcome", "ACKNOWLEDGED") != "ACKNOWLEDGED") else 0
-    except (OSError, ValueError, TypeError, KeyError, UnicodeError, subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, TypeError, KeyError, UnicodeError, YAMLError, subprocess.SubprocessError) as exc:
         guard = getattr(args, "receiver_cmd", None) == "run"
         if guard:
             try:
@@ -1216,6 +1358,13 @@ def run_receiver(args: argparse.Namespace) -> int:
         if getattr(args, "receiver_cmd", None) == "configure" and not isinstance(exc, ExclusiveProfileError):
             message = ("Receiver configure failed; inspect private setup and confirm both services stopped, "
                        "then explicitly repeat the same --name/--bitrate settings. No automatic retry was issued.")
+        if getattr(args, "receiver_cmd", None) == "rebind-renderer" and not isinstance(exc, ExclusiveProfileError):
+            message = ("Receiver rebind failed; preserve both native installations and keep services stopped. "
+                       "Review the native handover, then explicitly repeat the same renderer paths. No automatic retry was issued.")
+        if (getattr(args, "receiver_cmd", None) == "refresh-renderer"
+                and getattr(args, "accept_output_change", False) and not isinstance(exc, ExclusiveProfileError)):
+            message = ("Receiver output change failed; keep both services stopped and preserve the same edited native YAML, "
+                       "then explicitly repeat refresh-renderer --accept-output-change. No automatic retry was issued.")
         print(message, file=sys.stderr)
         return 1
     except KeyboardInterrupt:
@@ -1223,5 +1372,12 @@ def run_receiver(args: argparse.Namespace) -> int:
                    "the same --name/--bitrate settings. No automatic retry was issued."
                    if getattr(args, "receiver_cmd", None) == "configure" else
                    "Receiver interrupted; inspect service and playback status before retrying.")
+        if getattr(args, "receiver_cmd", None) == "rebind-renderer":
+            message = ("Receiver rebind interrupted; preserve both native installations and keep services stopped, "
+                       "then explicitly repeat the same renderer paths. No automatic retry was issued.")
+        if (getattr(args, "receiver_cmd", None) == "refresh-renderer"
+                and getattr(args, "accept_output_change", False)):
+            message = ("Receiver output change interrupted; keep both services stopped and preserve the same edited native YAML, "
+                       "then explicitly repeat refresh-renderer --accept-output-change. No automatic retry was issued.")
         print(message, file=sys.stderr)
         return 130

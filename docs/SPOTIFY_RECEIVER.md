@@ -617,10 +617,132 @@ selection and other receipts are preserved. Refresh does not stop/start services
 probe the device or require a working Spotify client/account. The next explicit
 switch still performs the normal stop and physical output-release checks.
 
-Changing the direct ALSA output or native paths/unit requires a fresh receiver
-setup. Restore the old owned paths/unit before `receiver uninstall`, then run
-`receiver setup` in a new private directory for the new profile. Refresh never
-migrates the sidecar or rewrites a service to match those changes.
+For a new native prefix/config/unit on the **same output**, use the stopped
+rebind workflow below.
+Refresh never migrates the sidecar or rewrites a service to match changed paths.
+
+### After selecting a different direct ALSA output
+
+Keep the same installed receiver directory and native prefix/config/unit paths.
+Stop both owned services first, then edit only the existing native YAML's
+`mpv_audio_device` to the exact direct route selected on your machine, in the
+form `alsa/hw:CARD=NAME,DEV=N`. Do not infer `NAME` from a product label. The
+XU4/KA17 ALSA identifier still needs to be established on that target; no example
+here establishes its route or physical acceptance. Leave the receiver's generated
+sidecar configuration and account files alone.
+
+```sh
+RECEIVER="$HOME/.local/share/orr-spotify"
+"$ORR" spotify receiver --directory "$RECEIVER" switch off
+# Edit the existing native YAML with the explicitly selected direct ALSA route.
+"$ORR" spotify receiver --directory "$RECEIVER" refresh-renderer --accept-output-change
+```
+
+The flag explicitly admits the edited output and YAML fingerprint. Without it,
+refresh continues to reject a changed route. The flag requires the exact intact
+installed receiver links, loaded owned units, unchanged verified client, and
+the same successful stopped/current-and-saved-cgroup proof as ordinary refresh.
+It retains strict native admission: only the YAML fingerprint and direct output
+may differ from the recorded renderer. A custom unit, moved native paths,
+default/mixed output or explicit subdevice route is not admitted by this flag.
+
+Only `receiver.json` and the owned `sidecar/config.yml` output field are changed.
+The sidecar stays in place, retaining the saved Connect identity, account state,
+name, bitrate, API settings and all other configuration. Account/identity files
+are never read, copied or rewritten; native YAML, native identity, client files,
+service units, startup selection and other receipts are unchanged. This does not
+pair again or establish that retained authorization is still valid. It does not
+stop/start services, contact Spotify or probe hardware; client verification may
+run the native loader's dependency-listing mode.
+
+Each replacement is atomic and synced, with sidecar first and receiver metadata
+last. If interrupted between them, the still-unadmitted native YAML blocks both
+normal source starts; off remains available. Keep services stopped and preserve
+the same edited native YAML, then explicitly repeat the flagged command. Only
+the exact saved sidecar or the exact sidecar for that requested output is accepted;
+a different pending output or unrelated sidecar edit is refused. There is no
+automatic retry, rollback or general configuration repair. Do not edit setup
+files or start services through another path concurrently.
+
+Success still reports `audio_output: UNVERIFIED`. An explicit later
+`receiver switch renderer` or `receiver switch spotify` performs all normal
+ownership and physical output-release checks against the newly saved route.
+Hardware, account and provider-policy acceptance remain separate. For a native
+upgrade as well, complete the same-output rebind/install below first, then make
+this separate stopped output change on the newly bound installation.
+
+### After upgrading the native installation
+
+`rebind-renderer` lets an existing receiver retain its private sidecar directory
+when ORR moves to a fresh native prefix. It does not transfer credentials, install
+units or start a source. Use the newer ORR executable that includes this command.
+
+1. Finish `receiver uninstall` using the intact old setup. Both services must be
+   inactive/dead, with no jobs/PIDs and empty complete current/saved cgroups.
+   Keep the old native prefix, YAML and unit intact through rebind: they are
+   validated against the saved profile and remain available for manual native
+   rollback. Do not remove or edit the old installation first.
+2. Prepare the fresh native installation and its offline migrated profile using
+   the [native upgrade procedure](../GETTING_STARTED.md#optional-offline-upgrade-profile). Review its
+   config/identity separately. Select the **same direct ALSA route**. Neither
+   installation's config, identity or saved renderer state is changed by rebind.
+3. Complete the native user-service handover manually while everything is
+   stopped: select the exact new canonical unit, as an exact copy or symlink at
+   the existing `open-room-renderer.service` user-unit path. Preserve native
+   startup's enabled/off choice. A startup link to the old canonical proposal
+   must be explicitly retargeted to the new canonical proposal; an existing
+   `../open-room-renderer.service` or absolute user-unit link keeps that exact
+   form. Run `systemctl --user daemon-reload`, without enabling/starting a source.
+   Review unfamiliar/custom/global/runtime links manually; rebind will not
+   replace or delete them. Do not make concurrent service or setup changes.
+4. Run rebind against the **same receiver directory**, with all three selected
+   new native paths explicit. For an offline migrated profile:
+
+   ```sh
+   NEW="$HOME/.local/share/open-room-renderer-next"
+   ORR="$NEW/venv/bin/open-room-renderer"
+   RECEIVER="$HOME/.local/share/orr-spotify"
+   "$ORR" spotify receiver --directory "$RECEIVER" rebind-renderer \
+     --renderer-prefix "$NEW" \
+     --renderer-config "$NEW/migrated-profile/config.yaml" \
+     --renderer-unit "$NEW/migrated-profile/open-room-renderer.service"
+   ```
+
+   Use the root `config.yaml` and root unit proposal instead if those are the
+   selected new native profile. Review the result, then explicitly run
+   `receiver install`. Starting a source still requires a separate `switch`.
+
+Rebind requires the completed `UNINSTALLED` receipt, absent owned receiver
+service links, the exact stopped new native service and no stale manager state,
+drop-ins or surviving owned processes. It holds both receiver operation/output
+locks, validates both strict native profiles and the unchanged pinned client and
+sidecar configuration, and refuses an existing native mpv socket. It does not
+probe hardware; the later explicit start retains every normal output check.
+
+Only the receiver's two generated unit proposals, native-path fields/fingerprint
+and any restored startup receipt are updated. Private proposal comments bind all
+three requested paths for interrupted retries; existing setup proposal bytes are
+unchanged until explicitly rebound. Credentials, saved Connect device identity,
+name, bitrate, API binding, client files and all other sidecar bytes remain in the
+same directory and are never copied. Credential/state files are not read.
+Native service/startup links are never changed by rebind. A `RESTORED` startup
+receipt requires the exact original choice with only old canonical unit targets
+translated to the new one. If no startup receipt ever existed, rebind retains
+only the current native layout; it cannot prove the operator preserved the
+previous enabled/off choice (`CURRENT_LAYOUT_RETAINED` in the result).
+
+Each replacement is atomic and synced; the final `receiver.json` replacement is
+the commit point. An interruption may leave old/requested-new proposal files or
+a translated startup receipt alongside the old profile. Normal receiver
+admission fails closed on mismatched proposals. Keep both native installations
+intact and stopped, then explicitly repeat the same three paths to finish.
+Foreign edits or a different pending target are refused; there is no automatic
+retry, general migration journal or credential repair. A process killed inside
+an atomic file write may require manual review of its private temporary file.
+
+Success confirms local in-place continuity only. It does not prove that retained
+Spotify authorization is still valid or that pairing, playback, KA17 output or
+provider permission have passed their separate gates.
 
 ## Ownership and failure contract
 
@@ -678,8 +800,12 @@ Config, client and credentials are **retained**, never recursively deleted.
 Interrupted removal can resume only while both services remain stopped and
 remaining links still match the recorded installation. Unexpected replacements
 are preserved for manual review. Stop/uninstall receiver mode before removing
-its native ORR installation. For an update, use a fresh verified client/setup
-and re-review the provider/target gates; no automatic binary updates are installed.
+its native ORR installation. For a native ORR upgrade on the same output, use
+`rebind-renderer` above to retain the receiver in place. A changed Spotify client
+still needs a fresh verified client/setup and review of provider/target gates;
+no automatic binary updates are installed. To change only the native direct
+output while retaining receiver state, use the explicit stopped
+`refresh-renderer --accept-output-change` workflow above.
 
 ## Evidence and gates
 
@@ -689,8 +815,10 @@ and re-review the provider/target gates; no automatic binary updates are install
   failed metadata writes, broken-Spotify return, private locks and interrupted
   installation. Stopped-only configuration tests cover retained private identity
   and credentials, exact installation/stop proof, interrupted pair writes and
-  explicit same-settings retry, and rejection of unrelated edits. These are not
-  physical or account tests.
+  explicit same-settings retry, and rejection of unrelated edits. Output-change
+  contracts additionally cover explicit opt-in, strict unchanged native paths/unit,
+  retained native and receiver state, and interrupted same-output retry. These
+  are not physical or account tests.
 - `tools/acceptance_spotify_receiver.py` requires **real systemd user services and
   cgroup v2**. It runs real parent/child processes writing synthetic PCM under an
   exclusive file lock, exercising switching, competing callers, foreign ownership,
