@@ -188,6 +188,7 @@ def test_cli_errors_do_not_echo_private_config_paths(capsys):
         runtime.main(["run", "--config", "/secret/token.yaml", "--stream-bind", "private-token"])
     output = capsys.readouterr()
     assert "secret" not in output.err and "private-token" not in output.err
+    assert "open-room-renderer-snapcast --help" in output.err
 
 
 def test_exited_leader_is_retained_until_last_group_signal(tmp_path, monkeypatch):
@@ -241,3 +242,36 @@ def test_initial_room_volume_is_bounded_and_silent_by_default(value):
     assert runtime.client_volume("0") == 0
     assert runtime.client_volume("10") == 10
     assert runtime.client_volume("100") == 100
+
+
+@pytest.mark.parametrize("provenance, expected_port", [(False, 8080), (True, 59152)])
+def test_saved_identity_preserves_actual_legacy_or_wiim_listener_defaults(tmp_path, provenance, expected_port):
+    state = tmp_path / "state"
+    state.mkdir()
+    identity = "00000000-0000-4000-8000-000000000000"
+    (state / "uuid").write_text(identity)
+    if provenance:
+        (state / "uuid.wiim").write_text(identity)
+    path = tmp_path / "source.yaml"
+    path.write_text(yaml.safe_dump({"mpv_audio_device": runtime.AUDIO_DEVICE, "state_dir": str(state)}))
+    before = {file.name: file.read_bytes() for file in state.iterdir()}
+    cfg, raw = runtime.read_config(str(path))
+    assert cfg.http_api_port == 8080 and cfg.upnp_port == expected_port
+    assert "upnp_port" not in raw and "uuid" not in raw
+    assert {file.name: file.read_bytes() for file in state.iterdir()} == before
+
+
+
+def test_preflight_accepts_listener_restart_after_owned_tcp_time_wait():
+    with socket.socket() as listener:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+        listener.listen()
+        with socket.create_connection(("127.0.0.1", port)) as client:
+            peer, _ = listener.accept()
+            with peer:
+                peer.shutdown(socket.SHUT_WR)
+                assert client.recv(1) == b""
+    cfg = Config(bind_address="127.0.0.1", http_api_port=port, upnp_port=port)
+    runtime.preflight_ports(cfg, "127.0.0.1", 1704, 1705)

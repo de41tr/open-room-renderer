@@ -24,8 +24,8 @@ import time
 
 import yaml
 
-from .config import StartupConfigError, parse_startup_yaml, read_startup_config
-from .queue_client import PrivateClientArgumentParser
+from .config import (StartupConfigError, WIIM_IDENTITY_FILE, normalize_uuid,
+                     parse_startup_yaml, preserve_discovery_identity, read_startup_config)
 
 AUDIO_DEVICE = "pulse/orr_snapcast"
 MAX_BYTES = 256 * 1024
@@ -34,6 +34,11 @@ NATIVE_TOOLS = ("mpv", "pulseaudio", "pactl", "parec", "snapserver")
 
 class RuntimeErrorSafe(RuntimeError):
     """Fixed diagnostics only; never include upstream logs or configuration."""
+
+
+class PrivateParser(argparse.ArgumentParser):
+    def error(self, _message):
+        self.exit(2, "Invalid Snapcast source arguments. Run open-room-renderer-snapcast --help.\n")
 
 
 def literal_address(value: str) -> str:
@@ -66,6 +71,39 @@ def client_volume(value: str) -> int:
         raise argparse.ArgumentTypeError("choose an initial client volume from 0 to 100") from None
 
 
+def saved_identity(path: Path) -> str | None:
+    """Read existing identity/provenance only; never create or migrate state."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        with os.fdopen(descriptor, "rb") as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise RuntimeErrorSafe("Saved discovery identity must be a regular file.")
+            data = source.read(MAX_BYTES + 1)
+        if len(data) > MAX_BYTES:
+            raise RuntimeErrorSafe("Saved discovery identity exceeds the size limit.")
+        return normalize_uuid(data.decode("utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError):
+        raise RuntimeErrorSafe("Saved discovery identity could not be inspected.") from None
+
+
+def apply_saved_discovery_defaults(cfg) -> None:
+    if cfg.uuid:
+        return
+    directory = Path(cfg.state_dir)
+    identity = saved_identity(directory / "uuid")
+    provenance = None
+    if identity is None or "wiim_home_profile" in cfg._implicit_discovery_settings:
+        provenance = saved_identity(directory / WIIM_IDENTITY_FILE)
+    if identity == "" or (identity is None and provenance == ""):
+        raise RuntimeErrorSafe("Saved discovery identity is empty.")
+    # Match the existing startup recovery of uuid.wiim without performing it.
+    if identity is not None or provenance is not None:
+        cfg.uuid = identity if identity is not None else provenance
+        preserve_discovery_identity(cfg, wiim_identity=provenance)
+
+
 def read_config(path: str) -> tuple[object, dict]:
     """Capture and validate once, without creating identity or saved state."""
     try:
@@ -83,6 +121,7 @@ def read_config(path: str) -> tuple[object, dict]:
         raise RuntimeErrorSafe("Renderer configuration could not be read.") from None
     if cfg.auto_spawn_mpv is not True or cfg.mpv_audio_device != AUDIO_DEVICE:
         raise RuntimeErrorSafe("Require auto_spawn_mpv: true and mpv_audio_device: pulse/orr_snapcast.")
+    apply_saved_discovery_defaults(cfg)
     # The launcher creates neither a physical output nor another service. A
     # separate renderer using the same state must be stopped by its operator.
     for value in (cfg.http_api_port, cfg.upnp_port):
@@ -116,6 +155,9 @@ def preflight_ports(cfg, stream_bind: str, stream_port: int, control_port: int) 
     try:
         for address, port in endpoints:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                # Match native listener reuse: harmless prior TIME_WAIT peers
+                # must not block an otherwise valid foreground restart.
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 probe.bind((address, port))
     except (OSError, TypeError):
         raise RuntimeErrorSafe("A requested listener is unavailable. Stop the separate service or choose unused ports.") from None
@@ -425,7 +467,7 @@ filter = *:warning
 
 
 def main(argv=None) -> int:
-    parser = PrivateClientArgumentParser(prog="open-room-renderer-snapcast",
+    parser = PrivateParser(prog="open-room-renderer-snapcast",
         description="Opt-in Linux foreground source; operator supplies Snapclients. No physical output or service changes.")
     parser.add_argument("command", choices=("check", "run"))
     parser.add_argument("--config", required=True)
@@ -435,7 +477,7 @@ def main(argv=None) -> int:
     parser.add_argument("--control-port", type=port_number, default=1705,
                         help="loopback-only Snapcast JSON-RPC port")
     parser.add_argument("--initial-client-volume", type=client_volume, default=0,
-                        help="new per-session client volume, 0..100 (default: 0, silent)")
+                        help="requested client volume, 0..100 (default: 0; requires a volume-respecting client mixer)")
     args = parser.parse_args(argv)
     runtime = None
     previous = {}
@@ -452,7 +494,7 @@ def main(argv=None) -> int:
         executables = require_tools()
         preflight_ports(cfg, args.stream_bind, args.stream_port, args.control_port)
         if args.command == "check":
-            print("Input, executable paths and available listener addresses checked. No processes, state or audio started; native versions/readiness remain unchecked.")
+            print("Input, saved discovery identity, executable paths and available listener addresses checked. No processes, state or audio started; native versions/readiness remain unchecked.")
             return 0
         for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             previous[sig] = signal.signal(sig, stop)

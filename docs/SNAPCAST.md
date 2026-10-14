@@ -18,8 +18,8 @@ original WiiM Home grouping are **NOT_TESTED** by the software acceptance.
   Other versions are rejected rather than guessing listener/config semantics.
   Ubuntu 24.04 / 0.27.0 is the hosted software-acceptance target; 0.31.0 has a
   narrowly reviewed compatible public config/API but its runtime on the target
-  remains NOT_TESTED. No downgrade or target service activation is implied. Install dependencies through your normal
-  distro/operator workflow; the launcher installs/enables nothing.
+  remains NOT_TESTED. No downgrade or target service activation is implied.
+  Install dependencies through your normal distro/operator workflow; the launcher installs/enables nothing.
 - User-owned or otherwise authorized media and independently configured
   Snapclients. This does not grant distribution rights for provider audio.
 - Stop any separately running ORR instance before reusing its ports/state.
@@ -47,18 +47,23 @@ open-room-renderer-snapcast run --config /path/to/renderer-snapcast.yaml \
   --initial-client-volume 10
 ```
 
-`check` validates the input, executable paths and free listener addresses
-without creating state or starting native software. It does not establish
+`check` validates the input, reads existing discovery identity/provenance to
+retain legacy listener defaults, and checks executable paths/free listener
+addresses without creating state or starting native software. It does not establish
 native version compatibility or audio readiness. `run` prints `READY` only
 after checking the private null sink, the unique Snapserver stream, the owned
 mpv output, and the renderer's own listening sockets. This means the source
 is ready; it does not mean a remote client or speaker has been tested.
 
-Fresh sessions default every newly connected Snapclient to **0 (silent)**.
+Fresh sessions request volume **0** for every newly connected Snapclient.
+This is not a guarantee of physical silence: clients configured with
+`--mixer none` ignore server volume. Use a volume-respecting software or
+hardware mixer, and set low physical output gain before connecting.
 Choose an explicit low startup level with `--initial-client-volume 10` as in the
 example; the accepted range is 0–100. Snapcast's temporary state does not retain
 prior room attenuation, so a session restart reuses the explicitly selected
-initial level. Never assume a room retains its old volume across restarts.
+initial level. Never assume a room retains its old volume across restarts
+or that a server acknowledgement proves a speaker is muted.
 
 Use the normal ORR web UI, CLI or supported controller to choose audio and
 adjust the shared source volume/EQ. Start with low volume on each room's
