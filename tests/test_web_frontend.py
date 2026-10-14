@@ -3,10 +3,12 @@
 Node tests exercise control flow, not an actual browser or responsive layout.
 """
 from html.parser import HTMLParser
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -62,8 +64,18 @@ def test_web_frontend_control_flow_node():
     node = shutil.which("node")
     if node is None:
         pytest.skip("Optional Node 18+ is not installed; no browser QA implied")
+    # The bounded group runner emits this log only after the group has stopped.
+    # Embedded timestamps distinguish late arrival from a Node subprocess stall.
+    started = time.monotonic()
+    print(f"\nFRONTEND_NODE_VERSION_START utc={datetime.now(timezone.utc).isoformat(timespec='milliseconds')} "
+          f"elapsed={time.monotonic() - started:.3f}s", flush=True)
     version = subprocess.run([node, "--version"], check=True, capture_output=True, text=True).stdout
     if int(re.match(r"v(\d+)", version).group(1)) < 18:
         pytest.skip("Optional Node 18+ is required for dependency-free UI unit tests")
+    node_version = re.match(r"v[0-9.]+", version).group(0)
+    print(f"FRONTEND_NODE_SUITE_START utc={datetime.now(timezone.utc).isoformat(timespec='milliseconds')} "
+          f"elapsed={time.monotonic() - started:.3f}s node={node_version}", flush=True)
     result = subprocess.run([node, "--test", str(ROOT / "tests" / "web_frontend.test.cjs"), str(ROOT / "tests" / "web_curve_transfer.test.cjs"), str(ROOT / "tests" / "web_favorites_transfer.test.cjs")], capture_output=True, text=True, timeout=60)
+    print(f"FRONTEND_NODE_SUITE_RETURNED utc={datetime.now(timezone.utc).isoformat(timespec='milliseconds')} "
+          f"elapsed={time.monotonic() - started:.3f}s", flush=True)
     assert result.returncode == 0, result.stdout + result.stderr
