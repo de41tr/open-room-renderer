@@ -664,6 +664,175 @@ def install(directory: str) -> dict:
         return {"installation": "INSTALLED", "services_started": False, "boot_policy": "UNCHANGED", "gates": GATES}
 
 
+def _startup_targets(root: Path, profile: dict) -> dict[str, set[str]]:
+    return {"renderer": {profile["renderer_unit"], str(_user_units() / RENDERER_SERVICE),
+                         "../" + RENDERER_SERVICE},
+            "spotify": {str(root / SPOTIFY_SERVICE)}}
+
+
+def _startup_snapshot(services: UserServices) -> dict[str, str | None]:
+    """Admit only our two persistent default.target links, never global policy."""
+    units = _user_units()
+    wanted = units / "default.target.wants"
+    targets = _startup_targets(services.root, services.profile)
+    observed = dict.fromkeys(UNITS)
+    if os.path.lexists(wanted):
+        with _directory(wanted) as directory:
+            info = os.fstat(directory)
+            if info.st_uid != os.geteuid() or info.st_mode & 0o022:
+                fail("Startup links require an owned, non-shared default.target.wants directory.")
+            for mode, unit in UNITS.items():
+                try:
+                    info = os.stat(unit, dir_fd=directory, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                if not stat.S_ISLNK(info.st_mode) or info.st_uid != os.geteuid():
+                    fail("An unfamiliar startup link must be reviewed manually; no policy was changed.")
+                value = os.readlink(unit, dir_fd=directory)
+                if value not in targets[mode]:
+                    fail("An unfamiliar startup link must be reviewed manually; no policy was changed.")
+                observed[mode] = value
+    raw = services.command("show", "--property=UnitPath")
+    if not raw.startswith("UnitPath=") or len(raw.splitlines()) != 1:
+        fail("The user manager's unit lookup paths cannot be verified.")
+    paths = [_path(value) for value in shlex.split(raw.strip().removeprefix("UnitPath="))]
+    if units not in paths or len(paths) > 64:
+        fail("The selected user unit directory is not a recognized manager lookup path.")
+    fragments = {Path(services.profile["renderer_unit"]), services.root / SPOTIFY_SERVICE}
+    expected = {units / unit for unit in UNITS.values()} | {wanted / unit for unit in UNITS.values()}
+    count = 0
+    for base in paths:
+        if not base.exists():
+            continue
+        for entry in base.iterdir():
+            count += 1
+            if count > 16384:
+                fail("The unit lookup layout exceeds the bounded startup inspection limit.")
+            # Include aliases and all dependency-link kinds, including runtime
+            # and global user-unit directories from the actual manager.
+            entries = entry.iterdir() if entry.name.endswith((".wants", ".requires", ".upholds")) else (entry,)
+            for path in entries:
+                count += 1
+                if count > 16384:
+                    fail("The unit lookup layout exceeds the bounded startup inspection limit.")
+                try:
+                    relevant = path.name in UNITS.values() or (path.is_symlink() and (
+                        Path(os.readlink(path)).name in UNITS.values() or path.resolve() in fragments))
+                except (OSError, RuntimeError):
+                    fail("A unit lookup link cannot be inspected; review startup policy manually before selecting a source.")
+                if relevant and path not in expected:
+                    fail("Global, runtime, aliased or custom receiver enablement needs manual review; no policy was changed.")
+    if sum(value is not None for value in observed.values()) > 1:
+        fail("Both receiver startup links are present; review them manually before selecting a source.")
+    return observed
+
+
+def _startup_record(root: Path, profile: dict) -> dict | None:
+    path = root / "startup.json"
+    if not os.path.lexists(path):
+        return None
+    record = _json(path)
+    targets = _startup_targets(root, profile)
+    if (record.get("format") != 1 or record.get("unit_directory") != str(_user_units())
+            or record.get("state") not in {"APPLYING", "SELECTED", "RESTORED"}
+            or record.get("selection") not in {*UNITS, "off", "restore"}
+            or record.get("original_renderer") not in {None, *targets["renderer"]}):
+        fail("The startup ownership receipt is invalid; preserve it for manual review.")
+    for key in ("from", "to"):
+        value = record.get(key)
+        if (type(value) is not dict or set(value) != set(UNITS)
+                or any(value[mode] not in {None, *targets[mode]} for mode in UNITS)
+                or sum(item is not None for item in value.values()) > 1):
+            fail("The startup ownership receipt is invalid; preserve it for manual review.")
+    target = _startup_choice(root, profile, record["selection"], record["original_renderer"])
+    if (record["to"] != target or (record["state"] == "RESTORED" and record["selection"] != "restore")
+            or (record["state"] == "SELECTED" and record["selection"] == "restore")):
+        fail("The startup ownership receipt is invalid; preserve it for manual review.")
+    return record
+
+
+def _startup_choice(root: Path, profile: dict, selection: str, original: str | None) -> dict[str, str | None]:
+    target = dict.fromkeys(UNITS)
+    if selection == "restore":
+        target["renderer"] = original
+    elif selection == "renderer":
+        target["renderer"] = original or profile["renderer_unit"]
+    elif selection == "spotify":
+        target["spotify"] = str(root / SPOTIFY_SERVICE)
+    return target
+
+
+def _startup_change(services: UserServices, selection: str) -> dict:
+    root, profile = services.root, services.profile
+    observed = _startup_snapshot(services)
+    record = _startup_record(root, profile)
+    if record is None:
+        if observed["spotify"] is not None:
+            fail("Spotify startup has no ownership receipt; review its existing link manually.")
+        original = observed["renderer"]
+    else:
+        original = record["original_renderer"]
+        if record["state"] == "APPLYING":
+            if any(observed[mode] not in {None, record["from"][mode], record["to"][mode]} for mode in UNITS):
+                fail("A pending startup link changed outside this setup; no policy was changed.")
+            if selection not in {"status", "restore", record["selection"]}:
+                fail("Repeat the pending startup selection or use startup restore before choosing another source.")
+        elif observed != record["to"]:
+            fail("Startup links changed outside this setup; preserve them for manual review.")
+    current = next((mode for mode, value in observed.items() if value is not None), "off")
+    if selection == "status":
+        return {"selected_startup": current, "startup_state": record["state"] if record else "UNCHANGED",
+                "requested_startup": record["selection"] if record else None,
+                "original_renderer_enabled": original is not None, "services_started": False}
+    target = _startup_choice(root, profile, selection, original)
+    record = {"format": 1, "unit_directory": str(_user_units()), "original_renderer": original,
+              "state": "APPLYING", "selection": selection, "from": observed, "to": target}
+    _write(root / "startup.json", record)
+    wanted = _user_units() / "default.target.wants"
+    _ensure_user_directory(wanted)
+    with _directory(wanted) as directory:
+        for mode, unit in UNITS.items():
+            if observed[mode] is not None:
+                info = os.stat(unit, dir_fd=directory, follow_symlinks=False)
+                if (not stat.S_ISLNK(info.st_mode) or info.st_uid != os.geteuid()
+                        or os.readlink(unit, dir_fd=directory) != observed[mode]):
+                    fail("A startup link changed during selection; resume only after manual review.")
+                os.unlink(unit, dir_fd=directory)
+                os.fsync(directory)
+        # Removal precedes creation: interruption can leave both off, never two
+        # enabled peers. A new foreign destination is never overwritten.
+        for mode, value in target.items():
+            if value is not None:
+                os.symlink(value, UNITS[mode], dir_fd=directory)
+                os.fsync(directory)
+    services.command("daemon-reload")
+    if _startup_snapshot(services) != target:
+        fail("Startup selection could not be confirmed; inspect startup status before resuming.")
+    state = "RESTORED" if selection == "restore" else "SELECTED"
+    _write(root / "startup.json", record | {"state": state})
+    return {"selected_startup": next((mode for mode, value in target.items() if value is not None), "off"),
+            "startup_state": state, "services_started": False, "current_services": "UNCHANGED",
+            "applies_to": "NEXT_USER_MANAGER_START", "lingering": "UNCHANGED"}
+
+
+def startup(directory: str, selection: str) -> dict:
+    if selection not in {"status", "renderer", "spotify", "off", "restore"}:
+        fail("Choose startup status, renderer, spotify, off or restore explicitly.")
+    root, profile = load_profile(directory)
+    with _lock(root, "control.lock"):
+        services = UserServices(root, profile)
+        links = _install_links(root, profile)
+        installation = _json(root / "installation.json")
+        if (installation.get("state") != "INSTALLED"
+                or installation.get("links") != {str(p): str(t) for p, t in links.items()}
+                or any(not _exact_link(path, target) for path, target in links.items())):
+            fail("Startup selection requires this setup's intact installed service links.")
+        services.validate()
+        if selection in UNITS:
+            load_profile(root, start=selection)
+        return _startup_change(services, selection)
+
+
 def uninstall(directory: str) -> dict:
     root, profile = load_profile(directory)
     with _lock(root, "control.lock"):
@@ -678,6 +847,8 @@ def uninstall(directory: str) -> dict:
             fail("An installed receiver link changed; preserve it for manual review.")
         if not resuming:
             services.stop_all(services.validate())
+            if os.path.lexists(root / "startup.json"):
+                _startup_change(services, "restore")
             _write(root / "installation.json", record | {"state": "UNINSTALLING"})
         else:
             # Some links may already be absent and systemd may need a reload.
@@ -690,6 +861,11 @@ def uninstall(directory: str) -> dict:
                         or not services.cgroup_empty(info["ControlGroup"])
                         or not services.cgroup_empty(saved.get(mode, ""))):
                     fail("Interrupted uninstall cannot confirm both services remain stopped; no more links were removed.")
+            if os.path.lexists(root / "startup.json"):
+                startup_record = _startup_record(root, profile)
+                if (startup_record["state"] != "RESTORED"
+                        or _startup_snapshot(services) != startup_record["to"]):
+                    fail("Interrupted uninstall cannot verify restored native startup; no more links were removed.")
         for path in links:
             if os.path.lexists(path):
                 path.unlink()
@@ -717,6 +893,8 @@ def add_receiver_parser(commands) -> None:
                          help="also read a sanitized snapshot from the configured Spotify loopback API")
     for action in ("install", "uninstall", "recover"):
         actions.add_parser(action)
+    boot = actions.add_parser("startup", help="explicitly select the next user-manager session; no immediate activation")
+    boot.add_argument("selection", choices=("status", "renderer", "spotify", "off", "restore"))
     for action in ("pause", "resume"):
         actions.add_parser(action, help=f"request {action} from the already selected Spotify client")
     actions.add_parser("next", help="request the next track in Spotify's existing context; may resume paused playback")
@@ -750,6 +928,8 @@ def run_receiver(args: argparse.Namespace) -> int:
             result = switch(args.directory, args.mode)
         elif args.receiver_cmd == "status":
             result = status(args.directory, playback=args.playback)
+        elif args.receiver_cmd == "startup":
+            result = startup(args.directory, args.selection)
         elif args.receiver_cmd in {"pause", "resume", "next", "previous", "seek", "volume", "now-playing",
                                     "repeat-context", "repeat-track", "shuffle"}:
             value = getattr(args, "value", None)

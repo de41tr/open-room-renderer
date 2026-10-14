@@ -406,3 +406,141 @@ def test_recovery_does_not_reset_successful_inactive_peer(ready, monkeypatch):
     monkeypatch.setattr(receiver, 'UserServices', Manager)
     assert receiver.recover(str(ready))['recovery'] == 'OFF_ONLY'
     assert calls == [('stop', *receiver.UNITS.values()), ('reset-failed', receiver.RENDERER_SERVICE)]
+
+
+@pytest.fixture
+def startup_ready(ready, monkeypatch, tmp_path):
+    units, global_units, runtime_units = [tmp_path / name for name in ('user-units', 'global-units', 'runtime-units')]
+    for path in (units, global_units, runtime_units):
+        path.mkdir()
+    monkeypatch.setattr(receiver, '_user_units', lambda: units)
+    root, profile = receiver.load_profile(ready)
+    links = receiver._install_links(root, profile)
+    (units / (receiver.RENDERER_SERVICE + '.d')).mkdir()
+    for path, target in links.items():
+        path.symlink_to(target)
+    (units / receiver.RENDERER_SERVICE).symlink_to(profile['renderer_unit'])
+    wanted = units / 'default.target.wants'
+    wanted.mkdir()
+    receiver._write(root / 'installation.json', {'format': 1, 'state': 'INSTALLED',
+        'links': {str(p): str(t) for p, t in links.items()}})
+    class Manager:
+        calls = []
+        stopped = receiver.UserServices.stopped
+        def __init__(self, root, profile): self.root, self.profile = root, profile
+        def command(self, *args, **_kwargs):
+            self.calls.append(args)
+            if args == ('show', '--property=UnitPath'):
+                return f'UnitPath={units} {global_units} {runtime_units}\n'
+            assert args == ('daemon-reload',)
+            return ''
+        def show(self, _mode): return stopped() | {'LoadState': 'loaded'}
+        def validate(self): return {mode: self.show(mode) for mode in receiver.UNITS}
+        def stop_all(self, _before): receiver._write(root / 'last-cgroups.json', dict.fromkeys(receiver.UNITS, ''))
+        def cgroup_empty(self, _group): return True
+    monkeypatch.setattr(receiver, 'UserServices', Manager)
+    return root, profile, wanted, global_units, runtime_units, Manager
+
+
+@pytest.mark.parametrize('original', [None, 'canonical', 'relative'])
+def test_startup_selection_preserves_exact_native_choice_without_activation(startup_ready, original):
+    root, profile, wanted, _global, _runtime, manager = startup_ready
+    native, spotify = [wanted / unit for unit in receiver.UNITS.values()]
+    original = {'canonical': profile['renderer_unit'], 'relative': '../' + receiver.RENDERER_SERVICE}.get(original)
+    if original:
+        native.symlink_to(original)
+    proposals = {name: (root / name).read_bytes() for name in receiver._unit_parts(root, profile)}
+    with pytest.raises(ExclusiveProfileError, match='Choose startup'):
+        receiver.startup(str(root), 'unexpected')
+    assert not (root / 'startup.json').exists() and not manager.calls
+    assert receiver.startup(str(root), 'status')['startup_state'] == 'UNCHANGED'
+    assert not (root / 'startup.json').exists()
+    assert receiver.startup(str(root), 'spotify')['selected_startup'] == 'spotify'
+    assert spotify.is_symlink() and not os.path.lexists(native)
+    assert receiver.startup(str(root), 'renderer')['selected_startup'] == 'renderer'
+    assert os.readlink(native) == (original or profile['renderer_unit'])
+    assert receiver.startup(str(root), 'off')['selected_startup'] == 'off'
+    assert not os.path.lexists(native) and not os.path.lexists(spotify)
+    result = receiver.startup(str(root), 'restore')
+    assert result['startup_state'] == 'RESTORED' and result['services_started'] is False
+    assert (os.readlink(native) if original else None) == original
+    assert bool(os.path.lexists(native)) == bool(original) and not os.path.lexists(spotify)
+    assert {name: (root / name).read_bytes() for name in proposals} == proposals
+    assert set(call[0] for call in manager.calls) <= {'show', 'daemon-reload'}
+
+
+@pytest.mark.parametrize('case', ['global', 'runtime', 'custom', 'alias', 'foreign', 'unreceipted'])
+def test_startup_refuses_unfamiliar_enablement_without_mutation(startup_ready, case):
+    root, profile, wanted, global_units, runtime_units, manager = startup_ready
+    native = wanted / receiver.RENDERER_SERVICE
+    native.symlink_to(profile['renderer_unit'])
+    if case in {'global', 'runtime', 'custom'}:
+        base = {'global': global_units, 'runtime': runtime_units, 'custom': wanted.parent}[case]
+        directory = base / ('custom.target.wants' if case == 'custom' else 'default.target.wants')
+        directory.mkdir()
+        foreign = directory / receiver.RENDERER_SERVICE
+        foreign.symlink_to(profile['renderer_unit'])
+    elif case == 'alias':
+        foreign = wanted.parent / 'other-name.service'
+        foreign.symlink_to(profile['renderer_unit'])
+    else:
+        native.unlink()
+        foreign = native if case == 'foreign' else wanted / receiver.SPOTIFY_SERVICE
+        foreign.symlink_to('/unrelated/service' if case == 'foreign' else root / receiver.SPOTIFY_SERVICE)
+    before = os.readlink(foreign)
+    with pytest.raises(ExclusiveProfileError):
+        receiver.startup(str(root), 'off')
+    assert os.readlink(foreign) == before and not (root / 'startup.json').exists()
+    assert not any(call[0] == 'daemon-reload' for call in manager.calls)
+
+
+@pytest.mark.parametrize('resume', ['spotify', 'restore', 'uninstall'])
+def test_startup_interruption_resumes_explicitly_and_restore_needs_no_client(startup_ready, monkeypatch, resume):
+    root, profile, wanted, _global, _runtime, _manager = startup_ready
+    native = wanted / receiver.RENDERER_SERVICE
+    original = '../' + receiver.RENDERER_SERVICE
+    native.symlink_to(original)
+    original_symlink = os.symlink
+    def interrupted(source, destination, **kwargs):
+        if destination == receiver.SPOTIFY_SERVICE:
+            raise OSError('injected interrupted startup apply')
+        return original_symlink(source, destination, **kwargs)
+    monkeypatch.setattr(os, 'symlink', interrupted)
+    with pytest.raises(OSError):
+        receiver.startup(str(root), 'spotify')
+    assert not any(wanted.iterdir())
+    assert receiver.startup(str(root), 'status')['startup_state'] == 'APPLYING'
+    with pytest.raises(ExclusiveProfileError, match='pending startup'):
+        receiver.startup(str(root), 'off')
+    monkeypatch.setattr(os, 'symlink', original_symlink)
+    if resume != 'spotify':
+        (root / 'sidecar/config.yml').write_text('broken client config')
+        monkeypatch.setattr(receiver, 'verify_client', lambda *_args: pytest.fail('restore needs Spotify'))
+    if resume == 'uninstall':
+        assert receiver.uninstall(str(root))['installation'] == 'UNINSTALLED'
+        assert (root / 'sidecar/config.yml').read_text() == 'broken client config'
+    else:
+        assert receiver.startup(str(root), resume)['startup_state'] != 'APPLYING'
+    if resume != 'spotify':
+        assert os.readlink(native) == original
+        assert not os.path.lexists(wanted / receiver.SPOTIFY_SERVICE)
+
+
+def test_startup_and_uninstall_preserve_a_changed_foreign_link(startup_ready):
+    root, profile, wanted, _global, _runtime, _manager = startup_ready
+    receiver.startup(str(root), 'spotify')
+    foreign = wanted / receiver.SPOTIFY_SERVICE
+    foreign.unlink()
+    foreign.symlink_to('/foreign/keep.service')
+    for action in ('restore', 'uninstall'):
+        with pytest.raises(ExclusiveProfileError, match='unfamiliar startup link'):
+            receiver.uninstall(str(root)) if action == 'uninstall' else receiver.startup(str(root), action)
+        assert os.readlink(foreign) == '/foreign/keep.service'
+        assert (wanted.parent / receiver.SPOTIFY_SERVICE).is_symlink()
+
+
+def test_startup_cli_dispatch_is_explicit(ready, monkeypatch):
+    called = []
+    monkeypatch.setattr(receiver, 'startup', lambda directory, selection: called.append((directory, selection)) or {})
+    assert cli.main(['spotify', 'receiver', '--directory', str(ready), 'startup', 'restore']) == 0
+    assert called == [(str(ready), 'restore')]

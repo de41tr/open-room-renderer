@@ -26,8 +26,11 @@ framework is introduced.
   Spotify Premium account for the upstream documented device-auth flow. The
   software license is not provider authorization. Do not pass credentials to ORR.
 
-The intended target is **Odroid XU4 / Armbian / FiiO KA17**. Its actual Armbian
-image, userspace, mpv version and ALSA identifier have not been observed. Run
+The intended target is **Odroid XU4 / Armbian / FiiO KA17**. The authorized fixed
+XU4 check on 2026-10-14 observed **Armbian 26.8.3 trixie, armv7l/32-bit and
+Python 3.13.5**, testing main `983dddae` CLI/help and two fixed cases. It did not
+test this receiver candidate or startup selection. Native mpv, the actual ALSA
+identifier/KA17 and provider acceptance remain unverified. Run
 `uname -m`, `getconf LONG_BIT`, `dpkg --print-architecture`, `mpv --version` and
 `aplay -l` on the target before selecting the artifact/output. Do not infer the
 card ID from the product name. The KA17's USB data port is distinct from its
@@ -122,6 +125,42 @@ foreground/custom-service launch paths first. Retain your existing config/state.
 
 Do not reuse the previous offline proposal's drop-in alongside the managed
 receiver. Remove it manually only after reviewing the stopped native service.
+
+## Optional next-session startup selection
+
+Installation leaves existing native renderer enablement unchanged. To explicitly
+select a source for the **next systemd user-manager session**:
+
+```sh
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" startup status
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" startup spotify
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" startup renderer
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" startup off
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" startup restore
+```
+
+Choose one of `spotify`, `renderer` or `off`; these commands **do not start or
+stop the current services**. The selection only changes the two recognized
+per-user `default.target.wants` links. The first selection saves the original
+native renderer link's exact target, or its absence. `restore` and receiver
+`uninstall` restore that original choice and retain private account/config data.
+Restoration and `off` do not require a healthy Spotify executable or config.
+Global, runtime, aliased, custom or externally changed enablement is refused for
+manual review rather than rewritten. Keep the private startup receipt intact.
+Inspection covers unit lookup and dependency-link layouts; it does not parse
+arbitrary units' inline `Wants=` or `Requires=`. Those custom dependencies and
+independent activation paths remain unsupported and must be reviewed manually.
+
+An interrupted selection can leave both sources disabled. `startup status`
+reports `APPLYING`; explicitly repeat the pending selection or use `startup
+restore`. No automatic resume, service retry or restart loop is added. The
+unchanged start guard still requires the whole peer cgroup and direct output to
+be released before admitting a source. Spotify still starts at volume zero.
+
+This is **not a power-on boot guarantee**: the user manager must already start
+through the operator's existing login/session policy. These commands never
+enable lingering or change system services. A next-session Spotify selection
+still requires the separately reviewed provider/account/device prerequisites.
 
 ## Start, switch, stop and recover
 

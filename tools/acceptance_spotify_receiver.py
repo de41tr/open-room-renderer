@@ -171,6 +171,8 @@ def production_install_acceptance(root):
                                            {'version': 'synthetic', 'binary_sha256': '0' * 64})
     units = receiver._user_units()
     native_link = units / receiver.RENDERER_SERVICE
+    wanted = units / 'default.target.wants'
+    original_startup = '../' + receiver.RENDERER_SERVICE
     try:
         args = argparse.Namespace(directory=str(setup), renderer_prefix=str(prefix),
             renderer_config=str(prefix / 'config.yaml'), renderer_unit=str(native),
@@ -182,14 +184,31 @@ def production_install_acceptance(root):
         states = owned.validate()
         assert all(owned.stopped(info) for info in states.values())
         assert states['renderer']['Restart'] == states['spotify']['Restart'] == 'no'
+        # Existing fixture only: selection edits persistent wanted links, never
+        # launches the deliberately non-runnable native/provider placeholders.
+        wanted.mkdir(exist_ok=True)
+        native_startup = wanted / receiver.RENDERER_SERVICE
+        assert not os.path.lexists(native_startup)
+        native_startup.symlink_to(original_startup)
+        owned.command('daemon-reload')
+        for selection in ('spotify', 'off', 'renderer', 'restore', 'spotify'):
+            result = receiver.startup(str(setup), selection)
+            expected = 'renderer' if selection == 'restore' else selection
+            assert result['selected_startup'] == expected and result['services_started'] is False
+            assert receiver.startup(str(setup), 'status')['selected_startup'] == expected
+            assert all(owned.stopped(info) for info in owned.validate().values())
+            if expected != 'off':
+                assert owned.command('show', receiver.UNITS[expected], '--property=UnitFileState').strip() == 'UnitFileState=enabled'
         assert receiver.uninstall(str(setup))['installation'] == 'UNINSTALLED'
+        assert os.readlink(native_startup) == original_startup
+        assert not os.path.lexists(wanted / receiver.SPOTIFY_SERVICE)
         restored = owned.show('renderer')
         assert restored['DropInPaths'] == '' and restored['Restart'] == 'on-failure'
         assert owned.stopped(restored)
         assert owned.show('spotify')['LoadState'] == 'not-found'
         assert (setup / 'sidecar/config.yml').exists()
         assert native_link.is_symlink() and native_link.resolve() == native
-        print('PASS: production setup/install/effective-unit/uninstall against real manager; no service activation', flush=True)
+        print('PASS: production install/startup selection/exact native restore/uninstall; no service activation', flush=True)
     finally:
         receiver._check_mpv, receiver.verify_client = old_mpv, old_client
         # All target names were proved absent before this isolated fixture.
@@ -197,7 +216,9 @@ def production_install_acceptance(root):
         targets = {units / receiver.SPOTIFY_SERVICE: setup / receiver.SPOTIFY_SERVICE,
                    units / (receiver.RENDERER_SERVICE + '.d') / receiver.DROPIN:
                        setup / (receiver.RENDERER_SERVICE + '.d') / receiver.DROPIN,
-                   native_link: native}
+                   native_link: native,
+                   wanted / receiver.RENDERER_SERVICE: original_startup,
+                   wanted / receiver.SPOTIFY_SERVICE: setup / receiver.SPOTIFY_SERVICE}
         to_stop = []
         for mode, unit in receiver.UNITS.items():
             info = manager.show(mode)
