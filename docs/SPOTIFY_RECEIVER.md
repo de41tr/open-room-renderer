@@ -29,8 +29,9 @@ framework is introduced.
 The intended target is **Odroid XU4 / Armbian / FiiO KA17**. The authorized fixed
 XU4 check on 2026-10-14 observed **Armbian 26.8.3 trixie, armv7l/32-bit and
 Python 3.13.5**, testing main `983dddae` CLI/help and two fixed cases. It did not
-test this receiver candidate or startup selection. Native mpv, the actual ALSA
-identifier/KA17 and provider acceptance remain unverified. Run
+test this receiver candidate or startup selection. The fixed check observed
+**mpv 0.40.0**; the actual ALSA identifier/KA17 and receiver/provider acceptance
+remain unverified. Run
 `uname -m`, `getconf LONG_BIT`, `dpkg --print-architecture`, `mpv --version` and
 `aplay -l` on the target before selecting the artifact/output. Do not infer the
 card ID from the product name. The KA17's USB data port is distinct from its
@@ -105,8 +106,43 @@ foreground/custom-service launch paths first. Retain your existing config/state.
      --renderer-config "$HOME/.local/share/open-room-renderer/config.yaml" \
      --renderer-unit "$HOME/.local/share/open-room-renderer/open-room-renderer.service" \
      --client-dir "$HOME/.local/share/orr-spotify-client-v0.10.3" \
+     --name "Studio Spotify" \
      --port 3678
    ```
+
+   `--name` chooses this receiver's Spotify Connect device label before first
+   setup. Omit it to retain `Open Room Renderer Spotify`. The chosen text is
+   saved in private `receiver.json` and checked against the sidecar config before
+   Spotify starts. Older profiles without this field keep the same default;
+   loading them does not rewrite any files. Native room renames do not change
+   this label. Changing an existing installation's label requires an explicit
+   fresh setup in a new directory; setup never overwrites an existing directory.
+
+   ORR accepts 1–128 printable Unicode characters without surrounding whitespace,
+   preserving the text exactly. This is ORR's local bound, not a claimed Spotify
+   limit. The pinned upstream [schema](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/config_schema.json)
+   defines `device_name` as a string; its [loader](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/cmd/daemon/cli_config.go)
+   passes the name into the daemon configuration. Neither declares a name-length
+   bound. This setup option does not alter device IDs, accounts or the offline
+   `prepare-exclusive` configuration. Actual provider/app display is unverified.
+
+   Optionally add `--bitrate 320` to this fresh setup command to request a
+   preferred bitrate of 320 kbps; `96` and `160` are also accepted. This is a
+   preference, not a guarantee of delivered bitrate, codec or sound quality,
+   and does not enable lossless playback. Omission leaves the sidecar config
+   byte-for-byte unchanged and retains the pinned upstream's 160 kbps preference,
+   including for older profiles. No existing installation is changed.
+
+   The chosen integer is saved as `preferred_bitrate` in private `receiver.json`
+   and mapped to the sidecar's top-level `bitrate`. The pinned upstream
+   [schema](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/config_schema.json)
+   specifies integer choices 96/160/320 and default 160; its
+   [loader](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/cmd/daemon/cli_config.go)
+   loads a Go `int`, defaults to 160 and passes it to `daemon.Config.Bitrate`.
+   Starts and current playback controls require the sidecar to match the saved
+   preference exactly. Changing it requires an explicit fresh setup in a new
+   directory; there is no runtime quality command. Account/provider and XU4 +
+   KA17 playback acceptance remain unverified.
 
 4. Review the generated unit/drop-in/config and stop the existing native user
    renderer. Then explicitly install the two exact service links:
@@ -286,30 +322,50 @@ with a 22-character ASCII base62 ID. URLs, user/collection/local-content URIs,
 episodes, extra parameters and whitespace are refused. Syntax validation does
 not establish that content exists or is playable by the paired account.
 
+To choose new content while this receiver is playing or paused, explicitly opt
+in for that one request:
+
+```sh
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" play --replace-current "$SPOTIFY_URI"
+```
+
+Without this flag, playing and paused sessions are refused before the POST.
+With it, stopped sessions remain eligible too, but buffering is always refused.
+This requests **playing the new content even if the previous content was
+paused**; it does not preserve pause or promise a seamless transition. Check
+Spotify's current volume before replacing content.
+
 `play` uses the same owned connection and invocation/cgroup fences. It first
 requires `GET /` to report boolean `playback_ready: true`, then `/status` to
-report a present, stopped, non-buffering session and the pinned volume scale.
+report a present, non-buffering session and the pinned volume scale, plus stopped
+state unless `--replace-current` was supplied.
 It sends exactly one `POST /player/play` with only `uri`, followed by one
 sanitized status snapshot. The [pinned request/readiness schema](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/api-spec.yml)
 and [play handler](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/player.go#L705-L774)
 support this contract: context resolution precedes device takeover; subsequent
-loading is asynchronous and can still fail after HTTP 200.
+loading is asynchronous and can still fail after HTTP 200. The omitted `paused`
+field defaults to false. `--replace-current` changes only ORR's local admission
+check, not the upstream payload.
 
 This can take Spotify playback over from another device and start sound at its
 current Spotify volume. Check that volume first. Playing a URI chooses a new
-Spotify context; upstream may retain queued tracks. This request sends no
-volume, shuffle or repeat changes, but upstream context restrictions can alter
-options. Another Spotify controller can race the stopped-state snapshot; the
-API has no atomic stopped-only condition.
+Spotify context. The [pinned context loader](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/controls.go#L297-L377)
+retains upcoming queued tracks; this is not an instruction to clear Spotify's
+queue. The current stream can continue while the new context resolves. This
+request sends no volume, shuffle or repeat changes; existing options carry over
+unless upstream context restrictions change them. Another Spotify controller
+can race the state snapshot; the API has no atomic stopped-only, non-buffering
+or current-track condition.
 `ACKNOWLEDGED` is not playback, requested-item identity or audio confirmation.
 The command never retries, authenticates, starts a service or contacts ORR's
 queue. Its deadline does not cancel upstream work; inspect status before retrying
 an uncertain result. Account, hardware and provider-policy gates remain pending,
 and Spotify still bypasses ORR EQ/balance.
 
-Only the requested content type is returned, never its ID or URI. ORR does not
-save the selector; shell history/process arguments and the sidecar/provider
-may retain it. No content metadata is printed by `play`.
+Only the requested content type and `replace_current` opt-in boolean describe
+the request in the result, never its ID or URI. ORR does not save the selector;
+shell history/process arguments and the sidecar/provider may retain it. No
+content metadata is printed by `play`.
 
 To explicitly inspect the current track while the renderer UI is stopped:
 
@@ -357,11 +413,41 @@ is **no ORR/systemd automatic restart loop** (`Restart=no`). For a normal explic
 restart, switch to the same mode again. Account renewal, outages and long-term
 unattended operation still need real acceptance.
 
+### Inspect a startup failure
+
+```sh
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" last-start-error
+```
+
+This read-only command needs only the private receiver directory, not healthy
+client/config files or a working service manager. It reads the existing private
+`last-guard-error.json` and displays an allowlisted category plus a fixed hint:
+`EXEC_FAILED` means the OS could not execute the native target; inspect its
+installation, execute permissions and native loader/dependencies.
+`GUARD_REJECTED` means the managed startup checks refused admission; inspect
+private setup, exact owned service units and exclusive output. `STARTUP_FAILED`
+covers other handled local startup errors. Use `status` for current services and
+the off-only `recover` above before a separate, explicit retry.
+
+The response is always marked `HISTORICAL_NOT_CURRENT`. A successful later start,
+return, stop or recovery does not clear this last **recorded** failure. A later
+failure might also leave it unchanged if writing fails. A missing record is null,
+not evidence of successful startup. Errors after the native exec, or before the
+Python guard starts, are outside this record; inspect service state too. Invalid,
+oversized, legacy free-text or unsafe-file records fail closed without displaying
+their contents. Reads never repair records, start services or contact a provider.
+
 ### After editing the native renderer YAML
 
 Receiver setup fingerprints the native YAML, so even a comment or port change
-requires explicit admission before the next start. For edits that keep the same
-native prefix, config/unit paths and direct ALSA output:
+requires explicit admission before the next start. Current Spotify controls,
+including `volume 0`, pause and now-playing, remain available for an already
+owned active Spotify process even if the native YAML changes or mpv becomes
+unavailable.
+They still require the pinned client, unchanged private sidecar configuration
+and exact loaded owned units, plus exclusive service and API connection ownership.
+They do not refresh the renderer or admit another source start. For edits that
+keep the same native prefix, config/unit paths and direct ALSA output:
 
 ```sh
 "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" switch off
@@ -418,8 +504,10 @@ managed services use umask 0077. Upstream state and credentials stay under the
 separate `sidecar/`, outside ORR exports. The API binds numeric loopback and has
 empty CORS, which does not authenticate local processes. Do not proxy it to the
 LAN. Unbounded upstream logs/pairing output are discarded instead of entering a
-shared journal. A fixed-message `last-guard-error.json` and systemd state expose
-local startup failures without raw provider content.
+shared journal. The fixed-category `last-guard-error.json` read channel above and
+separate systemd state expose local startup failures without raw exception text,
+paths or provider content. Writing the historical record is best effort and never
+authorizes a start or prevents return/off recovery.
 
 ```sh
 "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" uninstall

@@ -13,6 +13,7 @@ import pytest
 from aiohttp import web
 
 from fake_linkplay import cli, spotify_client as client, spotify_receiver as receiver
+from fake_linkplay import spotify_exclusive as exclusive
 from fake_linkplay.spotify_exclusive import ExclusiveProfileError
 from test_spotify_exclusive import profile  # existing canonical native fixture
 from test_spotify_diagnostic import peer, STATUS, SECRET
@@ -80,6 +81,155 @@ def test_setup_private_and_independent_renderer_return(ready, monkeypatch):
     receiver.load_profile(ready)  # stop/status never need intact Spotify state
     with pytest.raises(ExclusiveProfileError, match='Broken Spotify'):
         receiver.load_profile(ready, start='spotify')
+
+
+def test_setup_name_round_trips_without_changing_other_sidecar_settings(ready, profile):
+    name = 'Studio: "北" 100%'
+    root = ready.parent / 'named'
+    args = cli.build_parser().parse_args([
+        'spotify', 'receiver', '--directory', str(root), 'setup', '--name', name,
+        '--renderer-prefix', profile['renderer_prefix'], '--renderer-config', profile['renderer_config'],
+        '--renderer-unit', profile['renderer_unit'], '--client-dir', str(ready.parent / 'client'),
+        '--port', '3678'])
+    receiver.setup(args)
+    _, saved = receiver.load_profile(root, start='spotify')
+    assert saved['device_name'] == name
+    sidecar = receiver._json(root / 'sidecar/config.yml')
+    expected = receiver._json(ready / 'sidecar/config.yml')
+    expected['device_name'] = name
+    expected['cache']['dir'] = str(root / 'sidecar/cache')
+    assert sidecar == expected  # No device ID, account or unrelated option changes.
+    before = {p: p.read_bytes() for p in root.rglob('*') if p.is_file()}
+    args.name = 'A different receiver'
+    with pytest.raises(FileExistsError):
+        receiver.setup(args)
+    assert all(p.read_bytes() == data for p, data in before.items())
+    sidecar['device_name'] = args.name
+    receiver._write(root / 'sidecar/config.yml', sidecar)
+    with pytest.raises(ExclusiveProfileError, match='sidecar configuration changed'):
+        receiver.load_profile(root, start='spotify')
+
+
+def test_setup_name_default_legacy_profile_and_offline_config_bytes(ready, profile):
+    saved = receiver._json(ready / 'receiver.json')
+    assert 'preferred_bitrate' not in saved
+    assert 'bitrate' not in receiver._json(ready / 'sidecar/config.yml')
+    assert saved.pop('device_name') == 'Open Room Renderer Spotify'
+    # Recreate pre-name metadata; loading it must not migrate or rewrite it.
+    receiver._write(ready / 'receiver.json', saved)
+    before = {p: p.read_bytes() for p in ready.rglob('*') if p.is_file()}
+    receiver.load_profile(ready, start='spotify')
+    assert all(p.read_bytes() == data for p, data in before.items())
+    normalized = before[ready / 'sidecar/config.yml'].replace(str(ready).encode(), b'/synthetic/receiver')
+    # Exact config bytes from the pre-name implementation at 1730713f, with only
+    # the fixture's variable output directory replaced by /synthetic/receiver.
+    assert hashlib.sha256(normalized).hexdigest() == 'ce6742081c485bc82ae19072b5e0ea17115326bc0a6fffa64be095c62b8b8bf1'
+    output = ready.parent / 'offline'
+    exclusive.prepare_exclusive(**(profile | {'output_dir': str(output)}))
+    normalized = (output / 'sidecar/config.yml').read_bytes().replace(str(output).encode(), b'/synthetic/receiver')
+    assert hashlib.sha256(normalized).hexdigest() == '9b26902c934028c6b94ea9c266d8652d82174e633be2ea56b54a5aa195b9bb54'
+
+
+def test_setup_bitrate_preferences_map_exactly_for_start_and_current_controls(ready, profile, services, monkeypatch):
+    from fake_linkplay import spotify_playback as playback
+    calls = []
+    monkeypatch.setattr(playback, 'control', lambda *args: calls.append(args[:5]) or {'command': args[3]})
+    for bitrate in (96, 160, 320):
+        root = ready.parent / f'b{bitrate}'
+        args = cli.build_parser().parse_args([
+            'spotify', 'receiver', '--directory', str(root), 'setup', '--bitrate', str(bitrate),
+            '--renderer-prefix', profile['renderer_prefix'], '--renderer-config', profile['renderer_config'],
+            '--renderer-unit', profile['renderer_unit'], '--client-dir', str(ready.parent / 'client'),
+            '--port', '3678'])
+        receiver.setup(args)
+        _, saved = receiver.load_profile(root, start='spotify')
+        assert type(saved['preferred_bitrate']) is int and saved['preferred_bitrate'] == bitrate
+        actual = receiver._json(root / 'sidecar/config.yml')
+        expected = receiver._json(ready / 'sidecar/config.yml') | {'bitrate': bitrate}
+        expected['cache']['dir'] = str(root / 'sidecar/cache')
+        assert actual == expected and type(actual['bitrate']) is int
+        assert all(p.stat().st_mode & 0o777 == 0o600 for p in (root / 'receiver.json', root / 'sidecar/config.yml'))
+        before = {p: p.read_bytes() for p in root.rglob('*') if p.is_file()}
+        services.calls = [('started', 'spotify')]
+        assert receiver.playback_control(str(root), 'pause')['command'] == 'pause'
+        assert all(p.read_bytes() == data for p, data in before.items())
+        args.bitrate = 96 if bitrate == 320 else 320
+        with pytest.raises(FileExistsError):
+            receiver.setup(args)
+        assert all(p.read_bytes() == data for p, data in before.items())
+    assert calls == [('127.0.0.1', 3678, '42', 'pause', None)] * 3
+
+
+def test_setup_bitrate_rejects_invalid_values_privately_without_blocking_return(ready, monkeypatch, capsys):
+    for value in ('128', '320.0', SECRET, 'lossless'):
+        with pytest.raises(SystemExit) as exc:
+            cli.main(['spotify', 'receiver', '--directory', str(ready.parent / 'invalid'),
+                      'setup', '--bitrate', value])
+        assert exc.value.code == 2
+        output = capsys.readouterr()
+        assert not output.out and value not in output.err
+    saved = receiver._json(ready / 'receiver.json')
+    monkeypatch.setattr(receiver, 'UserServices', lambda *_args: pytest.fail('invalid preference reached services'))
+    for value in (True, 320.0, '320', 128, [], {}):
+        root = ready.parent / 'invalid'
+        args = argparse.Namespace(spotify_cmd='receiver', receiver_cmd='setup', directory=str(root), bitrate=value)
+        assert receiver.run_receiver(args) == 1
+        output = capsys.readouterr()
+        assert output.out == '' and output.err == 'Receiver: Use a preferred Spotify bitrate of 96, 160 or 320 kbps.\n'
+        assert not root.exists()
+    for value in (None, True, 320.0, '320', 128, [], {}):
+        receiver._write(ready / 'receiver.json', saved | {'preferred_bitrate': value})
+        with pytest.raises(ExclusiveProfileError, match='preferred Spotify bitrate'):
+            receiver.load_profile(ready, start='spotify')
+        with pytest.raises(ExclusiveProfileError, match='preferred Spotify bitrate'):
+            receiver.playback_control(str(ready), 'pause')
+        receiver.load_profile(ready)  # Stop/off remains independent of Spotify preferences.
+        receiver.load_profile(ready, start='renderer')
+
+
+def test_bitrate_sidecar_must_match_stored_integer_preference_for_start_and_controls(ready, monkeypatch):
+    saved = receiver._json(ready / 'receiver.json')
+    original = receiver._json(ready / 'sidecar/config.yml')
+    receiver._write(ready / 'receiver.json', saved | {'preferred_bitrate': 320})
+    receiver._write(ready / 'sidecar/config.yml', original | {'bitrate': 320})
+    receiver.load_profile(ready, start='spotify')
+    monkeypatch.setattr(receiver, 'UserServices', lambda *_args: pytest.fail('altered sidecar reached services'))
+    altered = [original, *(original | {'bitrate': v} for v in (160, 320.0, '320', None, True)),
+               original | {'bitrate': 320, 'flac_enabled': True}]
+    for actual in altered:
+        receiver._write(ready / 'sidecar/config.yml', actual)
+        with pytest.raises(ExclusiveProfileError, match='sidecar configuration changed'):
+            receiver.load_profile(ready, start='spotify')
+        with pytest.raises(ExclusiveProfileError, match='sidecar configuration changed'):
+            receiver.playback_control(str(ready), 'pause')
+    # Legacy omission is exact too: even explicitly adding 160 needs a stored preference.
+    receiver._write(ready / 'receiver.json', saved)
+    receiver._write(ready / 'sidecar/config.yml', original | {'bitrate': 160})
+    with pytest.raises(ExclusiveProfileError, match='sidecar configuration changed'):
+        receiver.load_profile(ready, start='spotify')
+
+
+def test_setup_name_rejects_invalid_input_privately_before_writes(ready, capsys):
+    invalid = ('', ' edge', 'edge ', 'private-name\nline', 'private-name\x00',
+               'private-name\u202e', '\ud800', 'x' * 129, None, 42)
+    for name in invalid:
+        root = ready.parent / 'invalid-name'
+        args = argparse.Namespace(spotify_cmd='receiver', receiver_cmd='setup', directory=str(root), name=name)
+        assert receiver.run_receiver(args) == 1
+        out = capsys.readouterr()
+        assert out.out == ''
+        assert out.err == ('Receiver: Use a printable Spotify device name of 1 to 128 characters '
+                           'without surrounding whitespace.\n')
+        assert not root.exists()
+    # The same validation protects a stored name before start, but not stop.
+    saved = receiver._json(ready / 'receiver.json')
+    saved['device_name'] = invalid[3]
+    receiver._write(ready / 'receiver.json', saved)
+    with pytest.raises(ExclusiveProfileError, match='printable Spotify device name'):
+        receiver.load_profile(ready, start='spotify')
+    receiver.load_profile(ready)
+    receiver.load_profile(ready, start='renderer')
+    assert receiver._device_name('北' * 128) == '北' * 128
 
 
 def test_switch_confirms_whole_stop_and_probe_before_one_start(ready, services):
@@ -727,3 +877,88 @@ def test_startup_cli_dispatch_is_explicit(ready, monkeypatch):
     monkeypatch.setattr(receiver, 'startup', lambda directory, selection: called.append((directory, selection)) or {})
     assert cli.main(['spotify', 'receiver', '--directory', str(ready), 'startup', 'restore']) == 0
     assert called == [(str(ready), 'restore')]
+
+
+def test_guard_exec_failure_has_private_historical_cli_channel(ready, services, monkeypatch, capsys):
+    states = {mode: stopped() for mode in receiver.UNITS}
+    group = f'/user.slice/user-{os.geteuid()}.slice/user@{os.geteuid()}.service/app.slice/{receiver.SPOTIFY_SERVICE}'
+    states['spotify'].update(ActiveState='active', SubState='running', MainPID=str(os.getpid()), ControlGroup=group)
+    monkeypatch.setattr(services, 'validate', lambda _self: states)
+    original = Path.read_text
+    monkeypatch.setattr(Path, 'read_text', lambda path, *args, **kwargs:
+                        '0::' + group if str(path) == '/proc/self/cgroup' else original(path, *args, **kwargs))
+    monkeypatch.setattr(receiver.os, 'umask', lambda _mask: None)
+    attempts = []
+    def fail_exec(*args):
+        attempts.append(args)
+        raise OSError(SECRET)
+    monkeypatch.setattr(receiver.os, 'execv', fail_exec)
+    command = ['spotify', 'receiver', '--directory', str(ready)]
+    assert cli.main(command + ['run', 'spotify']) == 1
+    output = capsys.readouterr()
+    assert SECRET not in output.out + output.err
+    assert len(attempts) == 1
+    record = ready / 'last-guard-error.json'
+    assert record.exists(), 'generic exec failure currently leaves no startup error record'
+    assert record.stat().st_mode & 0o777 == 0o600
+    assert receiver._json(record) == {'mode': 'spotify', 'category': 'EXEC_FAILED'}
+    assert cli.main(command + ['last-start-error']) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result == {'record_scope': 'HISTORICAL_NOT_CURRENT', 'last_start_error':
+                      receiver._json(record) | {'hint': receiver.START_FAILURE_HINTS['EXEC_FAILED']}}
+
+
+@pytest.mark.parametrize('error,category', [(ExclusiveProfileError, 'GUARD_REJECTED'), (ValueError, 'STARTUP_FAILED')])
+def test_guard_failure_record_and_output_never_echo_exception(ready, monkeypatch, capsys, error, category):
+    monkeypatch.setattr(receiver, 'run_guard', lambda *_args: (_ for _ in ()).throw(error(SECRET)))
+    assert cli.main(['spotify', 'receiver', '--directory', str(ready), 'run', 'renderer']) == 1
+    record = (ready / 'last-guard-error.json').read_text()
+    output = capsys.readouterr()
+    assert SECRET not in output.out + output.err + record
+    assert json.loads(record) == {'mode': 'renderer', 'category': category}
+
+
+def test_start_failure_read_is_independent_historical_and_best_effort(ready, services, monkeypatch, capsys):
+    command = ['spotify', 'receiver', '--directory', str(ready), 'last-start-error']
+    assert cli.main(command) == 0
+    assert json.loads(capsys.readouterr().out) == {'record_scope': 'HISTORICAL_NOT_CURRENT', 'last_start_error': None}
+    record = {'mode': 'spotify', 'category': 'EXEC_FAILED'}
+    receiver._write(ready / 'last-guard-error.json', record)
+    with monkeypatch.context() as patch:
+        patch.setattr(receiver, 'run_guard', lambda *_args: (_ for _ in ()).throw(ValueError(SECRET)))
+        patch.setattr(receiver, '_write', lambda *_args: (_ for _ in ()).throw(OSError(SECRET)))
+        assert cli.main(['spotify', 'receiver', '--directory', str(ready), 'run', 'renderer']) == 1
+    # A later failure whose write failed, and successful return/off, do not make
+    # the historical record current or introduce any dependency on its contents.
+    assert receiver._json(ready / 'last-guard-error.json') == record
+    (ready / 'sidecar/config.yml').unlink()
+    receiver.switch(str(ready), 'renderer')
+    receiver.switch(str(ready), 'off')
+    monkeypatch.setattr(receiver, 'load_profile', lambda *_args, **_kwargs: pytest.fail('read depends on profile health'))
+    assert cli.main(command) == 0
+    captured = capsys.readouterr()
+    assert SECRET not in captured.out + captured.err
+    result = json.loads(captured.out)
+    assert result['record_scope'] == 'HISTORICAL_NOT_CURRENT'
+    assert result['last_start_error']['category'] == 'EXEC_FAILED'
+    assert services.calls == [('stop_confirmed',), ('probe',), ('start', receiver.RENDERER_SERVICE),
+                              ('started', 'renderer'), ('stop_confirmed',)]
+
+
+@pytest.mark.parametrize('data', [
+    '{',
+    json.dumps({'mode': 'spotify', 'category': SECRET}),
+    json.dumps({'mode': 'spotify', 'category': 'EXEC_FAILED', 'error': SECRET}),
+    '{"mode":"spotify","category":"EXEC_FAILED","category":"EXEC_FAILED"}',
+    json.dumps([['mode', 'spotify'], ['category', 'EXEC_FAILED']]),
+    json.dumps({'mode': ['spotify'], 'category': 'EXEC_FAILED'}),
+    ' ' * 257 + '{}',
+])
+def test_start_failure_read_rejects_malformed_or_untrusted_records(ready, monkeypatch, capsys, data):
+    path = ready / 'last-guard-error.json'
+    path.write_text(data)
+    monkeypatch.setattr(receiver, 'UserServices', lambda *_args: pytest.fail('error read contacted service manager'))
+    assert cli.main(['spotify', 'receiver', '--directory', str(ready), 'last-start-error']) == 1
+    output = capsys.readouterr()
+    assert not output.out and SECRET not in output.err and str(ready) not in output.err
+    assert path.read_text() == data

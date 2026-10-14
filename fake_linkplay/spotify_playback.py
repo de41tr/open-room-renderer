@@ -2,7 +2,8 @@
 
 Only the receiver calls this after validating its pinned configuration and
 service invocation. No authentication, redirects or reconnects. Explicit play
-can activate an already paired, playback-ready stopped session.
+can activate an already paired, playback-ready session; replacing playing or
+paused content requires a separate explicit opt-in.
 """
 from __future__ import annotations
 
@@ -180,7 +181,9 @@ def now_playing(host: str, port: int, pid: str, validate_invocation: Callable[[]
 
 
 def control(host: str, port: int, pid: str, action: str, value: int | bool | str | None,
-            validate_invocation: Callable[[], None]) -> dict:
+            validate_invocation: Callable[[], None], *, replace_current: bool = False) -> dict:
+    if type(replace_current) is not bool or (replace_current and action != "play"):
+        _fail("Spotify replace-current is a boolean opt-in for play only.")
     option = {"repeat-context": "repeat_context", "repeat-track": "repeat_track",
               "shuffle": "shuffle_context"}.get(action)
     if action not in {"play", "pause", "resume", "next", "previous", "volume", "seek"} and option is None:
@@ -205,6 +208,7 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | str
               "playback_effect": "UNVERIFIED"}
     if action == "play":
         result["requested_content_type"] = value.split(":")[1]
+        result["replace_current"] = replace_current
     elif action == "volume":
         result["requested_volume"] = value
     elif action == "seek":
@@ -226,8 +230,10 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | str
             if before["volume_steps"] != 100 or before["volume"] > 100:
                 _fail("Spotify volume does not match the pinned receiver configuration; no control was sent.")
             if action == "play":
-                if not before["stopped"] or before["buffering"]:
-                    _fail("Spotify must report a stopped, non-buffering session; no play request was sent.")
+                if before["buffering"]:
+                    _fail("Spotify must report a non-buffering session; no play request was sent.")
+                if not before["stopped"] and not replace_current:
+                    _fail("Spotify must report a stopped session; use play --replace-current to replace playing or paused content.")
             elif action != "volume" and before["stopped"]:
                 _fail("Spotify reports no active playback; no control was sent.")
             if action == "seek":

@@ -26,10 +26,11 @@ import time
 
 from yaml import YAMLError
 
+from .device_name import validate_device_name
 from .native_profile import systemd_quote, user_unit
 from .spotify_client import fail, install_client, verify_client
 from .spotify_diagnostic import SpotifyDiagnosticClient, SpotifyDiagnosticError
-from .spotify_exclusive import (ExclusiveProfileError, RENDERER_SERVICE,
+from .spotify_exclusive import (DEFAULT_DEVICE_NAME, ExclusiveProfileError, RENDERER_SERVICE,
                                 SPOTIFY_SERVICE, _directory, _path,
                                 _private_directory, _read, _renderer,
                                 _spotify_config)
@@ -41,6 +42,42 @@ PROPERTIES = ("Id", "LoadState", "ActiveState", "SubState", "MainPID", "ControlP
               "NeedDaemonReload", "KillMode", "SendSIGKILL", "Restart", "TimeoutStopUSec")
 STOP_TIMEOUT = 55
 GATES = ["ACCOUNT_PENDING", "HARDWARE_PENDING", "PROVIDER_POLICY_PENDING"]
+START_FAILURE_HINTS = {
+    "EXEC_FAILED": "Check the native executable, execute permissions and native loader/dependencies before explicitly retrying.",
+    "GUARD_REJECTED": "Check private setup, exact owned service units and exclusive output; use off-only recover before explicitly retrying.",
+    "STARTUP_FAILED": "Inspect private setup and service status; use off-only recover before explicitly retrying.",
+}
+
+
+class _ExecFailed(OSError):
+    """The native executable did not replace the guard."""
+
+
+def _device_name(value: object) -> str:
+    # ORR's bounded display-name policy, not an upstream/provider length limit.
+    # Preserve the chosen Unicode text exactly; never inherit the room name.
+    if type(value) is not str or not value.isprintable() or value != value.strip():
+        fail("Use a printable Spotify device name of 1 to 128 characters without surrounding whitespace.")
+    try:
+        return validate_device_name(value)
+    except ValueError:
+        fail("Use a printable Spotify device name of 1 to 128 characters without surrounding whitespace.")
+
+
+def _preferred_bitrate(value: object) -> int:
+    if type(value) is not int or value not in (96, 160, 320):
+        fail("Use a preferred Spotify bitrate of 96, 160 or 320 kbps.")
+    return value
+
+
+def _sidecar_config(root: Path, profile: dict) -> dict:
+    name = _device_name(profile.get("device_name", DEFAULT_DEVICE_NAME))
+    config = _spotify_config(profile["renderer"]["audio_device"], profile["host"], profile["port"], root,
+                             device_name=name)
+    # Absence preserves legacy bytes and the pinned upstream's 160 preference.
+    if "preferred_bitrate" in profile:
+        config["bitrate"] = _preferred_bitrate(profile["preferred_bitrate"])
+    return config
 
 
 def _json(path: Path) -> dict:
@@ -137,6 +174,19 @@ def _check_mpv() -> None:
         fail("Receiver mode requires the distribution-owned /usr/bin/mpv executable.")
 
 
+def _check_spotify(root: Path, profile: dict) -> None:
+    """Validate the pinned client and unchanged private sidecar, not a start."""
+    _, receipt = verify_client(profile["client_dir"])
+    if receipt["binary_sha256"] != profile["client_sha256"]:
+        fail("The pinned client changed; reconfigure while both services are stopped.")
+    expected = _sidecar_config(root, profile)
+    actual = _json(root / "sidecar/config.yml")
+    if (actual != expected or ("bitrate" in actual and type(actual["bitrate"]) is not int)
+            or (root / "sidecar/config.yaml").exists()):
+        fail("The owned sidecar configuration changed or is shadowed by config.yaml.")
+    _private_directory(root / "sidecar")
+
+
 def load_profile(directory: str | Path, *, start: str | None = None) -> tuple[Path, dict]:
     root = _path(directory)
     _private_directory(root)
@@ -159,13 +209,7 @@ def load_profile(directory: str | Path, *, start: str | None = None) -> tuple[Pa
                  "open-room-renderer spotify receiver --directory DIR refresh-renderer "
                  "with DIR set to this receiver setup directory. Changed paths, unit or output require a fresh setup.")
         if start == "spotify":
-            _, receipt = verify_client(profile["client_dir"])
-            if receipt["binary_sha256"] != profile["client_sha256"]:
-                fail("The pinned client changed; reconfigure while both services are stopped.")
-            expected = _spotify_config(actual["audio_device"], profile["host"], profile["port"], root)
-            if _json(root / "sidecar/config.yml") != expected or (root / "sidecar/config.yaml").exists():
-                fail("The owned sidecar configuration changed or is shadowed by config.yaml.")
-            _private_directory(root / "sidecar")
+            _check_spotify(root, profile)
     return root, profile
 
 
@@ -439,7 +483,10 @@ def run_guard(directory: str, mode: str) -> None:
         argv = _target(root, profile, mode)
         os.umask(0o077)
         os.set_inheritable(lock, True)
-        os.execv(argv[0], argv)
+        try:
+            os.execv(argv[0], argv)
+        except OSError:
+            raise _ExecFailed from None
 
 
 def recover(directory: str) -> dict:
@@ -524,6 +571,28 @@ def refresh_renderer(directory: str) -> dict:
                 "service_state": "STOPPED", "services_started": False, "audio_output": "UNVERIFIED"}
 
 
+def last_start_error(directory: str) -> dict:
+    """Read only a fixed-category historical failure, independently of setup health."""
+    root = _path(directory)
+    _private_directory(root)
+    result = {"record_scope": "HISTORICAL_NOT_CURRENT", "last_start_error": None}
+    try:
+        data = _read(root / "last-guard-error.json")
+    except FileNotFoundError:
+        return result
+    if len(data) > 256:
+        fail("The startup failure record is invalid; no record content was displayed.")
+    # Tuple pairs distinguish an object from an array and reject duplicate keys.
+    pairs = json.loads(data, object_pairs_hook=tuple)
+    if type(pairs) is not tuple or len(pairs) != 2:
+        fail("The startup failure record is invalid; no record content was displayed.")
+    record = dict(pairs)
+    if (set(record) != {"mode", "category"} or type(record["mode"]) is not str or record["mode"] not in UNITS
+            or type(record["category"]) is not str or record["category"] not in START_FAILURE_HINTS):
+        fail("The startup failure record is invalid; no record content was displayed.")
+    return result | {"last_start_error": record | {"hint": START_FAILURE_HINTS[record["category"]]}}
+
+
 def status(directory: str, *, playback: bool = False) -> dict:
     root, profile = load_profile(directory)
     services = UserServices(root, profile)
@@ -557,11 +626,18 @@ def status(directory: str, *, playback: bool = False) -> dict:
     return result
 
 
-def playback_control(directory: str, action: str, value: int | bool | str | None = None) -> dict:
+def playback_control(directory: str, action: str, value: int | bool | str | None = None,
+                     *, replace_current: bool = False) -> dict:
     from .spotify_playback import control, now_playing
     from .spotify_pairing import pairing_code
-    root, profile = load_profile(directory, start="spotify")
+    if type(replace_current) is not bool or (replace_current and action != "play"):
+        fail("Spotify replace-current is a boolean opt-in for play only.")
+    root, profile = load_profile(directory)
     with _lock(root, "control.lock"):
+        # Current controls admit no new output owner. Use the stored renderer
+        # route only to verify the unchanged sidecar; every source start still
+        # requires fresh native profile/mpv validation in load_profile(start=).
+        _check_spotify(root, profile)
         services = UserServices(root, profile)
         states = services.validate()
         if states["spotify"]["ActiveState"] != "active" or not services.stopped(states["renderer"]):
@@ -581,7 +657,10 @@ def playback_control(directory: str, action: str, value: int | bool | str | None
                        != "0::" + spotify["ControlGroup"]):
                 fail("The exclusive Spotify service invocation changed during the playback request.")
 
-        if action == "pairing-code":
+        if action == "play":
+            result = control(profile["host"], profile["port"], identity[1], action, value, validate_invocation,
+                             replace_current=replace_current)
+        elif action == "pairing-code":
             result = pairing_code(profile["host"], profile["port"], identity[1], validate_invocation)
         elif action == "now-playing":
             result = now_playing(profile["host"], profile["port"], identity[1], validate_invocation)
@@ -591,6 +670,10 @@ def playback_control(directory: str, action: str, value: int | bool | str | None
 
 
 def setup(args: argparse.Namespace) -> dict:
+    name = _device_name(getattr(args, "name", DEFAULT_DEVICE_NAME))
+    bitrate = getattr(args, "bitrate", None)
+    if bitrate is not None:
+        bitrate = _preferred_bitrate(bitrate)
     root = _path(args.directory)
     prefix, config, unit, client = map(_path, (args.renderer_prefix, args.renderer_config,
                                               args.renderer_unit, args.client_dir))
@@ -608,9 +691,11 @@ def setup(args: argparse.Namespace) -> dict:
     profile = {"format": 1, "directory": str(root), "renderer_prefix": str(prefix),
                "renderer_config": str(config), "renderer_unit": str(unit), "client_dir": str(client),
                "client_sha256": receipt["binary_sha256"], "host": args.host, "port": args.port,
-               "renderer": renderer, "gates": GATES}
+               "renderer": renderer, "gates": GATES, "device_name": name}
+    if bitrate is not None:
+        profile["preferred_bitrate"] = bitrate
     files = _unit_parts(root, profile)
-    files["sidecar/config.yml"] = json.dumps(_spotify_config(renderer["audio_device"], args.host, args.port, root), indent=2) + "\n"
+    files["sidecar/config.yml"] = json.dumps(_sidecar_config(root, profile), indent=2) + "\n"
     files["receiver.json"] = json.dumps(profile, indent=2) + "\n"
     with _directory(root.parent) as parent:
         os.mkdir(root.name, 0o700, dir_fd=parent)
@@ -956,13 +1041,16 @@ def add_receiver_parser(commands) -> None:
     inspect = actions.add_parser("status", help="show service state without contacting either player")
     inspect.add_argument("--playback", action="store_true",
                          help="also read a sanitized snapshot from the configured Spotify loopback API")
+    actions.add_parser("last-start-error", help="read the last recorded guard failure; historical, not current health")
     for action in ("install", "uninstall", "recover"):
         actions.add_parser(action)
     actions.add_parser("refresh-renderer", help="accept same-route native YAML edits after both owned services are stopped")
     boot = actions.add_parser("startup", help="explicitly select the next user-manager session; no immediate activation")
     boot.add_argument("selection", choices=("status", "renderer", "spotify", "off", "restore"))
-    play = actions.add_parser("play", help="launch a Spotify track, album or playlist URI from an already paired stopped session")
+    play = actions.add_parser("play", help="launch a Spotify track, album or playlist URI; stopped-only unless explicitly replacing")
     play.add_argument("value", metavar="SPOTIFY_URI")
+    play.add_argument("--replace-current", action="store_true",
+                      help="also allow playing or paused content to be replaced and played at the current Spotify volume")
     for action in ("pause", "resume"):
         actions.add_parser(action, help=f"request {action} from the already selected Spotify client")
     actions.add_parser("next", help="request the next track in Spotify's existing context; may resume paused playback")
@@ -985,6 +1073,10 @@ def add_receiver_parser(commands) -> None:
         setup.add_argument("--" + name, required=True)
     setup.add_argument("--port", type=int, required=True)
     setup.add_argument("--host", default="127.0.0.1")
+    setup.add_argument("--name", default=DEFAULT_DEVICE_NAME,
+                       help="Spotify Connect device name for this fresh setup (default: %(default)s)")
+    setup.add_argument("--bitrate", type=int, choices=(96, 160, 320),
+                       help="preferred Spotify bitrate in kbps for this fresh setup; omission keeps upstream's 160 preference")
 
 
 def run_receiver(args: argparse.Namespace) -> int:
@@ -997,6 +1089,8 @@ def run_receiver(args: argparse.Namespace) -> int:
             result = switch(args.directory, args.mode)
         elif args.receiver_cmd == "status":
             result = status(args.directory, playback=args.playback)
+        elif args.receiver_cmd == "last-start-error":
+            result = last_start_error(args.directory)
         elif args.receiver_cmd == "startup":
             result = startup(args.directory, args.selection)
         elif args.receiver_cmd in {"play", "pause", "resume", "next", "previous", "seek", "volume", "now-playing", "pairing-code",
@@ -1004,7 +1098,11 @@ def run_receiver(args: argparse.Namespace) -> int:
             value = getattr(args, "value", None)
             if args.receiver_cmd in {"repeat-context", "repeat-track", "shuffle"}:
                 value = value == "on"
-            result = playback_control(args.directory, args.receiver_cmd, value)
+            if args.receiver_cmd == "play":
+                result = playback_control(args.directory, args.receiver_cmd, value,
+                                          replace_current=args.replace_current)
+            else:
+                result = playback_control(args.directory, args.receiver_cmd, value)
         elif args.receiver_cmd == "recover":
             result = recover(args.directory)
         elif args.receiver_cmd == "refresh-renderer":
@@ -1021,16 +1119,20 @@ def run_receiver(args: argparse.Namespace) -> int:
         print(json.dumps(result, sort_keys=True))
         return 1 if (result.get("provider_playback", {}).get("observation") == "unavailable" or
                      "error" in result or result.get("request_outcome", "ACKNOWLEDGED") != "ACKNOWLEDGED") else 0
-    except ExclusiveProfileError as exc:
-        if getattr(args, "receiver_cmd", None) == "run":
+    except (OSError, ValueError, TypeError, KeyError, UnicodeError, subprocess.SubprocessError) as exc:
+        guard = getattr(args, "receiver_cmd", None) == "run"
+        if guard:
             try:
-                _write(_path(args.directory) / "last-guard-error.json", {"mode": args.mode, "error": str(exc)})
+                root = _path(args.directory)
+                _private_directory(root)
+                _write(root / "last-guard-error.json", {"mode": args.mode,
+                    "category": "EXEC_FAILED" if isinstance(exc, _ExecFailed) else
+                    "GUARD_REJECTED" if isinstance(exc, ExclusiveProfileError) else "STARTUP_FAILED"})
             except (OSError, ExclusiveProfileError):
                 pass
-        print("Receiver: " + str(exc), file=sys.stderr)
-        return 1
-    except (OSError, ValueError, TypeError, KeyError, UnicodeError, subprocess.SubprocessError):
-        print("Receiver operation failed; inspect private setup and service state. No playback success is claimed.", file=sys.stderr)
+        message = ("Receiver: " + str(exc) if isinstance(exc, ExclusiveProfileError) and not guard else
+                   "Receiver operation failed; inspect private setup and service state. No playback success is claimed.")
+        print(message, file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         print("Receiver interrupted; inspect service and playback status before retrying.", file=sys.stderr)

@@ -28,6 +28,7 @@ UPSTREAM_COMMIT = "4dbc099f46da3529adaa85feb97c4f49deb0b130"
 UPSTREAM = "https://github.com/devgianlu/go-librespot/blob/" + UPSTREAM_COMMIT
 RENDERER_SERVICE = "open-room-renderer.service"
 SPOTIFY_SERVICE = "open-room-renderer-spotify.service"
+DEFAULT_DEVICE_NAME = "Open Room Renderer Spotify"
 MAX_INPUT = 262144
 GATES = ["TERMS_PENDING", "ACCOUNT_PENDING", "HARDWARE_PENDING", "ARBITRATION_PENDING"]
 
@@ -185,9 +186,10 @@ def _renderer(prefix: Path, config: Path, unit: Path, port: int) -> dict:
             "unit_sha256": hashlib.sha256(unit_data).hexdigest()}
 
 
-def _spotify_config(route: str, host: str, port: int, output: Path) -> dict:
+def _spotify_config(route: str, host: str, port: int, output: Path,
+                    *, device_name: str = DEFAULT_DEVICE_NAME) -> dict:
     return {
-        "device_name": "Open Room Renderer Spotify", "device_type": "speaker",
+        "device_name": device_name, "device_type": "speaker",
         "audio_backend": "alsa", "audio_device": route, "mixer_device": "",
         "external_volume": False, "volume_steps": 100, "initial_volume": 0,
         "ignore_last_volume": True, "disable_autoplay": True,

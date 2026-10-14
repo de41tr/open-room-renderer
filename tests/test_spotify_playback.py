@@ -15,7 +15,7 @@ from fake_linkplay import cli, spotify_playback as playback, spotify_receiver as
 from fake_linkplay.spotify_exclusive import ExclusiveProfileError
 from test_spotify_diagnostic import STATUS, SECRET
 from test_spotify_exclusive import profile
-from test_spotify_receiver import ready, stopped
+from test_spotify_receiver import ready, refresh_services, stopped
 
 TRACK = {"name": "Synthetic track", "artist_names": ["Synthetic artist", "Another artist"],
          "album_name": "Synthetic album", "duration": 180000, "position": 42500,
@@ -80,6 +80,81 @@ def test_owned_cli_pause_resume_and_absolute_volume(ready, tmp_path, monkeypatch
         assert requests[-2][2] == {"volume": 7, "relative": False}
 
 
+def test_native_yaml_edit_keeps_active_controls_but_blocks_switch_and_guard(ready, tmp_path, monkeypatch):
+    with peer(tmp_path) as (child, port, log):
+        configure_owned_peer(ready, monkeypatch, child, port)
+        saved = receiver._json(ready / "receiver.json")
+        config = Path(saved["renderer_config"])
+        edited = json.loads(config.read_text()) | {"friendly_name": "Edited native room"}
+        config.write_text(json.dumps(edited) + "\n# Same direct output, edited native YAML.\n")
+        # A running Spotify process owns the API; these requests do not start
+        # either source or admit the stopped renderer's new configuration.
+        manager = receiver.UserServices
+        validate = manager.validate
+        def running(self):
+            states = validate(self)
+            states["spotify"]["SubState"] = "running"
+            return states
+        monkeypatch.setattr(manager, "validate", running)
+        monkeypatch.setattr(receiver, "_write", lambda *_args: pytest.fail("control wrote setup metadata"))
+        monkeypatch.setattr(receiver, "probe_alsa", lambda *_args: pytest.fail("control probed output"))
+        muted = receiver.playback_control(str(ready), "volume", 0)
+        assert muted["request_outcome"] == "ACKNOWLEDGED"
+        assert muted["provider_after"]["status"]["volume"] == 0
+        paused = receiver.playback_control(str(ready), "pause")
+        assert paused["request_outcome"] == "ACKNOWLEDGED"
+        assert paused["provider_after"]["status"]["paused"] is True
+        observed = receiver.playback_control(str(ready), "now-playing")
+        assert observed["track"]["title"] == "Synthetic track"
+        assert observed["listener_ownership"] == "owned_connection"
+        assert all(result["audio_output"] == "UNVERIFIED" for result in (muted, paused, observed))
+        assert records(log) == [
+            ["GET", "/status", None], ["POST", "/player/volume", {"volume": 0, "relative": False}],
+            ["GET", "/status", None], ["GET", "/status", None], ["POST", "/player/pause", None],
+            ["GET", "/status", None], ["GET", "/status", None]]
+        for mode in ("spotify", "renderer"):
+            with pytest.raises(ExclusiveProfileError, match="native renderer profile changed"):
+                receiver.switch(str(ready), mode)
+            with pytest.raises(ExclusiveProfileError, match="native renderer profile changed"):
+                receiver.run_guard(str(ready), mode)
+        assert receiver._json(ready / "receiver.json") == saved
+        # An unavailable stopped renderer executable likewise cannot strand
+        # current controls, but remains a blocker for every future start.
+        monkeypatch.setattr(receiver, "_check_mpv", lambda: receiver.fail("Unavailable mpv fixture"))
+        assert receiver.playback_control(str(ready), "now-playing")["track"]["title"] == "Synthetic track"
+        for mode in ("spotify", "renderer"):
+            with pytest.raises(ExclusiveProfileError, match="Unavailable mpv fixture"):
+                receiver.run_guard(str(ready), mode)
+
+
+@pytest.mark.parametrize("damage, message", [
+    ("client", "pinned client changed"), ("sidecar", "sidecar configuration changed"),
+    ("private-directory", "mode 0700"), ("native-unit", "native renderer service has changed"),
+    ("loaded-unit", "exact loaded receiver units")])
+def test_active_controls_require_pinned_sidecar_and_owned_units(
+        ready, refresh_services, monkeypatch, damage, message):
+    states, _busy, _inspected = refresh_services
+    states["spotify"].update(ActiveState="active", SubState="running", MainPID="42")
+    saved = receiver._json(ready / "receiver.json")
+    if damage == "client":
+        receiver._write(ready / "receiver.json", saved | {"client_sha256": "f" * 64})
+    elif damage == "sidecar":
+        config = receiver._json(ready / "sidecar/config.yml")
+        receiver._write(ready / "sidecar/config.yml", config | {"audio_device": "hw:CARD=OTHER,DEV=0"})
+    elif damage == "private-directory":
+        (ready / "sidecar").chmod(0o755)
+    elif damage == "native-unit":
+        unit = Path(saved["renderer_unit"])
+        unit.write_text(unit.read_text() + "\n# Altered native unit.\n")
+    else:
+        states["spotify"]["NeedDaemonReload"] = "yes"
+    monkeypatch.setattr(receiver.UserServices, "wait_started",
+                        lambda *_args: pytest.fail("invalid profile reached process inspection"))
+    monkeypatch.setattr(playback, "_owned_connection", lambda *_args: pytest.fail("invalid profile reached API"))
+    with pytest.raises(ExclusiveProfileError, match=message):
+        receiver.playback_control(str(ready), "volume", 0)
+
+
 def test_play_accepts_three_uri_kinds_without_echo_persistence_or_effect_claim(
         ready, tmp_path, monkeypatch, capsys):
     with peer(tmp_path, "launch_ignore") as (child, port, log):
@@ -93,6 +168,7 @@ def test_play_accepts_three_uri_kinds_without_echo_persistence_or_effect_claim(
             assert not captured.err and all(value not in captured.out for value in (uri, PLAY_ID, SECRET, "Synthetic track"))
             result = json.loads(captured.out)
             assert result["command"] == "play" and result["requested_content_type"] == content_type
+            assert result["replace_current"] is False
             assert result["provider_playback_ready"] is True and result["request_outcome"] == "ACKNOWLEDGED"
             # The peer acknowledges without applying the command. No retry or
             # playback success is inferred, even when readback stays stopped.
@@ -103,6 +179,55 @@ def test_play_accepts_three_uri_kinds_without_echo_persistence_or_effect_claim(
             expected.extend([["GET", "/", None], ["GET", "/status", None],
                              ["POST", "/player/play", {"uri": uri}], ["GET", "/status", None]])
             assert records(log) == expected
+
+
+def test_play_replace_current_is_explicit_for_playing_and_paused(
+        ready, tmp_path, monkeypatch, capsys):
+    with peer(tmp_path) as (child, port, log):
+        configure_owned_peer(ready, monkeypatch, child, port)
+        receiver.playback_control(str(ready), "volume", 7)
+        receiver.playback_control(str(ready), "shuffle", True)
+        monkeypatch.setattr(receiver, "_write", lambda *_args: pytest.fail("play persisted metadata"))
+        monkeypatch.setattr(receiver, "probe_alsa", lambda *_args: pytest.fail("play probed output"))
+        for paused, content_type in ((False, "track"), (True, "album")):
+            if paused:
+                receiver.playback_control(str(ready), "pause")
+            uri = "spotify:" + content_type + ":" + PLAY_ID
+            command = ["spotify", "receiver", "--directory", str(ready), "play"]
+            offset = len(records(log))
+            assert cli.main([*command, uri]) == 1
+            captured = capsys.readouterr()
+            assert not captured.out and "--replace-current" in captured.err
+            assert all(value not in captured.err for value in (uri, PLAY_ID, SECRET))
+            assert records(log)[offset:] == [["GET", "/", None], ["GET", "/status", None]]
+            offset = len(records(log))
+            assert cli.main([*command, "--replace-current", uri]) == 0
+            captured = capsys.readouterr()
+            assert not captured.err and all(value not in captured.out for value in (uri, PLAY_ID, SECRET, "Synthetic track"))
+            result = json.loads(captured.out)
+            assert result["replace_current"] is True and result["requested_content_type"] == content_type
+            assert result["provider_playback_ready"] is True and result["request_outcome"] == "ACKNOWLEDGED"
+            before = result["provider_before"]["status"]
+            assert before["paused"] is paused and before["stopped"] is False
+            assert before["volume"] == 7 and before["shuffle_context"] is True
+            # The inert peer ignores play: acknowledgement cannot prove the
+            # new content started or resumed. No URI/option/volume is inferred.
+            assert result["provider_after"]["status"] == before
+            assert result["playback_effect"] == result["audio_output"] == "UNVERIFIED"
+            assert records(log)[offset:] == [["GET", "/", None], ["GET", "/status", None],
+                ["POST", "/player/play", {"uri": uri}], ["GET", "/status", None]]
+
+
+@pytest.mark.parametrize("behavior, reads", [("not_ready", 1), ("no_session", 2), ("buffering", 2)])
+def test_replace_current_still_requires_ready_nonbuffering_session(
+        ready, tmp_path, monkeypatch, capsys, behavior, reads):
+    with peer(tmp_path, behavior) as (child, port, log):
+        configure_owned_peer(ready, monkeypatch, child, port)
+        assert cli.main(["spotify", "receiver", "--directory", str(ready),
+                         "play", "--replace-current", "spotify:playlist:" + PLAY_ID]) == 1
+        captured = capsys.readouterr()
+        assert not captured.out and captured.err and SECRET not in captured.err and PLAY_ID not in captured.err
+        assert records(log) == [["GET", "/", None], ["GET", "/status", None]][:reads]
 
 
 def test_play_rejects_noncanonical_or_private_selectors_before_connecting(monkeypatch):
@@ -134,9 +259,10 @@ def test_play_requires_ready_stopped_session_and_same_connection(
         assert records(log) == [["GET", "/", None], ["GET", "/status", None]][:reads]
 
 
+@pytest.mark.parametrize("replace_current", [False, True])
 def test_play_rechecks_invocation_after_readiness_and_status(
-        ready, tmp_path, monkeypatch, capsys):
-    with peer(tmp_path, "launch") as (child, port, log):
+        ready, tmp_path, monkeypatch, capsys, replace_current):
+    with peer(tmp_path, "normal" if replace_current else "launch") as (child, port, log):
         configure_owned_peer(ready, monkeypatch, child, port)
         manager = receiver.UserServices
         validate = manager.validate
@@ -148,8 +274,9 @@ def test_play_rechecks_invocation_after_readiness_and_status(
                 states["spotify"]["InvocationID"] = "b" * 32
             return states
         monkeypatch.setattr(manager, "validate", changed)
+        options = ["--replace-current"] if replace_current else []
         assert cli.main(["spotify", "receiver", "--directory", str(ready),
-                         "play", "spotify:track:" + PLAY_ID]) == 1
+                         "play", *options, "spotify:track:" + PLAY_ID]) == 1
         captured = capsys.readouterr()
         assert not captured.out and captured.err and PLAY_ID not in captured.err
         assert records(log) == [["GET", "/", None], ["GET", "/status", None]]
@@ -185,6 +312,12 @@ def test_control_rejects_invalid_values_before_connecting(monkeypatch):
                           ("repeat-context", 1), ("repeat-track", 0), ("shuffle", "on"), ("shuffle", None)):
         with pytest.raises(ExclusiveProfileError):
             playback.control("127.0.0.1", 1, "1", action, value, lambda: None)
+    for action, replace_current in (("play", 1), ("play", "true"), ("play", None), ("pause", True),
+                                    ("now-playing", True), ("pairing-code", True)):
+        with pytest.raises(ExclusiveProfileError, match="boolean opt-in for play only"):
+            playback.control("127.0.0.1", 1, "1", action, None, lambda: None, replace_current=replace_current)
+        with pytest.raises(ExclusiveProfileError, match="boolean opt-in for play only"):
+            receiver.playback_control("/unused", action, replace_current=replace_current)
 
 
 def test_owned_cli_explicit_repeat_and_shuffle_options(ready, tmp_path, monkeypatch, capsys):
