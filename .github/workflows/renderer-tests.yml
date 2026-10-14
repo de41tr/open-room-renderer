@@ -220,6 +220,13 @@ jobs:
             tests/test_libmpv_admitted_load_root.py \
             tests/test_libmpv_station_refresh.py tests/test_libmpv_transport_uncertainty.py
 
+      - name: Exercise experimental PCM through real ALSA null and file output
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 1
+        env:
+          ORR_TEST_PCM_OUTPUT: "1"
+        run: .venv-ci/bin/python -m pytest -q tests/test_experimental_pcm.py -k real_alsa
+
       - name: Run explicit production Unix IPC and lifecycle lane
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         env:
@@ -247,6 +254,9 @@ jobs:
           prefix="$RUNNER_TEMP/orr-native"
           .venv-ci/bin/python scripts/install-native.py --prefix "$prefix"
           "$prefix/venv/bin/python" -I "$prefix/venv/bin/open-room-renderer" dsp show --help
+          # Installed-package consumer, isolated from the checkout/PYTHONPATH.
+          "$prefix/venv/bin/python" -I "$prefix/venv/bin/open-room-renderer" audio pcm-check \
+            --capture "$RUNNER_TEMP/orr-installed-generated.pcm"
           migration_source="$RUNNER_TEMP/orr-migration-source"
           .venv-ci/bin/python scripts/install-native.py --stage-only --prefix "$migration_source"
           "$prefix/venv/bin/python" -I scripts/smoke-migration-profile.py "$migration_source" "$prefix"
@@ -259,11 +269,12 @@ jobs:
           import fake_linkplay
           from fake_linkplay.config import Config, load_config
           from fake_linkplay.cli import build_parser
-          from fake_linkplay import spotify_exclusive
+          from fake_linkplay import spotify_exclusive, experimental_pcm
           from fake_linkplay.upnp_description import description_xml
           prefix = Path(sys.argv[1]).resolve()
           assert Path(fake_linkplay.__file__).resolve().is_relative_to(prefix / "venv")
           assert Path(spotify_exclusive.__file__).resolve().is_relative_to(prefix / "venv")
+          assert Path(experimental_pcm.__file__).resolve().is_relative_to(prefix / "venv")
           offline_args = build_parser().parse_args(["spotify", "prepare-exclusive",
               "--renderer-prefix", str(prefix), "--renderer-config", str(prefix / "config.yaml"),
               "--renderer-unit", str(prefix / "open-room-renderer.service"),

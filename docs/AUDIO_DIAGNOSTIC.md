@@ -107,3 +107,10 @@ reports the active driver. The [`null` output](https://mpv.io/manual/master/#aud
 produces no audio. See also [JSON IPC](https://mpv.io/manual/master/#json-ipc).
 These are property observations, not a hardware measurement or a Spotify
 integration check.
+
+## Separate experimental PCM check
+
+For a finite generated signal through ALSA null/file output, see
+[experimental PCM](EXPERIMENTAL_PCM.md) and `open-room-renderer audio pcm-check`.
+It has its own digital-byte/flush contract and does not inspect or change the
+running renderer. The `audio diagnose` command above remains read-only.

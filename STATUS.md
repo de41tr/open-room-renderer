@@ -1,5 +1,12 @@
 # Next-phase status and handover — 13 October 2026
 
+> **Current notice (14 October 2026):** The dated sections below are historical.
+> [PR #2](https://github.com/de41tr/open-room-renderer/pull/2) is merged; main is
+> `983dddae2570a8fb178227ed0a7768aafdd130b1`. Current work and exact-head check
+> links are in [PR #3](https://github.com/de41tr/open-room-renderer/pull/3),
+> [PR #4](https://github.com/de41tr/open-room-renderer/pull/4) and
+> [PR #5](https://github.com/de41tr/open-room-renderer/pull/5).
+
 ## Verified checkpoint
 
 **Software checkpoint verified; target acceptance remains open.**
