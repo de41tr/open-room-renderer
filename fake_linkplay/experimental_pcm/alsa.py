@@ -23,7 +23,7 @@ class AlsaError(PlayoutError):
 
 
 class AlsaPcmSink:
-    """Interleaved S16_LE; nonblocking PCM writes, explicit reset on failure."""
+    """Interleaved S16_LE/S32_LE; nonblocking writes, explicit reset on failure."""
     def __init__(self, format: PcmFormat, *, capture_fd: int | None = None):
         if not isinstance(format, PcmFormat):
             raise ValueError("PcmFormat required")
@@ -55,7 +55,7 @@ class AlsaPcmSink:
             # Public ALSA enums: playback=0, NONBLOCK=1, RW_INTERLEAVED=3.
             self._check("open", self._lib.snd_pcm_open_lconf(
                 C.byref(self._pcm), b"orr_sink", 0, 1, self._config))
-            pcm_format = self._lib.snd_pcm_format_value(b"S16_LE")
+            pcm_format = self._lib.snd_pcm_format_value(format.sample_format.encode("ascii"))
             self._check("format", pcm_format)
             self._check("parameters", self._lib.snd_pcm_set_params(
                 self._pcm, pcm_format, 3, format.channels, format.rate, 0, 100_000))

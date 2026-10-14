@@ -44,9 +44,12 @@ This is an actual compressed-file consumer of the same PCM boundary. Input must
 be a regular nonsymlink **standard FLAC** file, at most **64 MiB**, with a known nonzero
 STREAMINFO frame count at most **2,880,000** (60 seconds at 48 kHz). Its declared
 sample rate (up to 192 kHz) and channel count (1–8) are preserved; output is raw
-interleaved **S16_LE**. Higher-bit-depth input loses precision in that conversion.
-The JSON report declares source bit depth and output rate, channels, byte count
-and PCM hash.
+interleaved **S16_LE** for sources up to 16 bits, and **S32_LE** for sources above
+16 bits. Integer samples are left-justified in the output container, preserving
+all source bits: a signed 24-bit value becomes that value multiplied by 256 in
+S32_LE (eight zero low bits); a 32-bit value is unchanged. There is no packed
+24-bit or floating-point output. The JSON report declares source bit depth,
+output sample format, rate, channels, byte count and PCM hash.
 Keep the input file unchanged while the command runs.
 
 FFmpeg receives an already-open local descriptor, a pinned FLAC demuxer and a
@@ -76,8 +79,9 @@ sample-clock behavior or native multiroom interoperability.
 `PlayoutObservation`, `SampleAnchor`, and the error types. The only concrete sink
 currently supplied is `AlsaPcmSink`, restricted to null/file-on-null output.
 
-- A frame is one sample per channel. Input is explicitly decoded S16_LE PCM;
-  there is no compressed codec or packet-type inference in this boundary.
+- A frame is one sample per channel. Input is explicitly decoded interleaved
+  S16_LE (the default) or S32_LE PCM; other sample formats are rejected.
+  There is no compressed codec or packet-type inference in this boundary.
   The separate local-file consumer explicitly decodes standard FLAC first.
 - The caller submits one bounded contiguous block tagged with its generation.
   `step()` makes one nonblocking PCM write attempt and advances the cursor only
@@ -114,8 +118,11 @@ is needed; there is no physical/ARMv7 acceptance claim.
 
 The same native gate encodes original generated PCM to real standard FLAC with
 FFmpeg and decodes it through the CLI and ALSA file-on-null, comparing every
-captured byte. It also checks corrupt/truncated input and a declared-frame
-shortfall. Focused process tests cover split-frame pipe reads, excess output,
+captured byte. This covers unchanged 16-bit output and original low-level 24-bit
+samples whose significant low bits would be lost by conversion to 16 bits; the
+S32 capture matches every source sample left-justified by eight bits. Native
+32-bit FLAC media is not separately exercised by this case. The gate also checks
+corrupt/truncated input and a declared-frame shortfall. Focused process tests cover split-frame pipe reads, excess output,
 nonzero exit, deadline and cancellation cleanup. No workflow change is needed.
 
 The implementation uses original generic frame accounting and the public ALSA

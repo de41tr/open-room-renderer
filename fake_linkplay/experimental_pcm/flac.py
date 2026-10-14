@@ -36,13 +36,14 @@ def _streaminfo(fd: int) -> tuple[PcmFormat, int, int]:
             or int.from_bytes(header[5:8], "big") != 34):
         raise ValueError("standard FLAC STREAMINFO required")
     packed = int.from_bytes(header[18:26], "big")
-    format = PcmFormat(rate=packed >> 44, channels=((packed >> 41) & 7) + 1)
     source_bits = ((packed >> 36) & 31) + 1
     frames = packed & ((1 << 36) - 1)
     if source_bits < 4:
         raise ValueError("standard FLAC bit depth required")
     if not 1 <= frames <= MAX_OUTPUT_FRAMES:
         raise ValueError("known bounded FLAC sample count required")
+    format = PcmFormat(rate=packed >> 44, channels=((packed >> 41) & 7) + 1,
+                       sample_format="S32_LE" if source_bits > 16 else "S16_LE")
     return format, frames, source_bits
 
 
@@ -50,13 +51,16 @@ def _decode(fd: int, playout: PcmPlayout, expected_frames: int, deadline: float)
     """Consume one owned child's output with only a bounded frame-aligned block."""
     # Use the distribution executable on PATH, as the mpv backend does. There is
     # no command/argument override. The original filename is never given to it.
+    # FFmpeg left-justifies integer samples: 24-bit source values become
+    # value * 256 in S32_LE, retaining every significant bit without rounding.
+    pcm_type = "s32le" if playout.format.sample_format == "S32_LE" else "s16le"
     command = [
         "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-nostats",
         "-xerror", "-err_detect", "crccheck+explode", "-threads", "1",
         "-f", "flac", "-protocol_whitelist", "pipe", "-i", "pipe:0",
         "-map", "0:a:0", "-vn", "-sn", "-dn", "-map_metadata", "-1",
-        "-threads", "1", "-acodec", "pcm_s16le", "-ar", str(playout.format.rate),
-        "-ac", str(playout.format.channels), "-f", "s16le", "pipe:1",
+        "-threads", "1", "-acodec", f"pcm_{pcm_type}", "-ar", str(playout.format.rate),
+        "-ac", str(playout.format.channels), "-f", pcm_type, "pipe:1",
     ]
     env = dict(os.environ)
     env.pop("FFREPORT", None)  # Do not create ambient FFmpeg diagnostic files.
@@ -121,14 +125,14 @@ def run(flac_path: str, capture_fd: int | None = None) -> dict:
         return {
             "schema": 1, "input": "local_standard_flac",
             "output": "alsa_file_on_null" if capture_fd is not None else "alsa_null",
-            "sample_format": "S16_LE", "sample_rate": format.rate, "channels": format.channels,
+            "sample_format": format.sample_format, "sample_rate": format.rate, "channels": format.channels,
             "source_bits_per_sample": source_bits,
             "written_frames": frames, "decoded_pcm_bytes": frames * format.frame_bytes,
             "decoded_pcm_sha256": digest, "final_observation": asdict(observation),
             "limits": [
                 "standard FLAC file only; no native packet framing or transport proof",
                 "null consumes immediately; no physical output or sample-clock proof",
-                "rate/channels preserved; higher bit depths converted to S16_LE",
+                "rate/channels preserved; integer samples left-justified in S16_LE or S32_LE",
             ],
         }
     finally:

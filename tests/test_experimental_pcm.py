@@ -18,9 +18,8 @@ from fake_linkplay.experimental_pcm.playout import (PcmFormat, PcmPlayout, Playo
 
 class ScriptedSink:
     """Contract test double only. Real output acceptance is in subprocess below."""
-    format = PcmFormat()
-
-    def __init__(self, writes=()):
+    def __init__(self, writes=(), *, format=PcmFormat()):
+        self.format = format
         self.writes = deque(writes)
         self.output = bytearray()
         self.delay = 0
@@ -29,10 +28,10 @@ class ScriptedSink:
         self.reset_error = None
 
     def write(self, data):
-        accepted = self.writes.popleft() if self.writes else len(data) // 4
+        accepted = self.writes.popleft() if self.writes else len(data) // self.format.frame_bytes
         if isinstance(accepted, Exception):
             raise accepted
-        self.output += data[:accepted * 4]
+        self.output += data[:accepted * self.format.frame_bytes]
         return accepted
 
     def avail_delay(self):
@@ -45,6 +44,28 @@ class ScriptedSink:
 
     def close(self):
         self.closed += 1
+
+
+def test_sample_formats_and_s32_frame_accounting():
+    assert (PcmFormat().sample_format, PcmFormat().frame_bytes) == ("S16_LE", 4)
+    for unsupported in ("S24_LE", "FLOAT_LE", "S32_BE", "s32le", None):
+        with pytest.raises(ValueError, match="sample format"):
+            PcmFormat(sample_format=unsupported)
+    format = PcmFormat(sample_format="S32_LE")
+    assert format.frame_bytes == 8
+    sink = ScriptedSink([1, 0, 2], format=format)
+    data = bytes(range(24))
+    with PcmPlayout(sink, max_block_frames=3) as player:
+        for invalid in (data[:-1], data + b"\0" * 8):
+            with pytest.raises(ValueError, match="whole-frame"):
+                player.submit(invalid, first_frame=0, generation=0)
+        player.submit(data, first_frame=0, generation=0)
+        assert player.step() == 1
+        assert player.observe().accepted_frame == 1 and player.pending_frames == 2
+        assert player.step() == 0
+        assert player.step() == 2
+        assert player.observe().accepted_frame == 3 and player.pending_frames == 0
+        assert sink.output == data
 
 
 def test_partial_write_backpressure_cursor_and_signed_delay():
@@ -329,16 +350,28 @@ def test_flac_pipe_alignment_deadline_and_owned_child_cleanup(tmp_path, monkeypa
 
 
 @pytest.mark.skipif(os.environ.get("ORR_TEST_PCM_OUTPUT") != "1", reason="explicit real libasound/FFmpeg lane")
-def test_real_alsa_flac_file_consumer_and_incomplete_input(tmp_path):
+@pytest.mark.parametrize("source_bits", [16, 24])
+def test_real_alsa_flac_file_consumer_and_incomplete_input(tmp_path, source_bits):
     source = tmp_path / "private-original.flac"
     capture = tmp_path / "decoded.pcm"
-    original = generated_pcm(10000, phase=13)
+    if source_bits == 16:
+        input_pcm = original = generated_pcm(10000, phase=13)
+        input_type, output_format = "s16le", "S16_LE"
+    else:
+        # Original low-level 24-bit samples: every sample has meaningful low
+        # bits lost by the old S16 path. Expected S32 values are left-justified.
+        values = [value for i in range(10000)
+                  for value in ((((i % 97) - 48) * 129 + 1), -(((i % 97) - 48) * 129 + 1))]
+        assert all(value != (value >> 8) * 256 for value in values)
+        input_pcm = b"".join(value.to_bytes(3, "little", signed=True) for value in values)
+        original = b"".join((value * 256).to_bytes(4, "little", signed=True) for value in values)
+        input_type, output_format = "s24le", "S32_LE"
     # Original fixture, actually losslessly encoded by distribution FFmpeg.
     encoded = subprocess.run([
-        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "s16le",
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-f", input_type,
         "-ar", "48000", "-ac", "2", "-i", "pipe:0", "-c:a", "flac",
         "-metadata", "title=private-fixture-title", str(source),
-    ], input=original, capture_output=True, timeout=5)
+    ], input=input_pcm, capture_output=True, timeout=5)
     assert encoded.returncode == 0, encoded.stderr
     command = [sys.executable, "-m", "fake_linkplay.cli", "audio", "pcm-decode",
                "--flac", str(source), "--capture", str(capture)]
@@ -348,8 +381,9 @@ def test_real_alsa_flac_file_consumer_and_incomplete_input(tmp_path):
     report = json.loads(process.stdout)
     assert report["capture_verified"] is True
     assert report["written_frames"] == report["final_observation"]["accepted_frame"] == 10000
-    assert (report["sample_format"], report["sample_rate"], report["channels"]) == ("S16_LE", 48000, 2)
-    assert report["source_bits_per_sample"] == 16
+    assert (report["sample_format"], report["sample_rate"], report["channels"]) == (output_format, 48000, 2)
+    assert report["source_bits_per_sample"] == source_bits
+    assert report["decoded_pcm_bytes"] == len(original)
     assert capture.read_bytes() == original
     assert capture.stat().st_mode & 0o777 == 0o600
     assert "private" not in process.stdout + process.stderr

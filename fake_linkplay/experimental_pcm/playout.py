@@ -29,19 +29,22 @@ def trunc_ratio(value: int, denominator: int) -> int:
 
 @dataclass(frozen=True)
 class PcmFormat:
-    """The first adapter deliberately accepts only interleaved S16_LE PCM."""
+    """Interleaved signed little-endian PCM; S16_LE remains the default."""
     rate: int = 48_000
     channels: int = 2
+    sample_format: str = "S16_LE"
 
     def __post_init__(self) -> None:
         integer(self.rate, "sample rate", 1)
         integer(self.channels, "channel count", 1)
         if self.rate > 192_000 or self.channels > 8:
             raise ValueError("PCM format outside experimental limits")
+        if self.sample_format not in ("S16_LE", "S32_LE"):
+            raise ValueError("unsupported PCM sample format")
 
     @property
     def frame_bytes(self) -> int:
-        return self.channels * 2
+        return self.channels * (2 if self.sample_format == "S16_LE" else 4)
 
 
 @dataclass(frozen=True)
