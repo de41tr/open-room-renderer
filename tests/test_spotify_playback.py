@@ -80,6 +80,68 @@ def test_owned_cli_pause_resume_and_absolute_volume(ready, tmp_path, monkeypatch
         assert requests[-2][2] == {"volume": 7, "relative": False}
 
 
+@pytest.mark.parametrize("behavior", ["buffering", "stopped", "not_ready"])
+def test_stop_playback_owned_cli_allows_cancelling_load_and_inactive_reset(
+        ready, tmp_path, monkeypatch, capsys, behavior):
+    with peer(tmp_path, behavior) as (child, port, log):
+        configure_owned_peer(ready, monkeypatch, child, port)
+        monkeypatch.setattr(receiver, "_write", lambda *_args: pytest.fail("stop saved metadata"))
+        monkeypatch.setattr(receiver, "switch", lambda *_args: pytest.fail("stop switched services"))
+        monkeypatch.setattr(receiver, "probe_alsa", lambda *_args: pytest.fail("stop probed output"))
+        assert cli.main(["spotify", "receiver", "--directory", str(ready), "stop-playback"]) == 0
+        captured = capsys.readouterr()
+        assert not captured.err and SECRET not in captured.out and "Synthetic track" not in captured.out
+        result = json.loads(captured.out)
+        assert result["command"] == "stop-playback" and result["request_outcome"] == "ACKNOWLEDGED"
+        assert result["playback_effect"] == result["audio_output"] == "UNVERIFIED"
+        assert result["spotify_bypasses_orr_dsp"] and "provider_playback_ready" not in result
+        assert result["provider_before"]["session_observation"] == "SESSION_PRESENT"
+        # The unchanged inert peer ignores stop. Even unchanged buffering or
+        # active state must not be promoted from acknowledgement to effect.
+        assert result["provider_after"] == result["provider_before"]
+        state = result["provider_after"]["status"]
+        assert state["stopped"] is (behavior == "stopped")
+        assert state["buffering"] is (behavior == "buffering")
+        assert records(log) == [["GET", "/status", None], ["POST", "/player/stop", None],
+                                ["GET", "/status", None]]
+
+
+def test_stop_playback_requires_present_session_without_start_or_post(ready, tmp_path, monkeypatch, capsys):
+    with peer(tmp_path, "no_session") as (child, port, log):
+        configure_owned_peer(ready, monkeypatch, child, port)
+        assert cli.main(["spotify", "receiver", "--directory", str(ready), "stop-playback"]) == 1
+        captured = capsys.readouterr()
+        assert not captured.out and "no session" in captured.err and SECRET not in captured.err
+        assert records(log) == [["GET", "/status", None]]
+
+
+@pytest.mark.parametrize("code, body", [(204, b""), (200, b'{"private_error":"' + SECRET.encode() + b'"}')])
+def test_stop_playback_requires_pinned_null_acknowledgement_without_retry(tmp_path, monkeypatch, code, body):
+    request = playback._request
+    def changed(connection, method, path, payload=None):
+        response = request(connection, method, path, payload)
+        return (code, body) if method == "POST" else response
+    with peer(tmp_path) as (child, port, log):
+        monkeypatch.setattr(playback, "_request", changed)
+        result = playback.control("127.0.0.1", port, str(child.pid), "stop-playback", None, lambda: None)
+        assert result["request_outcome"] == "UNCONFIRMED" and "error" in result
+        assert result["provider_after"] is None and SECRET not in json.dumps(result)
+        assert result["playback_effect"] == result["audio_output"] == "UNVERIFIED"
+        assert records(log) == [["GET", "/status", None], ["POST", "/player/stop", None]]
+
+
+@pytest.mark.parametrize("behavior", ["close", "slow_ack"])
+def test_stop_playback_closed_or_slow_response_never_reconnects_or_repeats(tmp_path, monkeypatch, behavior):
+    monkeypatch.setattr(playback, "HTTP_DEADLINE_SECONDS", .2)
+    with peer(tmp_path, behavior) as (child, port, log):
+        started = time.monotonic()
+        result = playback.control("127.0.0.1", port, str(child.pid), "stop-playback", None, lambda: None)
+        assert time.monotonic() - started < 1
+        assert result["request_outcome"] == ("ACKNOWLEDGED" if behavior == "close" else "UNCONFIRMED")
+        assert "error" in result and result["provider_after"] is None
+        assert records(log) == [["GET", "/status", None], ["POST", "/player/stop", None]]
+
+
 def test_native_yaml_edit_keeps_active_controls_but_blocks_switch_and_guard(ready, tmp_path, monkeypatch):
     with peer(tmp_path) as (child, port, log):
         configure_owned_peer(ready, monkeypatch, child, port)
@@ -388,7 +450,7 @@ def test_owned_cli_next_previous_and_absolute_seek(ready, tmp_path, monkeypatch,
 def test_control_rejects_invalid_values_before_connecting(monkeypatch):
     monkeypatch.setattr(playback, "_owned_connection", lambda *_args: pytest.fail("invalid value connected"))
     for action, value in (("seek", -1), ("seek", True), ("seek", 1.5), ("seek", 2**63), ("seek", None),
-                          ("volume", 101), ("volume", False), ("next", 1), ("previous", 0),
+                          ("volume", 101), ("volume", False), ("next", 1), ("previous", 0), ("stop-playback", True),
                           ("repeat-context", 1), ("repeat-track", 0), ("shuffle", "on"), ("shuffle", None)):
         with pytest.raises(ExclusiveProfileError):
             playback.control("127.0.0.1", 1, "1", action, value, lambda: None)
@@ -507,7 +569,9 @@ def test_owned_now_playing_cli_reads_only_status_and_never_saves_metadata(ready,
         assert SECRET not in captured.out + captured.err and not captured.err
         result = json.loads(captured.out)
         assert result["track"] == {"title": "Synthetic track", "artists": ["Synthetic artist", "Another artist"],
-                                   "album": "Synthetic album", "duration_ms": 180000, "position_ms": 42500}
+                                   "album": "Synthetic album", "duration_ms": 180000, "position_ms": 42500,
+                                   "decoded_file": {"format": None, "codec": None, "nominal_bitrate_kbps": None,
+                                                    "decoder_sample_rate_hz": None, "source_bit_depth_bits": None}}
         assert result["status"]["paused"] is False and result["status"]["stopped"] is False
         assert result["command"] == "now-playing" and result["track_observation"] == "PRESENT"
         assert result["session_observation"] == "SESSION_PRESENT"
@@ -524,7 +588,10 @@ def test_now_playing_keeps_absent_data_unknown(tmp_path, behavior, observation):
         result = playback.now_playing("127.0.0.1", port, str(child.pid), lambda: None)
         assert result["track_observation"] == observation
         assert result["track"] == ({"title": "Synthetic track", "artists": None, "album": None,
-                                     "duration_ms": None, "position_ms": None} if behavior == "partial_track" else None)
+                                     "duration_ms": None, "position_ms": None,
+                                     "decoded_file": {"format": None, "codec": None, "nominal_bitrate_kbps": None,
+                                                      "decoder_sample_rate_hz": None, "source_bit_depth_bits": None}
+                                     } if behavior == "partial_track" else None)
         assert result["session_observation"] == ("NO_SESSION" if behavior == "no_session" else "SESSION_PRESENT")
         assert len(records(log)) == 1
 
@@ -537,6 +604,79 @@ def test_now_playing_projection_rejects_wrong_types_and_ignores_unrequested_fiel
         assert SECRET not in str(exc.value)
     result = playback._project_track({"track": TRACK, "next_track": {"name": SECRET}})
     assert SECRET not in json.dumps(result)
+
+
+@pytest.mark.parametrize("reported, expected", [
+    ({"format": "OGG_VORBIS_160", "codec": "vorbis", "bitrate": 160, "sample_rate": 44100, "bit_depth": None},
+     {"format": "OGG_VORBIS_160", "codec": "vorbis", "nominal_bitrate_kbps": 160,
+      "decoder_sample_rate_hz": 44100, "source_bit_depth_bits": None}),
+    # Format names do not supply missing numeric facts, even when they contain numbers.
+    ({"format": "AAC_48", "codec": "aac", "bitrate": None},
+     {"format": "AAC_48", "codec": "aac", "nominal_bitrate_kbps": None,
+      "decoder_sample_rate_hz": None, "source_bit_depth_bits": None}),
+    ({"format": "", "codec": "unknown", "bit_depth": 24},
+     {"format": None, "codec": "unknown", "nominal_bitrate_kbps": None,
+      "decoder_sample_rate_hz": None, "source_bit_depth_bits": 24}),
+])
+def test_now_playing_decoded_file_reports_only_supplied_fields(reported, expected):
+    value = STATUS | {"track": TRACK | reported, "next_track": {"format": SECRET},
+                      "preferred_bitrate": 320, "audio_output": {"sample_rate": 192000, "bit_depth": 32}}
+    result = playback._project_track(value)
+    assert result["track"]["decoded_file"] == expected
+    assert SECRET not in json.dumps(result)
+    # Normal status continues ignoring all track/technical metadata, even if malformed.
+    assert playback._project_status(value) == playback._project_status(STATUS)
+    value["track"]["codec"] = {"raw_error": SECRET}
+    assert playback._project_status(value) == playback._project_status(STATUS)
+
+
+def test_now_playing_decoded_file_null_and_empty_remain_unknown():
+    for reported in ({}, {"format": "", "codec": ""},
+                     {field: None for field in ("format", "codec", "bitrate", "sample_rate", "bit_depth")}):
+        result = playback._project_track({"track": TRACK | reported})["track"]["decoded_file"]
+        assert result == {"format": None, "codec": None, "nominal_bitrate_kbps": None,
+                          "decoder_sample_rate_hz": None, "source_bit_depth_bits": None}
+
+
+def test_now_playing_decoded_file_rejects_invalid_fields_without_private_details():
+    invalid = [(field, bad) for field in ("bitrate", "sample_rate", "bit_depth")
+               for bad in (True, 1.5, "44100", 0, -1, 2**31, {"raw_error": SECRET})]
+    invalid += [(field, bad) for field in ("format", "codec")
+                for bad in (False, 160, [], {"raw_error": SECRET}, "https://example.test/" + SECRET)]
+    invalid += [("format", "OGG_VORBIS_160\n"), ("codec", "VORBIS")]
+    for field, bad in invalid:
+        with pytest.raises(ExclusiveProfileError) as exc:
+            playback._project_track({"track": TRACK | {field: bad}})
+        assert str(exc.value) == "Spotify now-playing audio format could not be interpreted."
+
+
+@pytest.mark.parametrize("bitrate", [160, True])
+def test_now_playing_decoded_file_cli_is_one_private_read(ready, tmp_path, monkeypatch, capsys, bitrate):
+    request = playback._request
+    def reported(connection, method, path, payload=None):
+        code, encoded = request(connection, method, path, payload)
+        value = json.loads(encoded)
+        # Inject only the new synthetic fields after the unchanged inert peer's read.
+        value["track"].update(format="OGG_VORBIS_160", codec="vorbis", bitrate=bitrate,
+                              sample_rate=44100, bit_depth=None)
+        return code, json.dumps(value).encode()
+    with peer(tmp_path) as (child, port, log):
+        configure_owned_peer(ready, monkeypatch, child, port)
+        monkeypatch.setattr(playback, "_request", reported)
+        monkeypatch.setattr(receiver, "_write", lambda *_args: pytest.fail("now-playing persisted metadata"))
+        assert cli.main(["spotify", "receiver", "--directory", str(ready), "now-playing"]) == (1 if bitrate is True else 0)
+        captured = capsys.readouterr()
+        assert SECRET not in captured.out + captured.err
+        if bitrate is True:
+            assert not captured.out and "audio format could not be interpreted" in captured.err
+            assert "Synthetic track" not in captured.err
+        else:
+            result = json.loads(captured.out)
+            assert not captured.err and result["audio_output"] == "UNVERIFIED"
+            assert result["track"]["decoded_file"] == {
+                "format": "OGG_VORBIS_160", "codec": "vorbis", "nominal_bitrate_kbps": 160,
+                "decoder_sample_rate_hz": 44100, "source_bit_depth_bits": None}
+        assert records(log) == [["GET", "/status", None]]
 
 
 @pytest.mark.parametrize("read_only", [False, True])
@@ -598,7 +738,8 @@ def test_now_playing_failure_has_no_metadata_raw_error_or_retry(ready, tmp_path,
         assert len(records(log)) == 1
 
 
-def test_invocation_change_between_status_and_post_blocks_mutation(tmp_path):
+@pytest.mark.parametrize("action", ["resume", "stop-playback"])
+def test_invocation_change_between_status_and_post_blocks_mutation(tmp_path, action):
     checks = []
     def fence():
         checks.append(True)
@@ -606,7 +747,7 @@ def test_invocation_change_between_status_and_post_blocks_mutation(tmp_path):
             raise ExclusiveProfileError("Fixture invocation changed.")
     with peer(tmp_path) as (child, port, log):
         with pytest.raises(ExclusiveProfileError, match="invocation changed"):
-            playback.control("127.0.0.1", port, str(child.pid), "resume", None, fence)
+            playback.control("127.0.0.1", port, str(child.pid), action, None, fence)
         assert [(r[0], r[1]) for r in records(log)] == [("GET", "/status")]
 
 

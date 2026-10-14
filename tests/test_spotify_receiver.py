@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 
 import pytest
 from aiohttp import web
@@ -251,6 +252,79 @@ def test_invalid_target_preserves_healthy_renderer(ready, services, monkeypatch,
         receiver.switch(str(ready), 'spotify')
     assert services.calls == [('started', 'renderer')]
     assert receiver._json(ready / 'last-operation.json') == previous
+
+
+@pytest.mark.parametrize('source', ['spotify', 'off'])
+def test_existing_renderer_socket_preserves_known_source(ready, services, source):
+    if source == 'spotify':
+        services.calls.append(('started', source))
+    calls = services.calls.copy()
+    receiver._write(ready / 'last-operation.json', {'requested_mode': source})
+    receipt = ready / 'last-operation.json'
+    previous = receipt.read_bytes()
+    _, profile = receiver.load_profile(ready)
+    path = Path(profile['renderer_prefix']) / 'run/mpv.sock'
+    # A real socket inode, without opening a listener or using any audio device.
+    os.mknod(path, stat.S_IFSOCK | 0o600)
+    inode = path.stat().st_ino
+    with pytest.raises(ExclusiveProfileError, match='existing mpv socket cannot be adopted'):
+        receiver.switch(str(ready), 'renderer')
+    assert services.calls == calls
+    assert receipt.read_bytes() == previous
+    assert path.is_socket() and path.stat().st_ino == inode
+
+
+def test_renderer_restart_does_not_preflight_its_current_socket(ready, services):
+    services.calls.append(('started', 'renderer'))
+    _, profile = receiver.load_profile(ready)
+    path = Path(profile['renderer_prefix']) / 'run/mpv.sock'
+    os.mknod(path, stat.S_IFSOCK | 0o600)
+    # The fixture handles the restart; this checks admission before stop only.
+    assert receiver.switch(str(ready), 'renderer')['requested_mode'] == 'renderer'
+    assert services.calls == [('started', 'renderer'), ('stop_confirmed',), ('probe',),
+                              ('start', receiver.RENDERER_SERVICE), ('started', 'renderer')]
+    assert path.is_socket()
+
+
+@pytest.mark.parametrize('source', ['healthy', 'conflicting'])
+def test_renderer_socket_guard_still_rejects_after_stop(ready, services, monkeypatch, source):
+    services.calls.append(('started', 'spotify'))
+    _, profile = receiver.load_profile(ready)
+    path = Path(profile['renderer_prefix']) / 'run/mpv.sock'
+    if source == 'conflicting':
+        os.mknod(path, stat.S_IFSOCK | 0o600)
+    stop_all = services.stop_all
+    def stop(self, before):
+        stop_all(self, before)
+        if source == 'healthy':
+            os.mknod(path, stat.S_IFSOCK | 0o600)  # Appeared after preflight.
+    monkeypatch.setattr(services, 'stop_all', stop)
+    group = '/synthetic/' + receiver.RENDERER_SERVICE
+    validate = services.validate
+    def states(self):
+        result = validate(self)
+        if self.calls[-1] == ('started', 'renderer'):
+            result['renderer'].update(MainPID=str(os.getpid()), ControlGroup=group)
+        elif source == 'conflicting' and self.calls[-1] == ('started', 'spotify'):
+            result['renderer'] = result['spotify'].copy()
+        return result
+    monkeypatch.setattr(services, 'validate', states)
+    original = Path.read_text
+    monkeypatch.setattr(Path, 'read_text', lambda path, *args, **kwargs:
+                        '0::' + group if str(path) == '/proc/self/cgroup' else original(path, *args, **kwargs))
+    def guarded_start(self, mode):
+        self.calls.append(('started', mode))
+        receiver.run_guard(str(self.root), mode)
+        pytest.fail('The existing socket passed the renderer guard')
+    monkeypatch.setattr(services, 'wait_started', guarded_start)
+    monkeypatch.setattr(receiver.os, 'execv', lambda *_args: pytest.fail('Native exec attempted'))
+    with pytest.raises(ExclusiveProfileError, match='existing mpv socket cannot be adopted'):
+        receiver.switch(str(ready), 'renderer')
+    assert services.calls == [('started', 'spotify'), ('stop_confirmed',), ('probe',),
+                              ('start', receiver.RENDERER_SERVICE), ('started', 'renderer'),
+                              ('probe',), ('stop', *receiver.UNITS.values())]
+    assert receiver._json(ready / 'last-operation.json')['service_state'] == 'UNKNOWN'
+    assert path.is_socket()
 
 
 def test_target_change_after_stop_still_blocks_start_and_cleans_up(ready, services, monkeypatch):

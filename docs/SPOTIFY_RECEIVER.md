@@ -264,6 +264,7 @@ independent CLI can request basic controls:
 ```sh
 "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" pause
 "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" resume
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" stop-playback
 "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" volume 5
 "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" next
 "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" previous
@@ -309,7 +310,39 @@ retrying. Audio and `playback_effect` remain `UNVERIFIED`. The pinned upstream
 [request handlers](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/player.go#L740-L762)
 discard seek/skip errors before returning HTTP 200, so an acknowledgement does
 not prove a seek or track change succeeded. These commands require existing
-playback (except volume); they do not pair, activate a device or launch a URI.
+playback (except volume and stop-playback); they do not pair, activate a device
+or launch a URI.
+
+`stop-playback` requests a playback reset while leaving the selected Spotify
+service and its account/session running. It is separate from `switch off`, which
+stops both whole services and is the shutdown path. Only the existing `switch`
+workflow authorizes source/output handover. The command requires a present
+session and the same pinned configuration, client, connection and service fences
+as other controls. It does not require playback readiness or non-buffering state,
+so an already-owned load can be cancelled. An already-stopped session is also
+eligible for reset. Exactly one bodyless `POST /player/stop` sits between two
+sanitized status reads; there is no service start, login, fallback or retry.
+
+The [pinned stop handler](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/controls.go#L1667-L1697)
+invalidates load/prefetch generations, drops their pending work, stops the player,
+clears its current/prefetched stream references, resets playback state and
+announces inactivity. It only requests logout when zeroconf is enabled; this
+receiver's pinned configuration disables zeroconf. The
+[state reset](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/player_state.go#L82-L92)
+discards the published current track/context, position and previous/upcoming
+track fields, and resets repeat/shuffle options to false. It does not clear the
+internal track list or queue: queued items can carry into a later `play` request.
+This is neither a pause with a resumable current track nor a queue-clear command.
+Use an explicit `play` or the Spotify app to select playback again.
+
+Only the pinned HTTP 200 JSON-null response counts as `ACKNOWLEDGED`; HTTP 204
+means no session. Neither acknowledgement nor a stopped readback proves physical
+silence, ALSA release or an atomic cancellation of other controllers' work.
+Upstream's [player stop](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/player/player.go#L352-L362)
+discards the output-close error; navigation/mutation jobs and racing external
+commands are not an atomic part of this stop. `playback_effect` and `audio_output`
+stay `UNVERIFIED`. Read the separate before/after snapshots; do not treat this
+command as permission to start another output owner.
 
 To start an explicit item after pairing, while the selected Spotify receiver
 reports a stopped session:
@@ -426,8 +459,41 @@ or no session, and `UNKNOWN` when the track field is absent; unavailable fields
 inside a reported track remain null. A failed ownership/service check or invalid
 response exits 1 without printing metadata or raw provider errors.
 
+`track.decoded_file` adds a small technical observation from that same response:
+
+- `format` and `codec`: the upstream `track.format` file-format name and
+  `track.codec` family, as strings. They identify the file the sidecar reports
+  decoding, rather than the requested quality setting.
+- `nominal_bitrate_kbps`: upstream `track.bitrate`, an integer in kilobits per
+  second, not a measured transfer rate. Upstream only supplies a fixed nominal
+  bitrate for some formats.
+- `decoder_sample_rate_hz`: upstream `track.sample_rate`, the decoder's reported
+  sample rate as an integer in hertz.
+- `source_bit_depth_bits`: upstream `track.bit_depth`, the reported source bits
+  per sample as an integer. Lossy formats have no meaningful source bit depth
+  and upstream reports null; float decoder/output precision is a different fact.
+
+The [pinned source mapping](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/api_server.go#L249-L278)
+uses the decoded file plus decoder values, and the
+[stream types](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/player/stream.go#L18-L28)
+define rate/depth as signed 32-bit integers. ORR accepts only the pinned
+file-format/codec names and positive signed-32-bit numeric values, rejecting
+invalid reports privately. Missing/null fields and empty names remain null;
+ORR never fills them from a format name, preferred bitrate or output config.
+This remains `sidecar_reported` and `snapshot_only`: it does not establish
+ALSA/DAC output, the negotiated device format, lossless or bit-perfect delivery,
+or actual audible playback. `audio_output` remains `UNVERIFIED`.
+
+The 96/160/320 kbps setting is a preference. **Stock pinned v0.10.3 FLAC playback
+is unavailable**: [startup rejects `flac_enabled: true`](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/app.go#L132-L134)
+because the [stock implementation reports unsupported](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/playplay/impl/impl.go#L10-L12),
+and the [official release workflow](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/.github/workflows/release.yml)
+supplies no replacement. ORR adds no lossless toggle. Account/provider acceptance
+and XU4/KA17 output acceptance remain separate, open gates.
+
 Track names, artists and albums are shown only by this explicit command and are
-never saved or included in normal status/diagnostic output. Treat its terminal
+never saved or included in normal status/diagnostic output; the same restriction
+applies to `decoded_file`. Treat its terminal
 output as private listening history. No account/device identifiers, URIs, URLs, artwork or upcoming-track
 metadata are displayed or fetched separately. It does not watch, authenticate,
 activate playback, or contact the renderer UI.
@@ -573,6 +639,11 @@ migrates the sidecar or rewrites a service to match those changes.
   foreign player, audio server or unrelated service is killed.
 - Existing mpv sockets are never adopted or blindly deleted. If a forced kill
   leaves one behind, inspect the stopped installation before manual cleanup.
+  When ownership is known and the renderer is already stopped, a return to it
+  rejects an existing socket before stopping healthy Spotify or changing the
+  last-operation receipt. A running renderer's socket does not block its own
+  restart preflight. The guard rechecks after stop; unknown/conflicting ownership
+  retains the normal stop/cleanup path.
 - An ALSA probe is a point-in-time open/release check. A later foreign opener can
   win the gap; the client's real exclusive open must then fail. A second engine
   is never started to mask failure. This is a narrowly managed appliance profile,

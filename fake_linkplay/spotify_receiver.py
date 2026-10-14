@@ -174,6 +174,12 @@ def _check_mpv() -> None:
         fail("Receiver mode requires the distribution-owned /usr/bin/mpv executable.")
 
 
+def _check_renderer_socket(profile: dict) -> None:
+    socket = Path(profile["renderer_prefix"]) / "run/mpv.sock"
+    if os.path.lexists(socket):
+        fail("An existing mpv socket cannot be adopted; inspect the stopped installation first.")
+
+
 def _read_sidecar(root: Path, profile: dict) -> dict:
     """Verify the pinned client and private sidecar without touching account state."""
     _, receipt = verify_client(profile["client_dir"])
@@ -431,6 +437,10 @@ def switch(directory: str, mode: str) -> dict:
                 pass  # Unavailable ownership proof must not bypass stop/cleanup.
             if preflight:
                 load_profile(root, start=mode)
+                # A running renderer's owned socket is expected until stop.
+                # Only reject it early when that renderer is already stopped.
+                if mode == "renderer" and services.stopped(before["renderer"]):
+                    _check_renderer_socket(profile)
         try:
             services.stop_all(before)
             if mode != "off":
@@ -488,9 +498,7 @@ def run_guard(directory: str, mode: str) -> None:
     with _lock(root, "output.lock") as lock:
         probe_alsa(profile["renderer"]["audio_device"])
         if mode == "renderer":
-            socket = Path(profile["renderer_prefix"]) / "run/mpv.sock"
-            if os.path.lexists(socket):
-                fail("An existing mpv socket cannot be adopted; inspect the stopped installation first.")
+            _check_renderer_socket(profile)
         argv = _target(root, profile, mode)
         os.umask(0o077)
         os.set_inheritable(lock, True)
@@ -1123,6 +1131,7 @@ def add_receiver_parser(commands) -> None:
     enqueue.add_argument("value", metavar="SPOTIFY_TRACK_URI")
     for action in ("pause", "resume"):
         actions.add_parser(action, help=f"request {action} from the already selected Spotify client")
+    actions.add_parser("stop-playback", help="stop/reset Spotify playback while keeping its client/session; use switch off for service shutdown")
     actions.add_parser("next", help="request the next track in Spotify's existing context; may resume paused playback")
     actions.add_parser("previous", help="request Spotify's previous track or rewind the current track after 3 seconds")
     seek = actions.add_parser("seek", help="request an absolute position within Spotify's reported track duration")
@@ -1163,7 +1172,7 @@ def run_receiver(args: argparse.Namespace) -> int:
             result = last_start_error(args.directory)
         elif args.receiver_cmd == "startup":
             result = startup(args.directory, args.selection)
-        elif args.receiver_cmd in {"play", "enqueue", "pause", "resume", "next", "previous", "seek", "volume", "now-playing", "pairing-code",
+        elif args.receiver_cmd in {"play", "enqueue", "pause", "resume", "stop-playback", "next", "previous", "seek", "volume", "now-playing", "pairing-code",
                                     "repeat-context", "repeat-track", "shuffle"}:
             value = getattr(args, "value", None)
             if args.receiver_cmd in {"repeat-context", "repeat-track", "shuffle"}:

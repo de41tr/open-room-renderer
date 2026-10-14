@@ -25,6 +25,13 @@ from .spotify_exclusive import ExclusiveProfileError
 
 HTTP_DEADLINE_SECONDS = 12
 
+# Pinned v0.10.3 metadata.proto AudioFile.Format names, not playback support.
+_FILE_FORMATS = frozenset({
+    "OGG_VORBIS_96", "OGG_VORBIS_160", "OGG_VORBIS_320", "MP3_96", "MP3_160",
+    "MP3_256", "MP3_320", "MP3_160_ENC", "AAC_24", "AAC_48", "XHE_AAC_12",
+    "XHE_AAC_16", "XHE_AAC_24", "FLAC_FLAC", "FLAC_FLAC_24BIT",
+})
+
 
 class _DeadlineSocket(socket.socket):
     """Keep http.client's buffered header/body reads inside one deadline."""
@@ -159,6 +166,25 @@ def _project_track(value: dict) -> dict:
         if number is not None and (type(number) is not int or not 0 <= number <= 2**63 - 1):
             _fail("Spotify now-playing metadata could not be interpreted.")
         result[target] = number
+    # api-spec.yml and daemon/api_server.go:249-278 at 4dbc099f46da3529adaa85feb97c4f49deb0b130.
+    # The decoded file and decoder's report, never negotiated ALSA/DAC output.
+    decoded_file = {}
+    for field, allowed in (("format", _FILE_FORMATS),
+                           ("codec", {"vorbis", "flac", "mp3", "aac", "unknown"})):
+        text = track.get(field)
+        if text is not None and (type(text) is not str or (text and text not in allowed)):
+            _fail("Spotify now-playing audio format could not be interpreted.")
+        decoded_file[field] = text or None
+    for source, target in (("bitrate", "nominal_bitrate_kbps"),
+                           ("sample_rate", "decoder_sample_rate_hz"),
+                           ("bit_depth", "source_bit_depth_bits")):
+        number = track.get(source)
+        # Upstream emits only positive values; Stream's rate/depth are int32.
+        # Keep the same portable bound for its Go int nominal bitrate too.
+        if number is not None and (type(number) is not int or not 1 <= number <= 2**31 - 1):
+            _fail("Spotify now-playing audio format could not be interpreted.")
+        decoded_file[target] = number
+    result["decoded_file"] = decoded_file
     return {"track_observation": "PRESENT", "track": result}
 
 
@@ -189,8 +215,8 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | str
         _fail("Spotify replace-current is a boolean opt-in for play only.")
     option = {"repeat-context": "repeat_context", "repeat-track": "repeat_track",
               "shuffle": "shuffle_context"}.get(action)
-    if action not in {"play", "enqueue", "pause", "resume", "next", "previous", "volume", "seek"} and option is None:
-        _fail("Use Spotify play, enqueue, pause, resume, next, previous, volume, seek, repeat-context, repeat-track or shuffle.")
+    if action not in {"play", "enqueue", "pause", "resume", "stop-playback", "next", "previous", "volume", "seek"} and option is None:
+        _fail("Use Spotify play, enqueue, pause, resume, stop-playback, next, previous, volume, seek, repeat-context, repeat-track or shuffle.")
     if action == "play":
         # A deliberately narrow content selector, never URLs, user collections,
         # local files, encoded delimiters, credentials or a new queue model.
@@ -209,7 +235,7 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | str
         if type(value) is not int or not 0 <= value <= maximum:
             _fail("Use an absolute Spotify volume from 0 to 100 or a nonnegative int64 seek position in milliseconds.")
     elif value is not None:
-        _fail("Spotify pause, resume, next and previous take no value.")
+        _fail("Spotify pause, resume, stop-playback, next and previous take no value.")
     result = {"command": action, "request_outcome": "NOT_SENT", "provider_before": None,
               "provider_after": None, "observation": "sidecar_reported", "audio_output": "UNVERIFIED",
               "playback_effect": "UNVERIFIED"}
@@ -244,8 +270,10 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | str
                     _fail("Spotify must report a non-buffering session; no play request was sent.")
                 if not before["stopped"] and not replace_current:
                     _fail("Spotify must report a stopped session; use play --replace-current to replace playing or paused content.")
-            elif action != "volume" and before["stopped"]:
+            elif action not in {"volume", "stop-playback"} and before["stopped"]:
                 _fail("Spotify reports no active playback; no control was sent.")
+            # Stop also cancels an owned load and resets an inactive session.
+            # It must not depend on playback readiness or non-buffering state.
             if action == "enqueue" and before["buffering"]:
                 # Upstream can acknowledge a missing/replaced context. Avoid
                 # observed loads, but a racing controller can still replace it.
@@ -271,9 +299,12 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | str
                 # This appends to upstream's existing queue asynchronously;
                 # a 200 does not prove that the track was actually added.
                 payload = {"uri": value}
-            endpoint = option or {"previous": "prev", "enqueue": "add_to_queue"}.get(action, action)
-            code, _ = _request(connection, "POST", "/player/" + endpoint, payload)
-            if code != 200:
+            endpoint = option or {"previous": "prev", "enqueue": "add_to_queue",
+                                  "stop-playback": "stop"}.get(action, action)
+            code, encoded = _request(connection, "POST", "/player/" + endpoint, payload)
+            # Pinned stop replies (nil, nil), encoded as JSON null. A 204
+            # means no session, not successful cancellation or a logout ACK.
+            if code != 200 or (action == "stop-playback" and encoded.strip(b" \t\r\n") != b"null"):
                 _fail("Spotify did not acknowledge the control.")
             result["request_outcome"] = "ACKNOWLEDGED"
             result["provider_after"] = _status(connection, timing=action == "seek")
