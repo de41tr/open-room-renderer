@@ -11,6 +11,7 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -190,6 +191,51 @@ def manifest_path(prefix: Path, relative: str) -> Path:
     return result
 
 
+def check_receiver_dependency(prefix: Path) -> None:
+    # Keep the copied uninstaller standalone. Inspect only the two links made
+    # by receiver install, not arbitrary units, processes or historical receipts.
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    units = Path(base) / "systemd/user"
+    for relative in (Path("open-room-renderer-spotify.service"),
+                     Path("open-room-renderer.service.d/90-spotify-receiver.conf")):
+        link = units / relative
+        try:
+            info = link.lstat()
+        except FileNotFoundError:
+            continue
+        try:
+            if not stat.S_ISLNK(info.st_mode):
+                raise ValueError("Receiver link was replaced")
+            target = Path(os.readlink(link))
+            if not target.is_absolute() or target.parts[-len(relative.parts):] != relative.parts:
+                raise ValueError("Changed receiver link target")
+            root = target.parents[len(relative.parts) - 1]
+            # A missing unit target is still an installed link. Read the setup
+            # metadata directly, with a size/type bound even when it is damaged.
+            fd = os.open(root / "receiver.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise ValueError("Receiver metadata is not a regular file")
+                raw = os.read(fd, 262145)
+            finally:
+                os.close(fd)
+            if len(raw) > 262144:
+                raise ValueError("Receiver metadata is too large")
+            profile = json.loads(raw)
+            native = profile.get("renderer_prefix") if isinstance(profile, dict) else None
+            if (not isinstance(native, str) or not Path(native).is_absolute()
+                    or str(Path(native)) != native or ".." in Path(native).parts
+                    or profile.get("format") != 1 or profile.get("directory") != str(root)):
+                raise ValueError("Receiver metadata cannot identify its native prefix")
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"Cannot verify the native dependency of receiver link {link}. "
+                             "Restore/review that receiver setup and uninstall it first; no files removed.") from exc
+        if Path(native) == prefix:
+            raise ValueError(f"An installed Spotify receiver still uses this native prefix. "
+                             f"Run its 'spotify receiver --directory DIR uninstall' command first "
+                             f"with DIR set to {root}, while the native executable is intact; no files removed.")
+
+
 def uninstall(prefix: Path, *, dry_run: bool) -> None:
     manifest = prefix / MANIFEST
     if manifest.is_symlink():
@@ -202,6 +248,7 @@ def uninstall(prefix: Path, *, dry_run: bool) -> None:
     directories = [manifest_path(prefix, path) for path in data["directories"]]
     if (prefix / "run/mpv.sock").exists():
         raise ValueError("An mpv socket remains. Stop the renderer and its mpv process before uninstalling.")
+    check_receiver_dependency(prefix)
     preserved = []
     removable = []
     for entry, path in paths:

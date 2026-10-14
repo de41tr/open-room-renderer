@@ -474,6 +474,17 @@ old example has been replaced with `examples/config.example.yaml`.
 
 ## Uninstall Or Upgrade
 
+If the optional [Spotify receiver](docs/SPOTIFY_RECEIVER.md#privacy-removal-and-upgrade)
+is installed for this prefix, run its receiver `uninstall` command first, while
+the native executable is intact. Stopping Spotify alone is insufficient: its
+service and the renderer drop-in both depend on that executable. Native removal
+refuses either remaining receiver link in the current user's
+`$XDG_CONFIG_HOME/systemd/user` (default `~/.config/systemd/user`) when its setup
+names this prefix, or when the dependency cannot be verified. Review damaged
+links/metadata manually; an intact receiver for a different prefix is unaffected.
+This is a check of the receiver's known installation paths, not a service/process
+scanner or proof that other manually configured consumers are stopped.
+
 First stop the foreground renderer or stop/disable the manually enabled user unit:
 
 ```bash
@@ -492,8 +503,8 @@ receipt, or uninstall script; modified installer-owned files still retain the
 manifest and uninstall script for review. No recursive broad deletion is used.
 Stop all renderer/mpv processes first; a remaining IPC socket blocks removal.
 Older installations retain their original `uninstall.py`. To use the current
-preservation rules on those installations, run this checkout's
-`scripts/install-native.py --prefix /path/to/old-prefix --uninstall`, first adding
+preservation and receiver-dependency checks on those installations, run this checkout's
+`python3 scripts/install-native.py --prefix /path/to/old-prefix --uninstall`, first adding
 `--dry-run` to review the proposed removal.
 
 ### Optional Offline Upgrade Profile

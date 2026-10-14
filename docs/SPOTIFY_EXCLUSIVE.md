@@ -1,5 +1,10 @@
 # Offline proposal for manual exclusive Spotify mode
 
+This older command retains its inert contract. For the new opt-in executable
+service controller and independent return-to-renderer CLI, see
+[the receiver candidate](SPOTIFY_RECEIVER.md). Do not combine its managed drop-in
+with this proposal's manual drop-in.
+
 `spotify prepare-exclusive` writes a bounded **OFFLINE_ARTIFACT_ONLY** package.
 It never installs or runs a client, logs in, reads/imports account credentials,
 contacts a provider, calls systemctl, starts/stops mpv, opens a socket or probes

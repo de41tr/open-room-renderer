@@ -5,6 +5,19 @@ Status: Accepted strategy; productive Spotify playback remains gated
 Supersedes: 2026-10-12 Soloist-first/defer-all-integration decision
 Evidence: [weighted assessment, source pins and twelve-month burden](../SPOTIFY_FEASIBILITY.md)
 
+## Subsequent implementation decision: exclusive direct ALSA
+
+The post-PR-2 sprint implements the narrower direct-ALSA option in
+[the opt-in receiver candidate](../SPOTIFY_RECEIVER.md). Its independent CLI
+controls exact systemd user units, confirms complete cgroup stops and hardware
+open/release before admitting another engine, and remains available when the
+renderer Web service is stopped. A shared PCM/DSP engine is deferred: it would
+add buffering, clock and lifecycle work without closing account/hardware gates.
+Provider status remains separate and Spotify bypasses ORR EQ/balance. This
+supersedes the earlier diagnostic-only implementation scope below, not the
+provider/account/physical acceptance requirements. The earlier offline generator
+retains its deliberately inert contract.
+
 ## Decision
 
 Prefer **go-librespot** for the next optional technical experiment. Rank
