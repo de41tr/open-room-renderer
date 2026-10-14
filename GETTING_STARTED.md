@@ -400,15 +400,25 @@ discovery metadata. `enable_mdns: false` disables mDNS separately. Explicit
 configuration and existing saved identity are retained; no identity file is
 reset when changing profiles.
 
-When `wiim_home_profile` is omitted, an existing configured or saved identity
-whose WiiM conversion would change its advertised UUID keeps the neutral
-profile. Omitted SOAP, mDNS and HTTP-mirror settings then retain their earlier
+When `wiim_home_profile` is omitted, an existing configured identity or a saved
+identity without matching first-install provenance keeps the neutral profile.
+This includes compact IDs whose UUID spelling would be unchanged but whose
+mDNS instance name and discovery behavior would change. Omitted SOAP, mDNS and
+HTTP-mirror settings then retain their earlier
 defaults (8080, false and false); explicit settings still win, including mDNS
 enabled by older native installs. The portable runner uses the same rule.
-Fresh identities use the new WiiM defaults and keep them across restarts.
-Neither the input YAML nor the saved UUID is rewritten. Explicitly setting
+Fresh WiiM identities record their profile in `state_dir/uuid.wiim` before
+publishing `uuid`, so they keep the new defaults across restarts. Preserve both
+files when backing up or moving state; the offline migration tool copies both.
+Neither the input YAML nor an existing saved UUID is rewritten. Explicitly setting
 `wiim_home_profile: true` opts into the compatibility representation and can
 change a legacy advertised UUID; controllers may need to rediscover it.
+
+If you already tried an unreleased default-WiiM version that did not create
+`uuid.wiim`, explicitly set `wiim_home_profile: true` in your persistent YAML to
+retain that discovery profile. An unmarked compact ID cannot safely distinguish
+that trial from an older neutral installation, so omission conservatively keeps
+the legacy defaults. UUID prefixes are never used to guess its origin.
 
 ### Optional App-Compatible Port-80 Service
 
@@ -527,7 +537,7 @@ inside those private roots. Reads are capped at one MiB per file. Use a delibera
 manual migration for unsupported layouts; do not weaken ownership or permissions
 merely to bypass a refusal.
 
-Preparation copies existing uuid, device_name, channel_balance, gain.json,
+Preparation copies existing uuid, uuid.wiim, device_name, channel_balance, gain.json,
 active_dsp.json, eq_presets.json and favorites.json byte-for-byte into
 NEW/migrated-profile/state. Absent optional files stay absent. It skips
 plex_client_id and plex_user_info.json without reading their contents; provider sign-in/session setup may need to be repeated separately by you. There is no persisted playback queue. All other parsed

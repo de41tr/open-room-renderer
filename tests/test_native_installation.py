@@ -13,7 +13,7 @@ import sys
 import pytest
 import yaml
 
-from fake_linkplay.config import load_config
+from fake_linkplay.config import Config, load_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -353,16 +353,18 @@ def test_protected_subtrees_still_reject_symlink_traversal_before_deletion(insta
     assert (outside / "file").read_text() == "outside user data"
 
 
-def test_portable_runner_upgrade_keeps_existing_neutral_discovery(runner):
+@pytest.mark.parametrize("identity", ["00000000-0000-4000-8000-000000000001", "A" * 36])
+def test_portable_runner_upgrade_keeps_existing_neutral_discovery(runner, identity):
     state = runner.ROOT / ".state"
     state.mkdir()
-    saved = "00000000-0000-4000-8000-000000000001\n"
+    saved = identity + "\n"
     (state / "uuid").write_text(saved)
     for _ in range(2):
         cfg = load_config(runner.prepare("portable"))
         assert cfg.upnp_uuid == saved.strip() and not cfg.wiim_home_profile
         assert cfg.http_api_port == cfg.upnp_port == 8080
         assert not cfg.enable_mdns and not cfg.mirror_http_on_upnp_port
+        assert cfg.linkplay_instance_name == Config(uuid=identity, wiim_home_profile=False).linkplay_instance_name
         assert (state / "uuid").read_text() == saved
 
 
@@ -371,7 +373,10 @@ def test_portable_and_compat_runners_keep_identity(runner, monkeypatch):
     portable = load_config(portable_path)
     assert portable.http_api_port == 8080 and portable.upnp_port == 59152
     assert portable.wiim_home_profile and portable.enable_mdns and portable.enable_ssdp
-    assert portable.uuid == load_config(runner.prepare("portable")).uuid
+    restarted = load_config(runner.prepare("portable"))
+    assert portable.uuid == restarted.uuid
+    assert restarted.wiim_home_profile and restarted.enable_mdns and restarted.upnp_port == 59152
+    assert portable.linkplay_instance_name == restarted.linkplay_instance_name
     compat = load_config(runner.prepare("app-compat"))
     assert compat.http_api_port == 8080 and compat.upnp_port == 59152
     assert not compat.mirror_port_80

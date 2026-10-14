@@ -85,7 +85,7 @@ def test_prepares_separate_exact_state_and_only_two_rebased_settings(pair, monke
         assert str(path) not in migration.SKIP_FILES
         return real_open(path, *args, **kwargs)
     monkeypatch.setattr(migration.os, "open", guarded_open)
-    assert _prepare(pair) == {"status": "prepared", "state_files": 7, "skipped_plex_files": 2, "activated": False}
+    assert _prepare(pair) == {"status": "prepared", "state_files": 8, "skipped_plex_files": 2, "activated": False}
     profile = new / migration.PROFILE
     raw["state_dir"], raw["mpv_socket"] = str(profile / "state"), str(new / "run/mpv.sock")
     assert yaml.safe_load((profile / "config.yaml").read_text()) == raw
@@ -114,14 +114,19 @@ def test_dry_run_never_writes_or_loads_runtime_state(pair, monkeypatch):
     assert [_snapshot(p) for p in pair] == before
 
 
-def test_legacy_native_migration_pins_effective_discovery_and_reloads_same_identity(pair):
+@pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.parametrize("identity", ["00000000-0000-4000-8000-000000000001", "A" * 36])
+def test_legacy_native_migration_pins_effective_discovery_and_reloads_same_identity(pair, configured, identity):
     old, new = pair
     raw = json.loads((old / "config.yaml").read_text())
     raw.pop("wiim_home_profile")
     raw.pop("mirror_http_on_upnp_port")
     raw["upnp_port"] = 8080
+    raw["friendly_name"] = "Study"
+    if configured:
+        raw["uuid"] = identity
     (old / "config.yaml").write_text(json.dumps(raw))
-    saved = b"00000000-0000-4000-8000-000000000001\n"
+    saved = (identity + "\n").encode()
     (old / "state/uuid").write_bytes(saved)
     before = _snapshot(old)
     original = load_startup_config(old / "config.yaml")
@@ -136,8 +141,30 @@ def test_legacy_native_migration_pins_effective_discovery_and_reloads_same_ident
         assert cfg.upnp_uuid == original.upnp_uuid == saved.decode().strip()
         assert cfg.mdns_hostname == original.mdns_hostname
         assert cfg.wiim_mac == original.wiim_mac
+        assert cfg.linkplay_instance_name == original.linkplay_instance_name
         assert not cfg.wiim_home_profile and cfg.enable_mdns and cfg.upnp_port == 8080
     assert (output / "state/uuid").read_bytes() == saved
+    assert _snapshot(old) == before
+
+
+def test_fresh_implicit_wiim_profile_keeps_provenance_and_discovery_when_migrated(pair):
+    old, new = pair
+    raw = json.loads((old / "config.yaml").read_text())
+    for name in ("wiim_home_profile", "mirror_http_on_upnp_port", "upnp_port", "enable_mdns"):
+        raw.pop(name)
+    (old / "config.yaml").write_text(json.dumps(raw))
+    (old / "state/uuid").unlink()
+    original = load_startup_config(old / "config.yaml")
+    before = _snapshot(old)
+    assert original.wiim_home_profile
+    _prepare(pair)
+    output = new / migration.PROFILE
+    assert (output / "state/uuid.wiim").read_bytes() == (old / "state/uuid.wiim").read_bytes()
+    for _ in range(2):
+        cfg = load_startup_config(output / "config.yaml")
+        assert cfg.wiim_home_profile and cfg.enable_mdns and cfg.upnp_port == 59152
+        assert cfg.upnp_uuid == original.upnp_uuid
+        assert cfg.linkplay_instance_name == original.linkplay_instance_name
     assert _snapshot(old) == before
 
 

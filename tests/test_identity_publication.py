@@ -166,7 +166,14 @@ print(config.load_or_create_uuid(state, wiim_home_profile=profile == "True"), fl
         }
         assert (state / "uuid").read_text() == value + "\n"
         assert config.load_or_create_uuid(state, wiim_home_profile=not profile) == value
-        assert [path.name for path in state.iterdir()] == ["uuid"]
+        assert {path.name for path in state.iterdir()} == ({"uuid", "uuid.wiim"} if profile else {"uuid"})
+        settings = tmp_path / "config.yaml"
+        settings.write_text(f"state_dir: {state}\n")
+        for _ in range(2):
+            cfg = config.load_config(settings)
+            assert cfg.uuid == value and cfg.wiim_home_profile is profile
+            if profile:
+                assert (state / "uuid.wiim").read_text() == value + "\n"
     finally:
         for child in children:
             if child.poll() is None:
@@ -196,6 +203,40 @@ def test_prepublication_failure_has_no_direct_write_fallback(tmp_path, monkeypat
     with pytest.raises(OSError):
         config.load_or_create_uuid(tmp_path)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_interrupted_wiim_publication_recovers_identity_and_profile_together(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    settings = tmp_path / "config.yaml"
+    settings.write_text(f"state_dir: {state}\n")
+    original_link = os.link
+    original_sync = os.fsync
+    provenance_durable = False
+    def sync(descriptor):
+        nonlocal provenance_durable
+        original_sync(descriptor)
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode) and not (state / "uuid").exists():
+            assert (state / "uuid.wiim").read_text().strip()
+            provenance_durable = True
+    def interrupt(source, target):
+        if Path(target).name == "uuid":
+            assert provenance_durable, "Provenance must be durable before UUID publication"
+            raise OSError(errno.EIO, "synthetic interruption after provenance")
+        return original_link(source, target)
+    with monkeypatch.context() as fault:
+        fault.setattr(os, "link", interrupt)
+        fault.setattr(os, "fsync", sync)
+        with pytest.raises(OSError, match="UUID published"):
+            config.load_config(settings)
+    saved = (state / "uuid.wiim").read_text()
+    assert not (state / "uuid").exists()
+    monkeypatch.setattr(config.uuidlib, "uuid4", lambda: pytest.fail("published identity must be reused"))
+    cfg = config.load_config(settings)
+    restarted = config.load_config(settings)
+    assert cfg.upnp_uuid == restarted.upnp_uuid == saved.strip()
+    assert cfg.wiim_home_profile and restarted.wiim_home_profile
+    assert cfg.linkplay_instance_name == restarted.linkplay_instance_name
+    assert (state / "uuid").read_text() == (state / "uuid.wiim").read_text() == saved
 
 
 @pytest.mark.parametrize("error_type", [OSError, ValueError])

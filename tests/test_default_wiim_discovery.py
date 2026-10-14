@@ -21,10 +21,15 @@ def test_minimal_config_publishes_stable_app_identity(tmp_path: Path) -> None:
     path = tmp_path / 'config.yaml'
     path.write_text(yaml.safe_dump({'state_dir': str(tmp_path / 'state'), 'advertise_ip': '192.0.2.10'}))
     cfg = load_config(path)
+    original = path.read_bytes()
     assert cfg.upnp_uuid.startswith('FF')
     restarted = load_config(path)
     assert restarted.upnp_uuid == cfg.upnp_uuid
+    assert restarted.linkplay_instance_name == cfg.linkplay_instance_name
+    assert restarted.mdns_hostname == cfg.mdns_hostname and restarted.wiim_mac == cfg.wiim_mac
     assert restarted.wiim_home_profile and restarted.enable_mdns and restarted.upnp_port == 59152
+    assert path.read_bytes() == original
+    assert (tmp_path / 'state/uuid.wiim').read_text() == (tmp_path / 'state/uuid').read_text()
     packet = response_packet(cfg, 'urn:schemas-upnp-org:device:MediaRenderer:1').decode()
     assert 'ServiceName: ##hexStr##' in packet and 'Bootid.upnp.org:' in packet
     mdns = CustomMdnsProtocol(cfg)._response_for(0, DnsQuestion('_linkplay._tcp.local.', DNS_TYPE_PTR, DNS_CLASS_IN))

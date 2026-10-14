@@ -30,6 +30,7 @@ LEGACY_DISCOVERY_DEFAULTS = {
     "enable_mdns": False,
     "mirror_http_on_upnp_port": False,
 }
+WIIM_IDENTITY_FILE = "uuid.wiim"
 
 
 @dataclass(slots=True)
@@ -376,29 +377,36 @@ def _config_from_mapping(raw: dict[str, Any]) -> Config:
     return cfg
 
 
-def preserve_discovery_identity(cfg: Config) -> None:
-    """Keep omitted legacy defaults if automatic WiiM conversion changes an ID.
+def preserve_discovery_identity(cfg: Config, *, wiim_identity: str | None = None) -> None:
+    """Keep all omitted legacy discovery defaults for an existing identity.
 
-    An explicit profile choice remains authoritative. Newly generated compact
-    identities already round-trip unchanged, without relying on an FF prefix.
-    Call again after loading a saved identity; offline readers do not probe it.
-    Config and UUID files are never rewritten to record this effective choice.
+    An explicit profile choice remains authoritative. Only saved identities with
+    matching first-install provenance inherit the new WiiM defaults; unchanged
+    UUID spelling does not imply an unchanged mDNS instance or profile. Offline
+    callers supply captured provenance without probing state. Existing config
+    and UUID files are never rewritten to record this effective choice.
     """
 
     if "wiim_home_profile" not in cfg._implicit_discovery_settings or not cfg.uuid:
         return
-    if cfg.upnp_uuid == normalize_uuid(cfg.uuid):
+    if wiim_identity and normalize_uuid(wiim_identity) == normalize_uuid(cfg.uuid):
         return
     for name in cfg._implicit_discovery_settings:
         setattr(cfg, name, LEGACY_DISCOVERY_DEFAULTS[name])
 
 
 def _load_config_state(cfg: Config, *, _startup: bool = False) -> Config:
-    cfg.uuid = cfg.uuid or _read_state(
-        lambda: load_or_create_uuid(cfg.state_dir, wiim_home_profile=cfg.wiim_home_profile),
-        "identity", startup=_startup,
-    )
-    preserve_discovery_identity(cfg)
+    if not cfg.uuid:
+        cfg.uuid = _read_state(
+            lambda: load_or_create_uuid(cfg.state_dir, wiim_home_profile=cfg.wiim_home_profile),
+            "identity", startup=_startup,
+        )
+        if "wiim_home_profile" in cfg._implicit_discovery_settings:
+            wiim_identity = _read_state(
+                lambda: _read_optional_persistent_text(Path(cfg.state_dir) / WIIM_IDENTITY_FILE),
+                "identity", startup=_startup,
+            )
+            preserve_discovery_identity(cfg, wiim_identity=wiim_identity)
     load_persistent_runtime_state(cfg, _startup=_startup)
     return cfg
 
@@ -451,6 +459,9 @@ def load_or_create_uuid(state_dir: str | Path, *, wiim_home_profile: bool = Fals
         Creates the state directory and atomically publishes a fully written,
         fsynced UUID on first run. Requires hard links and directory fsync.
         Publication is never rolled back, even if directory sync fails.
+        New WiiM identities first publish uuid.wiim as explicit provenance,
+        then publish the same complete value to uuid. An interrupted publication
+        resumes from that record; no existing UUID is replaced.
     """
 
     directory = ensure_dir(state_dir)
@@ -459,33 +470,53 @@ def load_or_create_uuid(state_dir: str | Path, *, wiim_home_profile: bool = Fals
         return _read_uuid(uuid_path)
     except FileNotFoundError:
         pass
-    entropy = uuidlib.uuid4()
-    # FF is a compatibility discriminator, not an OEM identifier. The remaining
-    # UUID entropy belongs to this installation; do not clone a hardware ID.
-    value = f"FF00{entropy.hex.upper()}" if wiim_home_profile else str(entropy)
-    descriptor, temporary = tempfile.mkstemp(prefix=".uuid.", dir=directory)
-    published = False
+    wiim_path = directory / WIIM_IDENTITY_FILE
+    try:
+        value = _read_uuid(wiim_path)
+    except FileNotFoundError:
+        value = None
+    # Recover a fully published provenance record before proposing another ID.
+    published = value is not None
+    temporary = None
+    identity_temporary = None
     try:
         try:
-            try:
-                # Retain ownership even if constructing the text stream fails.
-                with os.fdopen(descriptor, "w", encoding="utf-8", closefd=False) as stream:
-                    stream.write(value + "\n")
-                    stream.flush()
-                    os.fsync(stream.fileno())
-            finally:
-                os.close(descriptor)
+            if value is None:
+                entropy = uuidlib.uuid4()
+                # FF is a compatibility discriminator, not an OEM identifier.
+                value = f"FF00{entropy.hex.upper()}" if wiim_home_profile else str(entropy)
+                temporary = _stage_uuid(directory, value)
+                if wiim_home_profile:
+                    try:
+                        os.link(temporary, wiim_path)
+                    except FileExistsError:
+                        value = _read_uuid(wiim_path)
+                    published = True
+            if published:
+                # Make provenance durable before uuid can become visible: a
+                # crash must not leave the new UUID with an implicit old profile.
+                descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+                # Separate inodes keep provenance immutable if an operator edits
+                # uuid in place, and satisfy offline migration's no-hardlink rule.
+                identity_temporary = _stage_uuid(directory, value)
             try:
                 # Atomic no-clobber publication. Replacing a competing creator's
                 # UUID would silently change the installation's identity.
-                os.link(temporary, uuid_path)
+                os.link(identity_temporary or temporary, uuid_path)
             except FileExistsError:
                 value = _read_uuid(uuid_path)
             published = True
         finally:
             # Remove only this creator's private name, never the published ID.
             # Sync afterward so successful cleanup is included in the sync.
-            Path(temporary).unlink(missing_ok=True)
+            if temporary is not None:
+                Path(temporary).unlink(missing_ok=True)
+            if identity_temporary is not None:
+                Path(identity_temporary).unlink(missing_ok=True)
         descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
         try:
             # A losing creator also confirms the directory before returning.
@@ -497,6 +528,25 @@ def load_or_create_uuid(state_dir: str | Path, *, wiim_home_profile: bool = Fals
             raise OSError("UUID published; directory durability unconfirmed") from exc
         raise
     return value
+
+
+def _stage_uuid(directory: Path, value: str) -> str:
+    """Write complete private bytes before either identity name is published."""
+
+    descriptor, temporary = tempfile.mkstemp(prefix=".uuid.", dir=directory)
+    try:
+        try:
+            # Retain ownership even if constructing the text stream fails.
+            with os.fdopen(descriptor, "w", encoding="utf-8", closefd=False) as stream:
+                stream.write(value + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+        finally:
+            os.close(descriptor)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+    return temporary
 
 
 def _read_uuid(path: Path) -> str:
