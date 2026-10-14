@@ -379,3 +379,12 @@ jobs:
                   for key, value in evidence["stages"].items()},
               "cleanup": evidence["cleanup"], "two_host_synchronization": "NOT_RUN"}, sort_keys=True))
           PY
+
+      - name: Verify the opt-in foreground Snapcast source runtime
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 1
+        run: |
+          # Reuse extracted official binaries; do not install/start services.
+          # The existing experiment and all its gates remain unchanged above.
+          export PATH="$RUNNER_TEMP/orr-snapcast-prefix/usr/bin:$PATH"
+          .venv-ci/bin/python tools/acceptance_snapcast_runtime.py

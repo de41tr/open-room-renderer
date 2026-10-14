@@ -39,6 +39,7 @@ mdns = []
 
 [project.scripts]
 open-room-renderer = "fake_linkplay.cli:main"
+open-room-renderer-snapcast = "fake_linkplay.snapcast_runtime:main"
 fake-linkplay = "fake_linkplay.cli:main"
 
 [tool.setuptools.packages.find]
