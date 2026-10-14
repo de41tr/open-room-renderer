@@ -21,6 +21,7 @@ TRACK = {"name": "Synthetic track", "artist_names": ["Synthetic artist", "Anothe
          "album_name": "Synthetic album", "duration": 180000, "position": 42500,
          "uri": SECRET, "artist_uris": [SECRET], "album_uri": SECRET,
          "album_cover_url": "https://example.test/" + SECRET, "raw_error": SECRET}
+PLAY_ID = "0" * 22  # Syntactically valid synthetic ID; never sent to Spotify.
 
 
 @contextmanager
@@ -77,6 +78,81 @@ def test_owned_cli_pause_resume_and_absolute_volume(ready, tmp_path, monkeypatch
             pair for action in ("pause", "resume", "volume")
             for pair in (("GET", "/status"), ("POST", "/player/" + action), ("GET", "/status"))]
         assert requests[-2][2] == {"volume": 7, "relative": False}
+
+
+def test_play_accepts_three_uri_kinds_without_echo_persistence_or_effect_claim(
+        ready, tmp_path, monkeypatch, capsys):
+    with peer(tmp_path, "launch_ignore") as (child, port, log):
+        configure_owned_peer(ready, monkeypatch, child, port)
+        monkeypatch.setattr(receiver, "_write", lambda *_args: pytest.fail("play persisted metadata"))
+        expected = []
+        for content_type in ("track", "album", "playlist"):
+            uri = "spotify:" + content_type + ":" + PLAY_ID
+            assert cli.main(["spotify", "receiver", "--directory", str(ready), "play", uri]) == 0
+            captured = capsys.readouterr()
+            assert not captured.err and all(value not in captured.out for value in (uri, PLAY_ID, SECRET, "Synthetic track"))
+            result = json.loads(captured.out)
+            assert result["command"] == "play" and result["requested_content_type"] == content_type
+            assert result["provider_playback_ready"] is True and result["request_outcome"] == "ACKNOWLEDGED"
+            # The peer acknowledges without applying the command. No retry or
+            # playback success is inferred, even when readback stays stopped.
+            assert result["provider_before"]["status"]["stopped"] is True
+            assert result["provider_after"]["status"]["stopped"] is True
+            assert result["audio_output"] == result["playback_effect"] == "UNVERIFIED"
+            assert result["spotify_bypasses_orr_dsp"] is True
+            expected.extend([["GET", "/", None], ["GET", "/status", None],
+                             ["POST", "/player/play", {"uri": uri}], ["GET", "/status", None]])
+            assert records(log) == expected
+
+
+def test_play_rejects_noncanonical_or_private_selectors_before_connecting(monkeypatch):
+    monkeypatch.setattr(playback, "_owned_connection", lambda *_args: pytest.fail("invalid URI connected"))
+    uri = "spotify:track:" + PLAY_ID
+    invalid = [None, 1, True, {}, "", "https://open.spotify.com/track/" + PLAY_ID,
+               "file:///tmp/" + SECRET, "spotify:local:" + SECRET, "spotify:user:" + SECRET,
+               "spotify:collection:tracks", "spotify:episode:" + PLAY_ID,
+               "spotify:artist:" + PLAY_ID, "SPOTIFY:track:" + PLAY_ID, uri + "\n",
+               " " + uri, uri + "?token=" + SECRET, uri + ":" + SECRET,
+               uri[:-1], uri + "0", "spotify:track:" + "é" * 22,
+               "spotify:track:" + "0" * 19 + "%30"]
+    for value in invalid:
+        with pytest.raises(ExclusiveProfileError) as exc:
+            playback.control("127.0.0.1", 1, "1", "play", value, lambda: None)
+        assert SECRET not in str(exc.value) and PLAY_ID not in str(exc.value)
+
+
+@pytest.mark.parametrize("behavior, reads", [("launch_not_ready", 1), ("launch_bad_ready", 1),
+    ("launch_no_session", 2), ("normal", 2), ("launch_buffering", 2), ("launch_close_root", 1)])
+def test_play_requires_ready_stopped_session_and_same_connection(
+        ready, tmp_path, monkeypatch, capsys, behavior, reads):
+    with peer(tmp_path, behavior) as (child, port, log):
+        configure_owned_peer(ready, monkeypatch, child, port)
+        assert cli.main(["spotify", "receiver", "--directory", str(ready),
+                         "play", "spotify:track:" + PLAY_ID]) == 1
+        captured = capsys.readouterr()
+        assert not captured.out and captured.err and SECRET not in captured.err and PLAY_ID not in captured.err
+        assert records(log) == [["GET", "/", None], ["GET", "/status", None]][:reads]
+
+
+def test_play_rechecks_invocation_after_readiness_and_status(
+        ready, tmp_path, monkeypatch, capsys):
+    with peer(tmp_path, "launch") as (child, port, log):
+        configure_owned_peer(ready, monkeypatch, child, port)
+        manager = receiver.UserServices
+        validate = manager.validate
+        checks = []
+        def changed(self):
+            checks.append(True)
+            states = validate(self)
+            if len(checks) == 3:
+                states["spotify"]["InvocationID"] = "b" * 32
+            return states
+        monkeypatch.setattr(manager, "validate", changed)
+        assert cli.main(["spotify", "receiver", "--directory", str(ready),
+                         "play", "spotify:track:" + PLAY_ID]) == 1
+        captured = capsys.readouterr()
+        assert not captured.out and captured.err and PLAY_ID not in captured.err
+        assert records(log) == [["GET", "/", None], ["GET", "/status", None]]
 
 
 def test_owned_cli_next_previous_and_absolute_seek(ready, tmp_path, monkeypatch, capsys):
@@ -358,6 +434,10 @@ def test_slow_drip_headers_cannot_extend_the_operation_deadline(tmp_path, monkey
 
 def run_peer(log, behavior):
     state = STATUS | {"paused": False, "volume": 0, "track": TRACK, "next_track": {"name": SECRET}}
+    if behavior.startswith("launch"):
+        state["stopped"] = True
+        behavior = behavior.removeprefix("launch_")
+    if behavior == "buffering": state["buffering"] = True
     if behavior == "no_track": state["track"] = None
     elif behavior == "missing_track": del state["track"]
     elif behavior == "partial_track": state["track"] = {"name": "Synthetic track"}
@@ -389,6 +469,11 @@ def run_peer(log, behavior):
                 self.wfile.write(encoded)
         def do_GET(self):
             self.record()
+            if self.path == "/" and not behavior.startswith("pairing"):
+                payload = {"playback_ready": {"not_ready": False, "bad_ready": "true"}.get(behavior, True),
+                           "private_extra": SECRET}
+                self.respond(payload, close=behavior == "close_root")
+                return
             if behavior.startswith("pairing"):
                 if self.path == "/":
                     self.respond({"playback_ready": False})

@@ -175,6 +175,116 @@ def test_native_refuses_existing_prefix(installer, tmp_path):
         installer.install(tmp_path, port=8080, stage_only=True, dry_run=False, require_alsa=False)
 
 
+@pytest.fixture
+def native_receiver(installer, tmp_path, monkeypatch):
+    from fake_linkplay import spotify_receiver as receiver
+
+    prefix, root = tmp_path / "r", tmp_path / "receiver"
+    installer.install(prefix, port=8080, stage_only=True, dry_run=False, require_alsa=False)
+    launcher = prefix / "venv/bin/open-room-renderer"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("inert fixture; never executed\n")
+    installer.write_manifest(prefix)
+    root.mkdir(mode=0o700)
+    profile = {"format": 1, "directory": str(root), "renderer_prefix": str(prefix),
+               "renderer_config": str(prefix / "config.yaml"),
+               "renderer_unit": str(prefix / receiver.RENDERER_SERVICE),
+               "client_dir": str(tmp_path / "client")}
+    receiver._write(root / "receiver.json", profile)
+    for name, body in receiver._unit_parts(root, profile).items():
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        target.write_text(body)
+        target.chmod(0o600)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    links = receiver._install_links(root, profile)
+    for link, target in links.items():
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(target)
+    receiver._write(root / "installation.json", {"format": 1, "state": "INSTALLED",
+                    "links": {str(p): str(t) for p, t in links.items()}})
+    return prefix, root, links
+
+
+def test_native_receiver_removal_requires_receiver_uninstall_first(native_receiver, monkeypatch):
+    from fake_linkplay import spotify_receiver as receiver
+
+    prefix, root, links = native_receiver
+    before = {str(p.relative_to(prefix)): p.read_bytes() for p in prefix.rglob("*") if p.is_file()}
+    # -I -S excludes both checkout imports and installed packages. The copied
+    # uninstaller must protect the independent command even without mpv running.
+    command = [sys.executable, "-I", "-S", str(prefix / "uninstall.py"), "--prefix", str(prefix), "--uninstall"]
+    assert not (prefix / "run/mpv.sock").exists()
+    for extra in (["--dry-run"], []):
+        result = subprocess.run(command + extra, text=True, capture_output=True, timeout=10)
+        assert result.returncode == 2 and "uninstall' command first" in result.stderr
+        assert {str(p.relative_to(prefix)): p.read_bytes() for p in prefix.rglob("*") if p.is_file()} == before
+        assert all(receiver._exact_link(p, t) for p, t in links.items())
+
+    calls = []
+    class StoppedServices:
+        def __init__(self, *_args): pass
+        def validate(self): return {}
+        def stop_all(self, _before): calls.append("confirmed stopped")
+        def command(self, *args): calls.append(args)
+    monkeypatch.setattr(receiver, "UserServices", StoppedServices)
+    assert receiver.uninstall(str(root))["installation"] == "UNINSTALLED"
+    assert calls == ["confirmed stopped", ("daemon-reload",)]
+    assert not any(os.path.lexists(p) for p in links)
+    result = subprocess.run(command, text=True, capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert not (prefix / "venv/bin/open-room-renderer").exists()
+    assert not (prefix / "source").exists()
+    assert (prefix / "config.yaml").is_file() and (root / "receiver.json").is_file()
+
+
+def test_native_receiver_does_not_block_unrelated_prefix(installer, native_receiver, tmp_path, monkeypatch):
+    prefix, _root, links = native_receiver
+    old = tmp_path / "r-old"
+    old.mkdir()
+    (old / "owned").write_text("old native installation")
+    installer.write_manifest(old)
+    # The explicit XDG location, not an unrelated default-home unit, is used.
+    home = tmp_path / "home"
+    default_unit = home / ".config/systemd/user/open-room-renderer-spotify.service"
+    default_unit.parent.mkdir(parents=True)
+    default_unit.symlink_to(tmp_path / "missing")
+    monkeypatch.setenv("HOME", str(home))
+    installer.uninstall(old, dry_run=False)
+    assert not old.exists()
+    assert (prefix / "venv/bin/open-room-renderer").is_file()
+    assert all(p.is_symlink() and os.readlink(p) == str(t) for p, t in links.items())
+    default_unit.unlink()
+    default_unit.symlink_to(links[next(iter(links))])
+    monkeypatch.delenv("XDG_CONFIG_HOME")
+    with pytest.raises(ValueError, match="uninstall.*first"):
+        installer.uninstall(prefix, dry_run=False)
+
+
+@pytest.mark.parametrize("damage", ["only-dropin", "dangling-unit", "changed-link", "replaced-link", "broken-metadata"])
+def test_native_receiver_incomplete_links_never_authorize_removal(installer, native_receiver, damage):
+    prefix, root, links = native_receiver
+    spotify, dropin = links
+    if damage == "only-dropin":
+        spotify.unlink()
+    else:
+        dropin.unlink()  # The remaining Spotify link alone must suffice.
+        if damage == "dangling-unit":
+            links[spotify].unlink()
+        elif damage == "changed-link":
+            spotify.unlink()
+            spotify.symlink_to(root / "changed.service")
+        elif damage == "replaced-link":
+            spotify.unlink()
+            spotify.write_text("replacement, preserve for manual review")
+        else:
+            (root / "receiver.json").write_text("{")
+    before = {str(p.relative_to(prefix)): p.read_bytes() for p in prefix.rglob("*") if p.is_file()}
+    with pytest.raises(ValueError, match="uninstall.*first"):
+        installer.uninstall(prefix, dry_run=False)
+    assert {str(p.relative_to(prefix)): p.read_bytes() for p in prefix.rglob("*") if p.is_file()} == before
+
+
 def test_uninstall_rejects_escape_before_any_deletion(installer, tmp_path):
     prefix = tmp_path / "p"
     prefix.mkdir()

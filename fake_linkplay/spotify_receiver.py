@@ -557,7 +557,7 @@ def status(directory: str, *, playback: bool = False) -> dict:
     return result
 
 
-def playback_control(directory: str, action: str, value: int | bool | None = None) -> dict:
+def playback_control(directory: str, action: str, value: int | bool | str | None = None) -> dict:
     from .spotify_playback import control, now_playing
     from .spotify_pairing import pairing_code
     root, profile = load_profile(directory, start="spotify")
@@ -961,6 +961,8 @@ def add_receiver_parser(commands) -> None:
     actions.add_parser("refresh-renderer", help="accept same-route native YAML edits after both owned services are stopped")
     boot = actions.add_parser("startup", help="explicitly select the next user-manager session; no immediate activation")
     boot.add_argument("selection", choices=("status", "renderer", "spotify", "off", "restore"))
+    play = actions.add_parser("play", help="launch a Spotify track, album or playlist URI from an already paired stopped session")
+    play.add_argument("value", metavar="SPOTIFY_URI")
     for action in ("pause", "resume"):
         actions.add_parser(action, help=f"request {action} from the already selected Spotify client")
     actions.add_parser("next", help="request the next track in Spotify's existing context; may resume paused playback")
@@ -997,7 +999,7 @@ def run_receiver(args: argparse.Namespace) -> int:
             result = status(args.directory, playback=args.playback)
         elif args.receiver_cmd == "startup":
             result = startup(args.directory, args.selection)
-        elif args.receiver_cmd in {"pause", "resume", "next", "previous", "seek", "volume", "now-playing", "pairing-code",
+        elif args.receiver_cmd in {"play", "pause", "resume", "next", "previous", "seek", "volume", "now-playing", "pairing-code",
                                     "repeat-context", "repeat-track", "shuffle"}:
             value = getattr(args, "value", None)
             if args.receiver_cmd in {"repeat-context", "repeat-track", "shuffle"}:

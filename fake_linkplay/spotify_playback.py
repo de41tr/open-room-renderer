@@ -1,7 +1,8 @@
 """Small one-shot requests over an established, owned IPv4 connection.
 
 Only the receiver calls this after validating its pinned configuration and
-service invocation. No authentication, activation, redirects or reconnects.
+service invocation. No authentication, redirects or reconnects. Explicit play
+can activate an already paired, playback-ready stopped session.
 """
 from __future__ import annotations
 
@@ -178,13 +179,19 @@ def now_playing(host: str, port: int, pid: str, validate_invocation: Callable[[]
         _fail("Spotify now-playing could not be read; no playback command was sent.")
 
 
-def control(host: str, port: int, pid: str, action: str, value: int | bool | None,
+def control(host: str, port: int, pid: str, action: str, value: int | bool | str | None,
             validate_invocation: Callable[[], None]) -> dict:
     option = {"repeat-context": "repeat_context", "repeat-track": "repeat_track",
               "shuffle": "shuffle_context"}.get(action)
-    if action not in {"pause", "resume", "next", "previous", "volume", "seek"} and option is None:
-        _fail("Use Spotify pause, resume, next, previous, volume, seek, repeat-context, repeat-track or shuffle.")
-    if option is not None:
+    if action not in {"play", "pause", "resume", "next", "previous", "volume", "seek"} and option is None:
+        _fail("Use Spotify play, pause, resume, next, previous, volume, seek, repeat-context, repeat-track or shuffle.")
+    if action == "play":
+        # A deliberately narrow content selector, never URLs, user collections,
+        # local files, encoded delimiters, credentials or a new queue model.
+        if (type(value) is not str or len(value) > 39
+                or not re.fullmatch(r"spotify:(?:track|album|playlist):[A-Za-z0-9]{22}", value)):
+            _fail("Use one canonical Spotify track, album or playlist URI with a 22-character base62 ID.")
+    elif option is not None:
         if type(value) is not bool:
             _fail("Spotify repeat-context, repeat-track and shuffle require explicit on or off.")
     elif action in {"volume", "seek"}:
@@ -196,7 +203,9 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | Non
     result = {"command": action, "request_outcome": "NOT_SENT", "provider_before": None,
               "provider_after": None, "observation": "sidecar_reported", "audio_output": "UNVERIFIED",
               "playback_effect": "UNVERIFIED"}
-    if action == "volume":
+    if action == "play":
+        result["requested_content_type"] = value.split(":")[1]
+    elif action == "volume":
         result["requested_volume"] = value
     elif action == "seek":
         result["requested_position_ms"] = value
@@ -205,13 +214,21 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | Non
     try:
         with _owned_connection(host, port, pid) as connection:
             validate_invocation()
+            if action == "play":
+                code, encoded = _request(connection, "GET", "/")
+                if code != 200 or _json_object(encoded).get("playback_ready") is not True:
+                    _fail("Spotify playback readiness was not confirmed; no play request was sent.")
+                result["provider_playback_ready"] = True
             result["provider_before"] = _status(connection, timing=action == "seek")
             before = result["provider_before"]["status"]
             if before is None:
                 _fail("Spotify has no session; no control was sent. Pair and select it yourself first.")
             if before["volume_steps"] != 100 or before["volume"] > 100:
                 _fail("Spotify volume does not match the pinned receiver configuration; no control was sent.")
-            if action != "volume" and before["stopped"]:
+            if action == "play":
+                if not before["stopped"] or before["buffering"]:
+                    _fail("Spotify must report a stopped, non-buffering session; no play request was sent.")
+            elif action != "volume" and before["stopped"]:
                 _fail("Spotify reports no active playback; no control was sent.")
             if action == "seek":
                 duration = before["duration_ms"]
@@ -226,6 +243,10 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | Non
                        if action in {"volume", "seek"} else None)
             if option is not None:
                 payload = {option: value}
+            elif action == "play":
+                # Pinned v0.10.3 resolves before taking over the device; its
+                # acknowledgement does not wait for the subsequent audio load.
+                payload = {"uri": value}
             endpoint = option or ("prev" if action == "previous" else action)
             code, _ = _request(connection, "POST", "/player/" + endpoint, payload)
             if code != 200:

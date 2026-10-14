@@ -274,6 +274,43 @@ discard seek/skip errors before returning HTTP 200, so an acknowledgement does
 not prove a seek or track change succeeded. These commands require existing
 playback (except volume); they do not pair, activate a device or launch a URI.
 
+To start an explicit item after pairing, while the selected Spotify receiver
+reports a stopped session:
+
+```sh
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" play "$SPOTIFY_URI"
+```
+
+Supply exactly `spotify:track:ID`, `spotify:album:ID` or `spotify:playlist:ID`,
+with a 22-character ASCII base62 ID. URLs, user/collection/local-content URIs,
+episodes, extra parameters and whitespace are refused. Syntax validation does
+not establish that content exists or is playable by the paired account.
+
+`play` uses the same owned connection and invocation/cgroup fences. It first
+requires `GET /` to report boolean `playback_ready: true`, then `/status` to
+report a present, stopped, non-buffering session and the pinned volume scale.
+It sends exactly one `POST /player/play` with only `uri`, followed by one
+sanitized status snapshot. The [pinned request/readiness schema](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/api-spec.yml)
+and [play handler](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/player.go#L705-L774)
+support this contract: context resolution precedes device takeover; subsequent
+loading is asynchronous and can still fail after HTTP 200.
+
+This can take Spotify playback over from another device and start sound at its
+current Spotify volume. Check that volume first. Playing a URI chooses a new
+Spotify context; upstream may retain queued tracks. This request sends no
+volume, shuffle or repeat changes, but upstream context restrictions can alter
+options. Another Spotify controller can race the stopped-state snapshot; the
+API has no atomic stopped-only condition.
+`ACKNOWLEDGED` is not playback, requested-item identity or audio confirmation.
+The command never retries, authenticates, starts a service or contacts ORR's
+queue. Its deadline does not cancel upstream work; inspect status before retrying
+an uncertain result. Account, hardware and provider-policy gates remain pending,
+and Spotify still bypasses ORR EQ/balance.
+
+Only the requested content type is returned, never its ID or URI. ORR does not
+save the selector; shell history/process arguments and the sidecar/provider
+may retain it. No content metadata is printed by `play`.
+
 To explicitly inspect the current track while the renderer UI is stopped:
 
 ```sh
