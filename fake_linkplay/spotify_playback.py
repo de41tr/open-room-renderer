@@ -1,4 +1,4 @@
-"""Small one-shot controls over an established, owned IPv4 connection.
+"""Small one-shot requests over an established, owned IPv4 connection.
 
 Only the receiver calls this after validating its pinned configuration and
 service invocation. No authentication, activation, redirects or reconnects.
@@ -112,40 +112,126 @@ def _request(connection: http.client.HTTPConnection, method: str, path: str,
         response.close()
 
 
-def _status(connection: http.client.HTTPConnection) -> dict:
+def _status(connection: http.client.HTTPConnection, *, timing: bool = False) -> dict:
     code, encoded = _request(connection, "GET", "/status")
-    return {"session_observation": "NO_SESSION" if code == 204 else "SESSION_PRESENT",
-            "status": None if code == 204 else _project_status(_json_object(encoded))}
+    if code == 204:
+        return {"session_observation": "NO_SESSION", "status": None}
+    value = _json_object(encoded)
+    status = _project_status(value)
+    if timing:
+        # Seek needs only numeric timing, never names, URIs or artwork.
+        track = value.get("track")
+        if track is not None and not isinstance(track, dict):
+            _fail("Spotify track timing could not be interpreted.")
+        for field in ("duration", "position"):
+            number = track.get(field) if track is not None else None
+            if number is not None and (type(number) is not int or not 0 <= number <= 2**63 - 1):
+                _fail("Spotify track timing could not be interpreted.")
+            status[field + "_ms"] = number
+    return {"session_observation": "SESSION_PRESENT", "status": status}
 
 
-def control(host: str, port: int, pid: str, action: str, value: int | None,
-            validate_invocation: Callable[[], None]) -> dict:
-    if action not in {"pause", "resume", "volume"} or (action == "volume" and
-            (type(value) is not int or not 0 <= value <= 100)) or (action != "volume" and value is not None):
-        _fail("Use Spotify pause, resume or an absolute volume from 0 to 100.")
-    result = {"command": action, "request_outcome": "NOT_SENT", "provider_before": None,
-              "provider_after": None, "observation": "sidecar_reported", "audio_output": "UNVERIFIED"}
-    if action == "volume":
-        result["requested_volume"] = value
+def _project_track(value: dict) -> dict:
+    """Explicit now-playing only: project v0.10.3 track fields, never URIs/artwork."""
+    track = value.get("track")
+    if track is None:
+        return {"track_observation": "NO_TRACK" if "track" in value else "UNKNOWN", "track": None}
+    if not isinstance(track, dict):
+        _fail("Spotify now-playing metadata could not be interpreted.")
+    result = {}
+    for source, target in (("name", "title"), ("album_name", "album")):
+        text = track.get(source)
+        if text is not None and not isinstance(text, str):
+            _fail("Spotify now-playing metadata could not be interpreted.")
+        result[target] = text or None
+    artists = track.get("artist_names")
+    if artists is not None and (not isinstance(artists, list) or
+                                any(not isinstance(artist, str) for artist in artists)):
+        _fail("Spotify now-playing metadata could not be interpreted.")
+    result["artists"] = artists
+    for source, target in (("duration", "duration_ms"), ("position", "position_ms")):
+        number = track.get(source)
+        if number is not None and (type(number) is not int or not 0 <= number <= 2**63 - 1):
+            _fail("Spotify now-playing metadata could not be interpreted.")
+        result[target] = number
+    return {"track_observation": "PRESENT", "track": result}
+
+
+def now_playing(host: str, port: int, pid: str, validate_invocation: Callable[[], None]) -> dict:
+    """One owned GET; return metadata only after the service fence still holds."""
     try:
         with _owned_connection(host, port, pid) as connection:
             validate_invocation()
-            result["provider_before"] = _status(connection)
+            code, encoded = _request(connection, "GET", "/status")
+            if code == 204:
+                observed = {"session_observation": "NO_SESSION", "status": None,
+                            "track_observation": "NO_TRACK", "track": None}
+            else:
+                value = _json_object(encoded)
+                observed = {"session_observation": "SESSION_PRESENT", "status": _project_status(value),
+                            **_project_track(value)}
+            validate_invocation()
+        return {"command": "now-playing", "observation": "sidecar_reported",
+                "listener_ownership": "owned_connection", "snapshot_freshness": "snapshot_only",
+                "audio_output": "UNVERIFIED", **observed}
+    except (OSError, http.client.HTTPException, SpotifyDiagnosticError):
+        _fail("Spotify now-playing could not be read; no playback command was sent.")
+
+
+def control(host: str, port: int, pid: str, action: str, value: int | bool | None,
+            validate_invocation: Callable[[], None]) -> dict:
+    option = {"repeat-context": "repeat_context", "repeat-track": "repeat_track",
+              "shuffle": "shuffle_context"}.get(action)
+    if action not in {"pause", "resume", "next", "previous", "volume", "seek"} and option is None:
+        _fail("Use Spotify pause, resume, next, previous, volume, seek, repeat-context, repeat-track or shuffle.")
+    if option is not None:
+        if type(value) is not bool:
+            _fail("Spotify repeat-context, repeat-track and shuffle require explicit on or off.")
+    elif action in {"volume", "seek"}:
+        maximum = 100 if action == "volume" else 2**63 - 1
+        if type(value) is not int or not 0 <= value <= maximum:
+            _fail("Use an absolute Spotify volume from 0 to 100 or a nonnegative int64 seek position in milliseconds.")
+    elif value is not None:
+        _fail("Spotify pause, resume, next and previous take no value.")
+    result = {"command": action, "request_outcome": "NOT_SENT", "provider_before": None,
+              "provider_after": None, "observation": "sidecar_reported", "audio_output": "UNVERIFIED",
+              "playback_effect": "UNVERIFIED"}
+    if action == "volume":
+        result["requested_volume"] = value
+    elif action == "seek":
+        result["requested_position_ms"] = value
+    elif option is not None:
+        result["requested_" + option] = value
+    try:
+        with _owned_connection(host, port, pid) as connection:
+            validate_invocation()
+            result["provider_before"] = _status(connection, timing=action == "seek")
             before = result["provider_before"]["status"]
             if before is None:
                 _fail("Spotify has no session; no control was sent. Pair and select it yourself first.")
             if before["volume_steps"] != 100 or before["volume"] > 100:
                 _fail("Spotify volume does not match the pinned receiver configuration; no control was sent.")
             if action != "volume" and before["stopped"]:
-                _fail("Spotify reports no active playback; no pause or resume was sent.")
+                _fail("Spotify reports no active playback; no control was sent.")
+            if action == "seek":
+                duration = before["duration_ms"]
+                if duration is None or duration <= 0:
+                    _fail("Spotify track duration is unknown; no seek was sent.")
+                if value > duration:
+                    _fail("Spotify seek exceeds the reported track duration; no seek was sent.")
             validate_invocation()
             result["request_outcome"] = "UNCONFIRMED"
-            code, _ = _request(connection, "POST", "/player/" + action,
-                               {"volume": value, "relative": False} if action == "volume" else None)
+            # v0.10.3 accepts a bodyless next/prev; never pass a content URI.
+            payload = ({"volume" if action == "volume" else "position": value, "relative": False}
+                       if action in {"volume", "seek"} else None)
+            if option is not None:
+                payload = {option: value}
+            endpoint = option or ("prev" if action == "previous" else action)
+            code, _ = _request(connection, "POST", "/player/" + endpoint, payload)
             if code != 200:
                 _fail("Spotify did not acknowledge the control.")
             result["request_outcome"] = "ACKNOWLEDGED"
-            result["provider_after"] = _status(connection)
+            result["provider_after"] = _status(connection, timing=action == "seek")
             validate_invocation()
     except (OSError, http.client.HTTPException, SpotifyDiagnosticError, ExclusiveProfileError) as exc:
         if result["request_outcome"] == "NOT_SENT":
@@ -153,5 +239,5 @@ def control(host: str, port: int, pid: str, action: str, value: int | None,
                 raise
             _fail("Spotify API ownership or status could not be read; no control was sent.")
         result["error"] = ("Spotify control or subsequent state was not confirmed. "
-                           "It may have taken effect; inspect status --playback before retrying.")
+                           "It may have taken effect; inspect status --playback or now-playing before retrying.")
     return result

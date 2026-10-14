@@ -167,9 +167,36 @@ independent CLI can request basic controls:
 "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" pause
 "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" resume
 "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" volume 5
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" next
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" previous
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" seek 45000
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" repeat-context on
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" repeat-track off
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" shuffle on
 ```
 
 Volume is absolute, 0..100, for the pinned setup's 100-step Spotify volume.
+Seek takes integer milliseconds (45000 = 45 seconds), from zero through the
+reported track duration. Invalid values, an unknown duration or a target beyond
+that duration are rejected before the POST. Seek snapshots include only numeric
+`duration_ms` and `position_ms`; absent values remain null. The track can change
+between the snapshot and request, so this is not a track-identity guarantee.
+`next` follows Spotify's existing context and **may resume paused playback**.
+`previous` normally rewinds the current track when more than three seconds in;
+otherwise it requests the previous track. Navigation may finish asynchronously
+or stop at a context boundary. There is no URI argument or ORR queue involved.
+
+`repeat-context`, `repeat-track` and `shuffle` require explicit `on` or `off`.
+They set the corresponding boolean; repeating the same command does not invert
+it. The repeat flags are independent, so setting one does not clear the other.
+The [pinned option handlers](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/controls.go#L1077-L1148)
+apply shuffle to the existing context without changing the current track.
+Shuffle needs a context and its reported flag can change before asynchronous
+reordering finishes, then revert on failure. Even a matching readback is only a
+snapshot, not proof that reshuffling completed. Only the existing projected
+playback booleans and volume fields are returned; no context/queue contents or
+track metadata are exposed by these controls.
+
 Controls validate the existing exclusive service invocation and configuration,
 then verify the established connection's accepted socket belongs to that client
 before sending HTTP. Inaccessible `/proc` ownership data blocks controls. No
@@ -179,8 +206,35 @@ reads; service checks retain their existing bounded timeouts. There is no retry.
 `request_outcome: ACKNOWLEDGED` means upstream returned HTTP 200, which does not
 guarantee the requested change: inspect the separately reported `provider_before`
 and `provider_after` states. Errors exit 1; an uncertain POST may already have
-taken effect. Inspect `status --playback` before retrying. Audio remains
-`UNVERIFIED`, and these controls neither pair/activate a device nor start content.
+taken effect. Inspect `status --playback` or explicitly `now-playing` before
+retrying. Audio and `playback_effect` remain `UNVERIFIED`. The pinned upstream
+[request handlers](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/player.go#L740-L762)
+discard seek/skip errors before returning HTTP 200, so an acknowledgement does
+not prove a seek or track change succeeded. These commands require existing
+playback (except volume); they do not pair, activate a device or launch a URI.
+
+To explicitly inspect the current track while the renderer UI is stopped:
+
+```sh
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" now-playing
+```
+
+This one-shot command uses the same owned connection and exclusive-service
+checks, sends only `GET /status`, and displays provider-reported playback state
+plus `track.title`, `artists`, `album`, `duration_ms` and `position_ms`. The
+[pinned upstream schema](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/api-spec.yml)
+supplies these from `name`, `artist_names`, `album_name`, `duration` and `position`.
+Position is a snapshot in milliseconds, not an extrapolated clock or evidence of
+DAC/audio output. `track_observation` is `NO_TRACK` for an explicit null track
+or no session, and `UNKNOWN` when the track field is absent; unavailable fields
+inside a reported track remain null. A failed ownership/service check or invalid
+response exits 1 without printing metadata or raw provider errors.
+
+Track names, artists and albums are shown only by this explicit command and are
+never saved or included in normal status/diagnostic output. Treat its terminal
+output as private listening history. No account/device identifiers, URIs, URLs, artwork or upcoming-track
+metadata are displayed or fetched separately. It does not watch, authenticate,
+activate playback, or contact the renderer UI.
 
 Return to ORR independently of Spotify or the stopped Web server:
 

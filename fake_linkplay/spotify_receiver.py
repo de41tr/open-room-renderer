@@ -495,18 +495,18 @@ def status(directory: str, *, playback: bool = False) -> dict:
     return result
 
 
-def playback_control(directory: str, action: str, value: int | None = None) -> dict:
-    from .spotify_playback import control
+def playback_control(directory: str, action: str, value: int | bool | None = None) -> dict:
+    from .spotify_playback import control, now_playing
     root, profile = load_profile(directory, start="spotify")
     with _lock(root, "control.lock"):
         services = UserServices(root, profile)
         states = services.validate()
         if states["spotify"]["ActiveState"] != "active" or not services.stopped(states["renderer"]):
-            fail("Select Spotify exclusively before using its playback controls; no control was sent.")
+            fail("Select Spotify exclusively before using its playback commands; no request was sent.")
         try:
             identity = services.wait_started("spotify")
         except ExclusiveProfileError:
-            fail("The owned Spotify process could not be confirmed; no control was sent.")
+            fail("The owned Spotify process could not be confirmed; no request was sent.")
 
         def validate_invocation() -> None:
             current = services.validate()
@@ -516,9 +516,12 @@ def playback_control(directory: str, action: str, value: int | None = None) -> d
                     or not services.cgroup_empty(current["renderer"]["ControlGroup"])
                     or (Path("/proc") / identity[1] / "cgroup").read_text().strip()
                        != "0::" + spotify["ControlGroup"]):
-                fail("The exclusive Spotify service invocation changed during the control request.")
+                fail("The exclusive Spotify service invocation changed during the playback request.")
 
-        result = control(profile["host"], profile["port"], identity[1], action, value, validate_invocation)
+        if action == "now-playing":
+            result = now_playing(profile["host"], profile["port"], identity[1], validate_invocation)
+        else:
+            result = control(profile["host"], profile["port"], identity[1], action, value, validate_invocation)
         return result | {"spotify_bypasses_orr_dsp": True, "gates": GATES}
 
 
@@ -716,8 +719,16 @@ def add_receiver_parser(commands) -> None:
         actions.add_parser(action)
     for action in ("pause", "resume"):
         actions.add_parser(action, help=f"request {action} from the already selected Spotify client")
+    actions.add_parser("next", help="request the next track in Spotify's existing context; may resume paused playback")
+    actions.add_parser("previous", help="request Spotify's previous track or rewind the current track after 3 seconds")
+    seek = actions.add_parser("seek", help="request an absolute position within Spotify's reported track duration")
+    seek.add_argument("value", type=int, metavar="MILLISECONDS")
+    actions.add_parser("now-playing", help="explicitly display the owned Spotify client's current track and playback state")
     volume = actions.add_parser("volume", help="set Spotify's own absolute volume; raise cautiously from zero")
     volume.add_argument("value", type=int, metavar="0..100")
+    for action in ("repeat-context", "repeat-track", "shuffle"):
+        option = actions.add_parser(action, help=f"set Spotify's {action} option for existing playback")
+        option.add_argument("value", choices=("on", "off"))
     change = actions.add_parser("switch", help="stop both complete services before starting one; off starts neither")
     change.add_argument("mode", choices=("renderer", "spotify", "off"))
     guard = actions.add_parser("run", help=argparse.SUPPRESS)
@@ -739,8 +750,12 @@ def run_receiver(args: argparse.Namespace) -> int:
             result = switch(args.directory, args.mode)
         elif args.receiver_cmd == "status":
             result = status(args.directory, playback=args.playback)
-        elif args.receiver_cmd in {"pause", "resume", "volume"}:
-            result = playback_control(args.directory, args.receiver_cmd, getattr(args, "value", None))
+        elif args.receiver_cmd in {"pause", "resume", "next", "previous", "seek", "volume", "now-playing",
+                                    "repeat-context", "repeat-track", "shuffle"}:
+            value = getattr(args, "value", None)
+            if args.receiver_cmd in {"repeat-context", "repeat-track", "shuffle"}:
+                value = value == "on"
+            result = playback_control(args.directory, args.receiver_cmd, value)
         elif args.receiver_cmd == "recover":
             result = recover(args.directory)
         elif args.receiver_cmd == "run":
