@@ -409,6 +409,126 @@ def test_recovery_does_not_reset_successful_inactive_peer(ready, monkeypatch):
 
 
 @pytest.fixture
+def refresh_services(ready, monkeypatch):
+    root, profile = receiver.load_profile(ready)
+    states = {mode: stopped() | {'Id': unit, 'LoadState': 'loaded', 'NeedDaemonReload': 'no',
+        'FragmentPath': profile['renderer_unit'] if mode == 'renderer' else str(root / unit),
+        'DropInPaths': str(root / (unit + '.d') / receiver.DROPIN) if mode == 'renderer' else '',
+        'KillMode': 'control-group', 'SendSIGKILL': 'yes', 'Restart': 'no', 'TimeoutStopUSec': '45s'}
+        for mode, unit in receiver.UNITS.items()}
+    busy, inspected = set(), []
+    monkeypatch.setattr(receiver.UserServices, 'show', lambda _self, mode: states[mode])
+    monkeypatch.setattr(receiver.UserServices, 'command', lambda *_args, **_kwargs: pytest.fail('service mutation'))
+    def empty(_self, group):
+        inspected.append(group)
+        return group not in busy
+    monkeypatch.setattr(receiver.UserServices, 'cgroup_empty', empty)
+    monkeypatch.setattr(receiver, 'probe_alsa', lambda *_args: pytest.fail('physical output probe'))
+    return states, busy, inspected
+
+
+def test_refresh_cli_changes_only_native_config_fingerprint_without_spotify(ready, refresh_services, monkeypatch, capsys):
+    profile = receiver._json(ready / 'receiver.json')
+    config = Path(profile['renderer_config'])
+    config.write_text(config.read_text() + '\n# Same direct output, edited native YAML.\n')
+    (ready / 'sidecar/config.yml').write_text('damaged config')
+    for name in ('sidecar/credentials.json', 'startup.json', 'installation.json', 'last-operation.json'):
+        (ready / name).write_text('preserve this private state\n')
+    receiver._write(ready / 'last-cgroups.json', {'renderer': 'saved-renderer', 'spotify': 'saved-spotify'})
+    states, _busy, inspected = refresh_services
+    states['renderer']['ControlGroup'] = 'current-renderer'
+    states['spotify']['ControlGroup'] = 'current-spotify'
+    before = {path: path.read_bytes() for path in ready.rglob('*') if path.is_file()}
+    monkeypatch.setattr(receiver, 'verify_client', lambda *_args: pytest.fail('Spotify health dependency'))
+    monkeypatch.setattr(receiver, '_check_mpv', lambda: pytest.fail('unrequested executable check'))
+    assert cli.main(['spotify', 'receiver', '--directory', str(ready), 'refresh-renderer']) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result == {'renderer_refresh': 'UPDATED', 'service_state': 'STOPPED',
+                      'services_started': False, 'audio_output': 'UNVERIFIED'}
+    updated = receiver._json(ready / 'receiver.json')
+    assert updated == profile | {'renderer': profile['renderer'] | {
+        'config_sha256': hashlib.sha256(config.read_bytes()).hexdigest()}}
+    assert ready.joinpath('receiver.json').stat().st_mode & 0o777 == 0o600
+    assert all(path.read_bytes() == data for path, data in before.items() if path.name != 'receiver.json')
+    assert inspected == ['current-renderer', 'saved-renderer', 'current-spotify', 'saved-spotify']
+    monkeypatch.setattr(receiver, '_write', lambda *_args: pytest.fail('unchanged refresh wrote metadata'))
+    assert receiver.refresh_renderer(str(ready))['renderer_refresh'] == 'UNCHANGED'
+    monkeypatch.setattr(receiver, '_check_mpv', lambda: None)
+    receiver.load_profile(ready, start='renderer')
+
+
+@pytest.mark.parametrize('case', ['active', 'result', 'job', 'current-cgroup', 'saved-cgroup', 'ownership', 'saved-record'])
+def test_refresh_refuses_unproven_stop_or_ownership_without_writes(ready, refresh_services, monkeypatch, case):
+    states, busy, _inspected = refresh_services
+    profile = receiver._json(ready / 'receiver.json')
+    config = Path(profile['renderer_config'])
+    config.write_text(config.read_text() + '\n# Edited YAML.\n')
+    saved = dict.fromkeys(receiver.UNITS, '')
+    if case == 'active':
+        states['spotify'].update(ActiveState='active', SubState='running', MainPID='42')
+    elif case == 'result':
+        states['renderer']['Result'] = 'timeout'
+    elif case == 'job':
+        states['spotify']['Job'] = '41'
+    elif case == 'current-cgroup':
+        states['renderer']['ControlGroup'] = 'current-descendant'
+        busy.add('current-descendant')
+    elif case == 'saved-cgroup':
+        saved['spotify'] = 'saved-descendant'
+        busy.add('saved-descendant')
+    elif case == 'ownership':
+        states['spotify']['NeedDaemonReload'] = 'yes'
+    else:
+        saved.pop('renderer')
+    receiver._write(ready / 'last-cgroups.json', saved)
+    before = (ready / 'receiver.json').read_bytes()
+    monkeypatch.setattr(receiver, '_write', lambda *_args: pytest.fail('unproven refresh wrote metadata'))
+    with pytest.raises(ExclusiveProfileError):
+        receiver.refresh_renderer(str(ready))
+    assert (ready / 'receiver.json').read_bytes() == before
+
+
+@pytest.mark.parametrize('case', ['route', 'unit', 'config-path', 'duplicate-yaml', 'invalid-yaml'])
+def test_refresh_rechecks_native_admission_and_refuses_migration(ready, refresh_services, monkeypatch, case):
+    profile = receiver._json(ready / 'receiver.json')
+    config = Path(profile['renderer_config'])
+    if case == 'route':
+        raw = json.loads(config.read_text())
+        config.write_text(json.dumps(raw | {'mpv_audio_device': 'alsa/hw:CARD=OTHER,DEV=0'}))
+    elif case == 'unit':
+        Path(profile['renderer_unit']).write_text('# Customized service\n')
+    elif case == 'config-path':
+        migrated = config.parent / 'migrated-profile'
+        migrated.mkdir(mode=0o700)
+        moved = migrated / 'config.yaml'
+        moved.write_bytes(config.read_bytes())
+        profile['renderer_config'] = str(moved)
+        Path(profile['renderer_unit']).write_text(receiver.user_unit(config.parent, config=moved))
+        receiver._write(ready / 'receiver.json', profile)
+    elif case == 'duplicate-yaml':
+        config.write_text('auto_spawn_mpv: true\nauto_spawn_mpv: false\n')
+    else:
+        config.write_text('auto_spawn_mpv: [unterminated\n')
+    before = (ready / 'receiver.json').read_bytes()
+    monkeypatch.setattr(receiver, '_write', lambda *_args: pytest.fail('unsupported refresh wrote metadata'))
+    with pytest.raises(ExclusiveProfileError, match='malformed' if case == 'invalid-yaml' else 'receiver setup'):
+        receiver.refresh_renderer(str(ready))
+    assert (ready / 'receiver.json').read_bytes() == before
+
+
+def test_refresh_requires_control_lock_and_changed_start_points_to_command(ready, refresh_services, monkeypatch):
+    profile = receiver._json(ready / 'receiver.json')
+    config = Path(profile['renderer_config'])
+    config.write_text(config.read_text() + '\n# Edited YAML.\n')
+    with pytest.raises(ExclusiveProfileError, match='--directory DIR refresh-renderer'):
+        receiver.load_profile(ready, start='renderer')
+    monkeypatch.setattr(receiver, '_write', lambda *_args: pytest.fail('locked refresh wrote metadata'))
+    with receiver._lock(ready, 'control.lock'):
+        with pytest.raises(ExclusiveProfileError, match='Another receiver operation'):
+            receiver.refresh_renderer(str(ready))
+
+
+@pytest.fixture
 def startup_ready(ready, monkeypatch, tmp_path):
     units, global_units, runtime_units = [tmp_path / name for name in ('user-units', 'global-units', 'runtime-units')]
     for path in (units, global_units, runtime_units):

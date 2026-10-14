@@ -24,6 +24,8 @@ import subprocess
 import sys
 import time
 
+from yaml import YAMLError
+
 from .native_profile import systemd_quote, user_unit
 from .spotify_client import fail, install_client, verify_client
 from .spotify_diagnostic import SpotifyDiagnosticClient, SpotifyDiagnosticError
@@ -153,7 +155,9 @@ def load_profile(directory: str | Path, *, start: str | None = None) -> tuple[Pa
         prefix = Path(profile["renderer_prefix"])
         actual = _renderer(prefix, Path(profile["renderer_config"]), Path(profile["renderer_unit"]), profile["port"])
         if actual != profile["renderer"]:
-            fail("The native renderer profile changed; reconfigure while both services are stopped.")
+            fail("The native renderer profile changed. For same-route YAML edits, stop both services, then run "
+                 "open-room-renderer spotify receiver --directory DIR refresh-renderer "
+                 "with DIR set to this receiver setup directory. Changed paths, unit or output require a fresh setup.")
         if start == "spotify":
             _, receipt = verify_client(profile["client_dir"])
             if receipt["binary_sha256"] != profile["client_sha256"]:
@@ -462,6 +466,43 @@ def recover(directory: str) -> dict:
         return result
 
 
+def refresh_renderer(directory: str) -> dict:
+    """Admit edited native YAML on the same route, without touching services."""
+    root = _path(directory)
+    with _lock(root, "control.lock"):
+        root, profile = load_profile(root)
+        guidance = ("Renderer refresh cannot change native paths, unit or ALSA output. "
+                    "Restore the owned paths/unit before receiver uninstall, then use receiver setup "
+                    "in a new private directory for the new profile.")
+        try:
+            actual = _renderer(Path(profile["renderer_prefix"]), Path(profile["renderer_config"]),
+                               Path(profile["renderer_unit"]), profile["port"])
+        except YAMLError:
+            fail("The edited native YAML is malformed; repair it before running refresh-renderer again.")
+        except ExclusiveProfileError as exc:
+            fail(str(exc) + " " + guidance)
+        previous = profile["renderer"]
+        if (type(previous) is not dict
+                or actual != previous | {"config_sha256": actual["config_sha256"]}):
+            fail(guidance)
+        services = UserServices(root, profile)
+        states = services.validate()
+        saved_path = root / "last-cgroups.json"
+        saved = _json(saved_path) if os.path.lexists(saved_path) else dict.fromkeys(UNITS, "")
+        if set(saved) != set(UNITS):
+            fail("The saved service cgroup record is incomplete; inspect the stopped setup before refreshing.")
+        for mode, info in states.items():
+            if (not services.stopped(info) or info["Result"] != "success"
+                    or not services.cgroup_empty(info["ControlGroup"])
+                    or not services.cgroup_empty(saved[mode])):
+                fail("Renderer refresh requires both owned services successfully stopped with empty complete cgroups; "
+                     "use receiver switch off, or receiver recover for a failed service, before refreshing.")
+        if actual != previous:
+            _write(root / "receiver.json", profile | {"renderer": actual})
+        return {"renderer_refresh": "UPDATED" if actual != previous else "UNCHANGED",
+                "service_state": "STOPPED", "services_started": False, "audio_output": "UNVERIFIED"}
+
+
 def status(directory: str, *, playback: bool = False) -> dict:
     root, profile = load_profile(directory)
     services = UserServices(root, profile)
@@ -497,6 +538,7 @@ def status(directory: str, *, playback: bool = False) -> dict:
 
 def playback_control(directory: str, action: str, value: int | bool | None = None) -> dict:
     from .spotify_playback import control, now_playing
+    from .spotify_pairing import pairing_code
     root, profile = load_profile(directory, start="spotify")
     with _lock(root, "control.lock"):
         services = UserServices(root, profile)
@@ -518,7 +560,9 @@ def playback_control(directory: str, action: str, value: int | bool | None = Non
                        != "0::" + spotify["ControlGroup"]):
                 fail("The exclusive Spotify service invocation changed during the playback request.")
 
-        if action == "now-playing":
+        if action == "pairing-code":
+            result = pairing_code(profile["host"], profile["port"], identity[1], validate_invocation)
+        elif action == "now-playing":
             result = now_playing(profile["host"], profile["port"], identity[1], validate_invocation)
         else:
             result = control(profile["host"], profile["port"], identity[1], action, value, validate_invocation)
@@ -893,6 +937,7 @@ def add_receiver_parser(commands) -> None:
                          help="also read a sanitized snapshot from the configured Spotify loopback API")
     for action in ("install", "uninstall", "recover"):
         actions.add_parser(action)
+    actions.add_parser("refresh-renderer", help="accept same-route native YAML edits after both owned services are stopped")
     boot = actions.add_parser("startup", help="explicitly select the next user-manager session; no immediate activation")
     boot.add_argument("selection", choices=("status", "renderer", "spotify", "off", "restore"))
     for action in ("pause", "resume"):
@@ -902,6 +947,7 @@ def add_receiver_parser(commands) -> None:
     seek = actions.add_parser("seek", help="request an absolute position within Spotify's reported track duration")
     seek.add_argument("value", type=int, metavar="MILLISECONDS")
     actions.add_parser("now-playing", help="explicitly display the owned Spotify client's current track and playback state")
+    actions.add_parser("pairing-code", help="display an already-issued temporary user code; no authentication start or retry")
     volume = actions.add_parser("volume", help="set Spotify's own absolute volume; raise cautiously from zero")
     volume.add_argument("value", type=int, metavar="0..100")
     for action in ("repeat-context", "repeat-track", "shuffle"):
@@ -930,7 +976,7 @@ def run_receiver(args: argparse.Namespace) -> int:
             result = status(args.directory, playback=args.playback)
         elif args.receiver_cmd == "startup":
             result = startup(args.directory, args.selection)
-        elif args.receiver_cmd in {"pause", "resume", "next", "previous", "seek", "volume", "now-playing",
+        elif args.receiver_cmd in {"pause", "resume", "next", "previous", "seek", "volume", "now-playing", "pairing-code",
                                     "repeat-context", "repeat-track", "shuffle"}:
             value = getattr(args, "value", None)
             if args.receiver_cmd in {"repeat-context", "repeat-track", "shuffle"}:
@@ -938,6 +984,8 @@ def run_receiver(args: argparse.Namespace) -> int:
             result = playback_control(args.directory, args.receiver_cmd, value)
         elif args.receiver_cmd == "recover":
             result = recover(args.directory)
+        elif args.receiver_cmd == "refresh-renderer":
+            result = refresh_renderer(args.directory)
         elif args.receiver_cmd == "run":
             run_guard(args.directory, args.mode)
             return 1  # exec never returns on success

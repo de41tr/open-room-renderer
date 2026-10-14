@@ -1,5 +1,6 @@
 """Real owned inert HTTP process; no Spotify daemon, session or audio."""
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
@@ -388,6 +389,20 @@ def run_peer(log, behavior):
                 self.wfile.write(encoded)
         def do_GET(self):
             self.record()
+            if behavior.startswith("pairing"):
+                if self.path == "/":
+                    self.respond({"playback_ready": False})
+                    return
+                if self.path == "/auth/code":
+                    expiry = datetime.now(timezone.utc) + timedelta(minutes=-1 if behavior == "pairing_expired" else 5)
+                    payload = {"code": "TEST-CODE", "url": "https://example.test/" + SECRET,
+                               "expires_at": expiry.isoformat()}
+                    if behavior == "pairing_bad_code": payload["code"] = "\x1b[31m" + SECRET
+                    if behavior == "pairing_bad_expiry": payload["expires_at"] = SECRET
+                    if behavior == "pairing_extra": payload.update(device_code=SECRET, access_token=SECRET, username=SECRET)
+                    code = {"pairing_absent": 204, "pairing_redirect": 302}.get(behavior, 200)
+                    self.respond(payload, code)
+                    return
             code = {"no_session": 204, "http_error": 401, "redirect": 302}.get(behavior, 200)
             self.respond(state, code)
         def do_POST(self):

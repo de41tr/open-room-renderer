@@ -187,13 +187,35 @@ and actual audio remain unverified. No metadata, authentication or playback
 commands are requested; no snapshot is saved.
 
 The first command can begin upstream's device-auth flow. **No login or account
-operation is performed by the installer or acceptance tests.** The operator
-personally retrieves the temporary code from the loopback API, opens the official
-[Spotify pairing page](https://www.spotify.com/pair), and approves their own
-account. Upstream documents `GET /auth/code` for that purpose. Do not publish its
-response or private `sidecar/` files. Normal ORR diagnostics never fetch that
-endpoint, tokens, usernames, track metadata or raw provider errors. Connect to
-the same account in the Spotify app and select the receiver after pairing.
+operation is performed by the installer or acceptance tests.** Once the operator
+has separately started Spotify, explicitly display its already-issued user code:
+
+```sh
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" pairing-code
+```
+
+This makes exactly one passive `GET /auth/code` through the same established
+connection ownership and service-invocation fences as the playback commands.
+The [pinned handler](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/api_server.go#L537-L546)
+only reads the pending challenge; it does not start or retry authentication.
+The [source mapping](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/app.go#L384-L398)
+exposes `UserCode`, never the OAuth device code or tokens. The command accepts
+only the pinned three-field contract, a short alphanumeric/hyphen user code
+(4..16 characters), and a timezone-qualified expiry no more than one hour away.
+Unexpected formats fail closed. `ABSENT`, `EXPIRED`, or a fixed unavailable
+error never initiates or retries a flow, opens a browser, polls, or starts a service.
+
+Only a current validated `user_code` and the fixed official
+[Spotify pairing destination](https://www.spotify.com/pair) are displayed.
+Spotify's [own instructions](https://support.spotify.com/cg-en/article/spotify-on-tv/)
+confirm that destination. The upstream URL is discarded, even if it contains
+the code. The operator personally opens the official page and approves their
+own account. The code may expire before use; no successful pairing is claimed.
+No code is saved by ORR; keep the terminal output private and do not publish it
+or private `sidecar/` files. Normal status, diagnostic and now-playing commands
+never fetch the pairing endpoint. Connect to the same account in the Spotify
+app and select the receiver after pairing. Account/provider/hardware gates stay
+open until their separate acceptance checks are completed.
 
 Spotify starts at **volume zero** on every service start. Raise its app volume
 carefully to a low listening level. No sound is claimed by an active process,
@@ -297,6 +319,32 @@ required. Network/session recovery inside upstream is not reimplemented; there
 is **no ORR/systemd automatic restart loop** (`Restart=no`). For a normal explicit
 restart, switch to the same mode again. Account renewal, outages and long-term
 unattended operation still need real acceptance.
+
+### After editing the native renderer YAML
+
+Receiver setup fingerprints the native YAML, so even a comment or port change
+requires explicit admission before the next start. For edits that keep the same
+native prefix, config/unit paths and direct ALSA output:
+
+```sh
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" switch off
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" refresh-renderer
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" switch renderer
+```
+
+`refresh-renderer` requires both exact owned services already inactive/dead with
+successful results, no PIDs/jobs, and empty current and saved cgroups including
+descendants. Use `recover` first if a failed service prevents that proof. It
+rechecks the strict native profile and updates only its YAML fingerprint in
+`receiver.json`. Sidecar configuration/credentials, client files, units, startup
+selection and other receipts are preserved. Refresh does not stop/start services,
+probe the device or require a working Spotify client/account. The next explicit
+switch still performs the normal stop and physical output-release checks.
+
+Changing the direct ALSA output or native paths/unit requires a fresh receiver
+setup. Restore the old owned paths/unit before `receiver uninstall`, then run
+`receiver setup` in a new private directory for the new profile. Refresh never
+migrates the sidecar or rewrites a service to match those changes.
 
 ## Ownership and failure contract
 
