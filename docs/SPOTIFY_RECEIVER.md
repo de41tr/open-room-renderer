@@ -52,6 +52,11 @@ can use the existing offline archive path instead.
 ELF class, machine, endianness, ARM EABI/hard-float flags and target loader are
 checked against the current native Python userspace. Cross-installation is not
 supported. A static ABI match does not prove target execution or dependencies.
+Receiver setup and every Spotify start also ask the native ELF loader to list
+the verified client's dependencies. This bounded check catches missing libraries
+and incompatible symbol versions without starting Spotify or touching its account
+configuration. The installer itself remains static; playback and hardware
+compatibility still need separate acceptance.
 
 The reviewed `go-librespot_linux_armv6.tar.gz` archive actually contains an
 **ELF32 ARM EABI5 hard-float** executable. Its `.ARM.attributes` declare
@@ -87,8 +92,9 @@ foreground/custom-service launch paths first. Retain your existing config/state.
    On verified native ARMv7 hard-float userspace, the selected archive is the
    generic `go-librespot_linux_armv6.tar.gz`, not the Raspberry-Pi-specific variant.
 
-3. Prepare a separate private receiver directory. No account, process or device
-   is touched by this step; it validates native files and client provenance:
+3. Prepare a separate private receiver directory. No account or audio device is
+   touched. It validates native files and provenance, and briefly runs the system
+   loader's dependency-listing mode without starting Spotify:
 
    ```sh
    "$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" setup \

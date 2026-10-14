@@ -1,19 +1,24 @@
-"""Pinned installation of the optional upstream Spotify executable.
+"""Pinned installation and native dependency checks for the optional client.
 
 Use a supplied archive or explicitly download the native official release.
-No client execution, credential operation, or Spotify request occurs here.
+Installation is static. Verification uses only the native loader's --list mode;
+no client daemon, credential operation, or Spotify request occurs here.
 """
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
+import re
 import stat
 import struct
+import subprocess
 import tarfile
+from typing import Iterator
 from urllib.parse import urljoin, urlsplit
 
 import aiohttp
@@ -87,7 +92,9 @@ async def _download_archive(machine: str) -> bytes:
         fail("Official client download was not completed within its limits; retry later or use --archive.")
 
 
-def _binary(path: Path) -> bytes:
+@contextmanager
+def _open_binary(path: Path) -> Iterator[tuple[int, bytes]]:
+    """Keep the checked file open so loader inspection cannot follow a path swap."""
     with _directory(path.parent) as parent:
         entry = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
         if not stat.S_ISREG(entry.st_mode):
@@ -101,7 +108,42 @@ def _binary(path: Path) -> bytes:
             data = handle.read(MAX_BINARY + 1)
             if len(data) > MAX_BINARY:
                 fail("Client file exceeds its size limit.")
-            return data
+            yield handle.fileno(), data
+
+
+def _binary(path: Path) -> bytes:
+    with _open_binary(path) as (_, data):
+        return data
+
+
+def _check_dependencies(fd: int, interpreter: str | None) -> None:
+    """List the independently pinned executable's libraries, never its entry point."""
+    if interpreter is None:
+        fail("The pinned client requires a native glibc loader for dependency inspection.")
+    try:
+        result = subprocess.run(
+            [interpreter, "--list", f"/proc/self/fd/{fd}"], pass_fds=(fd,),
+            env={"LC_ALL": "C"}, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, errors="replace", timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        fail("Native client dependency inspection did not complete; check the target ELF loader "
+             "and /proc availability, then retry receiver setup/start. No Spotify daemon was started.")
+    # glibc --list can exit zero despite unresolved libraries or symbol versions.
+    # Do not expose raw loader output, which can contain private filesystem paths.
+    output = result.stdout + "\n" + result.stderr
+    missing = sorted(set(re.findall(r"^\s*([A-Za-z0-9_.+-]+)\s+=> not found\s*$", output, re.MULTILINE)))
+    if "libasound.so.2" in missing or "libasound.so.2: cannot open shared object file" in output:
+        # Official package names: packages.debian.org/{bookworm,trixie} and
+        # packages.ubuntu.com/noble. Choose for the installed image, not the board.
+        fail("Client native dependency libasound.so.2 is missing. Install your distribution's native "
+             "ALSA runtime (Debian 12: libasound2; Debian 13/Ubuntu 24.04: libasound2t64), then retry "
+             "receiver setup/start. Do not copy shared libraries from another OS.")
+    versions = sorted(set(re.findall(r"version [`'](GLIBC_[0-9.]+)' not found", output)))
+    if missing or versions or result.returncode or result.stderr.strip() or "libasound.so.2 =>" not in result.stdout:
+        detail = ": " + ", ".join(missing + versions) if missing or versions else ""
+        fail(f"Client native dependencies could not be resolved{detail}. Use matching native glibc "
+             "and ALSA runtime packages from the target distribution, then retry receiver setup/start. "
+             "Do not copy shared libraries from another OS.")
 
 
 def elf_abi(data: bytes, machine: str) -> dict:
@@ -191,6 +233,7 @@ def install_client(archive: str | None, output_dir: str, *, download: bool = Fal
 
 
 def verify_client(directory: str | Path) -> tuple[Path, dict]:
+    """Check provenance/ABI and loader dependencies before setup or Spotify start."""
     root = _path(directory)
     receipt = json.loads(_read(root / "client-receipt.json"))
     machine = platform.machine().lower()
@@ -199,10 +242,11 @@ def verify_client(directory: str | Path) -> tuple[Path, dict]:
             or receipt.get("commit") != UPSTREAM_COMMIT or receipt.get("archive_sha256") != spec[1]):
         fail("Use an intact client installed from the pinned official archive.")
     binary = root / "go-librespot"
-    data = _binary(binary)
-    digest = hashlib.sha256(data).hexdigest()
-    if (digest != BINARY_SHA256.get(machine) or digest != receipt.get("binary_sha256")
-            or not os.access(binary, os.X_OK)):
-        fail("The installed client changed or is not executable; reinstall into a new directory.")
-    elf_abi(data, machine)
+    with _open_binary(binary) as (fd, data):
+        digest = hashlib.sha256(data).hexdigest()
+        if (digest != BINARY_SHA256.get(machine) or digest != receipt.get("binary_sha256")
+                or not os.access(binary, os.X_OK)):
+            fail("The installed client changed or is not executable; reinstall into a new directory.")
+        abi = elf_abi(data, machine)
+        _check_dependencies(fd, abi["interpreter"])
     return binary, receipt
