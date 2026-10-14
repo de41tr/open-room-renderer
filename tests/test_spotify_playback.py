@@ -282,6 +282,86 @@ def test_play_rechecks_invocation_after_readiness_and_status(
         assert records(log) == [["GET", "/", None], ["GET", "/status", None]]
 
 
+def test_enqueue_owned_cli_appends_one_track_without_echo_or_effect_claim(
+        ready, tmp_path, monkeypatch, capsys):
+    with peer(tmp_path) as (child, port, log):
+        configure_owned_peer(ready, monkeypatch, child, port)
+        monkeypatch.setattr(receiver, "_write", lambda *_args: pytest.fail("enqueue persisted metadata"))
+        monkeypatch.setattr(receiver, "probe_alsa", lambda *_args: pytest.fail("enqueue probed output"))
+        uri = "spotify:track:" + PLAY_ID
+        for paused in (False, True):
+            if paused:
+                receiver.playback_control(str(ready), "pause")
+            offset = len(records(log))
+            assert cli.main(["spotify", "receiver", "--directory", str(ready), "enqueue", uri]) == 0
+            captured = capsys.readouterr()
+            assert not captured.err and all(value not in captured.out for value in (uri, PLAY_ID, SECRET, "Synthetic track"))
+            result = json.loads(captured.out)
+            assert result["command"] == "enqueue" and result["requested_content_type"] == "track"
+            assert result["provider_playback_ready"] is True and result["request_outcome"] == "ACKNOWLEDGED"
+            before = result["provider_before"]["status"]
+            assert before["paused"] is paused and before["stopped"] is False
+            assert result["provider_after"]["status"] == before
+            # This existing inert peer ignores enqueue. A 200 and unchanged
+            # status prove neither append nor eventual playback or position.
+            assert result["queue_effect"] == result["playback_effect"] == result["audio_output"] == "UNVERIFIED"
+            assert result["spotify_bypasses_orr_dsp"] is True
+            assert records(log)[offset:] == [["GET", "/", None], ["GET", "/status", None],
+                ["POST", "/player/add_to_queue", {"uri": uri}], ["GET", "/status", None]]
+
+
+def test_enqueue_rejects_nontrack_or_noncanonical_selectors_before_connecting(monkeypatch):
+    monkeypatch.setattr(playback, "_owned_connection", lambda *_args: pytest.fail("invalid enqueue connected"))
+    uri = "spotify:track:" + PLAY_ID
+    for value in (None, True, "spotify:album:" + PLAY_ID, "spotify:playlist:" + PLAY_ID,
+                  "https://open.spotify.com/track/" + PLAY_ID, uri + "\n", uri[:-1], uri + "?" + SECRET):
+        with pytest.raises(ExclusiveProfileError, match="canonical Spotify track URI") as exc:
+            playback.control("127.0.0.1", 1, "1", "enqueue", value, lambda: None)
+        assert SECRET not in str(exc.value) and PLAY_ID not in str(exc.value)
+
+
+@pytest.mark.parametrize("behavior", ["not_ready", "no_session", "stopped", "buffering", "no_track"])
+def test_enqueue_requires_ready_existing_nonbuffering_playback(
+        ready, tmp_path, monkeypatch, capsys, behavior):
+    with peer(tmp_path, behavior) as (child, port, log):
+        configure_owned_peer(ready, monkeypatch, child, port)
+        assert cli.main(["spotify", "receiver", "--directory", str(ready),
+                         "enqueue", "spotify:track:" + PLAY_ID]) == 1
+        captured = capsys.readouterr()
+        assert not captured.out and captured.err and PLAY_ID not in captured.err and SECRET not in captured.err
+        expected = [["GET", "/", None], ["GET", "/status", None]]
+        assert records(log) == (expected[:1] if behavior == "not_ready" else expected)
+
+
+def test_enqueue_rechecks_invocation_before_mutation(tmp_path):
+    checks = []
+    def fence():
+        checks.append(True)
+        if len(checks) == 2:
+            raise ExclusiveProfileError("Fixture invocation changed.")
+    with peer(tmp_path) as (child, port, log):
+        with pytest.raises(ExclusiveProfileError, match="invocation changed"):
+            playback.control("127.0.0.1", port, str(child.pid), "enqueue", "spotify:track:" + PLAY_ID, fence)
+        assert records(log) == [["GET", "/", None], ["GET", "/status", None]]
+
+
+@pytest.mark.parametrize("behavior", ["drop", "close"])
+def test_enqueue_unknown_outcome_warns_about_duplicates_without_retry(
+        ready, tmp_path, monkeypatch, capsys, behavior):
+    with peer(tmp_path, behavior) as (child, port, log):
+        configure_owned_peer(ready, monkeypatch, child, port)
+        assert cli.main(["spotify", "receiver", "--directory", str(ready),
+                         "enqueue", "spotify:track:" + PLAY_ID]) == 1
+        captured = capsys.readouterr()
+        assert not captured.err and PLAY_ID not in captured.out and SECRET not in captured.out
+        result = json.loads(captured.out)
+        assert result["request_outcome"] == ("UNCONFIRMED" if behavior == "drop" else "ACKNOWLEDGED")
+        assert result["provider_after"] is None and result["queue_effect"] == "UNVERIFIED"
+        assert "inspect the queue in Spotify" in result["error"] and "duplicates" in result["error"]
+        assert records(log) == [["GET", "/", None], ["GET", "/status", None],
+            ["POST", "/player/add_to_queue", {"uri": "spotify:track:" + PLAY_ID}]]
+
+
 def test_owned_cli_next_previous_and_absolute_seek(ready, tmp_path, monkeypatch, capsys):
     with peer(tmp_path) as (child, port, log):
         configure_owned_peer(ready, monkeypatch, child, port)

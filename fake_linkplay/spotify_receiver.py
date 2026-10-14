@@ -174,17 +174,28 @@ def _check_mpv() -> None:
         fail("Receiver mode requires the distribution-owned /usr/bin/mpv executable.")
 
 
-def _check_spotify(root: Path, profile: dict) -> None:
-    """Validate the pinned client and unchanged private sidecar, not a start."""
+def _read_sidecar(root: Path, profile: dict) -> dict:
+    """Verify the pinned client and private sidecar without touching account state."""
     _, receipt = verify_client(profile["client_dir"])
     if receipt["binary_sha256"] != profile["client_sha256"]:
-        fail("The pinned client changed; reconfigure while both services are stopped.")
-    expected = _sidecar_config(root, profile)
-    actual = _json(root / "sidecar/config.yml")
-    if (actual != expected or ("bitrate" in actual and type(actual["bitrate"]) is not int)
-            or (root / "sidecar/config.yaml").exists()):
-        fail("The owned sidecar configuration changed or is shadowed by config.yaml.")
+        fail("The pinned client changed; restore the verified client before using this receiver setup.")
     _private_directory(root / "sidecar")
+    actual = _json(root / "sidecar/config.yml")
+    if (("bitrate" in actual and type(actual["bitrate"]) is not int)
+            or os.path.lexists(root / "sidecar/config.yaml")):
+        fail("The owned sidecar configuration changed or is shadowed by config.yaml.")
+    return actual
+
+
+def _same_config(actual: dict, expected: dict) -> bool:
+    # Do not equate JSON true/1 or integers/floats in otherwise fixed fields.
+    return json.dumps(actual, sort_keys=True) == json.dumps(expected, sort_keys=True)
+
+
+def _check_spotify(root: Path, profile: dict) -> None:
+    """Validate the pinned client and unchanged private sidecar, not a start."""
+    if not _same_config(_read_sidecar(root, profile), _sidecar_config(root, profile)):
+        fail("The owned sidecar configuration changed or is shadowed by config.yaml.")
 
 
 def load_profile(directory: str | Path, *, start: str | None = None) -> tuple[Path, dict]:
@@ -569,6 +580,59 @@ def refresh_renderer(directory: str) -> dict:
             _write(root / "receiver.json", profile | {"renderer": actual})
         return {"renderer_refresh": "UPDATED" if actual != previous else "UNCHANGED",
                 "service_state": "STOPPED", "services_started": False, "audio_output": "UNVERIFIED"}
+
+
+def configure(directory: str, *, name: str | None = None, bitrate: int | None = None) -> dict:
+    """Change only explicit Connect settings while both owned services are off."""
+    changes: dict[str, str | int] = {}
+    if name is not None:
+        changes["device_name"] = _device_name(name)
+    if bitrate is not None:
+        changes["preferred_bitrate"] = _preferred_bitrate(bitrate)
+    if not changes:
+        fail("Choose --name and/or --bitrate explicitly; omitted settings are retained.")
+    root = _path(directory)
+    with _lock(root, "control.lock"):
+        root, profile = load_profile(root)
+        updated = profile | changes
+        previous, desired = _sidecar_config(root, profile), _sidecar_config(root, updated)
+        actual = _read_sidecar(root, profile)
+        # One atomic sidecar replacement means the only recoverable split is
+        # the exact requested config alongside the previous profile. Refuse
+        # any retry that no longer describes that exact pending config.
+        if not (_same_config(actual, previous) or _same_config(actual, desired)):
+            fail("The owned sidecar configuration differs from both saved and requested settings. "
+                 "After an interrupted configure, repeat the same explicit --name/--bitrate settings.")
+        links = _install_links(root, profile)
+        installation = _json(root / "installation.json")
+        if (installation.get("state") != "INSTALLED"
+                or installation.get("links") != {str(p): str(t) for p, t in links.items()}
+                or any(not _exact_link(path, target) for path, target in links.items())):
+            fail("Receiver configure requires this setup's intact installed service links.")
+        services = UserServices(root, profile)
+        states = services.validate()
+        saved_path = root / "last-cgroups.json"
+        saved = _json(saved_path) if os.path.lexists(saved_path) else dict.fromkeys(UNITS, "")
+        if set(saved) != set(UNITS):
+            fail("The saved service cgroup record is incomplete; inspect the stopped setup before configuring.")
+        for mode, info in states.items():
+            if (not services.stopped(info) or info["Result"] != "success"
+                    or not services.cgroup_empty(info["ControlGroup"])
+                    or not services.cgroup_empty(saved[mode])):
+                fail("Receiver configure requires both owned services successfully stopped with empty complete cgroups; "
+                     "use receiver switch off, or receiver recover for a failed service, before configuring.")
+        changed = not _same_config(actual, desired) or updated != profile
+        # Sidecar first, with file+directory fsync before metadata replacement.
+        # An interrupted split fails normal Spotify admission; no rollback or
+        # automatic retry. Explicitly repeating these settings completes it.
+        if not _same_config(actual, desired):
+            _write(root / "sidecar/config.yml", desired)
+        if updated != profile:
+            _write(root / "receiver.json", updated)
+        return {"receiver_configuration": "UPDATED" if changed else "UNCHANGED",
+                "service_state": "STOPPED", "services_started": False,
+                "provider_settings": "UNVERIFIED",
+                "next": "Explicitly switch to Spotify when ready; verify settings in the real client."}
 
 
 def last_start_error(directory: str) -> dict:
@@ -1045,12 +1109,18 @@ def add_receiver_parser(commands) -> None:
     for action in ("install", "uninstall", "recover"):
         actions.add_parser(action)
     actions.add_parser("refresh-renderer", help="accept same-route native YAML edits after both owned services are stopped")
+    settings = actions.add_parser("configure", help="change this receiver's name and/or preferred bitrate while both owned services are stopped")
+    settings.add_argument("--name", help="Spotify Connect device name; omission keeps the saved name")
+    settings.add_argument("--bitrate", type=int, choices=(96, 160, 320),
+                          help="preferred Spotify bitrate in kbps; omission keeps the saved preference")
     boot = actions.add_parser("startup", help="explicitly select the next user-manager session; no immediate activation")
     boot.add_argument("selection", choices=("status", "renderer", "spotify", "off", "restore"))
     play = actions.add_parser("play", help="launch a Spotify track, album or playlist URI; stopped-only unless explicitly replacing")
     play.add_argument("value", metavar="SPOTIFY_URI")
     play.add_argument("--replace-current", action="store_true",
                       help="also allow playing or paused content to be replaced and played at the current Spotify volume")
+    enqueue = actions.add_parser("enqueue", help="append one track to Spotify's existing queue without starting or resuming playback")
+    enqueue.add_argument("value", metavar="SPOTIFY_TRACK_URI")
     for action in ("pause", "resume"):
         actions.add_parser(action, help=f"request {action} from the already selected Spotify client")
     actions.add_parser("next", help="request the next track in Spotify's existing context; may resume paused playback")
@@ -1093,7 +1163,7 @@ def run_receiver(args: argparse.Namespace) -> int:
             result = last_start_error(args.directory)
         elif args.receiver_cmd == "startup":
             result = startup(args.directory, args.selection)
-        elif args.receiver_cmd in {"play", "pause", "resume", "next", "previous", "seek", "volume", "now-playing", "pairing-code",
+        elif args.receiver_cmd in {"play", "enqueue", "pause", "resume", "next", "previous", "seek", "volume", "now-playing", "pairing-code",
                                     "repeat-context", "repeat-track", "shuffle"}:
             value = getattr(args, "value", None)
             if args.receiver_cmd in {"repeat-context", "repeat-track", "shuffle"}:
@@ -1107,6 +1177,8 @@ def run_receiver(args: argparse.Namespace) -> int:
             result = recover(args.directory)
         elif args.receiver_cmd == "refresh-renderer":
             result = refresh_renderer(args.directory)
+        elif args.receiver_cmd == "configure":
+            result = configure(args.directory, name=args.name, bitrate=args.bitrate)
         elif args.receiver_cmd == "run":
             run_guard(args.directory, args.mode)
             return 1  # exec never returns on success
@@ -1132,8 +1204,15 @@ def run_receiver(args: argparse.Namespace) -> int:
                 pass
         message = ("Receiver: " + str(exc) if isinstance(exc, ExclusiveProfileError) and not guard else
                    "Receiver operation failed; inspect private setup and service state. No playback success is claimed.")
+        if getattr(args, "receiver_cmd", None) == "configure" and not isinstance(exc, ExclusiveProfileError):
+            message = ("Receiver configure failed; inspect private setup and confirm both services stopped, "
+                       "then explicitly repeat the same --name/--bitrate settings. No automatic retry was issued.")
         print(message, file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print("Receiver interrupted; inspect service and playback status before retrying.", file=sys.stderr)
+        message = ("Receiver configure interrupted; confirm both services stopped, then explicitly repeat "
+                   "the same --name/--bitrate settings. No automatic retry was issued."
+                   if getattr(args, "receiver_cmd", None) == "configure" else
+                   "Receiver interrupted; inspect service and playback status before retrying.")
+        print(message, file=sys.stderr)
         return 130

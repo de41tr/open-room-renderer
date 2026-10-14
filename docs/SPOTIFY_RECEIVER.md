@@ -115,8 +115,9 @@ foreground/custom-service launch paths first. Retain your existing config/state.
    saved in private `receiver.json` and checked against the sidecar config before
    Spotify starts. Older profiles without this field keep the same default;
    loading them does not rewrite any files. Native room renames do not change
-   this label. Changing an existing installation's label requires an explicit
-   fresh setup in a new directory; setup never overwrites an existing directory.
+   this label. Use the stopped-only [`configure` command](#change-receiver-settings)
+   below to change an existing installation's label. Setup itself never
+   overwrites an existing directory.
 
    ORR accepts 1–128 printable Unicode characters without surrounding whitespace,
    preserving the text exactly. This is ORR's local bound, not a claimed Spotify
@@ -140,9 +141,9 @@ foreground/custom-service launch paths first. Retain your existing config/state.
    [loader](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/cmd/daemon/cli_config.go)
    loads a Go `int`, defaults to 160 and passes it to `daemon.Config.Bitrate`.
    Starts and current playback controls require the sidecar to match the saved
-   preference exactly. Changing it requires an explicit fresh setup in a new
-   directory; there is no runtime quality command. Account/provider and XU4 +
-   KA17 playback acceptance remain unverified.
+   preference exactly. Use the stopped-only [`configure` command](#change-receiver-settings)
+   below to change it in place; there is no runtime quality command.
+   Account/provider and XU4 + KA17 playback acceptance remain unverified.
 
 4. Review the generated unit/drop-in/config and stop the existing native user
    renderer. Then explicitly install the two exact service links:
@@ -341,7 +342,7 @@ report a present, non-buffering session and the pinned volume scale, plus stoppe
 state unless `--replace-current` was supplied.
 It sends exactly one `POST /player/play` with only `uri`, followed by one
 sanitized status snapshot. The [pinned request/readiness schema](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/api-spec.yml)
-and [play handler](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/player.go#L705-L774)
+and [play handler](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/player.go#L763-L838)
 support this contract: context resolution precedes device takeover; subsequent
 loading is asynchronous and can still fail after HTTP 200. The omitted `paused`
 field defaults to false. `--replace-current` changes only ORR's local admission
@@ -349,7 +350,7 @@ check, not the upstream payload.
 
 This can take Spotify playback over from another device and start sound at its
 current Spotify volume. Check that volume first. Playing a URI chooses a new
-Spotify context. The [pinned context loader](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/controls.go#L297-L377)
+Spotify context. The [pinned context loader](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/controls.go#L327-L411)
 retains upcoming queued tracks; this is not an instruction to clear Spotify's
 queue. The current stream can continue while the new context resolves. This
 request sends no volume, shuffle or repeat changes; existing options carry over
@@ -366,6 +367,47 @@ Only the requested content type and `replace_current` opt-in boolean describe
 the request in the result, never its ID or URI. ORR does not save the selector;
 shell history/process arguments and the sidecar/provider may retain it. No
 content metadata is printed by `play`.
+
+To append one track to the selected receiver's existing Spotify queue:
+
+```sh
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" enqueue "$SPOTIFY_TRACK_URI"
+```
+
+Supply exactly `spotify:track:ID` with a 22-character ASCII base62 ID. Albums,
+playlists, URLs and other selectors are refused. This requests one append to
+Spotify's existing queue, after already queued entries. It does not replace the
+current context, start/resume playback or clear the queue. Paused playback is
+eligible and is not deliberately resumed. Syntax validation does not establish
+that the requested track exists or can eventually play.
+
+`enqueue` uses the same pinned configuration, exclusive service invocation,
+cgroup and established-connection ownership checks. It requires boolean
+`playback_ready: true`, a present, non-stopped, non-buffering session with the
+pinned volume scale, and a current-track object. Buffering is refused because a
+context load can replace the list being mutated. These snapshots do not prove
+an upstream queue/context exists or prevent another controller from changing
+it before the request. No queue contents or current-track fields are returned.
+
+On that one connection it sends `GET /`, `GET /status`, exactly one
+`POST /player/add_to_queue` with only `uri`, then one sanitized `GET /status`.
+The [pinned HTTP handler](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/api_server.go#L743-L757)
+accepts a URI; the [player handler](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/player.go#L870-L872)
+acknowledges before the [asynchronous queue mutation](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/controls.go#L1150-L1181)
+finishes and even acknowledges when there is no context. The
+[track-list operation](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/tracks/tracks.go#L399-L406)
+appends rather than replacing existing entries. `ACKNOWLEDGED`, including an
+unchanged status readback, proves neither append, queue position nor eventual
+playback. `queue_effect`, `playback_effect` and audio remain `UNVERIFIED`.
+
+The existing one-deadline, no-reconnect and no-retry policy applies. A timeout
+does not cancel upstream work. Inspect the queue in the Spotify app before
+retrying an uncertain enqueue: another request can add a duplicate, and ORR's
+status/now-playing commands cannot confirm queue contents. ORR adds no queue
+model, listing, persistence, authentication, service activation or play request.
+Only `requested_content_type: track` describes the selection in its output,
+never the ID/URI; shell history/process arguments and Spotify may retain it.
+Account, provider-policy and hardware acceptance gates remain open.
 
 To explicitly inspect the current track while the renderer UI is stopped:
 
@@ -436,6 +478,51 @@ not evidence of successful startup. Errors after the native exec, or before the
 Python guard starts, are outside this record; inspect service state too. Invalid,
 oversized, legacy free-text or unsafe-file records fail closed without displaying
 their contents. Reads never repair records, start services or contact a provider.
+
+### Change receiver settings
+
+An existing installed receiver can keep its private directory and pairing state
+while changing its Connect display name and/or preferred bitrate:
+
+```sh
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" switch off
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" configure \
+  --name "Studio Spotify" --bitrate 320
+# When ready for a separate explicit start, under the account/hardware gates:
+"$ORR" spotify receiver --directory "$HOME/.local/share/orr-spotify" switch spotify
+```
+
+Supply at least one of `--name` or `--bitrate`; omitted settings are preserved,
+including legacy implicit defaults. The setup name rules and bitrate choices
+96/160/320 apply. There is no reset-to-default action. Repeating already-saved
+settings is a validated no-op.
+
+`configure` requires the exact installed links and loaded owned units, both
+services already inactive/dead with successful results, no PIDs/jobs, and empty
+current and saved cgroups including descendants. Use `recover` first for a failed
+service. It holds the existing control lock, verifies the pinned client and
+private sidecar configuration, and changes only the selected fields in
+`receiver.json` and `sidecar/config.yml`. Credentials, saved device identity and
+other sidecar state are never read or written. Native paths/output, client/version,
+service units, startup selection and all other settings are retained. It does
+not stop/start services, contact Spotify, pair again or probe an audio device;
+client verification may run the native loader's dependency-listing mode.
+
+Each file replacement is atomic and synced, with the sidecar written first.
+The pair is not one atomic filesystem transaction. If interrupted between the
+two replacements, normal Spotify starts remain blocked by the mismatched files;
+off and the independently validated renderer return remain available. Explicitly
+repeat the same selected settings to finish. The command accepts only the exact
+saved sidecar or the exact sidecar requested by those settings. A retry that no
+longer describes the pending config, or an unrelated manual change, is refused.
+There is no rollback, automatic retry, journal or general config repair. Do not
+edit these files or start services through another path concurrently.
+
+Success reports saved local configuration with provider settings `UNVERIFIED`.
+An explicit later start still performs every existing native-profile, sidecar,
+ownership and output-release check. It is not evidence that Spotify displays the
+new label or delivers the chosen bitrate; those need separate real acceptance.
+The change does not refresh an edited native YAML fingerprint.
 
 ### After editing the native renderer YAML
 
@@ -529,7 +616,10 @@ and re-review the provider/target gates; no automatic binary updates are install
   lifecycle, independent return path, private state and retained-state removal.
 - Focused synthetic contract tests cover stop-before-start, unknown stop/start,
   failed metadata writes, broken-Spotify return, private locks and interrupted
-  installation. These are not physical or account tests.
+  installation. Stopped-only configuration tests cover retained private identity
+  and credentials, exact installation/stop proof, interrupted pair writes and
+  explicit same-settings retry, and rejection of unrelated edits. These are not
+  physical or account tests.
 - `tools/acceptance_spotify_receiver.py` requires **real systemd user services and
   cgroup v2**. It runs real parent/child processes writing synthetic PCM under an
   exclusive file lock, exercising switching, competing callers, foreign ownership,

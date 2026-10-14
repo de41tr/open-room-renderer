@@ -114,12 +114,15 @@ def _request(connection: http.client.HTTPConnection, method: str, path: str,
         response.close()
 
 
-def _status(connection: http.client.HTTPConnection, *, timing: bool = False) -> dict:
+def _status(connection: http.client.HTTPConnection, *, timing: bool = False,
+            require_track: bool = False) -> dict:
     code, encoded = _request(connection, "GET", "/status")
     if code == 204:
         return {"session_observation": "NO_SESSION", "status": None}
     value = _json_object(encoded)
     status = _project_status(value)
+    if require_track and not isinstance(value.get("track"), dict):
+        _fail("Spotify must report a current track; no enqueue request was sent.")
     if timing:
         # Seek needs only numeric timing, never names, URIs or artwork.
         track = value.get("track")
@@ -186,14 +189,18 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | str
         _fail("Spotify replace-current is a boolean opt-in for play only.")
     option = {"repeat-context": "repeat_context", "repeat-track": "repeat_track",
               "shuffle": "shuffle_context"}.get(action)
-    if action not in {"play", "pause", "resume", "next", "previous", "volume", "seek"} and option is None:
-        _fail("Use Spotify play, pause, resume, next, previous, volume, seek, repeat-context, repeat-track or shuffle.")
+    if action not in {"play", "enqueue", "pause", "resume", "next", "previous", "volume", "seek"} and option is None:
+        _fail("Use Spotify play, enqueue, pause, resume, next, previous, volume, seek, repeat-context, repeat-track or shuffle.")
     if action == "play":
         # A deliberately narrow content selector, never URLs, user collections,
         # local files, encoded delimiters, credentials or a new queue model.
         if (type(value) is not str or len(value) > 39
                 or not re.fullmatch(r"spotify:(?:track|album|playlist):[A-Za-z0-9]{22}", value)):
             _fail("Use one canonical Spotify track, album or playlist URI with a 22-character base62 ID.")
+    elif action == "enqueue":
+        if (type(value) is not str or len(value) != 36
+                or not re.fullmatch(r"spotify:track:[A-Za-z0-9]{22}", value)):
+            _fail("Use one canonical Spotify track URI with a 22-character base62 ID.")
     elif option is not None:
         if type(value) is not bool:
             _fail("Spotify repeat-context, repeat-track and shuffle require explicit on or off.")
@@ -209,6 +216,9 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | str
     if action == "play":
         result["requested_content_type"] = value.split(":")[1]
         result["replace_current"] = replace_current
+    elif action == "enqueue":
+        result["requested_content_type"] = "track"
+        result["queue_effect"] = "UNVERIFIED"
     elif action == "volume":
         result["requested_volume"] = value
     elif action == "seek":
@@ -218,12 +228,12 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | str
     try:
         with _owned_connection(host, port, pid) as connection:
             validate_invocation()
-            if action == "play":
+            if action in {"play", "enqueue"}:
                 code, encoded = _request(connection, "GET", "/")
                 if code != 200 or _json_object(encoded).get("playback_ready") is not True:
-                    _fail("Spotify playback readiness was not confirmed; no play request was sent.")
+                    _fail(f"Spotify playback readiness was not confirmed; no {action} request was sent.")
                 result["provider_playback_ready"] = True
-            result["provider_before"] = _status(connection, timing=action == "seek")
+            result["provider_before"] = _status(connection, timing=action == "seek", require_track=action == "enqueue")
             before = result["provider_before"]["status"]
             if before is None:
                 _fail("Spotify has no session; no control was sent. Pair and select it yourself first.")
@@ -236,6 +246,10 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | str
                     _fail("Spotify must report a stopped session; use play --replace-current to replace playing or paused content.")
             elif action != "volume" and before["stopped"]:
                 _fail("Spotify reports no active playback; no control was sent.")
+            if action == "enqueue" and before["buffering"]:
+                # Upstream can acknowledge a missing/replaced context. Avoid
+                # observed loads, but a racing controller can still replace it.
+                _fail("Spotify must report a non-buffering session; no enqueue request was sent.")
             if action == "seek":
                 duration = before["duration_ms"]
                 if duration is None or duration <= 0:
@@ -253,7 +267,11 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | str
                 # Pinned v0.10.3 resolves before taking over the device; its
                 # acknowledgement does not wait for the subsequent audio load.
                 payload = {"uri": value}
-            endpoint = option or ("prev" if action == "previous" else action)
+            elif action == "enqueue":
+                # This appends to upstream's existing queue asynchronously;
+                # a 200 does not prove that the track was actually added.
+                payload = {"uri": value}
+            endpoint = option or {"previous": "prev", "enqueue": "add_to_queue"}.get(action, action)
             code, _ = _request(connection, "POST", "/player/" + endpoint, payload)
             if code != 200:
                 _fail("Spotify did not acknowledge the control.")
@@ -265,6 +283,10 @@ def control(host: str, port: int, pid: str, action: str, value: int | bool | str
             if isinstance(exc, ExclusiveProfileError):
                 raise
             _fail("Spotify API ownership or status could not be read; no control was sent.")
-        result["error"] = ("Spotify control or subsequent state was not confirmed. "
-                           "It may have taken effect; inspect status --playback or now-playing before retrying.")
+        if action == "enqueue":
+            result["error"] = ("Spotify enqueue or subsequent state was not confirmed. "
+                               "It may have added the track; inspect the queue in Spotify before retrying to avoid duplicates.")
+        else:
+            result["error"] = ("Spotify control or subsequent state was not confirmed. "
+                               "It may have taken effect; inspect status --playback or now-playing before retrying.")
     return result
