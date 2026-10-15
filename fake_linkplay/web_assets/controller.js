@@ -547,7 +547,7 @@
         const body = response.body, ids = new Set();
         if (response.status !== 200 || !isObject(body) || body.session_id !== this.session || !Array.isArray(body.stations) || body.stations.length > 20) throw new Error();
         for (const station of body.stations) {
-          if (!isObject(station) || !/^[0-9a-f]{32}$/.test(station.id) || ids.has(station.id) || !string(station.name) || !station.name.trim() || station.name.length > 256 || !string(station.country) || !/^(?:[A-Z]{2})?$/.test(station.country) || !["MP3", "AAC", "AAC+"].includes(station.codec) || !integer(station.bitrate) || station.bitrate > 10000) throw new Error();
+          if (!isObject(station) || !/^[0-9a-f]{32}$/.test(station.id) || ids.has(station.id) || !string(station.name) || !station.name.trim() || station.name.length > 256 || !string(station.country) || !/^(?:[A-Z]{2})?$/.test(station.country) || !["MP3", "AAC", "AAC+", "OGG"].includes(station.codec) || !integer(station.bitrate) || station.bitrate > 10000) throw new Error();
           ids.add(station.id);
         }
         this.stations = body.stations;

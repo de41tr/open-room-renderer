@@ -2388,8 +2388,9 @@ test('radio search is single-shot, bounded, and never sends a playback command',
   assert.equal(calls.length, 1); assert.equal(calls[0].path, '/orr/v1/web/radio/search');
   assert.deepEqual(calls[0].options.body, {action: 'search', name: 'Synthetic', country: 'DE'});
   const station = {id: 'a'.repeat(32), name: 'Synthetic <radio>', country: 'DE', codec: 'MP3', bitrate: 128};
-  wait.resolve({status: 200, body: {session_id: 'session-one', stations: [station]}});
-  await first; assert.deepEqual(search.stations, [station]); assert.equal(search.pending, false);
+  const ogg = {...station, id: 'b'.repeat(32), codec: 'OGG'};
+  wait.resolve({status: 200, body: {session_id: 'session-one', stations: [station, ogg]}});
+  await first; assert.deepEqual(search.stations, [station, ogg]); assert.equal(search.pending, false);
 });
 test('cleared or restarted radio search cannot restore late results', async () => {
   const {RadioSearch} = require('../fake_linkplay/web_assets/controller.js');

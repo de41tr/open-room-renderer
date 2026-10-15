@@ -3145,9 +3145,13 @@ class HttpApi:
             options.update(LIVE_STATION_HISTORY_OPTIONS)
         if station_from_reference(original_url):
             # A misleading catalog entry must never become an mpv playlist
-            # with arbitrary nested URLs. Explicitly force raw audio decoding.
+            # with arbitrary nested URLs. Force an admitted audio/container
+            # demuxer; an unknown content type must never enable auto-probing.
+            formats = {"audio/mpeg": "mp3", "audio/aac": "aac", "audio/ogg": "ogg"}
+            if item is None or item.content_type not in formats:
+                raise BackendError("Unsupported radio catalog format")
             options.update({"demuxer": "lavf", "demuxer-lavf-format":
-                            "aac" if item and item.content_type == "audio/aac" else "mp3", "ytdl": "no"})
+                            formats[item.content_type], "ytdl": "no"})
         return options
 
     async def _apply_station_child_history_locked(self, generation: int, snapshot: dict) -> bool:
@@ -3274,8 +3278,11 @@ class HttpApi:
         if station_id.startswith("rb:"):
             try:
                 station = await resolve_catalog_station(station_id[3:], count_click=catalog_click)
-                return RadioResolution(station.url, station_id,
-                    content_type="audio/mpeg" if station.codec == "MP3" else "audio/aac")
+                content_types = {"MP3": "audio/mpeg", "AAC": "audio/aac",
+                                 "AAC+": "audio/aac", "OGG": "audio/ogg"}
+                if station.codec not in content_types:
+                    raise CatalogError("Unsupported radio catalog format")
+                return RadioResolution(station.url, station_id, content_type=content_types[station.codec])
             except CatalogError:
                 raise RadioResolutionError("Public station resolution failed") from None
         return await resolve_station(station_id)

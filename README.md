@@ -99,7 +99,8 @@ In the existing web UI, use **Internet radio** to search Radio-Browser by statio
 name and optional two-letter country code. Choose **Play** to replace the current
 queue, or **Save favorite** to keep the station in the existing favorites library.
 No account is needed. This independent community catalog supports direct MP3/AAC
-streams; it does not implement WiiM Radio or the TuneIn catalog. See
+and Ogg container streams (chained Vorbis verified). It does not implement WiiM
+Radio or the TuneIn catalog. See
 [radio catalog behavior, privacy and verification](docs/RADIO_CATALOG.md).
 
 ## What It Is Not

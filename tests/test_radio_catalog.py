@@ -10,6 +10,7 @@ import pytest
 
 from fake_linkplay import radio_catalog as catalog
 from fake_linkplay.canonical_target import canonical_target_url
+from fake_linkplay.mpv_backend import BackendError
 from fake_linkplay.network_policy import NetworkPolicyError
 from fake_linkplay.state import PlaybackPhase
 from fake_linkplay.web_ui import PREFIX
@@ -44,6 +45,12 @@ async def test_directory_search_bounds_filters_and_mirror_fallback(monkeypatch):
     with pytest.raises(catalog.CatalogError):
         await catalog.search_stations("x", "DE")
     assert fetch.await_count == 2
+    for codec in ("MP3", "AAC", "AAC+", "OGG"):
+        assert catalog._stations(json.dumps([provider_row(codec=codec)]).encode()) == [replace(STATION, codec=codec)]
+    for codec in ("VORBIS", "OPUS", "FLAC", "ogg", "Ogg", "audio/ogg", "unknown", ""):
+        assert catalog._stations(json.dumps([provider_row(codec=codec)]).encode()) == []
+    for changes in ({"hls": 1}, {"lastcheckok": 0}, {"url_resolved": "file:///station.ogg"}):
+        assert catalog._stations(json.dumps([provider_row(codec="OGG", **changes)]).encode()) == []
     for raw in (b"{}", b"[]" * (catalog.MAX_BYTES // 2 + 1), json.dumps([provider_row()] * 21).encode()):
         with pytest.raises(catalog.CatalogError):
             catalog._stations(raw)
@@ -85,8 +92,15 @@ async def test_real_http_search_save_play_recall_uses_existing_owners(api, monke
         assert options["demuxer-lavf-format"] == "mp3" and options["demuxer"] == "lavf"
         assert api.state.queue.current.stream_type == "station"
         await command(session, base, before["csrf_token"], {"action": "stop"})
+        resolve.return_value = replace(STATION, codec="OGG", url="https://media.example.test/live.ogg")
         status, _ = await command(session, base, before["csrf_token"], {"action": "favorite_play", "id": saved["favorite_id"]})
         assert status == 200 and resolve.await_count == 2
+        assert api.state.queue.current.content_type == "audio/ogg"
+        assert api.mpv.loadfile.call_args.args[1]["demuxer-lavf-format"] == "ogg"
+        assert api.mpv.loadfile.call_args.args[1]["ytdl"] == "no"
+        api.state.queue.current.content_type = "application/octet-stream"
+        with pytest.raises(BackendError, match="Unsupported radio catalog format"):
+            api._mpv_playback_options(STATION.reference, api.state.queue.current.resolved_url)
 
 
 async def test_search_admission_busy_failure_and_expired_selection(api, monkeypatch):

@@ -23,7 +23,7 @@ DEADLINE = 12
 _UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z")
 _MIRROR = re.compile(r"[a-z0-9-]+\.api\.radio-browser\.info\Z")
 _REFERENCE = "https://www.radio-browser.info/history/"
-_FORMATS = {"MP3": "mp3", "AAC": "aac", "AAC+": "aac"}
+_FORMATS = {"MP3", "AAC", "AAC+", "OGG"}
 
 
 class CatalogError(ValueError):
@@ -170,7 +170,7 @@ async def resolve_station(station_id: str, *, count_click: bool = False) -> Cata
             stations, mirror = await _query("/json/stations/byuuid/" + station_id)
             station = next((item for item in stations if item.uuid == station_id), None)
             if station is None:
-                raise CatalogError("Radio station has no supported direct MP3/AAC stream")
+                raise CatalogError("Radio station has no supported direct MP3/AAC/Ogg stream")
             await resolve_proxy_target(station.url)
 
     except (TimeoutError, ClientError, OSError, ValueError) as exc:

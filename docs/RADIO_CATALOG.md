@@ -43,8 +43,11 @@ cleanup. If that optional listener fails, ordinary renderer startup continues
 and catalog playback is unavailable until the startup error is corrected.
 Every upstream redirect is pinned
 and validated against public-only addresses; the configured LAN exception does
-not apply. The player is restricted to raw MP3/AAC demuxers for these references.
-HLS, nested playlists and other formats are intentionally unsupported. Ordinary
+not apply. The player is restricted to explicit MP3, AAC or Ogg demuxers for these
+references; unknown content types fail closed. The exact provider label `OGG`
+admits the Ogg container family, with chained Vorbis verified. This does not
+claim every embedded codec works or separate Opus/FLAC support. HLS, nested
+playlists and other provider format labels are intentionally unsupported. Ordinary
 manual URLs and the existing TuneIn resolver retain their previous behavior.
 
 ## Evidence and limits
@@ -53,9 +56,11 @@ manual URLs and the existing TuneIn resolver retain their previous behavior.
   admission, favorites and canonical queue ownership, expiry, source rejection,
   and Stop superseding a pending station lookup.
 - `tests/test_libmpv_radio_catalog.py`: opt-in real HTTP/proxy and libmpv/null
-  decoding of generated MP3, favorite recall after a changed AAC URL/codec, and
-  rejection of a misleading M3U without fetching its nested target. Directory
-  data/DNS are synthetic; the decoder is real. This is not production Unix IPC.
+  decoding of generated MP3, favorite recall after changed AAC and Ogg URLs/codecs,
+  and advancing chained Vorbis across a title change through one selected-source
+  request. Misleading M3U bodies fail under MP3 and OGG admission without fetching
+  a nested target. Directory data/DNS are synthetic; the decoder is real. This is
+  not production Unix IPC.
 - The existing hosted Chrome lane additionally checks the genuine desktop/mobile
   UI's search → save → play flow, pending-search Clear, and directory failure,
   using generated MP3, a synthetic directory and production Unix IPC/null output.
