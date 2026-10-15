@@ -35,6 +35,7 @@ from aiohttp import ClientTimeout, TCPConnector
 from aiohttp import web
 
 from . import eq_presets
+from . import diagnostics as diagnostic
 from .eq_presets import DEFAULT_EQ_BAND_FREQS, DEFAULT_EQ_PLUGIN, EqPresetLibrary
 from .capabilities import capability_fields, configured_sources, service_capability
 from .eventing import EventSubscriber, EventSubscriptionManager
@@ -196,6 +197,10 @@ class HttpApi:
         # None reuses the main IPv4 listener; zero means optional setup failed.
         self.catalog_proxy_port: int | None = None
         self.state = state
+        try:
+            self.diagnostics = diagnostic.Diagnostics(cfg.state_dir, lambda: self.state)
+        except Exception:
+            self.diagnostics = None  # Diagnostics must never refuse renderer startup.
         self.favorites = FavoritesStore(cfg)
         self.state.preset_view = lambda: self.favorites.effective_presets()
         self.favorites_api = FavoritesApi(self.favorites, lambda: self.state.queue.current,
@@ -516,6 +521,7 @@ class HttpApi:
                     await asyncio.gather(*seek_tasks, return_exceptions=True)
                 recovery_task = self._station_recovery_task
                 await self._eventing.close()
+                diagnostic.safe(self, "close")
                 task, self._state_monitor_task = self._state_monitor_task, None
                 task.cancel()
                 try:
@@ -538,6 +544,7 @@ class HttpApi:
         """Observe EOF/failure even when no client is polling status."""
         while True:
             await asyncio.sleep(self._monitor_interval)
+            diagnostic.safe(self, "tick")
             self._prune_expired_subscribers()
             if self.state.phase in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING, PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
                 continue
@@ -578,6 +585,7 @@ class HttpApi:
                 stage.generation = generation
         else:
             self._invalidate_native_staging()
+        diagnostic.safe(self, "accepted")
         return generation
 
     def _invalidate_station_recovery(self) -> None:
@@ -665,6 +673,7 @@ class HttpApi:
         self._invalidate_station_recovery()
         self.state.gain_confirmed = False
         self.state.mark_error("Backend control failed")
+        diagnostic.safe(self, "failure", diagnostic.Reason.BACKEND)
         self._schedule_native_staging_failure()
         LOG.warning("playback failure category=backend_control generation=%s", self.state.generation)
         self._schedule_event_notify()
@@ -949,6 +958,7 @@ class HttpApi:
         reason = ("Automatic playback source ownership unconfirmed" if automatic_admission
                   else "Playback source ownership lost")
         self.state.mark_error(reason + "; playback silence not confirmed")
+        diagnostic.safe(self, "failure", diagnostic.Reason.OWNERSHIP)
         self._schedule_event_notify()
 
     def _reject_foreign_source_observation(self, snapshot: dict, expected_url: str) -> bool:
@@ -1447,6 +1457,7 @@ class HttpApi:
                 self._arm_station_recovery()
             self._apply_backend_snapshot(snapshot)
         except (BackendError, OSError, TimeoutError, asyncio.CancelledError):
+            diagnostic.note(diagnostic.Reason.CONFIRMATION, uncertain=True, stage="backend")
             if generation == self.state.generation and self.state.phase != PlaybackPhase.ERROR:
                 # A failed acknowledgement or cancelled waiter does not undo a
                 # native command. Keep the new owner intent: restoring PLAYING
@@ -1463,6 +1474,7 @@ class HttpApi:
             if generation == self.state.generation and self.state.phase == PlaybackPhase.ERROR:
                 self._schedule_native_staging_failure()
             raise
+        diagnostic.note(diagnostic.Reason.CONFIRMED, stage="backend")
         self._schedule_event_notify()
 
     async def _seek_command(self, seconds: int, *, relative: bool = False) -> None:
@@ -1696,20 +1708,13 @@ class HttpApi:
             return None
         return f"bytes {start - offset}-{end - offset}/{total - offset}"
 
+    @diagnostic.diagnosed("http")
     async def handle_httpapi(self, request: web.Request) -> web.Response:
         """Handle ``/httpapi.asp`` commands and serialize text/JSON results."""
 
         command = request.query.get("command", "")
         parsed = parse_command(command)
-        LOG.info(
-            "HTTP API remote=%s host=%s path=%s ua=%s command=%s parsed=%s",
-            request.remote,
-            request.host,
-            self._redact_sensitive_text(request.path_qs),
-            request.headers.get("User-Agent", ""),
-            self._redact_sensitive_text(command),
-            self._redact_sensitive_text(str(parsed)),
-        )
+        LOG.debug("HTTP API request received")
         forced_failure_commands = {"GetAcousticCapability"}
         if os.environ.get("WIIM_HOME_AUDIO_OUTPUT_CAPABILITY_MODE") == "fail":
             forced_failure_commands.update({"getSpdifOutMaxCap", "getCoaxOutMaxCap", "GetFadeFeature", "getSpdifOutSwitchDelayMs"})
@@ -1721,18 +1726,23 @@ class HttpApi:
             and os.environ.get("WIIM_HOME_AUDIO_OUTPUT_CAPABILITY_MODE") == "fail"
         )
         if force_failure and os.environ.get("WIIM_HOME_ACOUSTIC_CAPABILITY_MODE") == "fail":
-            LOG.info("HTTP API forced failure for %s", parsed.name)
+            diagnostic.note(diagnostic.Reason.CAPABILITY)
+            LOG.info("HTTP API capability request rejected")
             self._log_http_detail(request, "", 404, "Failed")
             return web.Response(status=404, text="Failed", content_type="text/plain")
         try:
             payload = await self.execute(parsed, request.remote or self.cfg.resolved_advertise_ip)
         except (BackendError, OSError, TimeoutError):
+            diagnostic.note(diagnostic.Reason.BACKEND, uncertain=True)
             LOG.warning("backend command failed")
             return web.Response(status=502, text="Failed", content_type="text/plain")
-        except (SoapFault, ValueError, TypeError):
+        except (SoapFault, ValueError, TypeError) as exc:
+            if isinstance(exc, SoapFault): diagnostic.soap_failure(exc)
+            else: diagnostic.note(diagnostic.Reason.INVALID_ARGS)
             return web.Response(status=400, text="Failed", content_type="text/plain")
         except Exception:
-            LOG.exception("command failed")
+            diagnostic.note(diagnostic.Reason.API)
+            LOG.warning("HTTP API command failed; diagnostic reason=api_failure")
             return web.Response(status=500, text="Failed", content_type="text/plain")
         if isinstance(payload, dict):
             LOG.info("HTTP API response=json keys=%s", ",".join(payload.keys()))
@@ -3510,7 +3520,9 @@ class HttpApi:
                      snapshot.get("idle-active") is not True and self._mpv_snapshot_has_audio(snapshot))
             if ready:
                 LOG.info("mpv audio-ready playback=%s snapshot=%s", self._redact_sensitive_text(playback_url), self._redact_sensitive_text(self._compact_snapshot(snapshot)))
+                diagnostic.note(diagnostic.Reason.READY, stage="backend")
                 return True
+        diagnostic.note(diagnostic.Reason.CONFIRMATION, uncertain=True, stage="backend")
         LOG.warning("mpv audio-ready timeout playback=%s snapshot=%s", self._redact_sensitive_text(playback_url), self._redact_sensitive_text(self._compact_snapshot(last_snapshot)))
         return False
 
@@ -3711,7 +3723,7 @@ class HttpApi:
     def _log_http_detail(self, request: web.Request, request_body: str, status: int, response_body: str) -> None:
         """Emit opt-in detailed HTTP diagnostics with redacted payloads."""
 
-        if not self.cfg.log_wiim_http_details:
+        if diagnostic.safe(self, "active") or not self.cfg.log_wiim_http_details:
             return
         LOG.info(
             "WIIM_HTTP_DETAIL %s",
@@ -4179,6 +4191,7 @@ class HttpApi:
         self._log_http_detail(request, "", 200, svg)
         return web.Response(text=svg, content_type="image/svg+xml")
 
+    @diagnostic.diagnosed("soap")
     async def soap(self, request: web.Request) -> web.Response:
         """Handle UPnP SOAP actions and return small XML response envelopes."""
 
@@ -4227,14 +4240,18 @@ class HttpApi:
                 raise SoapFault(401, "Invalid Action")
             response_text = soap_response(action, service, result)
         except SoapFault as exc:
+            diagnostic.soap_failure(exc)
             headers = {}
             if create_queue and exc.code == 402:
                 reason = exc.queue_rejection if isinstance(exc.queue_rejection, QueueRejectionReason) else rejection_stage
+                diagnostic.note(reason, soap_code=exc.code)
                 headers["X-Open-Room-CreateQueue-Rejection"] = reason.value
             return web.Response(status=500, text=fault_xml(exc), content_type="text/xml", headers=headers)
         except (BackendError, OSError, TimeoutError):
+            diagnostic.note(diagnostic.Reason.BACKEND, soap_code=501, uncertain=True)
             return web.Response(status=500, text=fault_xml(SoapFault(501, "Action Failed")), content_type="text/xml")
         except (ValueError, TypeError, OverflowError):
+            diagnostic.note(rejection_stage if create_queue else diagnostic.Reason.INVALID_ARGS, soap_code=402)
             headers = {"X-Open-Room-CreateQueue-Rejection": rejection_stage.value} if create_queue else {}
             return web.Response(status=500, text=fault_xml(SoapFault(402, "Invalid Args")), content_type="text/xml", headers=headers)
         self._log_http_detail(request, body, 200, response_text)
@@ -5236,6 +5253,7 @@ class HttpApi:
 
     def _schedule_event_notify(self, services: tuple[str, ...] | None = None) -> None:
         """Publish a renderer change to the independently owned subscriptions."""
+        diagnostic.safe(self, "observed")
         self._eventing.notify(services)
 
     def _event_body(self, service: str) -> str:
