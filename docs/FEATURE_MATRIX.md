@@ -1,18 +1,23 @@
 # WiiM Ultra vs. Open Room Renderer
 
-ORR integration snapshot: **2026-10-15 14:52 UTC**, main
-[`3a5f524fbc7c9bc5ff60a7f7f9caedb2295dd6bd`](https://github.com/de41tr/open-room-renderer/tree/3a5f524fbc7c9bc5ff60a7f7f9caedb2295dd6bd).
+ORR integration snapshot: **2026-10-15 20:03 UTC**, main
+[`22f01c8d5cee5bd5f0dfea5257ca7d0901d8fdfd`](https://github.com/de41tr/open-room-renderer/tree/22f01c8d5cee5bd5f0dfea5257ca7d0901d8fdfd).
 [PR #13](https://github.com/de41tr/open-room-renderer/pull/13) incorporated #6–#12
 by squash merge. Those source PRs were closed as incorporated, not individually
 merged. Their branches were retained. The shared code tree passed all four CI
-jobs on its first attempt [I]. All table entries describe this integrated source;
-the separate operating-quality candidate below is not included in main.
+jobs on its first attempt [I]. The operating-quality fix [O] and value-free
+CreateQueue diagnostics [D] are now also integrated. No open PR was found at
+the 19:54 UTC repository preflight; later showcase changes need their own review.
 
 **Source integration, installation and hardware acceptance are different stages.**
 The combined code has real Chrome, native decoder/IPC, install/uninstall and
-Snapcast software evidence [I]. This sprint did not deploy or activate the new
-code on XU4. No new Spotify-account/KA17 listening, original WiiM Home service,
-or physical multiroom acceptance is established.
+Snapcast software evidence [I]. The private target deployment report recorded
+this main installed and running at 19:09 UTC, with service checks passed.
+That does not establish audible output. The user confirmed original WiiM Android
+discovery, but the attempted Fritz/TuneIn playback still failed. No successful
+original-app playback, Spotify-account/KA17 listening or physical multiroom
+acceptance is established. Private addresses, configuration and captures are
+not part of this public matrix.
 
 WiiM entries remain **manufacturer claims**, not project-tested devices. The
 manufacturer comparison retains its earlier source snapshot: [U] and [F] were
@@ -33,7 +38,7 @@ claims. `REAL_CLIENT` includes real software with digital/null outputs;
 | Feature | WiiM Ultra (manufacturer / version) | ORR code present? | Actual ORR acceptance | User boundary | Next useful step |
 | --- | --- | --- | --- | --- | --- |
 | Spotify Connect | JA [U, F] | TEILWEISE: integrated optional go-librespot v0.10.3 receiver | SYNTHETIC: real service/process arbitration with generated output; account/DAC NOT_TESTED [S, I] | Separate volume; bypasses ORR EQ; renderer UI stops in Spotify mode; ARM64 CI is not ARMv7 acceptance | Authorized target installation, own-account pairing, listening and safe return [S] |
-| TuneIn | JA: app service [U] | TEILWEISE: anonymous station-ID resolver and direct streams | SYNTHETIC: resolver/queue contracts; original app NOT_TESTED | No complete official catalog/account integration | Test a public station from the original app |
+| TuneIn | JA: app service [U] | TEILWEISE: anonymous station-ID resolver and direct streams | SYNTHETIC: resolver/queue contracts; user-confirmed original Android discovery, attempted Fritz playback failed | No complete official catalog/account integration; diagnostics [D] are not a playback fix | Diagnose an attributable original-app start; require audible acceptance |
 | WiiM Radio | JA: app >=3.5.8 [R], Ultra firmware >=5.2.818432 [F] | NICHT_VERIFIZIERT: no dedicated service integration | ORIGINAL_APP: NOT_TESTED | TuneIn IDs and URL playback do not prove this service | Observe an authorized original-app station selection |
 | Independent internet radio / station catalog | JA: open streams and radio services [U, F] | TEILWEISE: integrated name search, country browse, Play, stable favorites, favorite repair and separate on-air title [C, L] | REAL_CLIENT: Chrome search/browse/save/play/repair; native MP3/AAC/chained Vorbis and title updates; SYNTHETIC directory [I] | Direct streams only; live directory/provider, original app and physical audio NOT_TESTED | Authorized live-directory workflow and listening acceptance |
 | Native WiiM multiroom grouping | JA [U] | NEIN: discovery is not group participation | NOT_TESTED | Legitimate participation/identity, transport and physical sync gates remain open | Establish a permitted participation path before any join claim |
@@ -69,18 +74,14 @@ Their inclusion and passing combined CI do not prove the cause or resolution of
 an original WiiM app issue. No single radio-to-running-Snapcast handoff sequence
 or audible hardware workflow is established by these separate software checks.
 
-## Separate operating quality candidate
+## Integrated operating quality and diagnostics
 
-At this snapshot, [Draft PR #14](https://github.com/de41tr/open-room-renderer/pull/14)
-is **open and unmerged**. Its pre-documentation runtime candidate is
-[`3946a983f304a91d795ab3369154a63c63bcea66`](https://github.com/de41tr/open-room-renderer/tree/3946a983f304a91d795ab3369154a63c63bcea66),
-tree `efc1ebd358e86cf30f55f6b8522d27e1d451f874`.
-[Combined run 38753036749](https://github.com/de41tr/open-room-renderer/actions/runs/38753036749)
-**passed all four jobs and every step**. The final PR checks on the head
-containing this documentation are authoritative; this pre-documentation run
-does not establish their result.
+**[O]** [PR #14](https://github.com/de41tr/open-room-renderer/pull/14) was
+squash-merged on 2026-10-15 at 16:30 UTC. Its final head
+`2bc47b972aac869161e684282f94e7a131befa26` passed all four jobs and 53 steps on
+attempt 1 in [run 38755744911](https://github.com/de41tr/open-room-renderer/actions/runs/38755744911).
 
-The candidate uses paused retention for demonstrated 400 ms finite direct
+The integrated fix uses paused retention for demonstrated 400 ms finite direct
 playback and ordinary queue admission, with immediate/capped early readiness
 sampling. For native loads with an acknowledged entry ID, readiness verifies
 its current-and-playing identity (or proven first-level child), rejecting stale
@@ -93,8 +94,25 @@ Earlier failed runs remain visible:
 and [`e3fc2ea`](https://github.com/de41tr/open-room-renderer/actions/runs/38748532769).
 The original ARM timeout cause is not established; the same-URL readiness defect
 was independently reproduced and fixed. Acceptance of 150 ms media and
-unobserved short native-staged successors is not established for the current
-candidate. It is not integrated support, a gapless claim or hardware acceptance.
+unobserved short native-staged successors is not established. Integration does
+not establish gapless playback or hardware acceptance.
+
+**[D]** [PR #15](https://github.com/de41tr/open-room-renderer/pull/15) was
+squash-merged at 19:06 UTC. Final head
+`70c839a203b4b94d70a83a091a545b1be38c28f2` passed all four jobs and 53 steps on
+attempt 1 in [run 38789264534](https://github.com/de41tr/open-room-renderer/actions/runs/38789264534).
+Its tree `dfa9e5cf5387b8bb85123c2fedad4be8fdbb4156` equals current main's tree.
+The PR-only workflow has no separate squash-main run. The closed diagnostic
+categories preserve rejection behavior and SOAP fault bytes; they are not a
+TuneIn compatibility fix or an audio-output test.
+
+The 20:03 UTC showcase preflight additionally completed a bounded production
+Web-HTTP → existing test ctypes adapter → actual libmpv/null journey on this
+main: original local stereo WAV decoding and advancing native time, favorite
+save/play/recall, pause/resume, volume readback, a −2 dB preset and EQ bypass.
+This is **REAL_SOFTWARE_TESTED**, not browser, production Unix IPC, live public
+radio, physical DAC or user-heard acceptance. Actual listening remains the
+showcase gate; see the [phone-first demo and fallback](demo.md).
 
 ## Manufacturer sources and dates
 
