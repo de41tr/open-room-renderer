@@ -488,7 +488,7 @@ class ServiceHarness:
         def api_factory(_cfg, state, _backend, **kwargs):
             assert kwargs == {"_startup": True}
             self.state = state
-            self.api = SimpleNamespace(app=lambda: object(), initialize_channel_balance=AsyncMock(side_effect=initialize_balance))
+            self.api = SimpleNamespace(cfg=cfg, app=lambda: object(), initialize_channel_balance=AsyncMock(side_effect=initialize_balance))
             return self.api
         monkeypatch.setattr(cli, "HttpApi", api_factory)
         harness = self
