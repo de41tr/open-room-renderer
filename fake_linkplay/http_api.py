@@ -3858,6 +3858,8 @@ class HttpApi:
         if not upstream_range and base_offset:
             upstream_range = f"bytes={base_offset}-"
         upstream_headers = {"User-Agent": "OpenRoomRenderer/0.1"}
+        if request.headers.get("Icy-MetaData") == "1":
+            upstream_headers["Icy-MetaData"] = "1"
         if upstream_range:
             upstream_headers["Range"] = upstream_range
         if self._proxy_semaphore.locked():
@@ -3874,6 +3876,13 @@ class HttpApi:
                 for header in ("Content-Length", "Content-Range", "Content-Encoding"):
                     if upstream.headers.get(header):
                         headers[header] = upstream.headers[header]
+                metaint = upstream.headers.get("icy-metaint")
+                if metaint is not None:
+                    # This header describes framing in the unchanged body.
+                    # Never deliver interleaved metadata as unframed audio.
+                    if not re.fullmatch(r"[1-9][0-9]{0,9}", metaint) or int(metaint) > 2**31 - 1:
+                        return web.Response(status=502, text="Invalid upstream metadata interval")
+                    headers["icy-metaint"] = metaint
                 if base_offset:
                     shifted_range = self._seek_proxy_content_range(
                         upstream.status, upstream.headers, upstream_range, base_offset)
