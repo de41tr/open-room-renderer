@@ -106,7 +106,11 @@ async def exercise_catalog(browser, api, backend, base, artifacts, label):
             assert await browser.inspect("document.querySelectorAll('#radio-results li').length") == 0
             await type_field("#radio-name", "unavailable")
             await browser.click("#radio-search")
-            await browser.wait("document.querySelector('#radio-status').textContent.startsWith('Search unavailable')")
+            await browser.wait("document.querySelector('#radio-status').textContent.startsWith('Radio-Browser search is unavailable')")
+            assert await browser.inspect("document.querySelector('#radio-status').textContent.includes('Favorites → + Add with a direct audio URL')")
+            await browser.click("#add-favorite")
+            await browser.wait("document.querySelector('#favorite-dialog').open")
+            await browser.click("#favorite-cancel")
             assert await _property(backend, "idle-active") is True
             await browser.click("#radio-clear")
     finally:
@@ -116,4 +120,5 @@ async def exercise_catalog(browser, api, backend, base, artifacts, label):
             "repair_escape_cancels": True,
             "native_codec": "mp3", "output": "null",
             "clear_discards_late_result": True, "outage_preserves_stopped_playback": True,
+            "outage_guides_manual_direct_favorite": True,
             "directory": "synthetic; no live-provider claim"}
