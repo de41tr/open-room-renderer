@@ -367,7 +367,7 @@ async def test_pause_survives_seek_at_successor_transition(tmp_path):
     await api._seek_command(7)
     assert api.state.queue.index == 2 and api.state.curpos == 7
     assert api.state.phase == PlaybackPhase.PAUSED and api.mpv.paused
-    assert mutations(api, "resume") == []
+    assert mutations(api, "resume") == [None]  # Initial admission only; seek stays paused.
 
 
 @pytest.mark.asyncio
