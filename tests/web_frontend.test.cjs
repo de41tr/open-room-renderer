@@ -2527,3 +2527,21 @@ test('radio repair sends once, retains ACK or UNKNOWN, and expiry requires a fre
     await h.refresh(); await h.ids.get('favorite-form').fire('submit'); assert.equal(commands().length, 1);
   }
 });
+
+test('current codec and bitrate show observed estimates and clear on stale or unowned playback', () => {
+  const {audioFormatText} = require('../fake_linkplay/web_assets/controller.js');
+  const playing = state({transport: {...state().transport, phase: 'PLAYING', status: 'CONFIRMED'},
+    media: {...state().media, audio: {codec: 'mp3', bitrate_bps: 128000, bitrate_kind: 'estimate'}}});
+  validateState(playing);
+  assert.equal(audioFormatText(playing, true), 'Codec: MP3 · Bitrate: ≈128 kb/s (estimate)');
+  for (const phase of ['STOPPED', 'ERROR', 'LOADING', 'BUFFERING']) {
+    assert.equal(audioFormatText({...playing, transport: {...playing.transport, phase}}, true), 'Codec: unknown · Bitrate: unknown');
+  }
+  assert.equal(audioFormatText(playing, false), 'Codec: unknown · Bitrate: unknown');
+  assert.equal(audioFormatText({...playing, media: {...playing.media, audio: {codec: 'flac', bitrate_bps: null, bitrate_kind: 'unavailable'}}}, true), 'Codec: FLAC · Bitrate: unknown');
+  for (const audio of [{codec: '<script>', bitrate_bps: null, bitrate_kind: 'unavailable'},
+      {codec: 'aac', bitrate_bps: -1, bitrate_kind: 'estimate'},
+      {codec: 'aac', bitrate_bps: 128000, bitrate_kind: 'exact'}]) {
+    assert.throws(() => validateState({...playing, media: {...playing.media, audio}}));
+  }
+});

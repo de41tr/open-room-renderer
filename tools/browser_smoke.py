@@ -179,6 +179,7 @@ async def exercise(browser: Browser, api: HttpApi, backend, base: str,
     assert await _property(backend, "current-ao") == "null"
     tracks = await _property(backend, "track-list")
     assert any(t.get("type") == "audio" and t.get("selected") and t.get("codec") == "pcm_s16le" for t in tracks), tracks
+    await browser.wait("document.querySelector('#audio-format').textContent.startsWith('Codec: PCM · Bitrate: ≈') && document.querySelector('#audio-format').textContent.endsWith('kb/s (estimate)')")
     await browser.wait("!document.querySelector('#pause').disabled")
     await browser.click("#pause")
     await browser.wait("document.querySelector('#playback-state').textContent === 'PAUSED' && document.querySelector('#playback-state').dataset.kind === 'confirmed'")
@@ -188,6 +189,7 @@ async def exercise(browser: Browser, api: HttpApi, backend, base: str,
     assert all(item["status"] == 200 and item["request_acknowledged"] is True for item in commands), commands
     evidence[label]["native"] = {"codec": "pcm_s16le", "ao": "null", "pause": True,
         "initial_time": position, "advanced_time": later, "ui_phase": "PAUSED"}
+    evidence[label]["native"]["ui_audio_format"] = await browser.inspect("document.querySelector('#audio-format').textContent")
 
     # Native dialog focus, tab sequence and dismissal, then a fresh opening.
     before_export = (len(evidence["http_commands"]), evidence["media_requests"])

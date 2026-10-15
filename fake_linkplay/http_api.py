@@ -1228,6 +1228,7 @@ class HttpApi:
         # An absent, incoherent or unavailable observation cannot retain an
         # earlier on-air title. sync_mpv_state already fences the generation.
         self.state.stream_title = ""
+        self.state.audio_codec, self.state.audio_bitrate_bps = "", None
         old_phase = self.state.phase
         if self.state.phase in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING}:
             return
@@ -1355,6 +1356,18 @@ class HttpApi:
                 and snap["duration"] > 0):
             self.state.totlen = int(snap["duration"]) + self._playback_offset_sec
         selected = self.state.queue.current
+        audio_info = snap.get("audio-info")
+        active_entry = self._native_active(snap)
+        if (selected and selected.url == self.state.current_url == self.state.backend_original_url
+                and self.state.intent in {"play", "pause"}
+                and self.state.phase in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}
+                and not self._native_output_uncertain and selected_audio and coherent_source
+                and self._native_control_source_matches(snap)
+                and isinstance(audio_info, dict) and active_entry is not None
+                and type(audio_info.get("entry_id")) is int and audio_info["entry_id"] == active_entry.get("id")):
+            codec, bitrate = audio_info.get("codec"), audio_info.get("bitrate_bps")
+            self.state.audio_codec = codec if isinstance(codec, str) and re.fullmatch(r"[a-zA-Z0-9_+-]{1,40}", codec) else ""
+            self.state.audio_bitrate_bps = bitrate if type(bitrate) is int and 1 <= bitrate <= 1_000_000_000 else None
         if (selected and selected.stream_type == "station" and selected.duration == 0
                 and selected.url == self.state.current_url == self.state.backend_original_url
                 and self.state.intent in {"play", "pause"}
@@ -4554,6 +4567,7 @@ class HttpApi:
         queue = self.state.queue
         item = queue.current
         self.state.stream_title = ""
+        self.state.audio_codec, self.state.audio_bitrate_bps = "", None
         self.queue_name = queue.name
         self.queue_url = item.url if item else ""
         self.queue_resolved_url = item.resolved_url if item else ""
