@@ -392,7 +392,7 @@ def test_native_opt_in_remains_exactly_two_unchanged_groups():
             "live_hls", "invalid_media", "repeat_queue", "shuffle_queue")],
         [f"tests/test_libmpv_{name}.py" for name in (
             "load_options", "station_cache", "load_cleanup", "station_playlist_cache",
-            "stall_recovery", "queue_staging", "queue_navigation_intent", "favorites", "queue_cli",
+            "stall_recovery", "queue_staging", "queue_navigation_intent", "favorites", "radio_catalog", "queue_cli",
             "web_controls", "standard_dmr", "source_ownership", "admitted_load_root",
             "station_refresh", "transport_uncertainty")],
     ]
