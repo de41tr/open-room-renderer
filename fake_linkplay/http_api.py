@@ -42,6 +42,8 @@ from .favorites import FavoriteError, FavoritesApi, FavoritesStore
 from .queue_playlist import QueuePlaylistApi
 from .web_audio_output import make_output_inspector
 from .web_playlists import PLAYLIST_ACTIONS
+from .radio_catalog import (CatalogError, CatalogPlaybackUnavailable, resolve_station as resolve_catalog_station,
+                            station_from_reference)
 from .web_ui import (WebAdmissionError, WebCommand, WebControlApi, WebDspCommandError,
                      WebDspExport, WebRuntime, prepare_dsp_curve_export)
 from .config import Config
@@ -190,6 +192,8 @@ class HttpApi:
         """Create an API handler bound to config, renderer state, and mpv."""
 
         self.cfg = cfg
+        # None reuses the main IPv4 listener; zero means optional setup failed.
+        self.catalog_proxy_port: int | None = None
         self.state = state
         self.favorites = FavoritesStore(cfg)
         self.state.preset_view = lambda: self.favorites.effective_presets()
@@ -386,6 +390,7 @@ class HttpApi:
                 and not self._station_recovery_task.done()),
             station_recovery_attempts=recovery.attempts if current_recovery else None,
             station_recovery_limit=len(self._station_recovery_delays) if current_recovery else None,
+            catalog_proxy_available=self.catalog_proxy_port != 0,
             playlist_stopped=playlist_stopped,
             actions=frozenset(actions), transport_unknown=unknown,
             transport_pending=self._native_waiting_for_audio or self._pending_seek_target is not None,
@@ -454,6 +459,12 @@ class HttpApi:
                     code = "favorites_not_empty" if exc.code == "library_not_empty" else "favorites_unavailable"
                     raise WebAdmissionError(code, exc.status) from None
                 raise
+        elif action == "radio_play":
+            await self._play_preset_snapshot({"url": command.url, "name": command.name,
+                                             "source": "RadioBrowser", "number": 1})
+        elif action == "favorite_radio":
+            record = self.favorites.add({"name": command.name, "url": command.url, "title": command.name})
+            return {"favorite_id": record["id"]}
         elif action == "favorite_play":
             await self._play_preset_snapshot(self.favorites.playback_snapshot(command.id))
         elif action == "favorite_add":
@@ -1075,7 +1086,8 @@ class HttpApi:
         if item is None or item.stream_type == "station" or index >= queue.count:
             return
         successor = queue.items[index]
-        if successor.stream_type == "station" or self._radio_station_from_url(successor.url):
+        if (successor.stream_type == "station" or self._radio_station_from_url(successor.url)
+                or station_from_reference(successor.url)):
             return
         stage = None
         try:
@@ -1903,6 +1915,7 @@ class HttpApi:
             if not parsed.args or (name == "playlist" and len(parsed.args) > 1 and parsed.args[1] != "0"):
                 raise ValueError("Unsupported playlist index")
             url = parsed.args[0]
+            self._require_catalog_proxy(url)
             # Validate the candidate before stopping staged native playback or
             # touching the current selection, generation or metadata.
             queue = PlaybackQueue(items=[QueueItem(url=url, source="CustomRadio")], index=1)
@@ -2795,8 +2808,14 @@ class HttpApi:
     def _tunein_capability_fields(self) -> dict[str, object]:
         return capability_fields(self.cfg)
 
+    def _require_catalog_proxy(self, url: str) -> None:
+        """Reject known unavailable catalog playback before changing ownership."""
+        if self.catalog_proxy_port == 0 and station_from_reference(url):
+            raise CatalogPlaybackUnavailable()
+
     async def _play_preset_snapshot(self, selected: dict[str, object]) -> None:
         """Construct the admitted preset before yielding to the playback owner."""
+        self._require_catalog_proxy(selected["url"])
         queue = PlaybackQueue(items=[QueueItem(
             url=selected["url"], title=selected.get("title") or selected["name"], source=selected["source"],
             artwork=selected.get("picurl", ""), id=f"preset:{selected['number']}",
@@ -2810,6 +2829,7 @@ class HttpApi:
 
     async def _play_url(self, url: str) -> None:
         """Resolve/load once and confirm only this generation's actual audio."""
+        self._require_catalog_proxy(url)
         if self._native_stage is not None or self._native_current_id is not None or self._native_output_uncertain:
             await self._transport_command("stop")
         if not self.state.queue.current or self.state.queue.current.url != url:
@@ -2895,12 +2915,14 @@ class HttpApi:
             self.state.phase = PlaybackPhase.LOADING
             selected = self.state.queue.current
             station_id = ""
+            catalog_content_type = ""
             resolution_failed = False
             provenance = selected._radio_station if selected else None
             refresh_id = (provenance[1] if provenance and provenance[0] == url
                           and selected.stream_type == "station" and selected.duration == 0
                           and (recovery is not None or selected._radio_resolution_attempted) else "")
-            if selected and selected.url == url and selected.resolved_url and not refresh_id:
+            if (selected and selected.url == url and selected.resolved_url and not refresh_id
+                    and not station_from_reference(url)):
                 direct_url = selected.resolved_url
             else:
                 try:
@@ -2908,6 +2930,8 @@ class HttpApi:
                                   else await self._resolve_playback_url(url))
                     if isinstance(resolution, RadioResolution):
                         direct_url, station_id = resolution.url, resolution.station_id
+                        if station_id.startswith("rb:"):
+                            catalog_content_type = resolution.content_type
                     else:
                         direct_url = resolution
                 except (RadioResolutionError, BackendError, OSError, TimeoutError):
@@ -2962,6 +2986,8 @@ class HttpApi:
                     self.queue_is_live = True
                     self.state.play_medium = "RADIO-NETWORK"
                     self.state.totlen = 0
+                if catalog_content_type and selected:
+                    selected.content_type = catalog_content_type
                 playback_url = self._backend_playback_url(url, direct_url)
                 mpv_options = self._mpv_playback_options(url, direct_url)
                 if recovery is not None:
@@ -3087,6 +3113,12 @@ class HttpApi:
         return True
 
     def _backend_playback_url(self, original_url: str, direct_url: str) -> str:
+        if station_from_reference(original_url):
+            # Community-directory URLs never go directly to the native player.
+            # The existing selected-source proxy pins every public redirect hop.
+            if self.catalog_proxy_port == 0:
+                raise BackendError("Radio catalog loopback proxy is unavailable")
+            return self._local_audio_proxy_url(direct_url, port=self.catalog_proxy_port)
         # WiiM Home can hand us service profile URLs rather than final media
         # URLs. For on-demand audio we optionally proxy the resolved media so
         # range seeks can be translated into fresh upstream HTTP requests.
@@ -3107,12 +3139,16 @@ class HttpApi:
         # canonical current item may supply policy; a resolved URL or stale
         # queue-wide live flag must not classify an unrelated load as radio.
         item = self.state.queue.current
+        options = {}
         if (item is not None and item.url == original_url == self.state.current_url
                 and item.stream_type == "station" and item.duration == 0):
-            # Per-file options reset on the next load. Leave forward buffering,
-            # ordinary media seeking and the user's native defaults unchanged.
-            return dict(LIVE_STATION_HISTORY_OPTIONS)
-        return {}
+            options.update(LIVE_STATION_HISTORY_OPTIONS)
+        if station_from_reference(original_url):
+            # A misleading catalog entry must never become an mpv playlist
+            # with arbitrary nested URLs. Explicitly force raw audio decoding.
+            options.update({"demuxer": "lavf", "demuxer-lavf-format":
+                            "aac" if item and item.content_type == "audio/aac" else "mp3", "ytdl": "no"})
+        return options
 
     async def _apply_station_child_history_locked(self, generation: int, snapshot: dict) -> bool:
         """One bounded best-effort policy attempt per proven first-level child.
@@ -3207,9 +3243,9 @@ class HttpApi:
             return False
         return self._bitrate_bps_from_url_or_headers(direct_url, {}) > 0
 
-    def _local_audio_proxy_url(self, url: str) -> str:
+    def _local_audio_proxy_url(self, url: str, *, port: int | None = None) -> str:
         self._proxy_sources[url] = self.state.generation
-        return f"http://127.0.0.1:{self.cfg.http_api_port}/proxy/audio?url={quote(url, safe='')}"
+        return f"http://127.0.0.1:{port if port is not None else self.cfg.http_api_port}/proxy/audio?url={quote(url, safe='')}"
 
     def _seek_audio_proxy_url(self, url: str, start_seconds: int) -> str:
         return f"{self._local_audio_proxy_url(url)}&start={max(0, int(start_seconds))}"
@@ -3234,14 +3270,24 @@ class HttpApi:
             pass
         return ""
 
-    async def _resolve_station_id(self, station_id: str) -> RadioResolution:
+    async def _resolve_station_id(self, station_id: str, *, catalog_click: bool = False) -> RadioResolution:
+        if station_id.startswith("rb:"):
+            try:
+                station = await resolve_catalog_station(station_id[3:], count_click=catalog_click)
+                return RadioResolution(station.url, station_id,
+                    content_type="audio/mpeg" if station.codec == "MP3" else "audio/aac")
+            except CatalogError:
+                raise RadioResolutionError("Public station resolution failed") from None
         return await resolve_station(station_id)
 
     async def _resolve_playback_url(self, url: str) -> str | RadioResolution:
         """Resolve recognized public station references, never arbitrary JSON."""
-        station_id = self._radio_station_from_url(url)
+        catalog_id = station_from_reference(url)
+        station_id = "rb:" + catalog_id if catalog_id else self._radio_station_from_url(url)
         if station_id:
             try:
+                if catalog_id:
+                    return await self._resolve_station_id(station_id, catalog_click=True)
                 return await self._resolve_station_id(station_id)
             except RadioResolutionError:
                 raise BackendError("Public station resolution failed") from None
@@ -3757,11 +3803,12 @@ class HttpApi:
     async def _open_proxy_source(self, original_url: str, headers: dict[str, str]):
         """Validate and pin every redirect hop; never forward client credentials."""
         url = original_url
+        allowed_lan = () if station_from_reference(self.state.current_url) else self.cfg.proxy_allowed_lan_hosts
         seen: set[str] = set()
         for _ in range(6):
             if not self._proxy_source_allowed(original_url):
                 raise NetworkPolicyError("Media selection changed")
-            target = await resolve_proxy_target(url, self.cfg.proxy_allowed_lan_hosts)
+            target = await resolve_proxy_target(url, allowed_lan)
             if target.url in seen:
                 raise NetworkPolicyError("Redirect loop")
             seen.add(target.url)
@@ -3790,7 +3837,7 @@ class HttpApi:
 
     async def proxy_audio(self, request: web.Request) -> web.StreamResponse:
         """Serve only selected media to the local backend, with SSRF-safe hops."""
-        if not (self.cfg.proxy_on_demand_audio or self.cfg.range_seek_reload):
+        if not (self.cfg.proxy_on_demand_audio or self.cfg.range_seek_reload or station_from_reference(self.state.current_url)):
             return web.Response(status=404)
         try:
             if not ipaddress.ip_address(request.remote or "").is_loopback:
@@ -4447,6 +4494,13 @@ class HttpApi:
             # A mode change does not invalidate the owner. Re-read it after
             # the asynchronous ownership preflight, just before selection.
             await self._play_queue_index(queue_name=queue.name, selection="natural")
+        except CatalogPlaybackUnavailable as exc:
+            if current():
+                # EOF was already observed. Retain that stopped source and
+                # confirmed gain; unavailable selection is not backend failure.
+                self.state.last_error = str(exc)
+                self._schedule_event_notify()
+            return
         except (BackendError, SoapFault, OSError, TimeoutError):
             if current() and self.state.phase != PlaybackPhase.ERROR:
                 self._mark_backend_failure()
@@ -4469,6 +4523,7 @@ class HttpApi:
             # Play (or the existing playing EOF path) may start this selection.
             await self._play_queue_index(self.state.queue.index + delta, start_playback=False, selection=selection)
             return
+        self._require_queue_catalog_proxy(self.state.queue, self.state.queue.index + delta, selection)
         if self._native_stage is not None:
             was_playing = self.state.intent == "play"
             # A confirmed pause freezes native advancement through the index
@@ -4503,6 +4558,24 @@ class HttpApi:
         target = queue.index + (-1 if selection == "previous" else 1)
         return 1 <= target <= queue.count
 
+    def _require_queue_catalog_proxy(self, queue: PlaybackQueue, index: int | None, selection: str) -> None:
+        """Preflight before native Pause/Stop, without consuming shuffle state."""
+        if self.catalog_proxy_port != 0:
+            return
+        if selection == "index":
+            if index is not None and 1 <= index <= queue.count:
+                self._require_catalog_proxy(queue.items[index - 1].url)
+        elif is_shuffle(queue.loop):
+            # On this known failure path, conservatively reject mixed queues
+            # before consuming RNG/history or changing backend ownership.
+            for candidate in queue.items:
+                self._require_catalog_proxy(candidate.url)
+        else:
+            target = (natural_successor(queue.index, queue.count, queue.loop)
+                      if selection == "natural" else queue.index + (-1 if selection == "previous" else 1))
+            if target is not None and 1 <= target <= queue.count:
+                self._require_catalog_proxy(queue.items[target - 1].url)
+
     async def _play_queue_index(self, index: int | None = None, queue_name: str = "", *,
                                 start_playback: bool = True, selection: str = "index") -> None:
         queue = self.state.queue
@@ -4522,6 +4595,8 @@ class HttpApi:
                 raise QueueError("Queue traversal boundary")
         except QueueError:
             raise SoapFault(711, "Illegal Seek Target") from None
+        if start_playback:
+            self._require_queue_catalog_proxy(queue, index, selection)
         if (self.state.backend_url or self.state.status in {"play", "pause", "transition"}
                 or self._native_stage is not None or self._native_current_id is not None
                 or self._native_output_uncertain):

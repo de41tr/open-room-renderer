@@ -116,7 +116,7 @@ jobs:
           google-chrome --version
           chromedriver --version
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y mpv
+          sudo apt-get install --no-install-recommends -y mpv ffmpeg
           python -m pip --isolated install --index-url https://pypi.org/simple --disable-pip-version-check --no-cache-dir -e . 'pytest>=8'
           python -m pip check
 
@@ -226,7 +226,7 @@ jobs:
             tests/test_libmpv_station_playlist_cache.py \
             tests/test_libmpv_stall_recovery.py tests/test_libmpv_queue_staging.py \
             tests/test_libmpv_queue_navigation_intent.py \
-            tests/test_libmpv_favorites.py \
+            tests/test_libmpv_favorites.py tests/test_libmpv_radio_catalog.py \
             tests/test_libmpv_queue_cli.py tests/test_libmpv_web_controls.py \
             tests/test_libmpv_standard_dmr.py \
             tests/test_libmpv_source_ownership.py \

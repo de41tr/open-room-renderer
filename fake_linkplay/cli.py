@@ -43,6 +43,29 @@ LOG = logging.getLogger(__name__)
 RESOURCE_CLEANUP_TIMEOUT = 10.0
 
 
+async def _start_catalog_proxy(api: HttpApi, runners: list[web.AppRunner]) -> None:
+    """Cover specific/IPv6 binds without expanding the configured LAN listener.
+
+    Ephemeral loopback port avoids competing for the configured API port. This
+    optional proxy has no control routes or observer; the normal CLI teardown
+    owns its runner even when setup is interrupted or fails.
+    """
+    if api.cfg.bind_address in {"0.0.0.0", "127.0.0.1", ""}:
+        return
+    api.catalog_proxy_port = 0
+    app = web.Application()
+    app.router.add_get("/proxy/audio", api.proxy_audio)
+    runner = web.AppRunner(app)
+    runners.append(runner)
+    try:
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        api.catalog_proxy_port = site._server.sockets[0].getsockname()[1]
+    except OSError:
+        LOG.warning("Radio catalog loopback proxy unavailable; ordinary renderer startup continues")
+
+
 async def serve(config_path: str | None = None) -> None:
     """Start HTTP, discovery, mDNS, and mpv services until interrupted.
 
@@ -135,6 +158,7 @@ async def serve(config_path: str | None = None) -> None:
             runners.append(runner)
             await runner.setup()
             await web.TCPSite(runner, cfg.bind_address, port).start()
+        await _start_catalog_proxy(api, runners)
         if cfg.enable_ssdp:
             ssdp = SsdpServer(cfg)
             await ssdp.start()

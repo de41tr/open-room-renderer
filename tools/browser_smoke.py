@@ -35,6 +35,7 @@ from fake_linkplay.queue_playlist import encode_current_playlist
 from fake_linkplay.state import RendererState
 from test_mpv_unix_integration import _eventually, _external_player, _property, _reap, _write_tone
 from tools.native_probe_supervisor import run_probe
+from tools.radio_catalog_browser import exercise_catalog
 
 ELEMENT = "element-6066-11e4-a52e-4f735466cecf"
 FILENAME = "open-room-renderer-playlist.json"
@@ -310,6 +311,9 @@ async def smoke(artifacts: Path, evidence: dict):
                         tracks = [workspace / name for name in ("first.wav", "second.wav")]
                         for path, frequency in zip(tracks, (440, 660)):
                             _write_tone(path, frequency)
+                        encode = await asyncio.create_subprocess_exec("ffmpeg", "-v", "error", "-i", str(tracks[0]),
+                            "-c:a", "libmp3lame", str(workspace / "station.mp3"))
+                        assert await asyncio.wait_for(encode.wait(), 15) == 0
                         cfg = Config(uuid="00000000-0000-4000-8000-000000000000",
                             state_dir=str(workspace / "state"), bind_address="127.0.0.1", advertise_ip="127.0.0.1",
                             default_volume=25, auto_spawn_mpv=False, enable_ssdp=False, enable_mdns=False)
@@ -333,6 +337,9 @@ async def smoke(artifacts: Path, evidence: dict):
                             evidence["media_requests"] += 1
                             return web.FileResponse(tracks[int(request.match_info["name"] == "second")])
                         app.router.add_get("/browser-smoke/{name:first|second}.wav", media)
+                        async def radio_media(request):
+                            return web.FileResponse(workspace / "station.mp3")
+                        app.router.add_get("/browser-smoke/station.mp3", radio_media)
                         runner = web.AppRunner(app, access_log=None, shutdown_timeout=1)
                         try:
                             await runner.setup()
@@ -360,6 +367,8 @@ async def smoke(artifacts: Path, evidence: dict):
                                         "driver": capabilities["chrome"]["chromedriverVersion"], "sandbox": "normal; no bypass flags"}
                                     try:
                                         await exercise(browser, api, backend, base, artifacts, downloads, mobile=mobile, evidence=evidence)
+                                        evidence[label]["radio_catalog"] = await exercise_catalog(
+                                            browser, api, backend, base, artifacts, label)
                                     except BaseException:
                                         await browser.diagnostics(artifacts, label + "-failure")
                                         raise
@@ -376,11 +385,11 @@ async def smoke(artifacts: Path, evidence: dict):
 
 async def worker(artifacts: Path) -> None:
     sources = sorted((ROOT / "fake_linkplay").rglob("*.py")) + sorted((ROOT / "fake_linkplay/web_assets").glob("*"))
-    sources += [Path(__file__), ROOT / "tests/test_mpv_unix_integration.py", ROOT / "tools/native_probe_supervisor.py"]
+    sources += [Path(__file__), ROOT / "tools/radio_catalog_browser.py", ROOT / "tests/test_mpv_unix_integration.py", ROOT / "tools/native_probe_supervisor.py"]
     hashes = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources if path.is_file()}
     evidence = {"status": "FAILED", "lane": "REAL_CHROME / production HTTP / production Unix IPC / mpv null",
         "architecture": platform.machine(), "source_sha256": hashes, "http_commands": [], "http_exports": [], "media_requests": 0,
-        "scope": "Generated local WAV only; mobile emulation, not hardware. No physical audio, Firefox, screen reader or broad accessibility claim."}
+        "scope": "Generated local WAV/MP3 and synthetic directory only; mobile emulation, not hardware. No physical audio, Firefox, screen reader or broad accessibility claim."}
     try:
         async with asyncio.timeout(120):
             await smoke(artifacts, evidence)

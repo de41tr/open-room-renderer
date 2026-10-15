@@ -525,6 +525,41 @@
       }
     }
   }
+  class RadioSearch {
+    constructor(request, onChange = () => {}) { this.request = request; this.onChange = onChange; this.serial = 0; this.clear(); }
+    clear() { this.serial += 1; this.pending = false; this.session = null; this.stations = []; this.message = "Search sends the name and optional country to Radio-Browser. No account is needed."; }
+    observe(state) {
+      if (this.session && state && this.session !== state.session_id) {
+        this.clear(); this.message = "The renderer restarted. Search again to choose a station.";
+      }
+    }
+    async search(state, name, country) {
+      if (this.pending || !state) return;
+      name = name.trim(); country = country.trim().toUpperCase();
+      if (name.length < 2 || name.length > 80 || (country && !/^[A-Z]{2}$/.test(country))) {
+        this.message = "Enter 2–80 characters and an optional two-letter country code."; this.onChange(); return;
+      }
+      const serial = ++this.serial;
+      this.session = state.session_id; this.pending = true; this.stations = []; this.message = "Searching Radio-Browser…"; this.onChange();
+      try {
+        const response = await this.request("/orr/v1/web/radio/search", {method: "POST", headers: {"X-ORR-CSRF": state.csrf_token}, body: {action: "search", name, country}, timeoutMs: 15000});
+        if (serial !== this.serial) return;
+        const body = response.body, ids = new Set();
+        if (response.status !== 200 || !isObject(body) || body.session_id !== this.session || !Array.isArray(body.stations) || body.stations.length > 20) throw new Error();
+        for (const station of body.stations) {
+          if (!isObject(station) || !/^[0-9a-f]{32}$/.test(station.id) || ids.has(station.id) || !string(station.name) || !station.name.trim() || station.name.length > 256 || !string(station.country) || !/^(?:[A-Z]{2})?$/.test(station.country) || !["MP3", "AAC", "AAC+"].includes(station.codec) || !integer(station.bitrate) || station.bitrate > 10000) throw new Error();
+          ids.add(station.id);
+        }
+        this.stations = body.stations;
+        this.message = this.stations.length ? `${this.stations.length} stations. Choose Play or Save favorite. Results expire after 15 minutes.` : "No supported stations found. Try another name or remove the country filter.";
+      } catch (_) {
+        if (serial !== this.serial) return;
+        this.stations = []; this.message = "Search unavailable. Check the connection or try again later. Playback was not changed.";
+      } finally {
+        if (serial === this.serial) { this.pending = false; this.onChange(); }
+      }
+    }
+  }
   class Controller {
     constructor(request, onChange = () => {}) {
       this.request = request;
@@ -703,5 +738,5 @@
       return result;
     }
   }
-  return {FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesDocument, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveDocument, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
+  return {RadioSearch, FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesDocument, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveDocument, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
 });

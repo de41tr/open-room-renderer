@@ -93,6 +93,15 @@ mpv
 your speakers
 ```
 
+### Search internet radio
+
+In the existing web UI, use **Internet radio** to search Radio-Browser by station
+name and optional two-letter country code. Choose **Play** to replace the current
+queue, or **Save favorite** to keep the station in the existing favorites library.
+No account is needed. This independent community catalog supports direct MP3/AAC
+streams; it does not implement WiiM Radio or the TuneIn catalog. See
+[radio catalog behavior, privacy and verification](docs/RADIO_CATALOG.md).
+
 ## What It Is Not
 
 This is not a polished commercial streamer. It is not an official product. It is not a cloud-service unlocker.

@@ -18,6 +18,7 @@ import json
 import math
 import re
 import secrets
+import time
 from urllib.parse import unquote, urlsplit
 
 from aiohttp import web
@@ -36,6 +37,7 @@ from .queue_playlist import encode_current_playlist
 from .web_playlists import (PLAYLIST_ACTIONS, WebPlaylistError, availability as playlist_availability,
                             prepare_edit, prepare_source, prepare_urls)
 from .radio import RadioResolutionError
+from .radio_catalog import CatalogError, CatalogPlaybackUnavailable, CatalogStation, search_stations
 from .state import PlaybackPhase, RendererState
 
 PREFIX = "/orr/v1/web"
@@ -58,7 +60,7 @@ _HEADERS = {
         "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
 }
 _GENERATION_ACTIONS = frozenset({"play", "pause", "next", "previous", "seek",
-                               "queue_select", "queue_mode", "favorite_current"}) | PLAYLIST_ACTIONS
+                               "queue_select", "queue_mode", "favorite_current", "radio_play"}) | PLAYLIST_ACTIONS
 _SCHEMAS = {
     **{name: {"expected_generation"} for name in ("play", "pause", "next", "previous")},
     "device_rename": {"name", "expected_device"},
@@ -66,6 +68,7 @@ _SCHEMAS = {
     "volume": {"value"}, "mute": {"value"}, "balance": {"value"}, "eq": {"enabled"},
     "queue_select": {"queue_name", "index", "expected_generation"},
     "queue_mode": {"queue_name", "mode", "expected_generation"},
+    "radio_play": {"id", "expected_generation"}, "favorite_radio": {"id"},
     "favorite_add": {"name", "url"}, "favorite_current": {"name", "expected_generation"},
     "favorite_rename": {"id", "name"}, "favorite_target": {"id", "url", "metadata"},
     "favorite_delete": {"id"}, "favorite_play": {"id"},
@@ -160,6 +163,7 @@ class WebDspExport:
 class WebRuntime:
     """Synchronous renderer-owned availability and uncertainty observations."""
     actions: frozenset[str]
+    catalog_proxy_available: bool = True
     transport_unknown: bool = False
     transport_pending: bool = False
     gain_pending: bool = False
@@ -560,6 +564,8 @@ class WebControlApi:
         self._csrf_token = secrets.token_urlsafe(32)
         self._session_id = secrets.token_urlsafe(24)
         self._revision = 0
+        self._radio_busy = False
+        self._radio_results: dict[str, tuple[float, CatalogStation]] = {}
         # Keyed presentation tokens conceal raw plugin/name identifiers; they
         # are derived views, not a second revision counter or state authority.
         self._dsp_key = secrets.token_bytes(32)
@@ -615,6 +621,11 @@ class WebControlApi:
     def _error(code: str, status: int, outcome: str = "REJECTED", *, committed: bool = False,
                effect: str | None = None) -> web.Response:
         messages = {
+            "radio_proxy_unavailable": "The local radio proxy could not start. Check the renderer startup log and restart it after resolving the local listener error.",
+            "radio_unavailable": "Radio-Browser is unavailable. Try searching again later.",
+            "radio_busy": "A station search is already running. Wait for it to finish.",
+            "radio_expired": "This station selection expired. Search again before choosing it.",
+            "radio_invalid": "Enter a station name of 2–80 characters and an optional two-letter country code.",
             "stale_output_inspection": "The renderer session changed. Refresh before inspecting again.",
             "output_inspection_busy": "An output inspection is already running. No new inspection was started.",
             "output_inspection_unavailable": "Output inspection is unavailable in this renderer.",
@@ -847,6 +858,15 @@ class WebControlApi:
             if command.action == "queue_select" and not 1 <= command.index <= state.queue.count:
                 raise WebAdmissionError("unavailable", 409)
         runtime = self._runtime()
+        if command.action in {"radio_play", "favorite_radio"}:
+            found = self._radio_results.get(command.id)
+            if found is None or time.monotonic() - found[0] > 900:
+                raise WebAdmissionError("radio_expired", 409)
+            if command.action == "radio_play" and not runtime.catalog_proxy_available:
+                raise WebAdmissionError("radio_proxy_unavailable", 503)
+            if command.action == "radio_play" and (runtime.transport_unknown or runtime.transport_pending):
+                raise WebAdmissionError("unavailable", 409)
+            command = replace(command, name=found[1].name, url=found[1].reference)
         if command.action in {"play", "pause", "next", "previous", "seek"} and command.action not in runtime.actions:
             raise WebAdmissionError("unavailable", 409)
         if command.action == "queue_mode" and runtime.queue_mode_locked:
@@ -928,6 +948,37 @@ class WebControlApi:
         finally:
             self._output_inspection_busy = False
 
+    async def _radio_search(self, encoded: bytes) -> web.Response:
+        payload = _decode_request(encoded)
+        if payload.keys() != {"action", "name", "country"} or payload["action"] != "search":
+            raise WebAdmissionError("radio_invalid", 400)
+        name, country = payload["name"], payload["country"]
+        if (not isinstance(name, str) or not 2 <= len(name.strip()) <= 80
+                or _INVALID_TEXT.search(name) or not isinstance(country, str)
+                or country and not re.fullmatch(r"[A-Z]{2}", country)):
+            raise WebAdmissionError("radio_invalid", 400)
+        if self._radio_busy:
+            raise WebAdmissionError("radio_busy", 409)
+        self._radio_busy = True
+        try:
+            stations = await search_stations(name, country)
+            now = time.monotonic()
+            self._radio_results = {key: value for key, value in self._radio_results.items()
+                                   if now - value[0] <= 900}
+            results = []
+            for station in stations:
+                token = secrets.token_hex(16)
+                self._radio_results[token] = (now, station)
+                results.append({"id": token, "name": station.name, "country": station.country,
+                                "codec": station.codec, "bitrate": station.bitrate})
+            while len(self._radio_results) > 100:
+                del self._radio_results[next(iter(self._radio_results))]
+            return web.json_response({"session_id": self._session_id, "stations": results}, headers=_HEADERS)
+        except CatalogError:
+            return self._error("radio_unavailable", 503, "ERROR")
+        finally:
+            self._radio_busy = False
+
     async def handle(self, request: web.Request) -> web.Response:
         dispatched = False
         try:
@@ -963,11 +1014,13 @@ class WebControlApi:
                             return self._error("favorites_unavailable", 503, "ERROR")
                         raise
                 return web.json_response(value, headers=_HEADERS)
-            if path not in {PREFIX + "/command", PREFIX + "/playlist/export", PREFIX + "/output/inspect", PREFIX + "/dsp/export", PREFIX + "/favorites/export"}:
+            if path not in {PREFIX + "/command", PREFIX + "/playlist/export", PREFIX + "/output/inspect", PREFIX + "/dsp/export", PREFIX + "/favorites/export", PREFIX + "/radio/search"}:
                 raise WebAdmissionError("not_found", 404)
             if request.method != "POST":
                 raise WebAdmissionError("method_not_allowed", 405)
             encoded = await self._body(request, origin)
+            if path == PREFIX + "/radio/search":
+                return await self._radio_search(encoded)
             if path == PREFIX + "/favorites/export":
                 return self._favorites_export(encoded)
             if path == PREFIX + "/dsp/export":
@@ -980,7 +1033,7 @@ class WebControlApi:
             dispatched = True
             result = await self._dispatch(command)
             return web.json_response({"request_acknowledged": True, **(result or {})}, headers=_HEADERS)
-        except WebAdmissionError as exc:
+        except (WebAdmissionError, CatalogPlaybackUnavailable) as exc:
             return self._error(exc.code, exc.status)
         except WebDspCommandError as exc:
             return self._error("command_failed", 502, "UNKNOWN", effect=exc.effect)

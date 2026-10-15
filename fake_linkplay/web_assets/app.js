@@ -1,7 +1,7 @@
 /* Same-origin UI. Canonical snapshots are the only source of displayed state. */
 (function () {
   "use strict";
-  const {FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
+  const {RadioSearch, FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
   const $ = id => document.getElementById(id);
   const drafts = {seek: false, volume: false, mode: false, balance: false};
   let snapshot = null, queueSignature = "", favoritesSignature = "", artworkURL = null;
@@ -77,6 +77,8 @@
   }
   const control = new Controller(request, render);
   const outputInspection = new OutputInspection(request, renderOutputInspection);
+  const radioSearch = new RadioSearch(request, renderRadio);
+  let radioSignature = "";
   function renderOutputInspection() {
     outputInspection.observe(control.state);
     $("inspect-output").disabled = !outputInspection.canInspect(control.state);
@@ -104,6 +106,7 @@
     snapshot = control.state;
     noticeView();
     renderOutputInspection();
+    renderRadio();
     $("refresh").disabled = false;
     if (!snapshot) return;
     const {media, transport, gain, queue, dsp} = snapshot;
@@ -177,6 +180,50 @@
     renderFavoriteDraft(ready);
   }
   function element(tag, className, value) { const item = document.createElement(tag); if (className) item.className = className; if (value !== undefined) item.textContent = value; return item; }
+  function renderRadio() {
+    radioSearch.observe(control.state);
+    $("radio-search").disabled = !control.fresh || radioSearch.pending;
+    $("radio-name").disabled = radioSearch.pending; $("radio-country").disabled = radioSearch.pending;
+    text("radio-status", radioSearch.message);
+    const signature = JSON.stringify([radioSearch.session, radioSearch.stations.map(item => item.id)]);
+    if (signature !== radioSignature) {
+      radioSignature = signature;
+      const rows = radioSearch.stations.map(station => {
+        const row = element("li", "radio-row"), copy = element("div", "item-copy");
+        copy.append(element("span", "item-title", station.name), element("span", "item-subtitle", [station.country, station.codec, station.bitrate ? `${station.bitrate} kbps` : ""].filter(Boolean).join(" · ")));
+        const actions = element("div", "radio-actions");
+        for (const [action, label] of [["radio_play", "Play"], ["favorite_radio", "Save favorite"]]) {
+          const button = element("button", "button small", label); button.type = "button"; button.dataset.radioAction = action;
+          button.addEventListener("click", async () => {
+            if (radioSearch.session !== control.state?.session_id || !control.canMutate(action) || button.dataset.sent) return;
+            const session = radioSearch.session, serial = radioSearch.serial;
+            if (action === "favorite_radio") button.dataset.sent = "true";
+            const body = {action, id: station.id};
+            if (action === "radio_play") body.expected_generation = control.state.generation;
+            const result = await run(body, action === "radio_play" ? "Play radio" : "Save station");
+            if (session !== radioSearch.session || serial !== radioSearch.serial) return;
+            if (action === "favorite_radio") {
+              const saved = result.kind === "acknowledged" && control.favoritesFresh && control.favorites.some(item => item.id === result.favoriteId);
+              button.textContent = saved ? "Saved" : "Check favorites";
+              radioSearch.message = saved ? "Station saved in Favorites." : "Save request finished. Review Favorites and the request status above before saving again.";
+            } else radioSearch.message = "Play request finished. The player above shows the renderer’s confirmed status.";
+            renderRadio();
+          });
+          actions.append(button);
+        }
+        row.append(copy, actions); return row;
+      });
+      $("radio-results").replaceChildren(...rows);
+    }
+    $("radio-results").querySelectorAll("button").forEach(button => {
+      button.disabled = Boolean(button.dataset.sent) || radioSearch.session !== control.state?.session_id || !control.canMutate(button.dataset.radioAction);
+    });
+  }
+  $("radio-form").addEventListener("submit", event => {
+    event.preventDefault();
+    if (control.fresh) radioSearch.search(control.state, $("radio-name").value, $("radio-country").value);
+  });
+  $("radio-clear").addEventListener("click", () => { radioSearch.clear(); $("radio-form").reset(); renderRadio(); });
   function currentEditor() { return control.fresh && snapshot?.dsp.status === "CONFIRMED" ? snapshot.dsp.editor : null; }
   function matchingBands(left, right) { return left.length === right.length && left.every((band, index) => band.param_name === right[index].param_name && band.value === right[index].value); }
   function renderSoundEditor() {
@@ -1155,7 +1202,7 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
   // Scrub private dialog input before navigation/BFCache, even if already closed.
   // Only local drafts are dismissed; sent commands and their outcomes stay live.
-  window.addEventListener("pagehide", () => { queueReview += 1; outputInspection.dismiss(); renderOutputInspection(); closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); curveExportDialog.close(false); curveImportDialog.close(false); favoritesExportDialog.close(false); favoritesRestoreDialog.close(false); });
+  window.addEventListener("pagehide", () => { radioSearch.clear(); renderRadio(); queueReview += 1; outputInspection.dismiss(); renderOutputInspection(); closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); curveExportDialog.close(false); curveImportDialog.close(false); favoritesExportDialog.close(false); favoritesRestoreDialog.close(false); });
   window.addEventListener("online", () => poll());
   window.addEventListener("offline", () => { control.fresh = false; control.favoritesFresh = false; control.favoritesReadFailure = null; render(); });
   poll();
