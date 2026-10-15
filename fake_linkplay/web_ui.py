@@ -69,6 +69,7 @@ _SCHEMAS = {
     "queue_select": {"queue_name", "index", "expected_generation"},
     "queue_mode": {"queue_name", "mode", "expected_generation"},
     "radio_play": {"id", "expected_generation"}, "favorite_radio": {"id"},
+    "favorite_radio_target": {"id", "station_id", "metadata", "expected_favorite", "expected_session"},
     "favorite_add": {"name", "url"}, "favorite_current": {"name", "expected_generation"},
     "favorite_rename": {"id", "name"}, "favorite_target": {"id", "url", "metadata"},
     "favorite_delete": {"id"}, "favorite_play": {"id"},
@@ -116,6 +117,8 @@ class WebCommand:
     url: str = ""
     id: str = ""
     metadata: str = ""
+    station_id: str = ""
+    expected_favorite: str = ""
     expected_dsp: str = ""
     expected_device: str = ""
     expected_session: str = ""
@@ -529,6 +532,12 @@ def decode_command(encoded: bytes) -> WebCommand:
         if "url" in payload:
             _text(payload["url"], 8192, required=True)
             validate_url(payload["url"])
+        if action == "favorite_radio_target":
+            if (not isinstance(payload["station_id"], str) or not re.fullmatch(r"[0-9a-f]{32}", payload["station_id"])
+                    or not isinstance(payload["expected_favorite"], str) or not _DSP_TOKEN.fullmatch(payload["expected_favorite"])
+                    or not isinstance(payload["expected_session"], str) or not _SESSION_TOKEN.fullmatch(payload["expected_session"])
+                    or payload["metadata"] not in ("keep", "clear")):
+                raise ValueError
         if action == "favorite_target":
             validate_target_edit(payload["url"], payload["metadata"])
         return WebCommand(**payload)
@@ -625,6 +634,8 @@ class WebControlApi:
             "radio_unavailable": "Radio-Browser is unavailable. Try searching again later.",
             "radio_busy": "A station search is already running. Wait for it to finish.",
             "radio_expired": "This station selection expired. Search again before choosing it.",
+            "stale_favorite": "This favorite or renderer session changed. Reopen Replace favorite and review the selection.",
+            "configured_read_only": "Configured favorites are read-only.",
             "radio_invalid": "Enter a station name (2–80 characters), a two-letter country code, or both.",
             "stale_output_inspection": "The renderer session changed. Refresh before inspecting again.",
             "output_inspection_busy": "An output inspection is already running. No new inspection was started.",
@@ -827,6 +838,10 @@ class WebControlApi:
             "dsp": dsp, "actions": actions,
         }
 
+    def favorite_revision(self, entry: dict[str, object]) -> str:
+        """Session-bound exact saved record identity; never disclose its URL."""
+        return self._dsp_digest("favorite", entry)
+
     def favorites_snapshot(self) -> dict[str, object]:
         document = self._favorites.document()
         records = []
@@ -840,6 +855,7 @@ class WebControlApi:
             # Never expose those legacy basename/query projections here.
             title = _title(entry["title"], (entry["url"],), "")
             records.append({"id": entry["id"], "editable": entry["editable"],
+                "revision": self.favorite_revision(entry) if entry["editable"] else "",
                 "name": _display(entry["name"], "Favorite"), "title": title,
                 "artist": _display(entry["artist"]), "album": _display(entry["album"]),
                 "artwork": safe_artwork(entry["artwork"]), "target_label": _display(target, "Saved target")})
@@ -858,8 +874,17 @@ class WebControlApi:
             if command.action == "queue_select" and not 1 <= command.index <= state.queue.count:
                 raise WebAdmissionError("unavailable", 409)
         runtime = self._runtime()
-        if command.action in {"radio_play", "favorite_radio"}:
-            found = self._radio_results.get(command.id)
+        if command.action == "favorite_radio_target":
+            if not secrets.compare_digest(command.expected_session, self._session_id):
+                raise WebAdmissionError("stale_favorite", 409)
+            if command.id.startswith("configured:"):
+                raise WebAdmissionError("configured_read_only", 403)
+            entry = next((entry for entry in self._favorites.document()["favorites"]
+                          if entry["id"] == command.id and entry["editable"]), None)
+            if entry is None or not secrets.compare_digest(command.expected_favorite, self.favorite_revision(entry)):
+                raise WebAdmissionError("stale_favorite", 409)
+        if command.action in {"radio_play", "favorite_radio", "favorite_radio_target"}:
+            found = self._radio_results.get(command.station_id if command.action == "favorite_radio_target" else command.id)
             if found is None or time.monotonic() - found[0] > 900:
                 raise WebAdmissionError("radio_expired", 409)
             if command.action == "radio_play" and not runtime.catalog_proxy_available:

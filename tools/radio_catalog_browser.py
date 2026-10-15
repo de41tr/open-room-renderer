@@ -43,6 +43,9 @@ async def exercise_catalog(browser, api, backend, base, artifacts, label):
         with patch("fake_linkplay.web_ui.search_stations", search), \
              patch("fake_linkplay.http_api.resolve_catalog_station", resolve_station), \
              patch("fake_linkplay.http_api.resolve_proxy_target", resolve):
+            repair = api.favorites.add({"name": "My morning radio", "url": "https://media.example.test/retired.mp3",
+                "title": "Old station title", "artist": "Old artist"})
+            admitted = api.favorites.playback_snapshot(repair["id"])
             before = len(api.favorites.document()["favorites"])
             await type_field("#radio-name", "Synthetic")
             await browser.click("#radio-search")
@@ -64,6 +67,34 @@ async def exercise_catalog(browser, api, backend, base, artifacts, label):
             assert await _property(backend, "audio-codec-name") == "mp3"
             assert await _property(backend, "current-ao") == "null"
             await browser.screenshot(artifacts / (label + "-radio.png"))
+            # Existing native playback must survive a library-only repair.
+            queue, queue_before, generation = api.state.queue, deepcopy(api.state.queue), api.state.generation
+            path_before = await _property(backend, "path")
+            opener = "#radio-results [data-radio-action='favorite_radio_target']"
+            await browser.click(opener)
+            assert await browser.inspect("document.activeElement.id") == "favorite-radio-select"
+            assert await browser.inspect("document.querySelector('#favorite-submit').disabled")
+            await browser.key("\ue00c")  # Escape cancels without writing.
+            await browser.wait("!document.querySelector('#favorite-dialog').open")
+            assert api.favorites.playback_snapshot(repair["id"])["url"] == repair["url"]
+            assert await browser.inspect("document.activeElement.dataset.radioAction") == "favorite_radio_target"
+            await browser.click(opener)
+            await browser.click("#favorite-radio-select option[value='" + repair["id"] + "']")
+            await browser.click("#favorite-metadata option[value='clear']")
+            assert await browser.inspect("document.querySelector('#favorite-radio-station').textContent") == "Selected station: Synthetic <radio> · DE · MP3 · 128 kbps"
+            assert "My morning radio" in await browser.inspect("document.querySelector('#favorite-delete-name').textContent")
+            assert await browser.inspect("document.querySelectorAll('#favorite-radio-select option[value^=\"configured:\"]').length") == 0
+            await browser.screenshot(artifacts / (label + "-radio-repair.png"))
+            assert await browser.inspect("document.documentElement.scrollWidth <= innerWidth + 1")
+            await browser.click("#favorite-submit")
+            await browser.wait("document.querySelector('#favorite-dialog-status').textContent.startsWith('ACKNOWLEDGED')")
+            updated = next(item for item in api.favorites.document()["favorites"] if item["id"] == repair["id"])
+            assert updated == {**repair, "url": station.reference, "title": "", "artist": ""}
+            assert admitted["url"] == repair["url"] and len(api.favorites.document()["favorites"]) == before + 1
+            assert api.state.queue is queue and queue == queue_before and api.state.generation == generation
+            assert await _property(backend, "path") == path_before
+            assert await browser.inspect("document.querySelector('#favorite-submit').disabled")
+            await browser.click("#favorite-cancel")
             assert await browser.inspect("document.documentElement.scrollWidth <= innerWidth + 1")
             await browser.click("#stop")
             await browser.wait("document.querySelector('#playback-state').textContent === 'STOPPED'")
@@ -81,7 +112,8 @@ async def exercise_catalog(browser, api, backend, base, artifacts, label):
     finally:
         release.set()
         await api._replace_queue(original_queue)
-    return {"search_save_play": True, "country_only_browse_save_play": True,
+    return {"search_save_play": True, "country_only_browse_save_play": True, "repair_preserves_identity_and_playback": True,
+            "repair_escape_cancels": True,
             "native_codec": "mp3", "output": "null",
             "clear_discards_late_result": True, "outage_preserves_stopped_playback": True,
             "directory": "synthetic; no live-provider claim"}

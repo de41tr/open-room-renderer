@@ -310,3 +310,112 @@ async def test_unavailable_catalog_eof_keeps_observed_stop_and_completes_task(tm
     assert api.state.gain_confirmed == confirmed_gain and not api.state.backend_url
     assert "local radio proxy" in api.state.last_error
     assert api._queue_advance_task.exception() is None
+
+
+@pytest.mark.parametrize("policy", ["keep", "clear"])
+async def test_catalog_repair_preserves_identity_order_playback_and_admitted_snapshot(api, monkeypatch, policy):
+    from copy import deepcopy
+    metadata = {"title": "Old title", "artist": "Old artist", "album": "Old album",
+                "artwork": "https://art.example.test/old.png"}
+    first = api.favorites.add({"name": "Before", "url": "https://media.example.test/first"})
+    saved = api.favorites.add({"name": "My morning radio", "url": "https://media.example.test/old?token=PRIVATE", **metadata})
+    last = api.favorites.add({"name": "After", "url": "https://media.example.test/last"})
+    admitted = api.favorites.playback_snapshot(saved["id"])
+    admitted_before = deepcopy(admitted)
+    monkeypatch.setattr("fake_linkplay.web_ui.search_stations", AsyncMock(return_value=[STATION]))
+    async with serving(api) as (session, base):
+        snapshot = await state(session, base)
+        assert (await command(session, base, snapshot["csrf_token"], {"action": "favorite_play", "id": saved["id"]}))[0] == 200
+        before = await state(session, base)
+        queue, queue_before, backend_before = api.state.queue, deepcopy(api.state.queue), await api.mpv.snapshot()
+        calls = list(api.mpv.calls)
+        response = await search(session, base, before)
+        token = (await response.json())["stations"][0]["id"]
+        projection = api.web_api.favorites_snapshot()["favorites"][1]
+        assert "PRIVATE" not in json.dumps(projection) and "url" not in projection
+        status, body = await command(session, base, before["csrf_token"], {
+            "action": "favorite_radio_target", "id": saved["id"], "station_id": token, "metadata": policy,
+            "expected_favorite": projection["revision"], "expected_session": before["session_id"]})
+        assert (status, body) == (200, {"request_acknowledged": True})
+        expected = {**saved, "url": STATION.reference,
+                    **(metadata if policy == "keep" else {key: "" for key in metadata})}
+        assert api.favorites.document()["favorites"] == [first, expected, last]
+        persisted = json.loads(api.favorites.path.read_text())
+        assert persisted["version"] == 1 and set(persisted["favorites"][1]) == {"id", "name", "url", *metadata}
+        assert api.web_api.favorites_snapshot()["favorites"][1]["revision"] != projection["revision"]
+        after = await state(session, base)
+        for key in ("generation", "transport", "media", "queue"):
+            assert before[key] == after[key]
+        assert api.state.queue is queue and queue == queue_before
+        assert admitted == admitted_before and admitted["url"] == saved["url"]
+        assert api.mpv.calls == calls and await api.mpv.snapshot() == backend_before
+
+
+async def test_catalog_repair_rejects_stale_readonly_invalid_and_expired_choices_before_write(api, monkeypatch):
+    from fake_linkplay.config import PodcastPreset
+    api.cfg.podcast_presets = (PodcastPreset("Configured", "https://media.example.test/configured"),)
+    saved = api.favorites.add({"name": "Keep me", "url": "https://media.example.test/old?token=PRIVATE"})
+    token = "a" * 32
+    api.web_api._radio_results[token] = (time.monotonic(), STATION)
+    async with serving(api) as (session, base):
+        snapshot = await state(session, base)
+        entry = next(item for item in api.web_api.favorites_snapshot()["favorites"] if item["id"] == saved["id"])
+        payload = {"action": "favorite_radio_target", "id": saved["id"], "station_id": token, "metadata": "clear",
+                   "expected_favorite": entry["revision"], "expected_session": snapshot["session_id"]}
+        assert api.web_api.favorites_snapshot()["favorites"][0]["revision"] == ""
+        original_file = api.favorites.path.read_bytes()
+        cases = [({"id": "configured:1"}, 403, "configured_read_only"),
+                 ({"id": "invalid"}, 400, "invalid_request"), ({"id": "b" * 32}, 409, "stale_favorite"),
+                 ({"station_id": "b" * 32}, 409, "radio_expired"),
+                 ({"expected_session": "z" * 32}, 409, "stale_favorite"),
+                 ({"metadata": "automatic"}, 400, "invalid_request")]
+        for changes, code, error in cases:
+            status, body = await command(session, base, snapshot["csrf_token"], {**payload, **changes})
+            assert status == code and body["error"] == error and body["outcome"] == "REJECTED"
+            assert api.favorites.path.read_bytes() == original_file
+        api.web_api._radio_results[token] = (time.monotonic() - 901, STATION)
+        status, body = await command(session, base, snapshot["csrf_token"], payload)
+        assert status == 409 and body["error"] == "radio_expired"
+        api.web_api._radio_results[token] = (time.monotonic(), STATION)
+        # Same hostname/redacted fields must not conceal an exact URL change.
+        api.favorites.set_url(saved["id"], "https://media.example.test/new?token=PRIVATE", "keep")
+        status, body = await command(session, base, snapshot["csrf_token"], payload)
+        assert status == 409 and body["error"] == "stale_favorite"
+        # A change after initial admission is rechecked at the final write boundary.
+        payload["expected_favorite"] = api.web_api.favorites_snapshot()["favorites"][1]["revision"]
+        original_dispatch = api.web_api._dispatch
+        async def changed_before_dispatch(command):
+            api.favorites.rename(saved["id"], "Other controller")
+            return await original_dispatch(command)
+        monkeypatch.setattr(api.web_api, "_dispatch", changed_before_dispatch)
+        status, body = await command(session, base, snapshot["csrf_token"], payload)
+        assert status == 409 and body["error"] == "stale_favorite"
+        assert api.favorites.playback_snapshot(saved["id"])["url"] != STATION.reference
+        monkeypatch.setattr(api.web_api, "_dispatch", original_dispatch)
+        api.favorites.delete(saved["id"])
+        status, body = await command(session, base, snapshot["csrf_token"], payload)
+        assert status == 409 and body["error"] == "stale_favorite"
+        assert not api.mpv.calls
+
+
+async def test_catalog_repair_committed_error_remains_unknown_without_retry(api, monkeypatch):
+    from fake_linkplay.persistence import AtomicWriteCommittedError
+    saved = api.favorites.add({"name": "Custom name", "url": "https://media.example.test/old"})
+    api.web_api._radio_results["a" * 32] = (time.monotonic(), STATION)
+    commit = api.favorites._commit
+    writes = []
+    def uncertain(records):
+        writes.append(records)
+        commit(records)
+        raise AtomicWriteCommittedError("https://private.example.test/?token=PRIVATE")
+    monkeypatch.setattr(api.favorites, "_commit", uncertain)
+    async with serving(api) as (session, base):
+        snapshot = await state(session, base)
+        status, body = await command(session, base, snapshot["csrf_token"], {
+            "action": "favorite_radio_target", "id": saved["id"], "station_id": "a" * 32, "metadata": "clear",
+            "expected_favorite": api.web_api.favorites_snapshot()["favorites"][0]["revision"],
+            "expected_session": snapshot["session_id"]})
+        assert status == 502 and body["outcome"] == "UNKNOWN" and body["committed"] is True
+        assert "PRIVATE" not in json.dumps(body)
+        assert api.favorites.playback_snapshot(saved["id"])["url"] == STATION.reference
+        assert len(writes) == 1 and not api.mpv.calls

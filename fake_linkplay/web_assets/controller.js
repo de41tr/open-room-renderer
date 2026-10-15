@@ -410,6 +410,7 @@
     const ids = new Set();
     for (const favorite of payload.favorites) {
       if (!isObject(favorite) || !string(favorite.id) || !favorite.id || ids.has(favorite.id) || typeof favorite.editable !== "boolean" || ![favorite.name, favorite.title, favorite.artist, favorite.album, favorite.target_label].every(string) || !(favorite.artwork === null || string(favorite.artwork))) throw new Error("Invalid favorite");
+      if (favorite.revision !== undefined && (!string(favorite.revision) || (favorite.editable ? !opaqueID(favorite.revision) : favorite.revision !== ""))) throw new Error("Invalid favorite revision");
       ids.add(favorite.id);
     }
     return payload.favorites;
@@ -551,7 +552,7 @@
           ids.add(station.id);
         }
         this.stations = body.stations;
-        this.message = this.stations.length ? `${this.stations.length} stations. Choose Play or Save favorite. Results expire after 15 minutes.` : "No supported stations found. Try another name or country.";
+        this.message = this.stations.length ? `${this.stations.length} stations. Choose Play, Save favorite, or Replace favorite. Results expire after 15 minutes.` : "No supported stations found. Try another name or country.";
       } catch (_) {
         if (serial !== this.serial) return;
         this.stations = []; this.message = "Search unavailable. Check the connection or try again later. Playback was not changed.";
@@ -646,6 +647,8 @@
         const response = await this.request("/orr/v1/web/command", {method: "POST", headers: {"X-ORR-CSRF": this.state.csrf_token}, body});
         if (response.status === 200 && isObject(response.body) && response.body.request_acknowledged === true) result = {kind: "acknowledged", text: `${label}: request acknowledged. Reading the current state…`, id, favoriteId: response.body.favorite_id || null, deviceRevision: response.body.device_revision};
         else result = {...commandError(response), id};
+        if (body.action === "favorite_radio_target" && result.kind === "error"
+            && (response.status < 400 || response.status >= 500 || !exactFields(response.body, ["error", "message", "outcome"]))) result.kind = "unknown";
         if (body.action === "favorite_restore" && result.kind === "unknown" && response.status === 502 && response.body?.error === "command_failed" && response.body.outcome === "UNKNOWN" && response.body.committed === true) result.favoritesLibraryDurabilityUnknown = true;
         // Only this exact admission rejection proves a row edit had no effect.
         // Extra fields (including committed/effect), other errors and local
@@ -684,13 +687,17 @@
               ? "The managed favorites library was replaced, but disk durability is unconfirmed. Matching readback cannot confirm durability. No retry was sent."
               : "Favorites restore outcome unknown. The library may have changed. Review managed favorites before another restore. No retry was sent.";
       }
-      if (body.action === "favorite_target") {
+      if (["favorite_target", "favorite_radio_target"].includes(body.action)) {
         // The redacted library cannot verify the exact URL, even with a fresh
         // matching hostname/name/ID. Never echo potentially private errors.
         result.text = result.kind === "acknowledged"
           ? "Target-change request acknowledged. The exact saved URL is not verified by this redacted view."
           : result.kind === "error"
-            ? "Target-change request rejected. Review the replacement URL and metadata choice before starting again."
+            ? body.action === "favorite_radio_target"
+              ? result.code === "radio_expired"
+                ? "Station selection expired. Search again, then choose the favorite and metadata policy again. Nothing was changed."
+                : "Replacement rejected. The favorite, station selection or renderer session may have changed. Close this dialog and review them before starting again."
+              : "Target-change request rejected. Review the replacement URL and metadata choice before starting again."
             : "Target-change outcome unknown. The change may have taken effect. No retry was sent. The exact saved URL cannot be verified from this redacted view.";
       }
       if (body.action === "device_rename") {
@@ -718,7 +725,7 @@
           ? "Room name saved; the current name is verified."
           : "Room rename acknowledged, but the current name has not been verified. Close this dialog and refresh before another request.";
       }
-      if (body.action === "favorite_target" && result.kind === "acknowledged") {
+      if (["favorite_target", "favorite_radio_target"].includes(body.action) && result.kind === "acknowledged") {
         if (!this.favoritesFresh) result.text += " The favorites list could not be refreshed.";
         if (!this.fresh) result.text += " Current renderer state is unavailable. Refresh before another command.";
       }
@@ -726,7 +733,7 @@
         // An ACK is not a playback observation. State badges remain canonical.
         if (body.action === "device_rename") {
           this.notice = {...result, kind: result.deviceVerified ? "confirmed" : "acknowledged"};
-        } else if (["favorite_target", "favorite_restore"].includes(body.action)) {
+        } else if (["favorite_target", "favorite_radio_target", "favorite_restore"].includes(body.action)) {
           this.notice = {...result};
         } else {
           this.notice = this.fresh

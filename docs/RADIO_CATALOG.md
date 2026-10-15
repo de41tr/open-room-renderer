@@ -4,7 +4,7 @@ Open the renderer's existing `/ui/` page on your trusted LAN. Under **Internet
 radio**, enter a station name (2–80 characters), a two-letter country code (for
 example `DE`), or both. Leave the name blank to browse stations in that country;
 adding a name narrows results. At least one field is required. Select **Play** or
-**Save favorite**.
+**Save favorite**, or explicitly **Replace favorite…**.
 
 - Search returns at most 20 popularity-ordered directory records, excluding
   broken stations, HLS and unsupported codecs. Some searches therefore show fewer
@@ -14,6 +14,14 @@ adding a name narrows results. At least one field is required. Select **Play** o
 - Save favorite does not start audio. Existing favorites, renaming, backup and
   recall are reused. The saved target is a stable Radio-Browser station UUID
   reference, resolved again when played, so a changed stream URL is not frozen.
+- Replace favorite lets you choose one existing managed favorite and review its
+  name alongside the selected station. Explicitly keep or clear saved title,
+  artist, album and artwork; clearing old metadata is useful when changing
+  stations. Its custom name, stable ID and order are preserved. No favorite is
+  appended, no stream is fetched, and current playback/queue or an already
+  admitted selection is unchanged. Configured favorites are read-only.
+  A changed favorite or renderer session is rejected; reopen and review it.
+  A lost/uncertain write response remains UNKNOWN, with no automatic retry.
 - Results expire after 15 minutes and after a renderer restart. Search again if
   a selection expires. Clear discards results, including a late search response.
 - Directory outages during search do not change playback. Playing a selection

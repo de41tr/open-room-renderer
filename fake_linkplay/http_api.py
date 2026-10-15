@@ -475,6 +475,11 @@ class HttpApi:
             return {"favorite_id": record["id"]}
         elif action == "favorite_rename":
             self.favorites.rename(command.id, command.name)
+        elif action == "favorite_radio_target":
+            # Recheck the exact record/result at the write boundary. No await
+            # may separate this admission from the existing library-only edit.
+            command = self.web_api._admit(command)
+            self.favorites.set_url(command.id, command.url, command.metadata)
         elif action == "favorite_target":
             self.favorites.set_url(command.id, command.url, command.metadata)
         elif action == "favorite_delete":

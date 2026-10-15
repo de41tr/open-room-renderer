@@ -2422,3 +2422,64 @@ test('radio search rejects malformed results without optimistic playback', async
   await search.search(state(), 'Synthetic', '');
   assert.deepEqual(search.stations, []); assert.match(search.message, /unavailable/);
 });
+
+const repairFavorite = () => ({...favorite(), id: 'b'.repeat(32), name: 'My morning radio', revision: 'c'.repeat(64)});
+const repairStation = {id: 'a'.repeat(32), name: 'New <station>', country: 'DE', codec: 'MP3', bitrate: 128};
+async function repairDraft() {
+  const h = await appHarness();
+  h.setFavorites(favorites([repairFavorite(), {...favorite(), id: 'configured:1', editable: false, revision: ''}]));
+  await h.refresh();
+  h.setPost(() => ({session_id: 'session-one', stations: [repairStation]}));
+  h.ids.get('radio-country').value = 'DE'; await h.ids.get('radio-form').fire('submit'); await h.settle();
+  const opener = h.ids.get('radio-results').querySelectorAll('button').find(item => item.dataset.radioAction === 'favorite_radio_target');
+  assert.ok(opener && !opener.disabled); await opener.fire('click');
+  return {h, opener, commands: () => h.posts().filter(body => body.action !== 'search')};
+}
+async function chooseRepair(h) {
+  h.ids.get('favorite-radio-select').value = repairFavorite().id;
+  await h.ids.get('favorite-radio-select').fire('change'); h.ids.get('favorite-metadata').value = 'clear';
+}
+test('radio repair requires explicit managed selection and metadata, with safe names and cancellable keyboard focus', async () => {
+  const {h, opener, commands} = await repairDraft();
+  assert.equal(h.ids.get('favorite-radio-select').value, ''); assert.equal(h.ids.get('favorite-submit').disabled, true);
+  assert.equal(h.focused(), h.ids.get('favorite-radio-select'));
+  assert.match(h.ids.get('favorite-radio-station').textContent, /New <station>/); assert.equal(h.ids.get('favorite-radio-station').children.length, 0);
+  assert.equal(h.ids.get('favorite-radio-select').children.length, 2, 'Prompt and managed favorite only');
+  assert.equal(h.ids.get('favorite-url-field').hidden, true); assert.equal(h.ids.get('favorite-name-field').hidden, true);
+  await chooseRepair(h); h.ids.get('favorite-metadata').value = '';
+  await h.ids.get('favorite-form').fire('submit'); assert.equal(commands().length, 0);
+  assert.match(h.ids.get('favorite-dialog-status').textContent, /Choose whether/);
+  assert.match(h.ids.get('favorite-delete-name').textContent, /My morning radio/);
+  await h.ids.get('favorite-dialog').fire('cancel');
+  assert.equal(h.ids.get('favorite-dialog').open, false); assert.equal(h.focused(), opener);
+  assert.equal(h.ids.get('favorite-radio-select').children.length, 0); assert.equal(commands().length, 0);
+});
+test('radio repair latches hidden target changes, deletion, new search or restarted sessions without sending', async () => {
+  for (const change of ['revision', 'delete', 'clear', 'restart']) {
+    const {h, commands} = await repairDraft(); await chooseRepair(h);
+    if (change === 'clear') await h.ids.get('radio-clear').fire('click');
+    else if (change === 'restart') {h.setState(state({session_id: 'new-session'})); h.setFavorites(favorites([repairFavorite()], 'new-session'));}
+    else h.setFavorites(favorites(change === 'delete' ? [] : [{...repairFavorite(), revision: 'd'.repeat(64)}]));
+    await h.refresh(); await h.ids.get('favorite-form').fire('submit');
+    assert.equal(commands().length, 0); assert.equal(h.ids.get('favorite-submit').disabled, true);
+    assert.match(h.ids.get('favorite-dialog-status').textContent, /changed/);
+  }
+});
+test('radio repair sends once, retains ACK or UNKNOWN, and expiry requires a fresh deliberate selection', async () => {
+  for (const outcome of ['ack', 'lost', 'committed', 'expired']) {
+    const {h, commands} = await repairDraft(); await chooseRepair(h);
+    h.setPost(() => {
+      if (outcome === 'lost') throw new Error('private target');
+      if (outcome === 'committed') return {__status: 502, error: 'command_failed', outcome: 'UNKNOWN', committed: true, message: 'private target'};
+      return outcome === 'expired' ? {__status: 409, error: 'radio_expired', outcome: 'REJECTED', message: 'Selection expired'} : {request_acknowledged: true};
+    });
+    await h.ids.get('favorite-form').fire('submit');
+    assert.deepEqual(commands(), [{action: 'favorite_radio_target', id: repairFavorite().id, station_id: repairStation.id,
+      metadata: 'clear', expected_favorite: repairFavorite().revision, expected_session: 'session-one'}]);
+    assert.equal(h.ids.get('favorite-radio-select').disabled, true); assert.equal(h.ids.get('favorite-metadata').disabled, true);
+    assert.equal(h.ids.get('favorite-submit').disabled, true);
+    assert.match(h.ids.get('favorite-dialog-status').textContent, outcome === 'ack' ? /^ACKNOWLEDGED.*not verified/ : ['lost', 'committed'].includes(outcome) ? /^UNKNOWN.*No retry/ : /^ERROR.*Search again/);
+    assert.equal(h.ids.get('notice-kind').textContent, outcome === 'ack' ? 'ACKNOWLEDGED' : ['lost', 'committed'].includes(outcome) ? 'UNKNOWN' : 'ERROR');
+    await h.refresh(); await h.ids.get('favorite-form').fire('submit'); assert.equal(commands().length, 1);
+  }
+});
