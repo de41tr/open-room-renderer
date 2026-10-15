@@ -677,6 +677,7 @@ async def test_static_assets_are_exact_packaged_resources_without_inline_bootstr
     expected = {"/": ("index.html", "text/html"), "/ui/": ("index.html", "text/html"),
                 "/ui/index.html": ("index.html", "text/html"), "/ui/style.css": ("style.css", "text/css"),
                 "/ui/controller.js": ("controller.js", "text/javascript"), "/ui/app.js": ("app.js", "text/javascript"),
+                "/ui/logo.png": ("logo.png", "image/png"),
                 "/ui/favicon.ico": (None, "image/x-icon")}
     async with serving(api) as (session, base):
         token = (await state(session, base))["csrf_token"]
@@ -684,6 +685,8 @@ async def test_static_assets_are_exact_packaged_resources_without_inline_bootstr
             async with session.get(base + route, allow_redirects=False) as response:
                 assert response.status == (204 if filename is None else 200)
                 assert response.content_type == content_type
+                if content_type == "image/png":
+                    assert "charset" not in response.headers["Content-Type"]
                 body = await response.read()
                 assert body == (b"" if filename is None else files("fake_linkplay").joinpath("web_assets", filename).read_bytes())
                 assert token.encode() not in body
@@ -698,7 +701,7 @@ async def test_static_assets_are_exact_packaged_resources_without_inline_bootstr
         for method in ("POST", "HEAD", "OPTIONS"):
             async with session.request(method, base + "/ui/favicon.ico") as response:
                 assert response.status == 405
-        for route in ("/ui/favicon.ico?x=1", "/ui/index.html?x=1", "/ui/app.js?x=1", "/ui/missing.js", "/ui/secret.json"):
+        for route in ("/ui/favicon.ico?x=1", "/ui/logo.png?x=1", "/ui/index.html?x=1", "/ui/app.js?x=1", "/ui/missing.js", "/ui/secret.json"):
             async with session.get(base + route) as response:
                 assert response.status in {400, 404}
         assert not api.mpv.calls
@@ -707,7 +710,7 @@ async def test_static_assets_are_exact_packaged_resources_without_inline_bootstr
 async def test_unsupported_encoded_asset_spelling_has_no_file_access(api):
     from yarl import URL
     async with serving(api) as (session, base):
-        for path in ("/ui/%66avicon.ico", "/ui/%61pp.js", "/ui/%2e%2e/pyproject.toml", "/ui/%2fetc/passwd"):
+        for path in ("/ui/%66avicon.ico", "/ui/%6cogo.png", "/ui/%61pp.js", "/ui/%2e%2e/pyproject.toml", "/ui/%2fetc/passwd"):
             async with session.get(URL(base + path, encoded=True)) as response:
                 assert response.status == 404
                 assert (await response.json())["outcome"] == "REJECTED"

@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIN_PYTHON = (3, 11)
 MIN_MPV = (0, 37)
 MANIFEST = "installed-files.json"
-WEB_ASSETS = ("index.html", "style.css", "controller.js", "app.js")
+WEB_ASSETS = ("index.html", "style.css", "controller.js", "app.js", "logo.png")
 
 
 def run(*args: str) -> str:

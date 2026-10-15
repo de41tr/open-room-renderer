@@ -51,6 +51,7 @@ _ASSETS = {"/": ("index.html", "text/html"), "/ui/": ("index.html", "text/html")
            "/ui/style.css": ("style.css", "text/css"),
            "/ui/controller.js": ("controller.js", "text/javascript"),
            "/ui/app.js": ("app.js", "text/javascript"),
+           "/ui/logo.png": ("logo.png", "image/png"),
            "/ui/favicon.ico": (None, "image/x-icon")}
 _HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
@@ -1044,7 +1045,8 @@ class WebControlApi:
                     # blocked by our intentionally unchanged image CSP.
                     return web.Response(status=204, content_type=content_type, headers=_HEADERS)
                 body = files("fake_linkplay").joinpath("web_assets", filename).read_bytes()
-                return web.Response(body=body, content_type=content_type, charset="utf-8", headers=_HEADERS)
+                return web.Response(body=body, content_type=content_type,
+                                    charset=None if content_type.startswith("image/") else "utf-8", headers=_HEADERS)
             if path in {PREFIX + "/state", PREFIX + "/favorites"}:
                 if request.method != "GET":
                     raise WebAdmissionError("method_not_allowed", 405)

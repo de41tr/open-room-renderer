@@ -20,6 +20,18 @@ def test_description_contains_media_renderer_and_playqueue() -> None:
     assert "urn:schemas-wiimu-com:service:PlayQueue:1" in xml
     assert "/upnp/control/PlayQueue" in xml
     assert "uuid:00000000-0000-4000-8000-000000000000" in xml
+    from importlib.resources import files
+    import struct
+    from xml.etree import ElementTree as ET
+    icon = ET.fromstring(xml).find("{*}device/{*}iconList/{*}icon")
+    assert icon.findtext("{*}url") == "/ui/logo.png"
+    assert icon.findtext("{*}mimetype") == "image/png"
+    png = files("fake_linkplay").joinpath("web_assets", "logo.png").read_bytes()
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    width, height, depth, kind = struct.unpack(">IIBB", png[16:26])
+    assert (int(icon.findtext("{*}width")), int(icon.findtext("{*}height"))) == (width, height)
+    assert depth == 8 and kind == 6  # Original 8-bit RGBA, 32 bits per pixel.
+    assert icon.findtext("{*}depth") == "32"
 
 
 def test_wiim_home_profile_description_contains_linkplay_services() -> None:
