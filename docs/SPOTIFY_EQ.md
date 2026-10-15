@@ -142,8 +142,13 @@ is stable across runs. The user may need to select it anew after restart.
   previously authorized normal renderer start path. Existing service boot
   settings, renderer config, favorites and saved EQ remain in place.
 
-FIFO buffering is bounded with file-local mpv options. Pauses/seeks/track changes
-may retain a short buffered tail; timing must be checked on the real device.
+FIFO buffering is bounded with file-local mpv options (`cache=no`, read-ahead
+0, demuxer maximum 65536 bytes, no back-buffer, audio buffer 0.1 s). The upstream
+writer reads 4096 float samples and completes each blocking FIFO write before
+reading again; crossfade is disabled. Its zero `DelayMs()` still means Spotify
+position can lead rendered audio, and `Drop()` cannot flush the downstream tail.
+Pauses/seeks/track changes may retain a buffered tail; exact timing must be
+checked on the real device. These options are not a 0.1 s end-to-end guarantee.
 Nothing in software status is a physical sound or audibility measurement.
 
 ## Acceptance evidence and remaining gates
@@ -151,6 +156,14 @@ Nothing in software status is a physical sound or audibility measurement.
 - Focused tests cover private nonactivating setup, existing-service opt-in,
   real listener collision before any state/backend access, failed Stop blocking
   a new source, and cancellation not abandoning producer cleanup.
+- The same native null-output case holds an owned child without FIFO open,
+  session or PCM for 11 seconds while the real monitor/status path runs. It
+  stays waiting (`BUFFERING` / Web `PENDING`, only Stop), rather than timing out
+  or claiming playback. A later explicit test signal starts only synthetic PCM.
+  The unpaced writer is backpressured: written PCM leads native null-output
+  position by about **0.75–0.77 s** at two observations on both mpv versions,
+  rather than decoding the complete 12 s synthetic track ahead. This is not a
+  measurement of KA17 output or Spotify-app control latency.
 - A real owned synthetic PCM producer, existing ORR EQ and actual libmpv digital
   PCM output measured a -12 dB cut amplitude ratio of approximately **0.25119**,
   and existing EQ bypass approximately **1.00011** in two fully completed

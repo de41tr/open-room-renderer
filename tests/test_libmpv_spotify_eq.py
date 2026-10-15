@@ -43,20 +43,30 @@ class PcmBackend(_NamedLoadBackend):
 class SyntheticSource(eq.SpotifyEqSource):
     async def _spawn(self, binary, directory):
         # No Spotify binary, app/API, login, external media or hardware involved.
-        script = '''import math, struct, sys, time
+        script = '''import math, pathlib, struct, sys, time
+if len(sys.argv) > 2:
+    while not pathlib.Path(sys.argv[2]).exists():
+        time.sleep(.02)
 with open(sys.argv[1], 'wb', buffering=0) as output:
     for block in range(600):
         data = b''.join(struct.pack('<ff', .001*math.sin(2*math.pi*1000*i/44100), .001*math.sin(2*math.pi*4000*i/44100)) for i in range(block*882,(block+1)*882))
         output.write(data)
-        time.sleep(.02)
+        if len(sys.argv) > 3:
+            with open(sys.argv[3], 'ab', buffering=0) as progress:
+                progress.write(b'.')
+        else:
+            time.sleep(.02)
 time.sleep(20)
 '''
-        return await asyncio.create_subprocess_exec(sys.executable, '-c', script, str(self.fifo),
+        gate = [str(self.start_gate), str(self.write_progress)] if hasattr(self, 'start_gate') else []
+        return await asyncio.create_subprocess_exec(sys.executable, '-c', script, str(self.fifo), *gate,
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL)
 
     async def _read_provider(self):
         self._validate_child()
+        if hasattr(self, 'start_gate') and not self.start_gate.exists():
+            return {'status': None, 'track': None, 'session_observation': 'NO_SESSION'}
         return {'status': {'stopped': False, 'paused': False, 'buffering': False}, 'track': None}
 
 
@@ -204,6 +214,9 @@ async def live_exercise(root, backend, transport):
                  state_dir=str(root/'state'), enable_mdns=False, enable_ssdp=False)
     api = HttpApi(cfg, RendererState.from_config(cfg), backend)
     source = SyntheticSource(root, p)
+    source.start_gate = root / 'emit-own-pcm'
+    source.write_progress = root / 'own-block-count'
+    monitor = None
     try:
         await backend.start()
         await api.initialize_channel_balance()
@@ -213,6 +226,18 @@ async def live_exercise(root, backend, transport):
                 {'param_name': 'a_q', 'value': 1}]})), '127.0.0.1')
         await source.start(api)
         child, runtime = source.process, source.runtime
+        # Discovery readiness precedes account selection/audio. Keep the actual
+        # producer alive without even opening its FIFO beyond the ordinary
+        # audio-ready deadline, then explicitly release only our own test tone.
+        monitor = asyncio.create_task(api._monitor_backend())
+        waiting_until = asyncio.get_running_loop().time() + 11
+        while asyncio.get_running_loop().time() < waiting_until:
+            await api.sync_mpv_state()
+            assert source.active and not source.failed and child.returncode is None
+            assert api.spotify_source is source and source.actions() == 'Stop'
+            assert api.state.phase == PlaybackPhase.BUFFERING
+            await asyncio.sleep(.1)
+        source.start_gate.touch()
         deadline = asyncio.get_running_loop().time()+4
         while api.state.phase != PlaybackPhase.PLAYING:
             assert asyncio.get_running_loop().time() < deadline
@@ -220,12 +245,16 @@ async def live_exercise(root, backend, transport):
             await asyncio.sleep(.05)
         assert 'g=-12.000' in str(await backend.get_property('af'))
         before_bypass = await backend.get_property('playback-time')
+        before_ahead = source.write_progress.stat().st_size * .02 - before_bypass
+        assert 0 <= before_ahead < 1, 'unpaced producer must be backpressured near realtime'
         await api.execute(ParsedCommand('EQOff'), '127.0.0.1')
         assert await backend.get_property('af') == []
         deadline = asyncio.get_running_loop().time()+3
         while (after_bypass := await backend.get_property('playback-time')) < before_bypass + .25:
             assert asyncio.get_running_loop().time() < deadline, 'live EQ bypass must keep PCM progressing'
             await asyncio.sleep(.05)
+        after_ahead = source.write_progress.stat().st_size * .02 - after_bypass
+        assert 0 <= after_ahead < 1, 'producer must not decode the entire track ahead'
         await api.execute(ParsedCommand('setChannelBalance:0.5'), '127.0.0.1')
         assert 'pan' in str(await backend.get_property('af'))
         queue = PlaybackQueue(items=[QueueItem(str(track), title='Own synthetic fallback')], index=1)
@@ -238,10 +267,15 @@ async def live_exercise(root, backend, transport):
         assert await backend.get_property('option-info/demuxer-max-bytes/set-locally') is False
         await api.execute(ParsedCommand('stop'), '127.0.0.1')
         return {'lane': 'REAL_SOFTWARE_TESTED/' + transport + '/synthetic-FIFO',
+                'unpaced_written_audio_ahead_seconds': [before_ahead, after_ahead],
+                'waiting_without_session_or_pcm_seconds': 11, 'later_explicit_pcm': True,
                 'existing_balance_filter': True, 'live_eq_bypass_progress': [before_bypass, after_bypass],
                 'mpv_version': await backend.get_property('mpv-version'),
                 'producer_reaped': True, 'ordinary_source_return': True,
                 'output': 'null, no DAC', 'Spotify': 'NOT_STARTED'}
     finally:
+        if monitor is not None:
+            monitor.cancel()
+            await asyncio.gather(monitor, return_exceptions=True)
         await source.close()
         await backend.stop_process()
