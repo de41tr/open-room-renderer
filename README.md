@@ -55,6 +55,9 @@ on the selected media, network, and audio device.
 
 ## What It Does Today
 
+For a concise product comparison, see [WiiM Ultra vs. ORR](docs/FEATURE_MATRIX.md),
+which separates implemented code from app/device acceptance.
+
 Working in this alpha:
 
 - advertises itself on the local network,
