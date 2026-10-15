@@ -2,6 +2,7 @@
 import asyncio
 from dataclasses import replace
 import json
+import time
 from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlsplit
 
@@ -89,6 +90,8 @@ async def test_real_http_search_save_play_recall_uses_existing_owners(api, monke
 
 
 async def test_search_admission_busy_failure_and_expired_selection(api, monkeypatch):
+    lookup = AsyncMock(side_effect=AssertionError("Expired selection reached resolver"))
+    monkeypatch.setattr("fake_linkplay.http_api.resolve_catalog_station", lookup)
     entered, release = asyncio.Event(), asyncio.Event()
     async def held(*_):
         entered.set(); await release.wait(); raise catalog.CatalogError("private error should stay hidden")
@@ -106,9 +109,10 @@ async def test_search_admission_busy_failure_and_expired_selection(api, monkeypa
         release.set()
         response = await pending
         assert response.status == 503 and "private error" not in await response.text()
-        api.web_api._radio_results["a" * 32] = (0, STATION)
+        api.web_api._radio_results["a" * 32] = (time.monotonic() - 901, STATION)
         status, body = await command(session, base, snapshot["csrf_token"], {"action": "radio_play", "id": "a" * 32, "expected_generation": snapshot["generation"]})
         assert status == 409 and body["error"] == "radio_expired" and not api.mpv.calls
+        lookup.assert_not_awaited()
 
 
 async def test_catalog_proxy_never_uses_lan_allowlist_or_redirects_to_private(api, monkeypatch):
@@ -196,7 +200,6 @@ async def test_optional_catalog_listener_failure_preserves_startup_and_rejects_p
     from aiohttp import web
     from fake_linkplay.cli import _start_catalog_proxy
     from fake_linkplay.web_ui import WebAdmissionError, WebCommand
-    import time
     runners = []
     await _start_catalog_proxy(api, runners)
     assert not runners and api.catalog_proxy_port is None
