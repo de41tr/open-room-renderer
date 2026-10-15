@@ -49,6 +49,8 @@ class RendererState:
     title: str = ""
     # Ephemeral, owned native observation; never a queue/favorite/legacy title.
     stream_title: str = ""
+    audio_codec: str = ""
+    audio_bitrate_bps: int | None = None
     artist: str = ""
     album: str = ""
     album_art_uri: str = ""
@@ -103,6 +105,7 @@ class RendererState:
     def accept_command(self, intent: str) -> int:
         """Invalidate pending observations before issuing a newer owner command."""
         self.stream_title = ""
+        self.audio_codec, self.audio_bitrate_bps = "", None
         self.generation += 1
         self.intent = intent
         self.last_error = ""
@@ -110,6 +113,7 @@ class RendererState:
 
     def mark_error(self, message: str = "Backend operation failed") -> None:
         self.stream_title = ""
+        self.audio_codec, self.audio_bitrate_bps = "", None
         self.phase = PlaybackPhase.ERROR
         self.last_error = message
 
@@ -146,6 +150,7 @@ class RendererState:
         """Mark playback stopped and reset the visible position."""
 
         self.stream_title = ""
+        self.audio_codec, self.audio_bitrate_bps = "", None
         self.phase = PlaybackPhase.STOPPED
         self.intent = "stop"
         self.curpos = 0

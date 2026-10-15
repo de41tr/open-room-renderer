@@ -807,6 +807,8 @@ class WebControlApi:
                                                          PlaybackPhase.BUFFERING} or runtime.transport_pending else "CONFIRMED")
         gain_status = ("PENDING" if runtime.gain_pending else "CONFIRMED"
                        if state.gain_confirmed and runtime.backend_gain_confirmed else "UNKNOWN")
+        audio_visible = bool(item and state.backend_url and state.intent in {"play", "pause"}
+            and state.phase in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED} and transport_status == "CONFIRMED")
         title = (_title(state.title, (item.url, item.resolved_url, state.current_url,
                     state.resolved_url, state.backend_url, state.backend_original_url), f"Track {queue.index}")
                  if item else "No selection")
@@ -838,6 +840,9 @@ class WebControlApi:
                 "message": "Playback state is unconfirmed. Stop is available for recovery." if transport_status == "ERROR"
                     else "Waiting for renderer confirmation." if transport_status == "PENDING" else ""},
             "media": {"title": title, "artist": _display(state.artist), "album": _display(state.album),
+                "audio": {"codec": (state.audio_codec or None) if audio_visible else None,
+                    "bitrate_bps": state.audio_bitrate_bps if audio_visible else None,
+                    "bitrate_kind": "estimate" if audio_visible and state.audio_bitrate_bps is not None else "unavailable"},
                 "stream_title": (safe_stream_title(state.stream_title, (item.url, item.resolved_url,
                     state.current_url, state.resolved_url, state.backend_url, state.backend_original_url)) or None)
                     if (item and item.stream_type == "station" and state.intent in {"play", "pause"}

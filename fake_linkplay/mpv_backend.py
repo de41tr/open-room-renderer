@@ -1037,4 +1037,44 @@ class MpvBackend:
             "track-list",
         ):
             data[key] = await self.get_property(key)
+        data["audio-info"] = None
+        # These are current decoded-track observations, never URL/catalog
+        # hints. Fence the packet bitrate read against native entry AND track
+        # identity changes while the separately queried properties arrive.
+        entry = self._media_entry(data.get("playlist"))
+        track = self._media_audio_track(data.get("track-list"))
+        if data["idle-active"] is False and entry is not None and track is not None and entry[1] == data.get("path"):
+            bitrate = await self.get_property("audio-bitrate")
+            end_track = self._media_audio_track(await self.get_property("track-list"))
+            end_entry = self._media_entry(await self.get_property("playlist"))
+            if end_entry == entry and end_track == track:
+                data["audio-info"] = {"entry_id": entry[0], "codec": track[1],
+                    "bitrate_bps": (int(bitrate) if type(bitrate) in {int, float}
+                        and math.isfinite(bitrate) and 1 <= bitrate <= 1_000_000_000 else None)}
         return data
+
+    @staticmethod
+    def _media_entry(entries: object) -> tuple[int, str] | None:
+        if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+            return None
+        active = [entry for entry in entries if entry.get("current") is True or entry.get("playing") is True]
+        if len(active) != 1:
+            return None
+        entry = active[0]
+        if (entry.get("current") is True and entry.get("playing") is True
+                and type(entry.get("id")) is int and entry["id"] >= 0
+                and isinstance(entry.get("filename"), str) and entry["filename"]):
+            return entry["id"], entry["filename"]
+        return None
+
+    @staticmethod
+    def _media_audio_track(tracks: object) -> tuple[int, str | None] | None:
+        if not isinstance(tracks, list):
+            return None
+        selected = [track for track in tracks if isinstance(track, dict)
+                    and track.get("type") == "audio" and track.get("selected") is True]
+        if len(selected) != 1 or type(selected[0].get("id")) is not int:
+            return None
+        codec = selected[0].get("codec")
+        codec = codec if isinstance(codec, str) and re.fullmatch(r"[a-zA-Z0-9_+-]{1,40}", codec) else None
+        return selected[0]["id"], codec

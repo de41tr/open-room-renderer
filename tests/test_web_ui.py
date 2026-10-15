@@ -867,6 +867,7 @@ def _live_title_snapshot(api, title="Artist & duo - <Song>"):
     api.state.mark_playing(url)
     api._native_current_id = 7
     return {"media-title": title, "path": url, "filename": "live.mp3", "playlist-path": None,
+        "audio-info": {"entry_id": 7, "codec": "mp3", "bitrate_bps": 128000},
         "playlist": [{"id": 7, "filename": url, "current": True, "playing": True}],
         "idle-active": False, "eof-reached": False, "pause": False, "playback-time": 4,
         "track-list": [{"type": "audio", "selected": True}]}
@@ -901,6 +902,7 @@ def test_live_stream_title_clears_when_observation_or_owner_is_unavailable(api, 
     observed = _live_title_snapshot(api)
     api._apply_backend_snapshot(observed)
     assert api.web_api.snapshot()["media"]["stream_title"]
+    assert api.web_api.snapshot()["media"]["audio"]["codec"] == "mp3"
     if unavailable == "missing_source":
         observed.pop("path")
     elif unavailable == "foreign_source":
@@ -924,6 +926,7 @@ def test_live_stream_title_clears_when_observation_or_owner_is_unavailable(api, 
     api._apply_backend_snapshot(observed)
     assert api.state.stream_title == ""
     assert api.web_api.snapshot()["media"]["stream_title"] is None
+    assert api.web_api.snapshot()["media"]["audio"] == {"codec": None, "bitrate_bps": None, "bitrate_kind": "unavailable"}
 
 
 async def test_delayed_old_generation_cannot_replace_newer_stream_title(api):
@@ -940,7 +943,25 @@ async def test_delayed_old_generation_cannot_replace_newer_stream_title(api):
     api._accept_playback_command("play")
     assert api.state.stream_title == ""
     newer = {**observed, "media-title": "New generation song"}
+    newer["audio-info"] = {"entry_id": 7, "codec": "flac", "bitrate_bps": 345678}
     api._apply_backend_snapshot(newer)
     release.set()
     await old
     assert api.web_api.snapshot()["media"]["stream_title"] == "New generation song"
+    assert api.web_api.snapshot()["media"]["audio"]["codec"] == "flac"
+
+
+def test_current_audio_format_is_observed_not_inferred_or_persisted(api):
+    observed = _live_title_snapshot(api)
+    api.favorites.add_current("Saved station", api.state.queue.current)
+    before = api.favorites.document()
+    # The canonical URL ends in mp3 but the actual decoded track says FLAC.
+    observed["audio-info"] = {"entry_id": 7, "codec": "flac", "bitrate_bps": 345678}
+    api._apply_backend_snapshot(observed)
+    assert api.web_api.snapshot()["media"]["audio"] == {"codec": "flac", "bitrate_bps": 345678, "bitrate_kind": "estimate"}
+    assert api.favorites.document() == before
+    for info in (None, {"entry_id": 8, "codec": "aac", "bitrate_bps": 999999},
+                 {"entry_id": 7, "codec": "secret?token=value", "bitrate_bps": float("nan")}):
+        observed["audio-info"] = info
+        api._apply_backend_snapshot(observed)
+        assert api.web_api.snapshot()["media"]["audio"] == {"codec": None, "bitrate_bps": None, "bitrate_kind": "unavailable"}
