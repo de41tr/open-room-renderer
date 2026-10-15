@@ -423,6 +423,20 @@ def test_moving_cgroup_tree_is_unknown_not_recursive(monkeypatch, tmp_path):
     assert services.cgroup_empty(group) is False
 
 
+@pytest.mark.parametrize('receipt', [[], None, 'private-receipt-marker', 7, True])
+def test_non_object_client_receipt_fails_before_client_or_manager(ready, monkeypatch, capsys, receipt):
+    root = Path(receiver._json(ready / 'receiver.json')['client_dir'])
+    root.mkdir(mode=0o700)
+    (root / 'client-receipt.json').write_text(json.dumps(receipt))
+    monkeypatch.setattr(receiver, 'verify_client', client.verify_client)
+    monkeypatch.setattr(client, '_open_binary', lambda *_args: pytest.fail('client opened'))
+    monkeypatch.setattr(receiver, 'UserServices', lambda *_args: pytest.fail('manager consulted'))
+    assert cli.main(['spotify', 'receiver', '--directory', str(ready), 'now-playing']) == 1
+    output = capsys.readouterr()
+    assert output.out == ''
+    assert output.err == 'Receiver: Use an intact client installed from the pinned official archive.\n'
+
+
 def test_client_receipt_cannot_forge_executable_provenance(tmp_path):
     executable = tmp_path / 'go-librespot'
     shutil.copyfile('/usr/bin/true', executable)

@@ -395,6 +395,8 @@
       } else if (transport.status !== "ERROR" || transport.phase !== "ERROR" || recovery.attempts_used !== undefined || recovery.attempt_limit !== undefined) throw new Error("Invalid recovery error");
     }
     if (!isObject(media) || ![media.title, media.artist, media.album].every(string) || !(media.artwork === null || string(media.artwork)) || typeof media.is_live !== "boolean" || !optionalNumber(media.position_seconds) || !optionalNumber(media.duration_seconds)) throw new Error("Invalid media snapshot");
+    if (media.stream_title !== undefined && media.stream_title !== null
+        && (!string(media.stream_title) || new TextEncoder().encode(media.stream_title).length > 1024)) throw new Error("Invalid stream title");
     if (!isObject(gain) || !["CONFIRMED", "PENDING", "UNKNOWN"].includes(gain.status) || !(gain.volume === null || (integer(gain.volume) && gain.volume <= 100)) || !optionalBoolean(gain.mute)) throw new Error("Invalid gain snapshot");
     if (!isObject(queue) || !string(queue.name) || !integer(queue.count) || queue.count > 1000 || !integer(queue.index) || !Object.hasOwn(MODES, queue.mode) || !Array.isArray(queue.items) || queue.items.length !== queue.count || (queue.count === 0 ? queue.index !== 0 : queue.index < 1 || queue.index > queue.count)) throw new Error("Invalid queue snapshot");
     if (queue.playlist_edit_reason !== undefined && !["supported", "empty_queue", "unsupported_queue"].includes(queue.playlist_edit_reason)) throw new Error("Invalid queue edit capability");
@@ -405,11 +407,18 @@
     if (PLAYLIST_ACTIONS.some(action => actions[action] !== undefined && typeof actions[action] !== "boolean")) throw new Error("Invalid playlist actions");
     return state;
   }
+  function streamTitleText(state, fresh) {
+    const {media, transport} = state, title = media.stream_title;
+    return fresh && media.is_live && transport.status === "CONFIRMED"
+      && ["PLAYING", "PAUSED"].includes(transport.phase) && title && title !== media.title
+      ? `On air: ${title}` : "";
+  }
   function validateFavorites(payload, session) {
     if (!isObject(payload) || payload.version !== 1 || !string(payload.session_id) || !payload.session_id || (session !== undefined && payload.session_id !== session) || !Array.isArray(payload.favorites)) throw new Error("Invalid favorites snapshot");
     const ids = new Set();
     for (const favorite of payload.favorites) {
       if (!isObject(favorite) || !string(favorite.id) || !favorite.id || ids.has(favorite.id) || typeof favorite.editable !== "boolean" || ![favorite.name, favorite.title, favorite.artist, favorite.album, favorite.target_label].every(string) || !(favorite.artwork === null || string(favorite.artwork))) throw new Error("Invalid favorite");
+      if (favorite.revision !== undefined && (!string(favorite.revision) || (favorite.editable ? !opaqueID(favorite.revision) : favorite.revision !== ""))) throw new Error("Invalid favorite revision");
       ids.add(favorite.id);
     }
     return payload.favorites;
@@ -525,6 +534,41 @@
       }
     }
   }
+  class RadioSearch {
+    constructor(request, onChange = () => {}) { this.request = request; this.onChange = onChange; this.serial = 0; this.clear(); }
+    clear() { this.serial += 1; this.pending = false; this.session = null; this.stations = []; this.message = "Search by station name, country, or both. Your search is sent to Radio-Browser. No account is needed."; }
+    observe(state) {
+      if (this.session && state && this.session !== state.session_id) {
+        this.clear(); this.message = "The renderer restarted. Search again to choose a station.";
+      }
+    }
+    async search(state, name, country) {
+      if (this.pending || !state) return;
+      name = name.trim(); country = country.trim().toUpperCase();
+      if ((name && (name.length < 2 || name.length > 80)) || (country && !/^[A-Z]{2}$/.test(country)) || (!name && !country)) {
+        this.message = "Enter a station name (2–80 characters), a two-letter country code, or both."; this.onChange(); return;
+      }
+      const serial = ++this.serial;
+      this.session = state.session_id; this.pending = true; this.stations = []; this.message = "Searching Radio-Browser…"; this.onChange();
+      try {
+        const response = await this.request("/orr/v1/web/radio/search", {method: "POST", headers: {"X-ORR-CSRF": state.csrf_token}, body: {action: "search", name, country}, timeoutMs: 15000});
+        if (serial !== this.serial) return;
+        const body = response.body, ids = new Set();
+        if (response.status !== 200 || !isObject(body) || body.session_id !== this.session || !Array.isArray(body.stations) || body.stations.length > 20) throw new Error();
+        for (const station of body.stations) {
+          if (!isObject(station) || !/^[0-9a-f]{32}$/.test(station.id) || ids.has(station.id) || !string(station.name) || !station.name.trim() || station.name.length > 256 || !string(station.country) || !/^(?:[A-Z]{2})?$/.test(station.country) || !["MP3", "AAC", "AAC+", "OGG"].includes(station.codec) || !integer(station.bitrate) || station.bitrate > 10000) throw new Error();
+          ids.add(station.id);
+        }
+        this.stations = body.stations;
+        this.message = this.stations.length ? `${this.stations.length} stations. Choose Play, Save favorite, or Replace favorite. Results expire after 15 minutes.` : "No supported stations found. Try another name or country.";
+      } catch (_) {
+        if (serial !== this.serial) return;
+        this.stations = []; this.message = "Search unavailable. Check the connection or try again later. Playback was not changed.";
+      } finally {
+        if (serial === this.serial) { this.pending = false; this.onChange(); }
+      }
+    }
+  }
   class Controller {
     constructor(request, onChange = () => {}) {
       this.request = request;
@@ -611,6 +655,8 @@
         const response = await this.request("/orr/v1/web/command", {method: "POST", headers: {"X-ORR-CSRF": this.state.csrf_token}, body});
         if (response.status === 200 && isObject(response.body) && response.body.request_acknowledged === true) result = {kind: "acknowledged", text: `${label}: request acknowledged. Reading the current state…`, id, favoriteId: response.body.favorite_id || null, deviceRevision: response.body.device_revision};
         else result = {...commandError(response), id};
+        if (body.action === "favorite_radio_target" && result.kind === "error"
+            && (response.status < 400 || response.status >= 500 || !exactFields(response.body, ["error", "message", "outcome"]))) result.kind = "unknown";
         if (body.action === "favorite_restore" && result.kind === "unknown" && response.status === 502 && response.body?.error === "command_failed" && response.body.outcome === "UNKNOWN" && response.body.committed === true) result.favoritesLibraryDurabilityUnknown = true;
         // Only this exact admission rejection proves a row edit had no effect.
         // Extra fields (including committed/effect), other errors and local
@@ -649,13 +695,17 @@
               ? "The managed favorites library was replaced, but disk durability is unconfirmed. Matching readback cannot confirm durability. No retry was sent."
               : "Favorites restore outcome unknown. The library may have changed. Review managed favorites before another restore. No retry was sent.";
       }
-      if (body.action === "favorite_target") {
+      if (["favorite_target", "favorite_radio_target"].includes(body.action)) {
         // The redacted library cannot verify the exact URL, even with a fresh
         // matching hostname/name/ID. Never echo potentially private errors.
         result.text = result.kind === "acknowledged"
           ? "Target-change request acknowledged. The exact saved URL is not verified by this redacted view."
           : result.kind === "error"
-            ? "Target-change request rejected. Review the replacement URL and metadata choice before starting again."
+            ? body.action === "favorite_radio_target"
+              ? result.code === "radio_expired"
+                ? "Station selection expired. Search again, then choose the favorite and metadata policy again. Nothing was changed."
+                : "Replacement rejected. The favorite, station selection or renderer session may have changed. Close this dialog and review them before starting again."
+              : "Target-change request rejected. Review the replacement URL and metadata choice before starting again."
             : "Target-change outcome unknown. The change may have taken effect. No retry was sent. The exact saved URL cannot be verified from this redacted view.";
       }
       if (body.action === "device_rename") {
@@ -683,7 +733,7 @@
           ? "Room name saved; the current name is verified."
           : "Room rename acknowledged, but the current name has not been verified. Close this dialog and refresh before another request.";
       }
-      if (body.action === "favorite_target" && result.kind === "acknowledged") {
+      if (["favorite_target", "favorite_radio_target"].includes(body.action) && result.kind === "acknowledged") {
         if (!this.favoritesFresh) result.text += " The favorites list could not be refreshed.";
         if (!this.fresh) result.text += " Current renderer state is unavailable. Refresh before another command.";
       }
@@ -691,7 +741,7 @@
         // An ACK is not a playback observation. State badges remain canonical.
         if (body.action === "device_rename") {
           this.notice = {...result, kind: result.deviceVerified ? "confirmed" : "acknowledged"};
-        } else if (["favorite_target", "favorite_restore"].includes(body.action)) {
+        } else if (["favorite_target", "favorite_radio_target", "favorite_restore"].includes(body.action)) {
           this.notice = {...result};
         } else {
           this.notice = this.fresh
@@ -703,5 +753,5 @@
       return result;
     }
   }
-  return {FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesDocument, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveDocument, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
+  return {RadioSearch, FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesDocument, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveDocument, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, streamTitleText, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
 });

@@ -55,6 +55,9 @@ on the selected media, network, and audio device.
 
 ## What It Does Today
 
+For a concise product comparison, see [WiiM Ultra vs. ORR](docs/FEATURE_MATRIX.md),
+which separates implemented code from app/device acceptance.
+
 Working in this alpha:
 
 - advertises itself on the local network,
@@ -92,6 +95,17 @@ mpv
         v
 your speakers
 ```
+
+### Search internet radio
+
+In the existing web UI, use **Internet radio** to search Radio-Browser by station
+name, two-letter country code, or both. Leave the name blank to browse a country.
+Choose **Play** to replace the current queue, or **Save favorite** to keep the
+station in the existing favorites library.
+No account is needed. This independent community catalog supports direct MP3/AAC
+and Ogg container streams (chained Vorbis verified). It does not implement WiiM
+Radio or the TuneIn catalog. See
+[radio catalog behavior, privacy and verification](docs/RADIO_CATALOG.md).
 
 ## What It Is Not
 

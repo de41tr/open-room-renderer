@@ -150,6 +150,25 @@ This is a local draft safeguard; the server's generation check still applies.
 
 ## Repair a saved favorite
 
+To repair from a Radio-Browser result without finding its raw URL, choose
+**Replace favorite…** under Internet radio. The existing favorite dialog shows
+both the selected station and a managed-favorite picker (name, position and a
+short stable-ID label). There is no default favorite or metadata choice. Confirm
+**Replace saved target** after choosing **keep** or **clear** saved metadata.
+Clear removes saved title, artist, album and artwork; keep preserves them exactly.
+Neither choice imports the result's display metadata or changes the custom name.
+
+The `favorite_radio_target` Web command accepts only the opaque station token,
+stable favorite ID, explicit metadata policy, opening session and an opaque
+exact-record revision. The revision uses a process-private HMAC key and is only
+in the Web projection; persisted favorites and backup/export schemas are unchanged.
+Expired/missing results, restarted sessions, changed/deleted favorites and
+configured favorites are rejected before writing. The record/result are checked
+again immediately before `FavoritesStore.set_url`, without an intervening await.
+Cancellation sends nothing. Submission is single-use and follows the same
+ACKNOWLEDGED/UNKNOWN and redacted-readback limits described below. It never adds
+another favorite, plays a station or changes an already admitted snapshot.
+
 Use **Change URL** on an editable managed favorite to replace a moved or expired
 address without deleting its stable ID. The name and order remain unchanged;
 configured favorites stay read-only. Enter the replacement in the initially blank
@@ -159,8 +178,7 @@ album and artwork. The stored URL is never loaded into this browser view.
 The change affects future playback only. It neither fetches the new address nor
 replaces the detached item already playing. Choose Play separately if you want
 to test the repaired favorite. Submitted URL bytes are not normalized; existing
-URL and complete request-size rules remain. No new API route or server behavior
-is introduced.
+URL and complete request-size rules remain. Change URL uses its existing API.
 
 After local validation, one send is admitted and the private input is cleared
 and disabled. Each dialog opening sends at most once, including rejected or

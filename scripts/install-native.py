@@ -330,7 +330,9 @@ def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require
             subprocess.run([sys.executable, "-m", "venv", str(prefix / "venv")], check=True)
             python = str(prefix / "venv/bin/python")
             subprocess.run([python, "-m", "pip", "install", "--report", str(prefix / "pip-install-report.json"), str(prefix / "source")], check=True)
-            receipt["packages"] = json.loads(run(python, "-m", "pip", "list", "--format=json"))
+            # Keep pip warnings on stderr, separate from the JSON package inventory.
+            receipt["packages"] = json.loads(subprocess.check_output(
+                [python, "-m", "pip", "list", "--format=json"], text=True))
             subprocess.run([str(prefix / "venv/bin/open-room-renderer"), "--help"], check=True, stdout=subprocess.DEVNULL)
             receipt["mode"] = "installed"
     finally:

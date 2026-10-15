@@ -53,10 +53,13 @@ jobs:
           python -m pip freeze
 
       - name: Run default unit and local-client suite on Python 3.11
+        env:
+          # Diagnostic stack dump only; no test or suite timeout changes.
+          PYTEST_ADDOPTS: "-o faulthandler_timeout=60"
         timeout-minutes: 3
         # Preserve every default test and the existing cap on this same runner.
         # Three bounded processes share one deadline; the first discovers all others.
-        # Place Spotify playback subprocess work in group 3 to balance discovery.
+        # Keep measured loopback CLI subprocess files in group 2; Spotify stays in group 3.
         run: |
           python scripts/run-native-groups.py --groups 3 --timeout 165 \
             --log-dir "$RUNNER_TEMP/orr-default-python311" -- \
@@ -67,8 +70,12 @@ jobs:
             --ignore=tests/test_startup_state.py --ignore=tests/test_legacy_cli_redirect_privacy.py \
             --ignore=tests/test_dsp_read_client.py --ignore=tests/test_dsp_client.py \
             --ignore=tests/test_transport_client.py --ignore=tests/test_spotify_playback.py \
+            --ignore=tests/test_queue_client_renderer.py --ignore=tests/test_dsp_client_renderer.py \
+            --ignore=tests/test_transport_client_renderer.py \
             ::: tests/test_queue_cli.py tests/test_playlist_cli.py tests/test_favorite_play_cli.py \
             tests/test_startup_config.py tests/test_startup_state.py tests/test_web_ui.py \
+            tests/test_queue_client_renderer.py tests/test_dsp_client_renderer.py \
+            tests/test_transport_client_renderer.py \
             ::: tests/test_native_group_runner.py tests/test_cli_commands.py \
             tests/test_legacy_cli_redirect_privacy.py tests/test_dsp_read_client.py \
             tests/test_dsp_client.py tests/test_transport_client.py \
@@ -116,7 +123,7 @@ jobs:
           google-chrome --version
           chromedriver --version
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y mpv
+          sudo apt-get install --no-install-recommends -y mpv ffmpeg
           python -m pip --isolated install --index-url https://pypi.org/simple --disable-pip-version-check --no-cache-dir -e . 'pytest>=8'
           python -m pip check
 
@@ -183,6 +190,9 @@ jobs:
           done
 
       - name: Run default unit and local-client suite
+        env:
+          # Diagnostic stack dump only; no test or suite timeout changes.
+          PYTEST_ADDOPTS: "-o faulthandler_timeout=60"
         # Reuse the floor's three default groups on this runner; retain every test.
         # Explicit native opt-in lanes below continue to use two groups.
         # The 900s watchdog starts after the job clock; the unchanged 15-minute
@@ -197,8 +207,12 @@ jobs:
             --ignore=tests/test_startup_state.py --ignore=tests/test_legacy_cli_redirect_privacy.py \
             --ignore=tests/test_dsp_read_client.py --ignore=tests/test_dsp_client.py \
             --ignore=tests/test_transport_client.py --ignore=tests/test_spotify_playback.py \
+            --ignore=tests/test_queue_client_renderer.py --ignore=tests/test_dsp_client_renderer.py \
+            --ignore=tests/test_transport_client_renderer.py \
             ::: tests/test_queue_cli.py tests/test_playlist_cli.py tests/test_favorite_play_cli.py \
             tests/test_startup_config.py tests/test_startup_state.py tests/test_web_ui.py \
+            tests/test_queue_client_renderer.py tests/test_dsp_client_renderer.py \
+            tests/test_transport_client_renderer.py \
             ::: tests/test_native_group_runner.py tests/test_cli_commands.py \
             tests/test_legacy_cli_redirect_privacy.py tests/test_dsp_read_client.py \
             tests/test_dsp_client.py tests/test_transport_client.py \
@@ -226,7 +240,7 @@ jobs:
             tests/test_libmpv_station_playlist_cache.py \
             tests/test_libmpv_stall_recovery.py tests/test_libmpv_queue_staging.py \
             tests/test_libmpv_queue_navigation_intent.py \
-            tests/test_libmpv_favorites.py \
+            tests/test_libmpv_favorites.py tests/test_libmpv_radio_catalog.py \
             tests/test_libmpv_queue_cli.py tests/test_libmpv_web_controls.py \
             tests/test_libmpv_standard_dmr.py \
             tests/test_libmpv_source_ownership.py \
@@ -379,3 +393,12 @@ jobs:
                   for key, value in evidence["stages"].items()},
               "cleanup": evidence["cleanup"], "two_host_synchronization": "NOT_RUN"}, sort_keys=True))
           PY
+
+      - name: Verify the opt-in foreground Snapcast source runtime
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 1
+        run: |
+          # Reuse extracted official binaries; do not install/start services.
+          # The existing experiment and all its gates remain unchanged above.
+          export PATH="$RUNNER_TEMP/orr-snapcast-prefix/usr/bin:$PATH"
+          .venv-ci/bin/python tools/acceptance_snapcast_runtime.py

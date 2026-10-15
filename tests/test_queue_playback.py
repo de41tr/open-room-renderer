@@ -1,4 +1,5 @@
 """UNIT/MOCK queue control: index changes must select a different backend URL."""
+import asyncio
 from dataclasses import asdict
 from html import escape
 from unittest.mock import AsyncMock
@@ -127,11 +128,111 @@ async def test_failed_track_switch_is_error_not_false_playing(api):
 
 
 @pytest.mark.asyncio
-async def test_direct_http_play_replaces_existing_queue(api):
+@pytest.mark.parametrize("command", ["play", "playlist", "m3u_play"])
+async def test_direct_http_play_replaces_existing_queue(api, command):
     await create(api)
-    await api.execute(ParsedCommand("play", (FIRST,)), "192.0.2.1")
+    await play(api, 2)
+    await api.execute(ParsedCommand(command, (FIRST,)), "192.0.2.1")
     assert api.state.plicount == api.state.plicurr == 1
     assert api.state.queue.current.url == FIRST
+    assert api.mpv.calls == [("load", SECOND), ("stop", None), ("load", FIRST)]
+    assert api.state.track_source == "CustomRadio" and api.state.title == "one.wav"
+    assert api.state.play_medium == "THIRD-DLNA" and api.state.album_art_uri == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["play", "playlist", "m3u_play"])
+@pytest.mark.parametrize("paused", [False, True], ids=["playing", "paused"])
+async def test_legacy_resolution_failure_retires_previous_audio(api, command, paused):
+    await create(api)
+    await play(api, 1)
+    if paused:
+        await api._transport_command("pause")
+    reference = "https://opml.radiotime.com/Tune.ashx?id=s12345"
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def unavailable(station_id):
+        assert station_id == "s12345"
+        entered.set()
+        await release.wait()
+        from fake_linkplay.radio import RadioResolutionError
+        raise RadioResolutionError("Synthetic unavailable station")
+
+    api._resolve_station_id = unavailable
+    pending = asyncio.create_task(api.execute(ParsedCommand(command, (reference,)), "192.0.2.1"))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        assert api.mpv.idle and api.mpv.url == ""
+        assert api.state.backend_url == api.state.backend_original_url == ""
+        assert api.state.current_url == api.state.queue.current.url == reference
+        release.set()
+        with pytest.raises(BackendError, match="resolution failed"):
+            await pending
+        assert api.mpv.idle and api.state.phase == PlaybackPhase.ERROR
+        assert [value for name, value in api.mpv.calls if name == "load"] == [FIRST]
+        assert [name for name, _ in api.mpv.calls].count("stop") == 1
+    finally:
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["rejected", "unconfirmed"])
+async def test_legacy_failed_stop_preserves_previous_selection(api, failure):
+    await create(api)
+    await play(api, 1)
+    queue, item = api.state.queue, api.state.queue.current
+    before = (api.state.current_url, api.state.title, api.state.track_metadata, api.queue_context)
+
+    async def failed_stop():
+        if failure == "rejected":
+            raise BackendError("Synthetic rejected Stop")
+        # A successful command reply without idle readback is not retirement.
+        return {"error": "success"}
+
+    api.mpv.stop = failed_stop
+    api._resolve_playback_url = AsyncMock(return_value=SECOND)
+    with pytest.raises(BackendError):
+        await api.execute(ParsedCommand("play", (SECOND,)), "192.0.2.1")
+    assert api.state.queue is queue and queue.current is item
+    assert (api.state.current_url, api.state.title, api.state.track_metadata, api.queue_context) == before
+    assert api.mpv.url == FIRST and api.state.phase == PlaybackPhase.ERROR
+    api._resolve_playback_url.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_replacement_superseded_during_stop_cannot_publish(api):
+    await create(api)
+    await play(api, 1)
+    queue = api.state.queue
+    entered, release = asyncio.Event(), asyncio.Event()
+    original_stop = api.mpv.stop
+
+    async def delayed_stop():
+        entered.set()
+        await release.wait()
+        await original_stop()
+
+    api.mpv.stop = delayed_stop
+    api._resolve_playback_url = AsyncMock(side_effect=lambda url: url)
+    old = asyncio.create_task(api.execute(ParsedCommand("play", (SECOND,)), "192.0.2.1"))
+    newer = None
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        assert api.state.queue is queue and api.state.current_url == FIRST
+        third = "https://media.example.test/three.wav"
+        newer = asyncio.create_task(api.execute(ParsedCommand("play", (third,)), "192.0.2.1"))
+        await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(BackendError, match="superseded"):
+            await old
+        assert await newer == "OK"
+        assert api.state.current_url == api.mpv.url == third
+        assert api.state.phase == PlaybackPhase.PLAYING
+        api._resolve_playback_url.assert_awaited_once_with(third)
+    finally:
+        release.set()
+        await asyncio.gather(*[task for task in (old, newer) if task is not None], return_exceptions=True)
 
 
 @pytest.mark.asyncio

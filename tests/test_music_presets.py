@@ -196,7 +196,7 @@ async def test_failed_replacement_keeps_new_selected_target_but_reports_error(tm
         assert backend.idle and backend.url == ""
         assert api.state.backend_url == api.state.backend_original_url == ""
         assert api.state.last_error == "Backend control failed"
-        assert backend.calls == [("loadfile", FIRST), ("loadfile", SECOND), ("stop", None)]
+        assert backend.calls == [("loadfile", FIRST), ("stop", None), ("loadfile", SECOND), ("stop", None)]
 
 
 @pytest.mark.asyncio
