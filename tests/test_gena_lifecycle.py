@@ -361,16 +361,16 @@ async def test_backend_loss_converges_without_polling_and_stays_failed_until_exp
         assert "<CurrentTransportState>STOPPED</CurrentTransportState>" in result
         assert "<CurrentTransportStatus>ERROR_OCCURRED</CurrentTransportStatus>" in result
     assert env.api._station_recovery is None and env.api._queue_advance_task is None
-    assert env.api.mpv.calls == [("load", first)]
+    assert env.api.mpv.calls == [("load", first), ("resume", None)]
     # Reappearance does not itself authorize stale playback or clear ERROR.
     env.api.mpv.fail = False
     await asyncio.sleep(env.api._monitor_interval * 3)
     assert (await command("getPlayerStatus"))["playback_phase"] == "ERROR"
-    assert env.api.mpv.calls == [("load", first)]
+    assert env.api.mpv.calls == [("load", first), ("resume", None)]
     assert await command("setPlayerCmd:play:" + second) == "OK"
     await eventually(lambda: last_change("AVTransport").get("TransportState") == "PLAYING")
     assert last_change("AVTransport")["TransportStatus"] == "OK"
-    assert env.api.mpv.calls == [("load", first), ("stop", None), ("load", second)]
+    assert env.api.mpv.calls == [("load", first), ("resume", None), ("stop", None), ("load", second), ("resume", None)]
     state = await command("getPlayerStatus")
     assert state["uri"] == second and state["status"] == "play" and state["transport_error"] == ""
 

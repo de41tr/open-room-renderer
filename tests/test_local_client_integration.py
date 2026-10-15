@@ -52,15 +52,17 @@ class FakeAudioBackend:
         if self.fail_operation == operation:
             raise BackendError(f"Synthetic {operation} failure")
 
-    async def loadfile(self, url: str, options: dict[str, str] | None = None) -> None:
+    async def loadfile(self, url: str, options: dict[str, str] | None = None, *, start_paused=False) -> None:
         self._record("loadfile", url)
-        self.url, self.idle, self.paused, self.position = url, False, False, 0
+        self.url, self.idle, self.paused, self.position = url, False, start_paused, 0
 
     async def pause(self) -> None:
         self._record("pause")
         self.paused = True
 
-    async def resume(self) -> None:
+    async def resume(self, *, current=None) -> None:
+        if current is not None and not await current():
+            raise BackendError("Playback command superseded")
         self._record("resume")
         self.paused = False
 
@@ -247,7 +249,7 @@ async def test_local_client_exact_transport_round_trip(local_renderer) -> None:
     stopped = await assert_transport(client, "stop")
     assert stopped["position"] == 0
     assert backend.idle
-    assert backend.calls == [("loadfile", MEDIA_URL), ("pause", None), ("resume", None), ("stop", None)]
+    assert backend.calls == [("loadfile", MEDIA_URL), ("resume", None), ("pause", None), ("resume", None), ("stop", None)]
     assert "getPlayerStatusEx" in local_renderer.commands
 
 

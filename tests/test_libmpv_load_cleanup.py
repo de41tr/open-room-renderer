@@ -187,6 +187,9 @@ async def _exercise(library: str, ffmpeg: str, directory: Path) -> dict:
         readiness = api._wait_for_mpv_audio_ready
 
         async def short_readiness(generation: int, url: str) -> bool:
+            # Inject the original active/unowned-child scenario despite the
+            # new global admission hold; all progress/cleanup checks remain.
+            await backend.checked_command(["set_property", "pause", False])
             ready = await HttpApi._wait_for_mpv_audio_ready(api, generation, url, timeout=1.0)
             snapshot = await backend.snapshot()
             # Confirm the gap is genuinely active native playback with lost

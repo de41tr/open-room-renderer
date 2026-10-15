@@ -121,6 +121,39 @@ async def test_source_unready_exhausts_exact_finite_budget_and_never_advances(ap
 
 
 @pytest.mark.asyncio
+async def test_duplicate_idle_preserves_failed_reload_diagnosis_and_budget(api):
+    queue = await play_station(api)
+    generation = api.state.generation
+    failed = asyncio.Event()
+    notify = api._schedule_event_notify
+    def observe_failure(*args):
+        if api.state.last_error == "Station source unavailable; retry pending":
+            failed.set()
+        notify(*args)
+    api._schedule_event_notify = observe_failure
+    api._station_recovery_delays = (0, 60, 60)
+    async def unavailable(*args):
+        api.mpv.idle = True
+        return False
+    api._wait_for_mpv_audio_ready = unavailable
+    task = await eof(api)
+    await asyncio.wait_for(failed.wait(), 1)
+    for _ in range(3):
+        await api.sync_mpv_state()
+        assert api.state.last_error == "Station source unavailable; retry pending"
+        assert api.state.phase == PlaybackPhase.BUFFERING
+        assert api._station_recovery_task is task and not task.done()
+        assert api._station_recovery.attempts == 1
+        assert api.state.generation == generation and api.state.queue is queue
+        assert api.state.queue.index == 1 and api.state.intent == "play"
+        assert loads(api) == [STATION, STATION]
+    await api._transport_command("stop")
+    await asyncio.gather(task, return_exceptions=True)
+    assert api.state.phase == PlaybackPhase.STOPPED and api.state.intent == "stop"
+    assert api._station_recovery is None and loads(api) == [STATION, STATION]
+
+
+@pytest.mark.asyncio
 async def test_budget_is_not_replenished_by_short_success_or_repeated_eof(api):
     await play_station(api)
     generation = api.state.generation

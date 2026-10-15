@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
 import logging
 import re
 import signal
@@ -41,6 +42,10 @@ from .utils import setup_logging
 
 LOG = logging.getLogger(__name__)
 RESOURCE_CLEANUP_TIMEOUT = 10.0
+
+
+class StartupListenerError(Exception):
+    """A configured HTTP listener cannot start because its port is occupied."""
 
 
 async def _start_catalog_proxy(api: HttpApi, runners: list[web.AppRunner]) -> None:
@@ -157,7 +162,16 @@ async def serve(config_path: str | None = None) -> None:
             runner = web.AppRunner(api.app())
             runners.append(runner)
             await runner.setup()
-            await web.TCPSite(runner, cfg.bind_address, port).start()
+            try:
+                await web.TCPSite(runner, cfg.bind_address, port).start()
+            except OSError as exc:
+                if exc.errno != errno.EADDRINUSE:
+                    raise
+                raise StartupListenerError(
+                    "An HTTP listener port is already in use. Check for another running "
+                    "renderer or service, or choose unused http_api_port/upnp_port "
+                    "settings and review mirror_port_80."
+                ) from None
         await _start_catalog_proxy(api, runners)
         if cfg.enable_ssdp:
             ssdp = SsdpServer(cfg)
@@ -397,7 +411,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "serve":
         try:
             asyncio.run(serve(args.config))
-        except (StartupConfigError, StartupStateError) as exc:
+        except (StartupConfigError, StartupStateError, StartupListenerError) as exc:
             print(f"Startup error: {exc}", file=sys.stderr)
             return 2
         return 0

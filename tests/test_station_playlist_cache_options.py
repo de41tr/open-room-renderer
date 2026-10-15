@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from fake_linkplay.http_api import HttpApi
 from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES, LIVE_STATION_HISTORY_OPTIONS, MpvBackend
 from fake_linkplay.queue import PlaybackQueue, QueueItem
 from fake_linkplay.state import PlaybackPhase
@@ -195,7 +196,8 @@ async def test_new_admitted_load_resets_attempt_even_when_native_id_is_reused(ap
     prepare(api)
     await apply(api)
     api.mpv.apply_station_child_history.assert_awaited_once()
-    api.mpv.loadfile = AsyncMock(return_value={'error': 'success'})
+    api.mpv.snapshot.side_effect = lambda: {**snapshot(), 'pause': api.mpv.paused}
+    api._wait_for_mpv_audio_ready = lambda generation, url: HttpApi._wait_for_mpv_audio_ready(api, generation, url)
     # Same canonical queue object, URL and child ID, but a new load may have
     # restarted the backend. It must get a new bounded application attempt.
     await api._play_url(SOURCE)

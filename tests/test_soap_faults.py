@@ -19,6 +19,7 @@ class FakeBackend:
         self.calls = []
         self.failure = False
         self.url = ""
+        self.paused = False
 
     async def _call(self, name, value=None):
         self.calls.append((name, value))
@@ -36,18 +37,21 @@ class FakeBackend:
     async def stop(self):
         return await self._call("stop")
 
-    async def resume(self):
+    async def resume(self, *, current=None):
+        if current is not None and not await current():
+            raise BackendError("Playback command superseded")
+        self.paused = False
         return await self._call("resume")
 
     async def seek(self, value):
         return await self._call("seek", value)
 
-    async def loadfile(self, url, options=None):
-        self.url = url
+    async def loadfile(self, url, options=None, *, start_paused=False):
+        self.url, self.paused = url, start_paused
         return await self._call("load", url)
 
     async def snapshot(self):
-        return {"idle-active": False, "pause": False, "playback-time": 0,
+        return {"idle-active": False, "pause": self.paused, "playback-time": 0,
                 "track-list": [{"type": "audio", "selected": True}], "path": self.url}
 
 
@@ -186,7 +190,7 @@ async def test_select_then_play_loads_exactly_once(api):
     assert (await api.soap(request("SetAVTransportURI", f"<CurrentURI>{escape(url)}</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>"))).status == 200
     assert not api.mpv.calls
     assert (await api.soap(request("Play", "<Speed>1</Speed>"))).status == 200
-    assert api.mpv.calls == [("load", url)]
+    assert api.mpv.calls == [("load", url), ("resume", None)]
     assert api.state.status == "play"
 
 

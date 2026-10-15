@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from fake_linkplay.config import Config, ExperimentalSource, load_config
 from fake_linkplay.http_api import EventSubscriber, HttpApi, ParsedCommand
-from fake_linkplay.mpv_backend import MpvBackend, redact_sensitive as redact_mpv_sensitive
+from fake_linkplay.mpv_backend import BackendError, MpvBackend, redact_sensitive as redact_mpv_sensitive
 from fake_linkplay.radio import RadioResolution
 from fake_linkplay.state import RendererState
 
@@ -53,17 +53,19 @@ class DummyMpv(MpvBackend):
     async def volume(self, value: int) -> None:  # type: ignore[override]
         return None
 
-    async def loadfile(self, url: str, options: dict[str, str] | None = None) -> None:  # type: ignore[override]
+    async def loadfile(self, url: str, options: dict[str, str] | None = None, *, start_paused=False) -> None:  # type: ignore[override]
         self.loaded_url = url
         self.idle = False
-        self.paused = False
+        self.paused = start_paused
         self.load_options = options
         self.load_count += 1
 
     async def pause(self) -> None:  # type: ignore[override]
         self.paused = True
 
-    async def resume(self) -> None:  # type: ignore[override]
+    async def resume(self, *, current=None) -> None:  # type: ignore[override]
+        if current is not None and not await current():
+            raise BackendError("Playback command superseded")
         self.paused = False
 
     async def stop(self) -> None:  # type: ignore[override]

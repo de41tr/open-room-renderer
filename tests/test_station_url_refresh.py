@@ -170,7 +170,7 @@ async def test_initial_header_load_failure_before_ack_refreshes_on_owner_play(ap
     queue = PlaybackQueue(name="Initial failure", source="newTuneIn", stream_id="s12345")
     await api._materialize_radio_queue(queue)
     original_load = api.mpv.loadfile
-    async def fail_load(url, options=None):
+    async def fail_load(url, options=None, *, start_paused=False):
         api.mpv.calls.append(("load", url))
         raise BackendError("Synthetic failure before acknowledgement")
     api.mpv.loadfile = fail_load

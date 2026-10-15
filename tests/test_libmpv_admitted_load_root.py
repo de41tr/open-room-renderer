@@ -59,6 +59,9 @@ async def _exercise(library, directory):
                 result = await backend.checked_command(["loadfile", str(foreign), "replace"])
                 replaced = result["data"]["playlist_entry_id"]
                 assert replaced != admitted
+                # The independent native actor explicitly plays its source;
+                # renderer admission now holds the prior item globally paused.
+                await backend.checked_command(["set_property", "pause", False])
                 await backend.checked_command(["set_property", "volume", 73])
                 await _eventually("replacement decoded", lambda: (
                     backend.read_property("path") == str(foreign)
@@ -115,6 +118,8 @@ async def _exercise(library, directory):
     api = HttpApi(cfg, RendererState.from_config(cfg), backend)
     api._schedule_event_notify = lambda *args: None
     async def unready_edl(generation, url):
+        # Exercise the existing active-but-unprovable cleanup case explicitly.
+        await backend.checked_command(["set_property", "pause", False])
         await _eventually("owned native EDL decoded", lambda: (
             str(backend.read_property("path")).startswith("edl://")
             and backend.read_property("playback-time") > .05))

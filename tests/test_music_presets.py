@@ -20,21 +20,28 @@ class FakeAudioBackend:
     """No optional client dependency and no media/network access."""
     url: str = ""
     idle: bool = True
+    paused: bool = False
     fail_operation: str | None = None
     calls: list[tuple[str, object]] = field(default_factory=list)
 
-    async def loadfile(self, url, options=None):
+    async def loadfile(self, url, options=None, *, start_paused=False):
         self.calls.append(("loadfile", url))
         if self.fail_operation == "loadfile":
             raise BackendError("Synthetic load failure")
-        self.url, self.idle = url, False
+        self.url, self.idle, self.paused = url, False, start_paused
+
+    async def resume(self, *, current=None):
+        if current is not None and not await current():
+            raise BackendError("Playback command superseded")
+        self.calls.append(("resume", None))
+        self.paused = False
 
     async def stop(self):
         self.calls.append(("stop", None))
         self.url, self.idle = "", True
 
     async def snapshot(self):
-        return {"path": self.url, "idle-active": self.idle, "pause": False,
+        return {"path": self.url, "idle-active": self.idle, "pause": self.paused,
                 "playback-time": 0, "duration": 120 if self.url else None,
                 "track-list": [] if self.idle else [{"type": "audio", "selected": True}]}
 
@@ -196,7 +203,7 @@ async def test_failed_replacement_keeps_new_selected_target_but_reports_error(tm
         assert backend.idle and backend.url == ""
         assert api.state.backend_url == api.state.backend_original_url == ""
         assert api.state.last_error == "Backend control failed"
-        assert backend.calls == [("loadfile", FIRST), ("stop", None), ("loadfile", SECOND), ("stop", None)]
+        assert backend.calls == [("loadfile", FIRST), ("resume", None), ("stop", None), ("loadfile", SECOND), ("stop", None)]
 
 
 @pytest.mark.asyncio

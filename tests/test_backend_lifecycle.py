@@ -616,6 +616,29 @@ async def test_cli_cleans_every_partially_started_resource_after_failure(monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stage,failure", [
+    ("site0.start", OSError(errno.EACCES, "synthetic permission failure")),
+    ("site0.start", OSError(errno.EADDRNOTAVAIL, "synthetic address failure")),
+    ("runner0.setup", OSError(errno.EADDRINUSE, "synthetic setup failure")),
+])
+async def test_cli_only_translates_occupied_port_errors_from_site_start(monkeypatch, stage, failure):
+    harness = ServiceHarness(monkeypatch)
+    step = harness.step
+
+    async def fail_at_stage(name):
+        await step(name)
+        if name == stage:
+            raise failure
+
+    harness.step = fail_at_stage
+    with pytest.raises(OSError) as caught:
+        await cli.serve("synthetic.yaml")
+    assert caught.value is failure
+    assert harness.events[-1] == "backend.close"
+    assert "runner0.close" in harness.events
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["backend.start", "backend.initialize_gain", "runner0.setup", "site1.start", "ssdp.start", "mdns.start"])
 async def test_cli_cancellation_awaits_partial_start_cleanup(monkeypatch, stage):
     harness = ServiceHarness(monkeypatch, block=stage)

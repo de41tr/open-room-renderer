@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 
-from fake_linkplay.mpv_backend import MpvBackend
+from fake_linkplay.mpv_backend import BackendError, MpvBackend
 
 
 _URL = "https://media.example.test/tone.wav"
@@ -88,3 +88,40 @@ async def test_named_command_transport_failure_keeps_error_and_safe_logging(monk
     assert result == {"error": "Synthetic failure"}
     assert "command loadfile failed" in caplog.text
     assert "private-fixture" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_paused_load_requires_hold_ack_and_never_autounpauses():
+    backend = MpvBackend("/synthetic-mpv.sock", auto_spawn=False)
+    backend._initialize_gain_locked = AsyncMock()
+    backend.command = AsyncMock(return_value={"error": "hold rejected"})
+    with pytest.raises(BackendError):
+        await backend.loadfile(_URL, start_paused=True)
+    backend.command.assert_awaited_once_with(["set_property", "pause", True], timeout=2.0)
+    backend.command.reset_mock()
+    backend.command.return_value = {"error": "success"}
+    assert await backend.loadfile(_URL, start_paused=True) == {"error": "success"}
+    assert backend.command.await_args_list == [
+        call(["set_property", "pause", True], timeout=2.0),
+        call(["loadfile", _URL, "replace"], timeout=3.0)]
+
+
+@pytest.mark.asyncio
+async def test_resume_checks_owner_after_dsp_and_gain_before_unpause():
+    backend = MpvBackend("/synthetic-mpv.sock", auto_spawn=False)
+    events = []
+    backend._dsp_managed = True
+    async def dsp(*args):
+        events.append("dsp")
+    async def gain(*args, **kwargs):
+        events.append("gain")
+    async def current():
+        events.append("owner")
+        return False
+    backend._apply_audio_filter_graph_locked = dsp
+    backend._initialize_gain_locked = gain
+    backend.command = AsyncMock(return_value={"error": "success"})
+    with pytest.raises(BackendError, match="superseded"):
+        await backend.resume(current=current)
+    assert events == ["dsp", "gain", "owner"]
+    backend.command.assert_not_awaited()

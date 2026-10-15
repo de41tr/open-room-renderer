@@ -132,7 +132,7 @@ def rich_queue(*, index=2, loop=4):
 async def test_default_cli_replacement_stops_active_queue_without_loading_new_media(renderer):
     old_url = "https://media.example.test/old.wav"
     await asyncio.to_thread(renderer.client.replace, explicit_queue("Old queue", [old_url]), play=True)
-    assert renderer.api.mpv.calls == [("load", old_url)]
+    assert renderer.api.mpv.calls == [("load", old_url), ("resume", None)]
     old_queue = renderer.api.state.queue
     renderer.requests.clear()
     renderer.api._resolve_playback_url.reset_mock()
@@ -150,13 +150,13 @@ async def test_default_cli_replacement_stops_active_queue_without_loading_new_me
     assert [item.url for item in renderer.api.state.queue.items] == list(URLS)
     assert renderer.api.state.phase == PlaybackPhase.STOPPED
     assert renderer.api.mpv.idle and renderer.api.mpv.url == ""
-    assert renderer.api.mpv.calls == [("load", old_url), ("stop", None)]
+    assert renderer.api.mpv.calls == [("load", old_url), ("resume", None), ("stop", None)]
     renderer.api._resolve_playback_url.assert_not_awaited()
 
     browsed = await asyncio.to_thread(renderer.client.browse, NAME)
     assert browsed.index == 2 and browsed.count == 3
     assert [item.url for item in browsed.items] == list(URLS)
-    assert renderer.api.mpv.calls == [("load", old_url), ("stop", None)]
+    assert renderer.api.mpv.calls == [("load", old_url), ("resume", None), ("stop", None)]
 
 
 @pytest.mark.asyncio
@@ -179,7 +179,7 @@ async def test_cli_load_play_preserves_mode_and_plays_requested_canonical_index(
     assert renderer.api.state.queue.loop == wire_mode
     assert renderer.api.state.queue.index == renderer.api.state.plicurr == 2
     assert renderer.api.state.phase == PlaybackPhase.PLAYING
-    assert renderer.api.mpv.calls == [("load", URLS[1])]
+    assert renderer.api.mpv.calls == [("load", URLS[1]), ("resume", None)]
     assert renderer.api.state.current_url == renderer.api.mpv.url == URLS[1]
 
     summary = (await renderer.cli("show", "--name", NAME)).success()
@@ -210,7 +210,7 @@ async def test_cli_play_index_never_rewrites_queue_or_uses_shuffle_position(rend
     assert [item.url for item in queue.items] == list(URLS)
     assert renderer.api.state.phase == PlaybackPhase.PLAYING
     assert renderer.api.state.current_url == renderer.api.mpv.url == URLS[0]
-    assert renderer.api.mpv.calls == [("stop", None), ("load", URLS[0])]
+    assert renderer.api.mpv.calls == [("stop", None), ("load", URLS[0]), ("resume", None)]
 
 
 @pytest.mark.asyncio

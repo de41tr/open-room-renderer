@@ -675,6 +675,10 @@ class HttpApi:
             self.state.phase = PlaybackPhase.STOPPED
             return
         self.state.phase = PlaybackPhase.BUFFERING
+        if self._station_recovery_task is not None and not self._station_recovery_task.done():
+            # Duplicate EOF/idle observations cannot erase the active retry's
+            # more specific failed-load diagnosis or start another cycle.
+            return
         self.state.last_error = {
             "source_eof": "Station source ended; retry pending",
             "source_stall": "Station source stalled; retry pending",
@@ -3010,7 +3014,8 @@ class HttpApi:
                         # Only entering the guarded mutation consumes the
                         # initially materialized target, even if ACK fails.
                         selected._radio_resolution_attempted = True
-                    load_reply = await self._gain_reconciling_call(self.mpv.loadfile(playback_url, mpv_options))
+                    load_reply = await self._gain_reconciling_call(
+                        self.mpv.loadfile(playback_url, mpv_options, start_paused=True))
                     data = load_reply.get("data") if isinstance(load_reply, dict) else None
                     entry_id = data.get("playlist_entry_id") if isinstance(data, dict) else None
                     if type(entry_id) is int and entry_id >= 0:
@@ -3057,21 +3062,64 @@ class HttpApi:
                 raise BackendError("Playback failed before confirmation")
             if not ready:
                 raise SourcePlaybackError("Source did not confirm playback")
-            self._admitted_load_generation = None
-            self._admitted_load_entry_id = None
-            # An idle observation during readiness may have cleared identity.
-            # Audio confirmation belongs to this still-current loaded source.
-            self.state.backend_url = playback_url
-            self.state.backend_original_url = url
-            if recovery is None:
-                self._arm_station_recovery()
-            self.state.mark_playing(url)
-            await self.sync_mpv_state()
+            # Readiness runs without holding the mutation lock. Recheck the
+            # paused audio and admitted source after reacquiring it, then fence
+            # the final unpause against commands arriving during DSP/gain work.
+            def may_resume() -> bool:
+                return (current() and owns_selection()
+                        and self.state.phase not in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR})
+
+            async def confirm_paused_owner() -> bool:
+                # Called after resume's DSP/gain awaits, immediately before
+                # unpause. An earlier snapshot cannot authorize that mutation.
+                if not may_resume():
+                    return False
+                snapshot = await self.mpv.snapshot()
+                if not may_resume():
+                    return False
+                if snapshot.get("backend-error"):
+                    raise BackendError("Backend control failed before resume")
+                if self._reject_replaced_load_root(snapshot, generation):
+                    return False
+                if not self._mpv_snapshot_ready_while_paused(snapshot, playback_url):
+                    raise SourcePlaybackError("Source lost paused audio readiness")
+                return True
+
+            async with asyncio.timeout(10.0), self._backend_lock:
+                if not may_resume():
+                    raise BackendError("Playback command superseded before resume")
+                await self._gain_reconciling_call(self.mpv.resume(current=confirm_paused_owner))
+                if not may_resume():
+                    raise BackendError("Playback command superseded during resume")
+                confirmed = await self.mpv.snapshot()
+                if not may_resume():
+                    raise BackendError("Playback command superseded after resume")
+                if confirmed.get("backend-error"):
+                    raise BackendError("Backend control failed after resume")
+                if self._reject_replaced_load_root(confirmed, generation):
+                    raise BackendError("Playback source ownership lost after resume")
+                self._admitted_load_generation = None
+                self._admitted_load_entry_id = None
+                self.state.backend_url = playback_url
+                self.state.backend_original_url = url
+                if recovery is None:
+                    self._arm_station_recovery()
+                self.state.mark_playing(url)
+                self._apply_backend_snapshot(confirmed)
             if not current():
                 raise BackendError("Playback command superseded")
             if recovery is not None and not self.state.backend_url:
                 raise SourcePlaybackError("Station source ended during recovery", "source_eof")
-            if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING}:
+            # A proven paused source may finish between acknowledged resume
+            # and the first observation. Keep its observed EOF/queue advance;
+            # never turn a successfully admitted short file into a false 502.
+            ended_after_resume = (
+                recovery is None and self.state.intent == "play"
+                and self.state.phase == PlaybackPhase.STOPPED
+                and not (item and item.stream_type == "station" and item.duration == 0)
+                and confirmed is not None
+                and (confirmed.get("idle-active") is True or confirmed.get("eof-reached") is True))
+            if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING} and not ended_after_resume:
                 raise BackendError("Backend no longer playing")
         except (BackendError, OSError, TimeoutError, asyncio.CancelledError) as exc:
             try:
@@ -3400,15 +3448,44 @@ class HttpApi:
                 and active[0].get("filename") == observed and active[0].get("playlist-path") == expected_url)
 
 
+    def _mpv_snapshot_ready_while_paused(self, snapshot: dict, playback_url: str) -> bool:
+        if self._admitted_load_entry_id is not None:
+            # A same-URL reload can still expose the retiring source's audio
+            # metadata while the acknowledged new entry is only current.
+            # Require its playing identity, or a proven first-level child.
+            active = self._native_active(snapshot)
+            if not self._native_source_observation_coherent(snapshot) or active is None:
+                return False
+            if (active.get("id") != self._admitted_load_entry_id
+                    and not (snapshot.get("path") != playback_url
+                             and snapshot.get("playlist-path") == playback_url
+                             and active.get("playlist-path") == playback_url)):
+                return False
+        tracks = snapshot.get("track-list")
+        return (snapshot.get("pause") is True and snapshot.get("idle-active") is False
+                and snapshot.get("eof-reached") is not True
+                and self._mpv_snapshot_matches_source(snapshot, playback_url)
+                and isinstance(tracks, list) and any(
+                    isinstance(track, dict) and track.get("type") == "audio" and track.get("selected") is True
+                    for track in tracks))
+
     async def _wait_for_mpv_audio_ready(self, generation: int, playback_url: str, timeout: float = 10.0) -> bool:
         """Poll mpv until the loaded item exposes a selected audio track."""
 
         deadline = asyncio.get_running_loop().time() + timeout
         last_snapshot: dict[str, object] = {}
+        # Holding the source preserves the admission window; a few early
+        # observations avoid adding half a second to every audible start.
+        # Slow/unready sources return to the existing 500 ms cadence.
+        early_delays = iter((0.0, 0.025, 0.05, 0.1, 0.25))
         while asyncio.get_running_loop().time() < deadline:
             if generation != self._play_generation:
                 return False
-            await asyncio.sleep(0.5)
+            delay = min(next(early_delays, 0.5), deadline - asyncio.get_running_loop().time())
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if asyncio.get_running_loop().time() >= deadline:
+                break
             async with self._backend_lock:
                 snapshot = await self.mpv.snapshot()
                 if await self._apply_station_child_history_locked(generation, snapshot):
@@ -3424,7 +3501,10 @@ class HttpApi:
                 return False
             if not self._mpv_snapshot_matches_source(snapshot, playback_url):
                 continue
-            if snapshot.get("idle-active") is not True and self._mpv_snapshot_has_audio(snapshot):
+            ready = (self._mpv_snapshot_ready_while_paused(snapshot, playback_url)
+                     if self._admitted_load_generation == generation else
+                     snapshot.get("idle-active") is not True and self._mpv_snapshot_has_audio(snapshot))
+            if ready:
                 LOG.info("mpv audio-ready playback=%s snapshot=%s", self._redact_sensitive_text(playback_url), self._redact_sensitive_text(self._compact_snapshot(snapshot)))
                 return True
         LOG.warning("mpv audio-ready timeout playback=%s snapshot=%s", self._redact_sensitive_text(playback_url), self._redact_sensitive_text(self._compact_snapshot(last_snapshot)))

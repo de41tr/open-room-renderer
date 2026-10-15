@@ -180,8 +180,8 @@ async def test_possibly_applied_load_is_cleaned_even_without_acknowledgement(api
             await asyncio.Future()
         raise BackendError("Acknowledgement lost after apply")
 
-    async def load(url, options=None):
-        await original_load(url, options)
+    async def load(url, options=None, *, start_paused=False):
+        await original_load(url, options, start_paused=start_paused)
         if stage == "load":
             await fail()
 
@@ -257,10 +257,10 @@ async def test_issued_cleanup_records_actual_idle_without_overwriting_new_owner(
             owner_saw_idle_identity.append((api.state.backend_url, api.state.backend_original_url))
         await original_stop()
 
-    async def load(url, options=None):
+    async def load(url, options=None, *, start_paused=False):
         if url == NEXT:
             owner_saw_idle_identity.append((api.state.backend_url, api.state.backend_original_url))
-        await original_load(url, options)
+        await original_load(url, options, start_paused=start_paused)
 
     api.mpv.stop, api.mpv.loadfile = stop, load
     old = asyncio.create_task(api._play_url(SOURCE))

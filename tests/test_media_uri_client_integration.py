@@ -9,7 +9,7 @@ from test_media_uri_encoding import MEDIA_URI
 async def test_real_client_preserves_encoded_media_resource(local_renderer):
     await local_renderer.client.play_url(MEDIA_URI)
     assert local_renderer.backend.url == MEDIA_URI
-    assert local_renderer.backend.calls == [("loadfile", MEDIA_URI)]
+    assert local_renderer.backend.calls == [("loadfile", MEDIA_URI), ("resume", None)]
     assert "setPlayerCmd:play:" + MEDIA_URI in local_renderer.commands
 
 
@@ -19,7 +19,7 @@ async def test_real_client_playlist_preserves_whole_resource(local_renderer):
                 "http://[::1]:8080/a:b.pls:3"):
         await local_renderer.client.play_playlist(uri)
         assert local_renderer.backend.url == uri
-        assert local_renderer.backend.calls[-1] == ("loadfile", uri)
+        assert local_renderer.backend.calls[-2:] == [("loadfile", uri), ("resume", None)]
         assert "setPlayerCmd:playlist:" + uri in local_renderer.commands
         status = await local_renderer.client.get_player_status()
         assert status["uri"] == uri and status["play_status"] == "play"
@@ -51,4 +51,4 @@ async def test_playlist_rejects_invalid_input_before_displacing_current_playback
     async with local_renderer.session.get(local_renderer.base_url + "/httpapi.asp",
             params={"command": "setPlayerCmd:playlist:" + quote(MEDIA_URI, safe="") + ":0"}) as response:
         assert response.status == 200 and await response.text() == "OK"
-    assert backend.calls == calls + [("stop", None), ("loadfile", MEDIA_URI)]
+    assert backend.calls == calls + [("stop", None), ("loadfile", MEDIA_URI), ("resume", None)]

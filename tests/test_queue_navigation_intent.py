@@ -91,7 +91,7 @@ async def test_paused_native_transition_rejection_does_not_reconcile_or_resume(t
     assert api._native_stage is stage and api.mpv.paused and api.mpv.url == B
     await api.sync_mpv_state()
     assert api.state.queue.index == 2 and api.state.phase == PlaybackPhase.PAUSED
-    assert mutations(api, "resume") == []
+    assert mutations(api, "resume") == [None]  # Initial admission only; navigation never resumes.
 
 
 @pytest.mark.asyncio
@@ -363,7 +363,7 @@ async def test_navigation_during_nonstaged_stop_keeps_stop_intent(tmp_path, surf
     assert api.state.phase == PlaybackPhase.STOPPED and api.state.intent == "stop"
     assert api.state.backend_url == api.state.backend_original_url == ""
     assert api.mpv.idle and mutations(api, "load") == [(A, B)[index - 1]]
-    assert mutations(api, "resume") == []
+    assert mutations(api, "resume") == [None]  # Initial admission only; navigation never resumes.
 
 
 @pytest.mark.asyncio

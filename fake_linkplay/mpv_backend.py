@@ -17,7 +17,7 @@ import socket
 import struct
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from .audio_device import validate_audio_device
 from .log_safety import redact_media_urls
@@ -581,8 +581,10 @@ class MpvBackend:
             if writer is not None:
                 await self._close_writer(writer, deadline)
 
-    async def loadfile(self, url: str, options: dict[str, str] | None = None) -> dict[str, Any]:
-        """Confirm desired DSP and gain before every load, then leave pause."""
+    async def loadfile(
+        self, url: str, options: dict[str, str] | None = None, *, start_paused: bool = False,
+    ) -> dict[str, Any]:
+        """Confirm DSP/gain, optionally holding the source for admission."""
 
         # A single lock order (DSP, then gain) prevents a restored cut from
         # disappearing between confirmation and the first decoded sample.
@@ -592,11 +594,17 @@ class MpvBackend:
             async with self._gain_lock:
                 # External mpv may have restarted or changed since the last load.
                 await self._initialize_gain_locked(force=True)
-                return await self._loadfile_locked(url, options)
+                return await self._loadfile_locked(url, options, start_paused=start_paused)
 
-    async def _loadfile_locked(self, url: str, options: dict[str, str] | None) -> dict[str, Any]:
+    async def _loadfile_locked(
+        self, url: str, options: dict[str, str] | None, *, start_paused: bool = False,
+    ) -> dict[str, Any]:
         """Keep source loading serialized with gain initialization and changes."""
 
+        if start_paused:
+            # Retain audio during admission instead of racing the first
+            # readiness sample. A global hold also survives playlist expansion.
+            await self.checked_command(["set_property", "pause", True])
         LOG.info("mpv loadfile replace url=%s options=%s", redact_sensitive(url), redact_sensitive(options or {}))
         command: list[Any] | dict[str, Any] = ["loadfile", url, "replace"]
         if options:
@@ -608,6 +616,8 @@ class MpvBackend:
         if response.get("error") != "success":
             LOG.warning("mpv loadfile returned error url=%s response=%s", redact_sensitive(url), redact_sensitive(response))
             return {**response, "error": response.get("error") or "mpv loadfile acknowledgement missing"}
+        if start_paused:
+            return response
         pause_response = await self.command(["set_property", "pause", False], timeout=3.0)
         if pause_response.get("error") != "success":
             LOG.warning("mpv unpause after loadfile returned error url=%s response=%s", redact_sensitive(url), redact_sensitive(pause_response))
@@ -640,14 +650,16 @@ class MpvBackend:
 
         await self.checked_command(["set_property", "pause", True])
 
-    async def resume(self) -> None:
-        """Confirm the complete desired DSP and gain before resuming playback."""
+    async def resume(self, *, current: Callable[[], Awaitable[bool]] | None = None) -> None:
+        """Reconcile DSP/gain, then unpause only a still-current admission."""
 
         async with self._dsp_lock:
             if self._dsp_managed:
                 await self._apply_audio_filter_graph_locked(self._audio_filter_graph())
             async with self._gain_lock:
                 await self._initialize_gain_locked(force=True)
+                if current is not None and not await current():
+                    raise BackendError("Playback command superseded before resume")
                 await self.checked_command(["set_property", "pause", False])
 
     async def stop(self) -> None:

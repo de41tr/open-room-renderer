@@ -60,9 +60,9 @@ class SeekBackend:
             self.after_seek()
         return {"error": "success"}
 
-    async def loadfile(self, url, options=None):
+    async def loadfile(self, url, options=None, *, start_paused=False):
         self.calls.append(("load", url, deepcopy(options)))
-        self.url, self.idle, self.eof, self.paused = url, False, False, False
+        self.url, self.idle, self.eof, self.paused = url, False, False, start_paused
         self.position = int((options or {}).get("start", 0))
         return {"error": "success"}
 
@@ -74,7 +74,9 @@ class SeekBackend:
         self.calls.append(("stop",))
         self.idle, self.url = True, ""
 
-    async def resume(self):
+    async def resume(self, *, current=None):
+        if current is not None and not await current():
+            raise BackendError("Playback command superseded")
         self.calls.append(("resume",))
         self.paused = False
 

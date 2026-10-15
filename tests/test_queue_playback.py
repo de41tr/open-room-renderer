@@ -135,7 +135,7 @@ async def test_direct_http_play_replaces_existing_queue(api, command):
     await api.execute(ParsedCommand(command, (FIRST,)), "192.0.2.1")
     assert api.state.plicount == api.state.plicurr == 1
     assert api.state.queue.current.url == FIRST
-    assert api.mpv.calls == [("load", SECOND), ("stop", None), ("load", FIRST)]
+    assert api.mpv.calls == [("load", SECOND), ("resume", None), ("stop", None), ("load", FIRST), ("resume", None)]
     assert api.state.track_source == "CustomRadio" and api.state.title == "one.wav"
     assert api.state.play_medium == "THIRD-DLNA" and api.state.album_art_uri == ""
 

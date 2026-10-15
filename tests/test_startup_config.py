@@ -1,4 +1,4 @@
-"""Private startup diagnostics without native backends, sockets, or listeners."""
+"""Private startup diagnostics with fake backends and isolated loopback listeners."""
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -6,10 +6,12 @@ import importlib.util
 import logging
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import textwrap
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import yaml
@@ -315,6 +317,64 @@ def test_runtime_failures_are_not_misreported_as_configuration_errors(monkeypatc
     monkeypatch.setattr(cli, "serve", fail)
     with pytest.raises(RuntimeError, match=SECRET):
         cli.main(["serve", "--config", "valid.yaml"])
+
+
+@pytest.mark.parametrize("collision", ["first", "second", "numeric-string-second"])
+def test_occupied_http_port_reports_private_error_and_releases_listeners(
+    tmp_path, monkeypatch, capsys, collision,
+):
+    backend = SimpleNamespace(**{
+        name: AsyncMock() for name in ("start", "stop", "initialize_gain", "stop_process")
+    })
+    monkeypatch.setattr(cli, "MpvBackend", lambda *args, **kwargs: backend)
+    monkeypatch.setattr(cli, "HttpApi", lambda *args, **kwargs: SimpleNamespace(
+        app=cli.web.Application, initialize_channel_balance=AsyncMock(),
+    ))
+    monkeypatch.setattr(cli, "setup_logging", lambda _: None)
+    forbidden = Mock(side_effect=AssertionError("discovery must not start"))
+    monkeypatch.setattr(cli, "SsdpServer", forbidden)
+    monkeypatch.setattr(cli, "MdnsAdvertiser", forbidden)
+    # Observe real aiohttp cleanup without replacing its socket/start behavior.
+    started_addresses = []
+    cleanup = cli.web.AppRunner.cleanup
+
+    async def record_cleanup(runner):
+        started_addresses.extend(runner.addresses)
+        await cleanup(runner)
+
+    monkeypatch.setattr(cli.web.AppRunner, "cleanup", record_cleanup)
+    with socket.socket() as owner:
+        owner.bind(("127.0.0.1", 0))
+        owner.listen()
+        occupied_port = owner.getsockname()[1]
+        second_port = str(occupied_port) if collision == "numeric-string-second" else occupied_port
+        path = tmp_path / f"{SECRET}.yaml"
+        path.write_text(yaml.safe_dump({
+            "http_api_port": occupied_port if collision == "first" else 0,
+            "upnp_port": second_port,
+            "bind_address": "127.0.0.1", "advertise_ip": "127.0.0.1",
+            "mirror_port_80": False, "enable_ssdp": False, "enable_mdns": False,
+            "auto_spawn_mpv": False, "mpv_socket": str(tmp_path / "unused.sock"),
+            "state_dir": str(tmp_path / "state"),
+        }))
+
+        assert cli.main(["serve", "--config", str(path)]) == 2
+        assert capsys.readouterr() == ("", (
+            "Startup error: An HTTP listener port is already in use. Check for another "
+            "running renderer or service, or choose unused http_api_port/upnp_port "
+            "settings and review mirror_port_80.\n"
+        ))
+        backend.stop_process.assert_awaited_once()
+        forbidden.assert_not_called()
+        assert len(started_addresses) == (0 if collision == "first" else 1)
+        for address in started_addresses:
+            with socket.socket() as replacement:
+                replacement.bind(address)
+        # The unrelated owner survives and can still accept a connection.
+        owner.settimeout(1)
+        with socket.create_connection(owner.getsockname(), timeout=1):
+            connection, _ = owner.accept()
+            connection.close()
 
 
 def test_public_loader_keeps_legacy_construction_without_startup_checks(tmp_path, monkeypatch):
