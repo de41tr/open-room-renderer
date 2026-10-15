@@ -153,11 +153,18 @@ Nothing in software status is a physical sound or audibility measurement.
   a new source, and cancellation not abandoning producer cleanup.
 - A real owned synthetic PCM producer, existing ORR EQ and actual libmpv digital
   PCM output measured a -12 dB cut amplitude ratio of approximately **0.25119**,
-  then existing EQ bypass approximately **1.00011**. Producer reaping, FIFO
-  cleanup and ordinary-source input-option restoration were confirmed.
-- That local measurement uses the existing test-only libmpv command adapter.
-  The CI-only production Unix IPC test separately checks the same source
-  lifecycle with null output and a normal-source return.
+  and existing EQ bypass approximately **1.00011** in two fully completed
+  digital segments, on mpv **0.37.0 and 0.40.0**. Producer reaping, FIFO cleanup
+  and ordinary-source input-option restoration were confirmed.
+- Those local measurements use the existing test-only libmpv command adapter.
+  The same test also proves live EQ bypass with continued native position
+  progress through null output. The CI-only production Unix IPC test repeats
+  that live-bypass/source-return proof using the real production transport.
+- **Known measurement-path limitation:** mpv 0.37's untimed `ao=pcm` file sink
+  stalls after a live filter removal with this paced FIFO. The live untimed-file
+  transition is not claimed as passing. Static digital amplitudes and live
+  clocked/null progress are separate evidence; no product workaround, skip or
+  relaxed time limit hides this limitation.
 - **NOT TESTED on XU4/KA17, no Spotify account/audio/discovery acceptance, no
   provider-policy clearance, no physical output or listening claim.** These
   gates remain until explicitly authorized and independently observed.

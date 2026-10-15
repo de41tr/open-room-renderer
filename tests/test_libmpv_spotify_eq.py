@@ -33,7 +33,7 @@ class PcmBackend(_NamedLoadBackend):
         self.root = root
 
     async def command(self, args, timeout=5.0):
-        if isinstance(args, dict):
+        if isinstance(args, dict) and args['url'] not in self._allowed_media:
             path = Path(args['url'])
             assert path.name == 'audio.fifo' and path.parent.parent == self.root and path.is_fifo()
             self._allowed_media.add(str(path))
@@ -86,11 +86,20 @@ async def exercise(library: str, root: Path):
         assert graph and 'g=-12.000' in graph[0]['params']['graph']
         assert backend.read_property('options/demuxer-rawaudio-rate') == 44100
         assert backend.read_property('audio-params')['samplerate'] == 44100
-        # The same existing EQ control used by the UI changes this running FIFO.
-        boundary = sink.stat().st_size / (16000*2*4)
+        # mpv 0.37's untimed ao=pcm stalls on a live filter removal, while
+        # its clocked/null output keeps progressing. Close each digital segment
+        # completely; the separate production-IPC test proves live bypass.
+        await source.close()
+        assert child.returncode is not None and not runtime.exists() and source.keepalive is None
+        assert api.spotify_source is None and backend.read_property('idle-active') is True
+        boundary_bytes = sink.stat().st_size
+        boundary = boundary_bytes / (16000*2*4)
         await api.execute(ParsedCommand('EQOff'), '127.0.0.1')
         assert backend.read_property('af') == []
-        await _eventually('bypass PCM samples', lambda: sink.stat().st_size >= 16000*2*4*(boundary+1.8), 7)
+        source = SyntheticSource(root, p)
+        await source.start(api)
+        second_runtime, second_child = source.runtime, source.process
+        await _eventually('bypass PCM segment', lambda: sink.stat().st_size >= boundary_bytes + 16000*2*4*.75, 7)
         # Model app Resume after ORR paused the native reader. The provider
         # fixture still reports play; reconciliation uses the existing DSP guard.
         await backend.pause()
@@ -98,7 +107,7 @@ async def exercise(library: str, root: Path):
         await source.observe()
         assert backend.read_property('pause') is False
         await source.close()
-        assert child.returncode is not None and not runtime.exists() and source.keepalive is None
+        assert second_child.returncode is not None and not second_runtime.exists()
         assert api.spotify_source is None and backend.read_property('idle-active') is True
         assert api.state.current_url == ''
         samples = array('f'); samples.frombytes(sink.read_bytes())
@@ -106,7 +115,7 @@ async def exercise(library: str, root: Path):
             return [math.sqrt(sum(x*x for x in samples[int(start*16000)*2+c:int(end*16000)*2:2]) /
                               int((end-start)*16000)) / (.001/math.sqrt(2)) / ((25/100)**3)
                     for c in (0, 1)]
-        cut, bypass = ratios(.2,.5), ratios(boundary+1.2,boundary+1.5)
+        cut, bypass = ratios(.2,.5), ratios(boundary+.2,boundary+.5)
         assert cut[0] == pytest.approx(10**(-12/20), rel=.035)
         assert cut[1] > .8
         assert bypass == pytest.approx([1,1], rel=.035)
@@ -120,9 +129,11 @@ async def exercise(library: str, root: Path):
         await backend.stop()
         return {'lane': 'REAL_SOFTWARE_TESTED/synthetic-owned-child-FIFO-existing-EQ',
                 'input': '44100 Hz stereo f32le, synthetic peak 0.001', 'output': '16000 Hz float PCM file',
+                'mpv_version': backend.read_property('mpv-version'),
+                'measurement': 'two completed digital segments; live bypass tested separately with null output',
                 'cut_normalized_rms': cut, 'bypass_normalized_rms': bypass,
-                'producer_reaped_before_reader_stop': child.returncode is not None,
-                'private_runtime_removed': not runtime.exists(), 'ordinary_source_return': True,
+                'producer_reaped_before_reader_stop': child.returncode is not None and second_child.returncode is not None,
+                'private_runtime_removed': not runtime.exists() and not second_runtime.exists(), 'ordinary_source_return': True,
                 'spotify_account': 'NOT_TESTED', 'DAC': 'NOT_TESTED', 'production_unix_IPC': 'NOT_TESTED'}
     finally:
         await source.close()
@@ -135,9 +146,10 @@ def test_real_owned_pcm_runs_through_existing_eq_and_returns(tmp_path):
         pytest.skip('set ORR_TEST_LIBMPV_PATH for real digital-only FIFO acceptance')
     script = '''import asyncio,json,locale,sys
 from pathlib import Path
-from test_libmpv_spotify_eq import exercise
+from test_libmpv_spotify_eq import exercise, libmpv_null_exercise
 locale.setlocale(locale.LC_NUMERIC, 'C')
 print(json.dumps(asyncio.run(exercise(sys.argv[1],Path(sys.argv[2]))), sort_keys=True))
+print(json.dumps(asyncio.run(libmpv_null_exercise(sys.argv[1],Path(sys.argv[2]).with_name('null-live'))), sort_keys=True))
 '''
     env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(Path(__file__).parent), str(Path(__file__).parents[1])]))
     result = subprocess.run([sys.executable, '-c', script, library, str(tmp_path/'acceptance')],
@@ -171,6 +183,16 @@ print(json.dumps(asyncio.run(unix_exercise(Path(sys.argv[1]))), sort_keys=True))
 
 async def unix_exercise(root):
     from fake_linkplay.mpv_backend import MpvBackend
+    backend = MpvBackend(str(root / 'mpv.sock'), auto_spawn=True, initial_volume=25)
+    return await live_exercise(root, backend, 'production-Unix-IPC')
+
+
+async def libmpv_null_exercise(library, root):
+    backend = PcmBackend(library, root / 'own.wav', None, root)
+    return await live_exercise(root, backend, 'libmpv-test-command-adapter')
+
+
+async def live_exercise(root, backend, transport):
     from fake_linkplay.queue import PlaybackQueue, QueueItem
     from fake_linkplay.state import PlaybackPhase
     root.mkdir(mode=0o700)
@@ -178,7 +200,6 @@ async def unix_exercise(root):
     p = {'format': 1, 'client_dir': str(root / 'unused-client'), 'client_sha256': 'a'*64,
          'name': 'Synthetic source', 'bitrate': 160, 'port': 3678, 'device_id': 'b'*40}
     eq.verify_client = lambda _: (Path(sys.executable), {'binary_sha256': p['client_sha256']})
-    backend = MpvBackend(str(root / 'mpv.sock'), auto_spawn=True, initial_volume=25)
     cfg = Config(uuid='00000000-0000-4000-8000-000000000000', default_volume=25,
                  state_dir=str(root/'state'), enable_mdns=False, enable_ssdp=False)
     api = HttpApi(cfg, RendererState.from_config(cfg), backend)
@@ -186,12 +207,24 @@ async def unix_exercise(root):
     try:
         await backend.start()
         await api.initialize_channel_balance()
+        await api.execute(ParsedCommand('EQSetLV2SourceBand:' + json.dumps({
+            'source_name': 'wifi', 'pluginURI': 'synthetic.spotify.pcm', 'EQBand': [
+                {'param_name': 'a_freq', 'value': 1000}, {'param_name': 'a_gain', 'value': -12},
+                {'param_name': 'a_q', 'value': 1}]})), '127.0.0.1')
         await source.start(api)
         child, runtime = source.process, source.runtime
         deadline = asyncio.get_running_loop().time()+4
         while api.state.phase != PlaybackPhase.PLAYING:
             assert asyncio.get_running_loop().time() < deadline
             await source.observe()
+            await asyncio.sleep(.05)
+        assert 'g=-12.000' in str(await backend.get_property('af'))
+        before_bypass = await backend.get_property('playback-time')
+        await api.execute(ParsedCommand('EQOff'), '127.0.0.1')
+        assert await backend.get_property('af') == []
+        deadline = asyncio.get_running_loop().time()+3
+        while (after_bypass := await backend.get_property('playback-time')) < before_bypass + .25:
+            assert asyncio.get_running_loop().time() < deadline, 'live EQ bypass must keep PCM progressing'
             await asyncio.sleep(.05)
         await api.execute(ParsedCommand('setChannelBalance:0.5'), '127.0.0.1')
         assert 'pan' in str(await backend.get_property('af'))
@@ -204,8 +237,10 @@ async def unix_exercise(root):
         assert await backend.get_property('current-ao') == 'null'
         assert await backend.get_property('option-info/demuxer-max-bytes/set-locally') is False
         await api.execute(ParsedCommand('stop'), '127.0.0.1')
-        return {'lane': 'REAL_SOFTWARE_TESTED/production-Unix-IPC/synthetic-FIFO',
-                'existing_balance_filter': True, 'producer_reaped': True, 'ordinary_source_return': True,
+        return {'lane': 'REAL_SOFTWARE_TESTED/' + transport + '/synthetic-FIFO',
+                'existing_balance_filter': True, 'live_eq_bypass_progress': [before_bypass, after_bypass],
+                'mpv_version': await backend.get_property('mpv-version'),
+                'producer_reaped': True, 'ordinary_source_return': True,
                 'output': 'null, no DAC', 'Spotify': 'NOT_STARTED'}
     finally:
         await source.close()
