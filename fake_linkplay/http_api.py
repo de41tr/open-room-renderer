@@ -3448,12 +3448,23 @@ class HttpApi:
                 and active[0].get("filename") == observed and active[0].get("playlist-path") == expected_url)
 
 
-    @classmethod
-    def _mpv_snapshot_ready_while_paused(cls, snapshot: dict, playback_url: str) -> bool:
+    def _mpv_snapshot_ready_while_paused(self, snapshot: dict, playback_url: str) -> bool:
+        if self._admitted_load_entry_id is not None:
+            # A same-URL reload can still expose the retiring source's audio
+            # metadata while the acknowledged new entry is only current.
+            # Require its playing identity, or a proven first-level child.
+            active = self._native_active(snapshot)
+            if not self._native_source_observation_coherent(snapshot) or active is None:
+                return False
+            if (active.get("id") != self._admitted_load_entry_id
+                    and not (snapshot.get("path") != playback_url
+                             and snapshot.get("playlist-path") == playback_url
+                             and active.get("playlist-path") == playback_url)):
+                return False
         tracks = snapshot.get("track-list")
         return (snapshot.get("pause") is True and snapshot.get("idle-active") is False
                 and snapshot.get("eof-reached") is not True
-                and cls._mpv_snapshot_matches_source(snapshot, playback_url)
+                and self._mpv_snapshot_matches_source(snapshot, playback_url)
                 and isinstance(tracks, list) and any(
                     isinstance(track, dict) and track.get("type") == "audio" and track.get("selected") is True
                     for track in tracks))

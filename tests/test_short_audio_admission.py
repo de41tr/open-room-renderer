@@ -28,7 +28,7 @@ async def test_time_or_duration_never_substitutes_for_paused_selected_audio(tmp_
                           "unpaused": ("pause", False), "foreign": ("path", B)}[evidence]
             snapshot[key] = value
         assert snapshot["duration"] > 0 and isinstance(snapshot["playback-time"], (float, int))
-        assert not HttpApi._mpv_snapshot_ready_while_paused(snapshot, A)
+        assert not api._mpv_snapshot_ready_while_paused(snapshot, A)
         return False
     api._wait_for_mpv_audio_ready = readiness
     with pytest.raises(SourcePlaybackError):
@@ -98,3 +98,49 @@ async def test_proven_audio_ending_after_resume_ack_is_success_and_advances_once
     assert api.mpv.calls == [("load", A), ("resume", None)]
     await api._queue_advance_task
     api._advance_queue_after_eof.assert_awaited_once_with(api.state.generation, api.state.queue)
+
+
+async def test_same_url_reload_waits_for_acknowledged_playing_root_audio(tmp_path):
+    api = make_api(tmp_path, enabled=False, urls=(A,))
+    acknowledge(api)
+    await start(api)
+    await api._transport_command("stop")
+    api.mpv.calls.clear()
+    api._wait_for_mpv_audio_ready = HttpApi._wait_for_mpv_audio_ready.__get__(api)
+    original = api.mpv.snapshot
+    samples = []
+    async def snapshot():
+        result = await original()
+        if api._admitted_load_generation == api.state.generation and api.mpv.paused:
+            samples.append(result)
+            if len(samples) == 1:
+                # Native Stop/reload of the same URL can expose retiring
+                # audio metadata while the new ACK is only current, not playing.
+                result["playlist"][0].pop("playing")
+            elif len(samples) == 2:
+                result["track-list"] = []
+                result["playback-time"] = None
+        return result
+    api.mpv.snapshot = snapshot
+    await start(api)
+    assert len(samples) >= 4  # Two non-ready reads, real readiness, final owner check.
+    assert api.mpv.calls == [("load", A), ("resume", None)]
+    assert api.state.phase == PlaybackPhase.PLAYING and not api.state.last_error
+    assert api.mpv.entry_id == 2 and not api._native_output_uncertain
+
+
+@pytest.mark.parametrize("parent,expected", [(A, True), (B, False), (None, False)])
+async def test_acknowledged_container_readiness_requires_exact_first_level_parent(tmp_path, parent, expected):
+    api = make_api(tmp_path, enabled=False, urls=(A,))
+    acknowledge(api)
+    async def readiness(generation, url):
+        assert api._admitted_load_entry_id == 1
+        replace(api, B, parent)
+        snapshot = await api.mpv.snapshot()
+        assert api._mpv_snapshot_ready_while_paused(snapshot, A) is expected
+        return False
+    api._wait_for_mpv_audio_ready = readiness
+    with pytest.raises(SourcePlaybackError):
+        await start(api)
+    # Admission rejection cannot manufacture an ACK for the expanded child.
+    assert api._admitted_load_entry_id is None
