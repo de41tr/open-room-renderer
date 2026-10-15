@@ -527,7 +527,7 @@
   }
   class RadioSearch {
     constructor(request, onChange = () => {}) { this.request = request; this.onChange = onChange; this.serial = 0; this.clear(); }
-    clear() { this.serial += 1; this.pending = false; this.session = null; this.stations = []; this.message = "Search sends the name and optional country to Radio-Browser. No account is needed."; }
+    clear() { this.serial += 1; this.pending = false; this.session = null; this.stations = []; this.message = "Search by station name, country, or both. Your search is sent to Radio-Browser. No account is needed."; }
     observe(state) {
       if (this.session && state && this.session !== state.session_id) {
         this.clear(); this.message = "The renderer restarted. Search again to choose a station.";
@@ -536,8 +536,8 @@
     async search(state, name, country) {
       if (this.pending || !state) return;
       name = name.trim(); country = country.trim().toUpperCase();
-      if (name.length < 2 || name.length > 80 || (country && !/^[A-Z]{2}$/.test(country))) {
-        this.message = "Enter 2–80 characters and an optional two-letter country code."; this.onChange(); return;
+      if ((name && (name.length < 2 || name.length > 80)) || (country && !/^[A-Z]{2}$/.test(country)) || (!name && !country)) {
+        this.message = "Enter a station name (2–80 characters), a two-letter country code, or both."; this.onChange(); return;
       }
       const serial = ++this.serial;
       this.session = state.session_id; this.pending = true; this.stations = []; this.message = "Searching Radio-Browser…"; this.onChange();
@@ -551,7 +551,7 @@
           ids.add(station.id);
         }
         this.stations = body.stations;
-        this.message = this.stations.length ? `${this.stations.length} stations. Choose Play or Save favorite. Results expire after 15 minutes.` : "No supported stations found. Try another name or remove the country filter.";
+        this.message = this.stations.length ? `${this.stations.length} stations. Choose Play or Save favorite. Results expire after 15 minutes.` : "No supported stations found. Try another name or country.";
       } catch (_) {
         if (serial !== this.serial) return;
         this.stations = []; this.message = "Search unavailable. Check the connection or try again later. Playback was not changed.";

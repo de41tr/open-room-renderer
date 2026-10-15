@@ -96,8 +96,9 @@ your speakers
 ### Search internet radio
 
 In the existing web UI, use **Internet radio** to search Radio-Browser by station
-name and optional two-letter country code. Choose **Play** to replace the current
-queue, or **Save favorite** to keep the station in the existing favorites library.
+name, two-letter country code, or both. Leave the name blank to browse a country.
+Choose **Play** to replace the current queue, or **Save favorite** to keep the
+station in the existing favorites library.
 No account is needed. This independent community catalog supports direct MP3/AAC
 and Ogg container streams (chained Vorbis verified). It does not implement WiiM
 Radio or the TuneIn catalog. See

@@ -625,7 +625,7 @@ class WebControlApi:
             "radio_unavailable": "Radio-Browser is unavailable. Try searching again later.",
             "radio_busy": "A station search is already running. Wait for it to finish.",
             "radio_expired": "This station selection expired. Search again before choosing it.",
-            "radio_invalid": "Enter a station name of 2–80 characters and an optional two-letter country code.",
+            "radio_invalid": "Enter a station name (2–80 characters), a two-letter country code, or both.",
             "stale_output_inspection": "The renderer session changed. Refresh before inspecting again.",
             "output_inspection_busy": "An output inspection is already running. No new inspection was started.",
             "output_inspection_unavailable": "Output inspection is unavailable in this renderer.",
@@ -953,9 +953,10 @@ class WebControlApi:
         if payload.keys() != {"action", "name", "country"} or payload["action"] != "search":
             raise WebAdmissionError("radio_invalid", 400)
         name, country = payload["name"], payload["country"]
-        if (not isinstance(name, str) or not 2 <= len(name.strip()) <= 80
+        if (not isinstance(name, str) or name.strip() and not 2 <= len(name.strip()) <= 80
                 or _INVALID_TEXT.search(name) or not isinstance(country, str)
-                or country and not re.fullmatch(r"[A-Z]{2}", country)):
+                or country and not re.fullmatch(r"[A-Z]{2}", country)
+                or not name.strip() and not country):
             raise WebAdmissionError("radio_invalid", 400)
         if self._radio_busy:
             raise WebAdmissionError("radio_busy", 409)

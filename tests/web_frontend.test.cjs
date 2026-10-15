@@ -2392,6 +2392,21 @@ test('radio search is single-shot, bounded, and never sends a playback command',
   wait.resolve({status: 200, body: {session_id: 'session-one', stations: [station, ogg]}});
   await first; assert.deepEqual(search.stations, [station, ogg]); assert.equal(search.pending, false);
 });
+test('radio country browsing requires a name or country before sending one bounded search', async () => {
+  const {RadioSearch} = require('../fake_linkplay/web_assets/controller.js');
+  const calls = [], search = new RadioSearch(async (path, options) => {
+    calls.push({path, options}); return {status: 200, body: {session_id: 'session-one', stations: []}};
+  });
+  for (const [name, country] of [['', ''], [' ', ' '], ['', 'D1'], ['', 'DEU'], ['x', 'DE']]) {
+    await search.search(state(), name, country);
+    assert.equal(calls.length, 0); assert.match(search.message, /name.*country code.*or both/);
+  }
+  await search.search(state(), ' ', ' de ');
+  assert.equal(calls.length, 1); assert.equal(calls[0].path, '/orr/v1/web/radio/search');
+  assert.deepEqual(calls[0].options.body, {action: 'search', name: '', country: 'DE'});
+  assert.equal(calls[0].options.timeoutMs, 15000); assert.equal(search.pending, false);
+  assert.match(search.message, /Try another name or country/);
+});
 test('cleared or restarted radio search cannot restore late results', async () => {
   const {RadioSearch} = require('../fake_linkplay/web_assets/controller.js');
   for (const dismiss of [search => search.clear(), search => search.observe(state({session_id: 'new-session'}))]) {

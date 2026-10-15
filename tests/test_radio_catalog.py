@@ -56,6 +56,22 @@ async def test_directory_search_bounds_filters_and_mirror_fallback(monkeypatch):
             catalog._stations(raw)
 
 
+async def test_directory_country_browse_and_name_only_keep_bounded_query(monkeypatch):
+    query = AsyncMock(return_value=([STATION], "one.api.radio-browser.info"))
+    monkeypatch.setattr(catalog, "_query", query)
+    bounds = {"limit": ["20"], "hidebroken": ["true"], "order": ["clickcount"], "reverse": ["true"]}
+    for name, country, filters in ((" ", "DE", {"countrycode": ["DE"]}),
+                                   ("Synthetic", "", {"name": ["Synthetic"]})):
+        assert await catalog.search_stations(name, country) == [STATION]
+        path = urlsplit(query.call_args.args[0])
+        assert path.path == "/json/stations/search"
+        assert parse_qs(path.query, keep_blank_values=True) == {**bounds, **filters}
+    for name, country in (("", ""), (" ", ""), ("", "D1"), ("", "DEU"), ("x", "DE"), ("\t", "DE")):
+        with pytest.raises(catalog.CatalogError):
+            await catalog.search_stations(name, country)
+    assert query.await_count == 2
+
+
 async def test_resolution_rejects_private_destinations_and_untrusted_references(monkeypatch):
     monkeypatch.setattr(catalog, "_query", AsyncMock(return_value=([replace(STATION, url="http://127.0.0.1/private")], "one.api.radio-browser.info")))
     with pytest.raises(catalog.CatalogError, match="unavailable"):
@@ -66,8 +82,10 @@ async def test_resolution_rejects_private_destinations_and_untrusted_references(
     assert catalog.station_from_reference(STATION.reference) == UUID
 
 
-async def test_real_http_search_save_play_recall_uses_existing_owners(api, monkeypatch):
-    monkeypatch.setattr("fake_linkplay.web_ui.search_stations", AsyncMock(return_value=[STATION]))
+@pytest.mark.parametrize("name", ["Synthetic", ""])
+async def test_real_http_search_save_play_recall_uses_existing_owners(api, monkeypatch, name):
+    directory = AsyncMock(return_value=[STATION])
+    monkeypatch.setattr("fake_linkplay.web_ui.search_stations", directory)
     resolve = AsyncMock(return_value=STATION)
     monkeypatch.setattr("fake_linkplay.http_api.resolve_catalog_station", resolve)
     api._wait_for_mpv_audio_ready = AsyncMock(return_value=True)
@@ -75,8 +93,9 @@ async def test_real_http_search_save_play_recall_uses_existing_owners(api, monke
     api.mpv.loadfile = AsyncMock(side_effect=original_load)
     async with serving(api) as (session, base):
         before = await state(session, base)
-        response = await search(session, base, before)
+        response = await search(session, base, before, name=name)
         assert response.status == 200
+        directory.assert_awaited_once_with(name, "DE")
         result = await response.json()
         station = result["stations"][0]
         assert "url" not in station and STATION.url not in json.dumps(result)
@@ -114,8 +133,10 @@ async def test_search_admission_busy_failure_and_expired_selection(api, monkeypa
         snapshot = await state(session, base)
         response = await session.post(base + PREFIX + "/radio/search", json={"name": "Synthetic", "country": "DE"})
         assert response.status == 403 and not entered.is_set()
-        response = await search(session, base, snapshot, name="x")
-        assert response.status == 400
+        for name, country in (("x", "DE"), ("", ""), (" ", ""), ("", "D1"), ("", "DEU")):
+            response = await search(session, base, snapshot, name=name, country=country)
+            assert response.status == 400 and (await response.json())["error"] == "radio_invalid"
+            assert not entered.is_set()
         pending = asyncio.create_task(search(session, base, snapshot))
         await asyncio.wait_for(entered.wait(), 2)
         response = await search(session, base, snapshot)

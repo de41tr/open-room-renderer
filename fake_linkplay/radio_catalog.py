@@ -24,6 +24,7 @@ _UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z")
 _MIRROR = re.compile(r"[a-z0-9-]+\.api\.radio-browser\.info\Z")
 _REFERENCE = "https://www.radio-browser.info/history/"
 _FORMATS = {"MP3", "AAC", "AAC+", "OGG"}
+_INVALID_TEXT = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]")
 
 
 class CatalogError(ValueError):
@@ -52,7 +53,7 @@ def station_from_reference(url: str) -> str:
 
 
 def _text(value: object, limit: int = 256) -> str:
-    if not isinstance(value, str) or re.search(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff\ufffe\uffff]", value):
+    if not isinstance(value, str) or _INVALID_TEXT.search(value):
         return ""
     return value.strip().encode("utf-8")[:limit].decode("utf-8", errors="ignore")
 
@@ -148,14 +149,19 @@ async def _query(path: str) -> tuple[list[CatalogStation], str]:
 
 
 async def search_stations(name: str, country: str = "") -> list[CatalogStation]:
-    if (not isinstance(name, str) or not 2 <= len(name.strip()) <= 80 or _text(name, 320) != name.strip()
-            or not isinstance(country, str) or country and not re.fullmatch(r"[A-Z]{2}", country)):
-        raise CatalogError("Enter 2–80 characters and an optional two-letter country code")
+    if (not isinstance(name, str) or _INVALID_TEXT.search(name)
+            or name.strip() and not 2 <= len(name.strip()) <= 80
+            or not isinstance(country, str) or country and not re.fullmatch(r"[A-Z]{2}", country)
+            or not name.strip() and not country):
+        raise CatalogError("Enter a station name (2–80 characters), a two-letter country code, or both")
+    parameters = {"limit": MAX_RESULTS, "hidebroken": "true", "order": "clickcount", "reverse": "true"}
+    if name.strip():
+        parameters["name"] = name.strip()
+    if country:
+        parameters["countrycode"] = country
     try:
         async with asyncio.timeout(DEADLINE):
-            result, _ = await _query("/json/stations/search?" + urlencode({
-                "name": name.strip(), "countrycode": country, "limit": MAX_RESULTS,
-                "hidebroken": "true", "order": "clickcount", "reverse": "true"}))
+            result, _ = await _query("/json/stations/search?" + urlencode(parameters))
             return result
     except (TimeoutError, ClientError, OSError, ValueError) as exc:
         if isinstance(exc, CatalogError):

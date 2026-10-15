@@ -1,8 +1,10 @@
 # Independent internet-radio catalog
 
 Open the renderer's existing `/ui/` page on your trusted LAN. Under **Internet
-radio**, enter at least two characters of a station name. An optional two-letter
-country code (for example `DE`) narrows results. Select **Play** or **Save favorite**.
+radio**, enter a station name (2–80 characters), a two-letter country code (for
+example `DE`), or both. Leave the name blank to browse stations in that country;
+adding a name narrows results. At least one field is required. Select **Play** or
+**Save favorite**.
 
 - Search returns at most 20 popularity-ordered directory records, excluding
   broken stations, HLS and unsupported codecs. Some searches therefore show fewer
@@ -26,7 +28,7 @@ country code (for example `DE`) narrows results. Select **Play** or **Save favor
 
 ## Privacy and bounds
 
-Search sends only the entered name and optional country code to Radio-Browser.
+Search sends only the entered name and/or country code to Radio-Browser.
 Playback looks up the selected station UUID. An initial selection also makes a
 best-effort popularity click request, as the API asks clients to do; searching,
 saving and automatic recovery do not count clicks. The directory sees the renderer's
@@ -70,7 +72,8 @@ manual URLs and the existing TuneIn resolver retain their previous behavior.
   a nested target. Directory data/DNS are synthetic; the decoder is real. This is
   not production Unix IPC.
 - The existing hosted Chrome lane additionally checks the genuine desktop/mobile
-  UI's search → save → play flow, pending-search Clear, and directory failure,
+  UI's name search and country-only browse → save → play flow, pending-search
+  Clear, and directory failure,
   using generated MP3, a synthetic directory and production Unix IPC/null output.
 - Neither synthetic directory verification nor null output proves a live public
   station, audible DAC playback, original WiiM Home, or user hardware acceptance.
@@ -79,7 +82,8 @@ manual URLs and the existing TuneIn resolver retain their previous behavior.
 ## Public sources
 
 - [Radio-Browser API usage and mirror discovery](https://api.radio-browser.info/)
-- [Search, station UUIDs and click-counter API](https://docs.radio-browser.info/)
+- [Advanced search: name and countrycode are optional filters](https://docs.radio-browser.info/#advanced-station-search)
+- [Station UUIDs and click-counter API](https://docs.radio-browser.info/)
 - [Directory data is public-domain; streams remain station property](https://www.radio-browser.info/add)
 - [mpv demuxer options](https://mpv.io/manual/stable/#demuxer)
 
