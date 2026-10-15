@@ -1,7 +1,7 @@
 /* Dependency-free control-flow tests; these are not browser/layout tests. */
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_MODES, validateEditor, MODES, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError} = require('../fake_linkplay/web_assets/controller.js');
+const {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_MODES, validateEditor, MODES, validateState, streamTitleText, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError} = require('../fake_linkplay/web_assets/controller.js');
 const clone = value => JSON.parse(JSON.stringify(value));
 const revisionID = letter => letter.repeat(64);
 const eqLibraryWarning = 'Saved EQ presets could not be loaded. Stop the renderer service, repair or restore its saved EQ preset library, then restart it.';
@@ -2377,4 +2377,22 @@ test('queue rejection recovery refuses raw duplicate members before JSON.parse c
   const body = queueAdmissionRejection(); delete body.__status; h.hooks.post = () => ({status: 409, body});
   const result = await h.controller.mutate({action: 'playlist_remove', expected_generation: 7, index: 1}, 'Remove');
   assert.equal(result.kind, 'error'); assert.equal(result.queueEditRejected, undefined, 'Missing raw admission evidence must fail closed');
+});
+
+
+test('live stream title is optional, bounded and shown only for fresh owned playback', () => {
+  const live = state({transport: {...state().transport, phase: 'PLAYING', intent: 'play'},
+    media: {...state().media, title: 'Canonical station', is_live: true, stream_title: 'Artist - <script>literal</script>'}});
+  assert.equal(validateState(live), live);
+  assert.equal(streamTitleText(live, true), 'On air: Artist - <script>literal</script>');
+  assert.equal(streamTitleText(live, false), '');
+  for (const title of [undefined, null, '', 'Canonical station']) {
+    const view = {...live, media: {...live.media, stream_title: title}};
+    assert.equal(validateState(view), view); assert.equal(streamTitleText(view, true), '');
+  }
+  for (const title of [7, {}, 'é'.repeat(513)]) assert.throws(() => validateState({...live, media: {...live.media, stream_title: title}}));
+  for (const phase of ['STOPPED', 'ERROR', 'LOADING', 'BUFFERING']) assert.equal(streamTitleText({...live, transport: {...live.transport, phase}}, true), '');
+  assert.equal(streamTitleText({...live, transport: {...live.transport, status: 'PENDING'}}, true), '');
+  assert.equal(streamTitleText({...live, media: {...live.media, is_live: false}}, true), '');
+  assert.equal(streamTitleText({...live, transport: {...live.transport, phase: 'PAUSED'}}, true), 'On air: Artist - <script>literal</script>');
 });

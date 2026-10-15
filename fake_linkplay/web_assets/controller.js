@@ -395,6 +395,8 @@
       } else if (transport.status !== "ERROR" || transport.phase !== "ERROR" || recovery.attempts_used !== undefined || recovery.attempt_limit !== undefined) throw new Error("Invalid recovery error");
     }
     if (!isObject(media) || ![media.title, media.artist, media.album].every(string) || !(media.artwork === null || string(media.artwork)) || typeof media.is_live !== "boolean" || !optionalNumber(media.position_seconds) || !optionalNumber(media.duration_seconds)) throw new Error("Invalid media snapshot");
+    if (media.stream_title !== undefined && media.stream_title !== null
+        && (!string(media.stream_title) || new TextEncoder().encode(media.stream_title).length > 1024)) throw new Error("Invalid stream title");
     if (!isObject(gain) || !["CONFIRMED", "PENDING", "UNKNOWN"].includes(gain.status) || !(gain.volume === null || (integer(gain.volume) && gain.volume <= 100)) || !optionalBoolean(gain.mute)) throw new Error("Invalid gain snapshot");
     if (!isObject(queue) || !string(queue.name) || !integer(queue.count) || queue.count > 1000 || !integer(queue.index) || !Object.hasOwn(MODES, queue.mode) || !Array.isArray(queue.items) || queue.items.length !== queue.count || (queue.count === 0 ? queue.index !== 0 : queue.index < 1 || queue.index > queue.count)) throw new Error("Invalid queue snapshot");
     if (queue.playlist_edit_reason !== undefined && !["supported", "empty_queue", "unsupported_queue"].includes(queue.playlist_edit_reason)) throw new Error("Invalid queue edit capability");
@@ -404,6 +406,12 @@
     if (!isObject(actions) || !["play", "pause", "stop", "next", "previous", "seek", "queue_select", "queue_mode", "save_current"].every(key => typeof actions[key] === "boolean")) throw new Error("Invalid actions snapshot");
     if (PLAYLIST_ACTIONS.some(action => actions[action] !== undefined && typeof actions[action] !== "boolean")) throw new Error("Invalid playlist actions");
     return state;
+  }
+  function streamTitleText(state, fresh) {
+    const {media, transport} = state, title = media.stream_title;
+    return fresh && media.is_live && transport.status === "CONFIRMED"
+      && ["PLAYING", "PAUSED"].includes(transport.phase) && title && title !== media.title
+      ? `On air: ${title}` : "";
   }
   function validateFavorites(payload, session) {
     if (!isObject(payload) || payload.version !== 1 || !string(payload.session_id) || !payload.session_id || (session !== undefined && payload.session_id !== session) || !Array.isArray(payload.favorites)) throw new Error("Invalid favorites snapshot");
@@ -703,5 +711,5 @@
       return result;
     }
   }
-  return {FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesDocument, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveDocument, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
+  return {FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesDocument, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveDocument, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, streamTitleText, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
 });

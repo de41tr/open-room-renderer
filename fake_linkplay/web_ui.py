@@ -265,6 +265,12 @@ def _title(value: object, urls: tuple[str, ...], fallback: str) -> str:
     return visible
 
 
+def safe_stream_title(value: object, urls: tuple[str, ...]) -> str:
+    """Bound literal live metadata, excluding source basenames and URL secrets."""
+    visible = _dsp_name(_title(value, urls, ""))
+    return visible.encode("utf-8")[:MAX_TEXT_BYTES].decode("utf-8", errors="ignore")
+
+
 def _queue_label(name: str) -> str:
     """A bounded display label, never queue ownership or a media reference."""
     visible = _display(name, "Current queue")
@@ -801,6 +807,11 @@ class WebControlApi:
                 "message": "Playback state is unconfirmed. Stop is available for recovery." if transport_status == "ERROR"
                     else "Waiting for renderer confirmation." if transport_status == "PENDING" else ""},
             "media": {"title": title, "artist": _display(state.artist), "album": _display(state.album),
+                "stream_title": (safe_stream_title(state.stream_title, (item.url, item.resolved_url,
+                    state.current_url, state.resolved_url, state.backend_url, state.backend_original_url)) or None)
+                    if (item and item.stream_type == "station" and state.intent in {"play", "pause"}
+                        and state.phase in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}
+                        and transport_status == "CONFIRMED" and state.backend_url) else None,
                 "artwork": safe_artwork(state.album_art_uri), "is_live": bool(item and item.stream_type == "station"),
                 "position_seconds": max(0, int(state.curpos)) if item and transport_status == "CONFIRMED" else None,
                 "duration_seconds": _duration(state.totlen)},

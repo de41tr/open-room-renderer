@@ -43,7 +43,7 @@ from .queue_playlist import QueuePlaylistApi
 from .web_audio_output import make_output_inspector
 from .web_playlists import PLAYLIST_ACTIONS
 from .web_ui import (WebAdmissionError, WebCommand, WebControlApi, WebDspCommandError,
-                     WebDspExport, WebRuntime, prepare_dsp_curve_export)
+                     WebDspExport, WebRuntime, prepare_dsp_curve_export, safe_stream_title)
 from .config import Config
 from .device_name import DeviceNameCommittedError, validate_device_name
 from .log_safety import redact_media_urls
@@ -653,6 +653,7 @@ class HttpApi:
         self._schedule_event_notify()
 
     def _recover_station_after_end(self, category: str) -> None:
+        self.state.stream_title = ""
         recovery = self._station_recovery
         if recovery is None or not self._station_recovery_is_current(recovery):
             self.state.phase = PlaybackPhase.STOPPED
@@ -1191,6 +1192,9 @@ class HttpApi:
 
     def _apply_backend_snapshot(self, snap: dict) -> None:
         """One source of truth for all HTTP, SOAP and event serializers."""
+        # An absent, incoherent or unavailable observation cannot retain an
+        # earlier on-air title. sync_mpv_state already fences the generation.
+        self.state.stream_title = ""
         old_phase = self.state.phase
         if self.state.phase in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING}:
             return
@@ -1318,6 +1322,16 @@ class HttpApi:
                 and snap["duration"] > 0):
             self.state.totlen = int(snap["duration"]) + self._playback_offset_sec
         selected = self.state.queue.current
+        if (selected and selected.stream_type == "station" and selected.duration == 0
+                and selected.url == self.state.current_url == self.state.backend_original_url
+                and self.state.intent in {"play", "pause"}
+                and self.state.phase in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}
+                and not self._native_output_uncertain and selected_audio and coherent_source
+                and self._native_control_source_matches(snap)):
+            self.state.stream_title = safe_stream_title(snap.get("media-title"), (
+                selected.url, selected.resolved_url, self.state.current_url, self.state.resolved_url,
+                self.state.backend_url, self.state.backend_original_url,
+                snap.get("path", ""), snap.get("filename", "")))
         if (snap.get("media-title") and self.state.intent != "stop"
                 and (not selected or not selected.title or selected.title_is_fallback)):
             title = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]", "\ufffd", str(snap["media-title"]))
@@ -4370,6 +4384,7 @@ class HttpApi:
         """Project the selected canonical queue item into existing serializers."""
         queue = self.state.queue
         item = queue.current
+        self.state.stream_title = ""
         self.queue_name = queue.name
         self.queue_url = item.url if item else ""
         self.queue_resolved_url = item.resolved_url if item else ""
