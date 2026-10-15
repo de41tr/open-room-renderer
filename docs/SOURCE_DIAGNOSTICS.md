@@ -49,8 +49,20 @@ they never borrow a nearby request. HTTP 200 alone is not an audio result.
 Action labels come from checked SOAP contracts and fixed HTTP command sets/
 namespace prefixes. Unknown client commands become unknown; their text is never
 retained. Legacy namespace labels can be coarser than individual operations.
+Web command POSTs use the same request context with protocol=http and fixed
+endpoint=web_control. Only decoded actions from the browser's fixed schema become
+labels; unknown/rejected undecodable commands remain unknown. Admission still runs
+before dispatch, and the existing HTTP status and UNKNOWN result are preserved.
+Assets, state polls, exports, radio search and output inspection are not traced.
+
 Reasons are members of Reason or the existing QueueRejectionReason enum.
 CreateQueue reuses its framing/queue/provider rejection reasons at their origin.
+The existing SourcePlaybackError categories map to the fixed source_resolution,
+source_unready and source_eof reasons. Unknown categories become unknown. Source
+failure is recorded before existing cleanup; the final HTTP/SOAP/Web result keeps
+that category instead of overwriting it with a generic backend failure. An
+independent cleanup failure can still report backend failure. No exception text
+is inspected. Readiness text logs contain neither URL nor backend snapshot.
 Unclassified failures remain unknown; no exception-message parsing is used.
 
 To add a new reason, add a fixed enum member in reviewed renderer code and call
@@ -87,9 +99,18 @@ collection completion is not an app test pass.
     python -m pytest -q tests/test_source_diagnostics.py \
       tests/test_soap_faults.py::test_create_queue_diagnostic_is_request_local_and_402_only
 
-These use real HTTP/SOAP handlers with a synthetic backend and temporary private
-files: rejected CreateQueue, accepted/confirmed and uncertain transport, unknown
-commands, 5,000 BrowseQueue polls, pending reads, bounds, expiry and crash snapshots.
-No server, real mpv, media fetch, device, playback or app interaction is used.
+These use real HTTP/SOAP/Web handlers with a synthetic backend and temporary
+private files: rejected CreateQueue, accepted/confirmed and uncertain transport,
+unknown commands, 5,000 BrowseQueue polls, pending reads, bounds, expiry and crash
+snapshots. Two targeted cases additionally use actual ephemeral loopback HTTP
+servers: one synthetic source returns 404, while a fake player acknowledges load,
+requests that source once, and never exposes audio readiness. The real existing
+readiness deadline is shortened only in the test. Web favorite_play and HTTPasp
+setPlayerCmd:play each produce HTTP 502 / outcome=unknown / reason=source_unready /
+state=ERROR with correlated acceptance and source-failure events. Fixed category
+mapping, unknown-category fallback and privacy are checked for both boundaries.
+No real mpv, device, external fetch, physical playback or app interaction is used.
+The source's HTTP 404 is test evidence, not a new upstream-status diagnostic field;
+source_unready alone does not distinguish 404, timeout or unsupported media.
 The private hwtest PR tests schema validation and ZIP collection across this seam.
 The synthetic queue-context-missing example is not a diagnosis of the Fritz issue.

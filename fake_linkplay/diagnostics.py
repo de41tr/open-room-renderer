@@ -48,6 +48,9 @@ class Reason(Enum):
     TRANSITION = "transition_unavailable"
     BACKEND = "backend_operation_failed"
     CONFIRMATION = "backend_confirmation_failed"
+    SOURCE_RESOLUTION = "source_resolution"
+    SOURCE_UNREADY = "source_unready"
+    SOURCE_EOF = "source_eof"
     CONFIRMED = "backend_transport_confirmed"
     READY = "backend_audio_ready_observed"
     OWNERSHIP = "source_ownership_lost"
@@ -255,6 +258,11 @@ class Diagnostics:
             candidate = request.headers.get("SOAPACTION","").strip().strip('"').rsplit("#",1)[-1]
             if service and candidate in READ_ACTIONS[service] | MUTATING_ACTIONS[service]:
                 action, read = candidate, candidate in READ_ACTIONS[service]
+        elif protocol == "web":
+            from .web_ui import PREFIX
+            if getattr(request, "path", "") != PREFIX + "/command":
+                return None  # No assets, state polls, exports or output inspection.
+            protocol, endpoint = "http", "web_control"
         else:
             endpoint = "linkplay_http"
             # The renderer's parser already separates URL arguments. No values survive.
@@ -396,6 +404,38 @@ def note(reason, *, soap_code=None, uncertain=False, stage=None):
             trace.uncertain |= uncertain
             if stage:
                 trace.event(stage,"unknown" if uncertain else "completed",reason)
+    except Exception:
+        pass
+
+def source_reason(category):
+    # Only categories already authored by SourcePlaybackError, never its message.
+    if type(category) is not str:
+        return Reason.UNKNOWN
+    return {Reason.SOURCE_RESOLUTION.value: Reason.SOURCE_RESOLUTION,
+            Reason.SOURCE_UNREADY.value: Reason.SOURCE_UNREADY,
+            Reason.SOURCE_EOF.value: Reason.SOURCE_EOF}.get(category, Reason.UNKNOWN)
+
+def backend_failure(exc, *, soap_code=None):
+    from .http_api import SourcePlaybackError
+    reason = source_reason(exc.category) if isinstance(exc, SourcePlaybackError) else Reason.BACKEND
+    note(reason, soap_code=soap_code, uncertain=True)
+
+def web_command(command):
+    try:
+        from .web_ui import _SCHEMAS
+        trace = CURRENT.get()
+        if trace is not None and trace.endpoint == "web_control" and command.action in _SCHEMAS:
+            trace.action = command.action  # Decoded, fixed vocabulary; no arguments.
+    except Exception:
+        pass
+
+def uncertain():
+    try:
+        trace = CURRENT.get()
+        if trace is not None:
+            trace.uncertain = True
+            if trace.reason is Reason.COMPLETED:
+                trace.reason = Reason.UNKNOWN
     except Exception:
         pass
 

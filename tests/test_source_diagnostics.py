@@ -1,4 +1,4 @@
-"""Offline source diagnosis: real handlers, synthetic backend, no listeners/audio."""
+"""Focused source diagnosis: fake backend, synthetic inputs and local 404 only."""
 import asyncio
 import datetime as dt
 import json
@@ -138,3 +138,117 @@ async def test_private_snapshot_expiry_restart_and_bounded_overwrite(api,tmp_pat
     api.diagnostics.close()
     with pytest.raises(asyncio.CancelledError):
         await pending
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry", ["web", "httpasp"])
+async def test_local_404_source_keeps_context_without_urls_or_real_player(api, caplog, entry):
+    """Real loopback 404 + command handlers; a fake backend replaces mpv/audio."""
+    from aiohttp import ClientSession, web
+    from test_web_ui import serving, state, command
+
+    fetched = []
+    async def missing(request):
+        fetched.append(request.method)
+        return web.Response(status=404, text="SECRET_MARKER PRIVATE_URL TOKEN_MARKER")
+
+    source_app = web.Application()
+    source_app.router.add_get("/SECRET_MARKER", missing)
+    source = web.AppRunner(source_app, access_log=None)
+    await source.setup()
+    site = web.TCPSite(source, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    url = f"http://127.0.0.1:{port}/SECRET_MARKER?token=TOKEN_MARKER"
+
+    class Http404Backend(Backend):
+        async def loadfile(self, url, options=None, *, start_paused=False):
+            # Simulate mpv's acknowledged load followed by failed source opening.
+            # This request is the only source I/O; no real backend/device exists.
+            async with ClientSession(trust_env=False) as session:
+                async with session.get(url, allow_redirects=False) as response:
+                    assert response.status == 404
+            return await super().loadfile(url, options, start_paused=start_paused)
+
+        async def snapshot(self):
+            return {**await super().snapshot(), "path": self.url}
+
+    api.mpv = Http404Backend()
+    api.cfg.proxy_on_demand_audio = False
+    readiness = api._wait_for_mpv_audio_ready
+    async def short_readiness(generation, url):
+        # Same production readiness path; shorten only its existing test deadline.
+        return await readiness(generation, url, timeout=0.04)
+    api._wait_for_mpv_audio_ready = short_readiness
+    try:
+        with caplog.at_level("INFO", logger="fake_linkplay.http_api"):
+            async with serving(api) as (session, base):
+                if entry == "web":
+                    api.favorites.add({"name": "private-title", "url": url})
+                    snapshot = await state(session, base)
+                    favorite = api.web_api.favorites_snapshot()["favorites"][0]["id"]
+                    code, body = await command(session, base, snapshot["csrf_token"],
+                                              {"action": "favorite_play", "id": favorite})
+                    assert code == 502 and body["outcome"] == "UNKNOWN"
+                else:
+                    async with session.get(base + "/httpapi.asp",
+                            params={"command": "setPlayerCmd:play:" + url}) as response:
+                        assert response.status == 502 and await response.text() == "Failed"
+    finally:
+        await source.cleanup()
+
+    assert fetched == ["GET"]
+    assert [name for name, _ in api.mpv.calls] == ["load", "stop"]
+    data = finish_window(api.diagnostics)
+    endpoint, action = ("web_control", "favorite_play") if entry == "web" else ("linkplay_http", "play")
+    final = [e for e in data["events"] if e["endpoint"] == endpoint
+             and e["action"] == action and e["stage"] == "command" and e["http_code"] == 502]
+    assert len(final) == 1
+    result = final[0]
+    assert result["reason"] == "source_unready" and result["outcome"] == "unknown"
+    assert result["state_after"] == "ERROR"
+    assert result["generation_after"] == api.state.generation > result["generation_before"]
+    related = [e for e in data["events"] if e["request_id"] == result["request_id"]]
+    assert any(e["outcome"] == "accepted" for e in related)
+    assert any(e["stage"] == "playback" and e["reason"] == "source_unready" for e in related)
+    assert not any(e["reason"] in {"backend_audio_ready_observed", "backend_transport_confirmed"} for e in related)
+    if entry == "httpasp":
+        assert result["subcommand"] == "play"
+    assert_private(data, caplog)
+    assert url not in json.dumps(data) + caplog.text
+    assert "http://" not in json.dumps(data) + caplog.text
+    print("LOCAL_404_DIAG " + json.dumps({k: result[k] for k in
+          ("protocol", "endpoint", "action", "subcommand", "stage", "outcome", "reason",
+           "http_code", "soap_code", "state_before", "state_after", "generation_after")}))
+
+@pytest.mark.asyncio
+async def test_fixed_source_categories_and_unknown_web_command(api, caplog):
+    from fake_linkplay.http_api import SourcePlaybackError
+    from fake_linkplay import diagnostics as diagnostic
+    from test_web_ui import serving, state, command
+
+    for category in ("source_resolution", "source_unready", "source_eof", "SECRET_MARKER:https://PRIVATE_URL"):
+        api.execute = AsyncMock(side_effect=SourcePlaybackError("SECRET_MARKER TOKEN_MARKER", category))
+        response = await api.handle_httpapi(http("setPlayerCmd:play:https://PRIVATE_URL/TOKEN_MARKER"))
+        assert response.status == 502
+        row = api.diagnostics.events[-1]
+        expected = category if category.startswith("source_") else "unknown"
+        assert row["reason"] == expected and row["outcome"] == "unknown"
+    # Web input must be decoded before a fixed action label is recorded.
+    async with serving(api) as (session, base):
+        snapshot = await state(session, base)
+        code, _ = await command(session, base, snapshot["csrf_token"],
+                                {"action": "SECRET_MARKER:https://PRIVATE_URL/TOKEN_MARKER"})
+        assert code == 400
+        row = api.diagnostics.events[-1]
+        assert row["endpoint"] == "web_control" and row["action"] == "unknown"
+        assert row["outcome"] == "unknown"
+        # Same generic web catch preserves each authored source category, too.
+        for category in ("source_resolution", "source_unready", "source_eof", "SECRET_MARKER"):
+            api.web_api._dispatch = AsyncMock(side_effect=SourcePlaybackError("TOKEN_MARKER", category))
+            code, body = await command(session, base, snapshot["csrf_token"], {"action": "stop"})
+            assert code == 502 and body["outcome"] == "UNKNOWN"
+            row = api.diagnostics.events[-1]
+            assert row["action"] == "stop" and row["outcome"] == "unknown"
+            assert row["reason"] == (category if category.startswith("source_") else "unknown")
+    assert diagnostic.source_reason(["SECRET_MARKER"]) is diagnostic.Reason.UNKNOWN
+    assert_private(api.diagnostics.events, caplog)

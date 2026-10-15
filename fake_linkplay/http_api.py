@@ -311,6 +311,7 @@ class HttpApi:
             device_name=lambda: self.device_name_override or self.cfg.friendly_name,
             runtime=self._web_runtime, dsp_snapshot=self._web_dsp_snapshot,
             favorites=self.favorites, dispatch=self._web_dispatch,
+            diagnostics=lambda: self.diagnostics,
             export_dsp_curve=self._web_export_dsp_curve,
             inspect_output=make_output_inspector(socket_path=cfg.mpv_socket,
                 configured_output=cfg.mpv_audio_device, auto_spawn=cfg.auto_spawn_mpv),
@@ -1732,8 +1733,8 @@ class HttpApi:
             return web.Response(status=404, text="Failed", content_type="text/plain")
         try:
             payload = await self.execute(parsed, request.remote or self.cfg.resolved_advertise_ip)
-        except (BackendError, OSError, TimeoutError):
-            diagnostic.note(diagnostic.Reason.BACKEND, uncertain=True)
+        except (BackendError, OSError, TimeoutError) as exc:
+            diagnostic.backend_failure(exc)
             LOG.warning("backend command failed")
             return web.Response(status=502, text="Failed", content_type="text/plain")
         except (SoapFault, ValueError, TypeError) as exc:
@@ -3133,6 +3134,8 @@ class HttpApi:
             if self.state.phase not in {PlaybackPhase.PLAYING, PlaybackPhase.BUFFERING} and not ended_after_resume:
                 raise BackendError("Backend no longer playing")
         except (BackendError, OSError, TimeoutError, asyncio.CancelledError) as exc:
+            if isinstance(exc, SourcePlaybackError):
+                diagnostic.note(diagnostic.source_reason(exc.category), uncertain=True, stage="playback")
             try:
                 await silence_failed_load()
             except (BackendError, OSError, TimeoutError, asyncio.CancelledError) as cleanup_error:
@@ -3146,7 +3149,7 @@ class HttpApi:
                 raise BackendError("Playback cleanup did not confirm silence") from cleanup_error
             if owns_selection():
                 if isinstance(exc, SourcePlaybackError):
-                    LOG.warning("playback failure category=%s generation=%s", exc.category, generation)
+                    LOG.warning("playback failure category=%s generation=%s", diagnostic.source_reason(exc.category).value, generation)
                     if recovery is None and self.state.phase != PlaybackPhase.ERROR:
                         self.state.mark_error(str(exc))
                         self._schedule_event_notify()
@@ -3519,11 +3522,11 @@ class HttpApi:
                      if self._admitted_load_generation == generation else
                      snapshot.get("idle-active") is not True and self._mpv_snapshot_has_audio(snapshot))
             if ready:
-                LOG.info("mpv audio-ready playback=%s snapshot=%s", self._redact_sensitive_text(playback_url), self._redact_sensitive_text(self._compact_snapshot(snapshot)))
+                LOG.info("mpv audio-ready confirmed")
                 diagnostic.note(diagnostic.Reason.READY, stage="backend")
                 return True
         diagnostic.note(diagnostic.Reason.CONFIRMATION, uncertain=True, stage="backend")
-        LOG.warning("mpv audio-ready timeout playback=%s snapshot=%s", self._redact_sensitive_text(playback_url), self._redact_sensitive_text(self._compact_snapshot(last_snapshot)))
+        LOG.warning("mpv audio-ready timeout")
         return False
 
     @staticmethod
@@ -4247,8 +4250,8 @@ class HttpApi:
                 diagnostic.note(reason, soap_code=exc.code)
                 headers["X-Open-Room-CreateQueue-Rejection"] = reason.value
             return web.Response(status=500, text=fault_xml(exc), content_type="text/xml", headers=headers)
-        except (BackendError, OSError, TimeoutError):
-            diagnostic.note(diagnostic.Reason.BACKEND, soap_code=501, uncertain=True)
+        except (BackendError, OSError, TimeoutError) as exc:
+            diagnostic.backend_failure(exc, soap_code=501)
             return web.Response(status=500, text=fault_xml(SoapFault(501, "Action Failed")), content_type="text/xml")
         except (ValueError, TypeError, OverflowError):
             diagnostic.note(rejection_stage if create_queue else diagnostic.Reason.INVALID_ARGS, soap_code=402)
