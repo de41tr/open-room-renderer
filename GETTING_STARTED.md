@@ -186,6 +186,15 @@ Saved bytes are not reset or repaired. For invalid initial balance, public loade
 and ordinary API construction retain their behavior. Backend availability,
 binding and unrelated cleanup diagnostics are unchanged.
 
+If a configured HTTP listener port is already occupied, `serve` exits **2** with
+a fixed `Startup error:` message instead of a traceback or the bind address.
+Check for another running renderer or service, choose unused `http_api_port` /
+`upnp_port` settings, and review `mirror_port_80`. Already-started listeners and
+the acquired backend still receive normal cleanup; the existing port owner is
+left alone. There is no preflight probe, automatic port fallback or retry.
+Other bind errors retain their underlying exceptions, and `config check` still
+does not check port availability.
+
 For compatibility, bare `serve` still selects `configs/config.example.yaml`
 relative to the current directory. Built-in defaults remain available when the
 failed read and a subsequent leaf inspection both report the selected path missing.
