@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "presets": {
+    "Showcase gentle bass cut": {
+      "http://moddevices.com/plugins/caps/EqNp": [
+        {
+          "param_name": "a_freq",
+          "value": 160.0
+        },
+        {
+          "param_name": "a_gain",
+          "value": -2.0
+        },
+        {
+          "param_name": "a_q",
+          "value": 0.707
+        },
+        {
+          "param_name": "a_mode",
+          "value": 0
+        },
+        {
+          "param_name": "b_freq",
+          "value": 62.5
+        },
+        {
+          "param_name": "b_gain",
+          "value": 0.0
+        },
+        {
+          "param_name": "b_q",
+          "value": 0.25
+        },
+        {
+          "param_name": "b_mode",
+          "value": 1
+        },
+        {
+          "param_name": "c_freq",
+          "value": 125.0
+        },
+        {
+          "param_name": "c_gain",
+          "value": 0.0
+        },
+        {
+          "param_name": "c_q",
+          "value": 0.25
+        },
+        {
+          "param_name": "c_mode",
+          "value": 1
+        },
+        {
+          "param_name": "d_freq",
+          "value": 250.0
+        },
+        {
+          "param_name": "d_gain",
+          "value": 0.0
+        },
+        {
+          "param_name": "d_q",
+          "value": 0.25
+        },
+        {
+          "param_name": "d_mode",
+          "value": 1
+        },
+        {
+          "param_name": "e_freq",
+          "value": 500.0
+        },
+        {
+          "param_name": "e_gain",
+          "value": 0.0
+        },
+        {
+          "param_name": "e_q",
+          "value": 0.25
+        },
+        {
+          "param_name": "e_mode",
+          "value": 1
+        },
+        {
+          "param_name": "f_freq",
+          "value": 1000.0
+        },
+        {
+          "param_name": "f_gain",
+          "value": 0.0
+        },
+        {
+          "param_name": "f_q",
+          "value": 0.25
+        },
+        {
+          "param_name": "f_mode",
+          "value": 1
+        },
+        {
+          "param_name": "g_freq",
+          "value": 2000.0
+        },
+        {
+          "param_name": "g_gain",
+          "value": 0.0
+        },
+        {
+          "param_name": "g_q",
+          "value": 0.25
+        },
+        {
+          "param_name": "g_mode",
+          "value": 1
+        },
+        {
+          "param_name": "h_freq",
+          "value": 4000.0
+        },
+        {
+          "param_name": "h_gain",
+          "value": 0.0
+        },
+        {
+          "param_name": "h_q",
+          "value": 0.25
+        },
+        {
+          "param_name": "h_mode",
+          "value": 1
+        },
+        {
+          "param_name": "i_freq",
+          "value": 8000.0
+        },
+        {
+          "param_name": "i_gain",
+          "value": 0.0
+        },
+        {
+          "param_name": "i_q",
+          "value": 0.25
+        },
+        {
+          "param_name": "i_mode",
+          "value": 1
+        },
+        {
+          "param_name": "j_freq",
+          "value": 16000.0
+        },
+        {
+          "param_name": "j_gain",
+          "value": 0.0
+        },
+        {
+          "param_name": "j_q",
+          "value": 0.25
+        },
+        {
+          "param_name": "j_mode",
+          "value": 1
+        }
+      ]
+    }
+  }
+}

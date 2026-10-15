@@ -2026,15 +2026,26 @@ test('recovery guidance never erases sticky unknown outcomes or sends a retry', 
   const h = await appHarness(); h.setPost(() => {throw new Error('lost response');});
   await h.ids.get('play').fire('click'); await h.settle();
   assert.equal(h.posts().length, 1); assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN');
-  for (const kind of ['station_exhausted', 'backend_control']) {
-    h.setState(state({transport: {phase: 'ERROR', intent: 'play', status: 'ERROR', message: 'Playback state is unconfirmed. Stop is available for recovery.', recovery: {kind, message: kind === 'station_exhausted' ? 'Automatic station recovery is exhausted. Choose Play to try again.' : 'Backend control failed. Playback and silence are unconfirmed.'}}, actions: {...state().actions, pause: false, next: false, previous: false, seek: false}}));
+  for (const kind of ['station_exhausted', 'backend_control', null]) {
+    const recovery = kind && {kind, message: kind === 'station_exhausted' ? 'Automatic station recovery is exhausted. Choose Play to try again.' : 'Backend control failed. Playback and silence are unconfirmed.'};
+    h.setState(state({transport: {phase: 'ERROR', intent: 'play', status: 'ERROR', message: 'Playback state is unconfirmed. Stop is available for recovery.', recovery}, actions: {...state().actions, pause: false, next: false, previous: false, seek: false}}));
     await h.refresh();
     assert.equal(h.ids.get('playback-recovery').hidden, false);
+    if (kind) assert.equal(h.ids.get('playback-recovery').textContent, recovery.message);
+    else assert.match(h.ids.get('playback-recovery').textContent, /Choose Stop.*STOPPED.*another source.*does not confirm physical silence/);
     assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN');
     assert.match(h.ids.get('notice-text').textContent, /outcome unknown/i);
     assert.equal(h.ids.get('stop').disabled, false); assert.equal(h.ids.get('pause').disabled, true); assert.equal(h.ids.get('next').disabled, true);
     assert.equal(h.posts().length, 1);
   }
+  h.offline(); assert.equal(h.ids.get('playback-recovery').hidden, true);
+  await h.refresh(); assert.equal(h.ids.get('playback-recovery').hidden, false);
+  h.setPost(() => {h.setState(state()); return {request_acknowledged: true};});
+  await h.ids.get('stop').fire('click');
+  assert.equal(h.ids.get('playback-state').textContent, 'STOPPED');
+  assert.equal(h.ids.get('playback-recovery').hidden, true);
+  assert.match(h.ids.get('notice-text').textContent, /Earlier request outcome unknown: Play/);
+  assert.deepEqual(h.posts().map(item => item.action), ['play', 'stop']);
 });
 
 // Output inspection is a separate, explicit read workflow, never a playback mutation.
@@ -2421,6 +2432,22 @@ test('radio search rejects malformed results without optimistic playback', async
   const search = new RadioSearch(async () => ({status: 200, body: {session_id: 'session-one', stations: [{id: '../unsafe', name: 'Invalid'}]}}));
   await search.search(state(), 'Synthetic', '');
   assert.deepEqual(search.stations, []); assert.match(search.message, /unavailable/);
+});
+test('radio search catalog failure guides a manual direct favorite without replay or raw errors', async () => {
+  const h = await appHarness();
+  h.setPost(() => ({__status: 503, error: 'radio_unavailable', outcome: 'ERROR', message: 'private provider details'}));
+  h.ids.get('radio-name').value = 'Synthetic';
+  await h.ids.get('radio-form').fire('submit'); await h.settle();
+  const message = h.ids.get('radio-status').textContent;
+  assert.match(message, /Radio-Browser search is unavailable/);
+  assert.match(message, /Favorites → \+ Add.*direct audio URL/);
+  assert.match(message, /Playback was not changed/);
+  assert.doesNotMatch(message, /private provider details/);
+  assert.equal(h.ids.get('radio-search').disabled, false);
+  assert.equal(h.ids.get('add-favorite').disabled, false);
+  await h.ids.get('add-favorite').fire('click');
+  assert.equal(h.ids.get('favorite-dialog').open, true);
+  assert.deepEqual(h.posts(), [{action: 'search', name: 'Synthetic', country: ''}]);
 });
 
 test('live stream title is optional, bounded and shown only for fresh owned playback', () => {
