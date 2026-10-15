@@ -48,6 +48,10 @@ def description_xml(cfg: Config) -> str:
     <serialNumber>{escape(cfg.upnp_uuid.replace('-', '')[:16])}</serialNumber>
     <UDN>uuid:{escape(cfg.upnp_uuid)}</UDN>
     <presentationURL>http://{cfg.resolved_advertise_ip}:{cfg.http_api_port}/httpapi.asp?command=getStatusEx</presentationURL>
+    <iconList><icon>
+      <mimetype>image/png</mimetype><width>485</width><height>483</height><depth>32</depth>
+      <url>/ui/logo.png</url>
+    </icon></iconList>
     <serviceList>
       {service("urn:schemas-upnp-org:service:AVTransport:1", "urn:upnp-org:serviceId:AVTransport1", "/upnp/control/rendertransport1", "/upnp/event/rendertransport1", "/upnp/rendertransportSCPD.xml")}
       {service("urn:schemas-upnp-org:service:AVTransport:1", "urn:upnp-org:serviceId:AVTransport", "/upnp/control/AVTransport", "/upnp/event/AVTransport", "/upnp/AVTransport.xml")}
