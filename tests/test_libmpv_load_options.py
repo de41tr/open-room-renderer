@@ -178,6 +178,20 @@ async def _exercise_short_admission(library: str, directory: Path) -> dict[str, 
                 await api.sync_mpv_state()
                 assert api.state.phase == PlaybackPhase.STOPPED and not api.state.last_error
                 assert api.state.backend_url == api.state.backend_original_url == ""
+                # Deliberately miss the old 500 ms poll window: success must
+                # come from retention, not merely sampling a short file faster.
+                readiness = api._wait_for_mpv_audio_ready
+                async def delayed_readiness(*args):
+                    await asyncio.sleep(.6)
+                    return await readiness(*args)
+                api._wait_for_mpv_audio_ready = delayed_readiness
+                try:
+                    assert await command("setPlayerCmd:play:" + urls[0]) == (200, "OK")
+                    await _eventually("retained short native EOF", lambda: backend.read_property("idle-active"))
+                    await api.sync_mpv_state()
+                    assert api.state.phase == PlaybackPhase.STOPPED and not api.state.last_error
+                finally:
+                    api._wait_for_mpv_audio_ready = readiness
                 queue = explicit_queue("Short then long", urls)
                 assert (await soap("ReplaceQueue", prepare_replace(queue)))[0] == 200
                 backend.commands.clear()
@@ -192,11 +206,22 @@ async def _exercise_short_admission(library: str, directory: Path) -> dict[str, 
                 assert backend.read_property("current-ao") == "null"
                 assert await command("setPlayerCmd:stop") == (200, "OK")
                 assert api.state.phase == PlaybackPhase.STOPPED and backend.read_property("idle-active")
+                # Gate the race explicitly so fast admission cannot outrun
+                # the Stop actor before this case reaches the held source.
+                release = asyncio.Event()
+                async def held_readiness(*args):
+                    await release.wait()
+                    return await readiness(*args)
+                api._wait_for_mpv_audio_ready = held_readiness
                 pending = asyncio.create_task(command("setPlayerCmd:play:" + urls[0]))
-                await _eventually("short source held before admission", lambda: (
-                    backend.read_property("pause") is True and backend.read_property("path") == urls[0]
-                    and backend.read_property("idle-active") is False))
-                assert await command("setPlayerCmd:stop") == (200, "OK")
+                try:
+                    await _eventually("short source held before admission", lambda: (
+                        backend.read_property("pause") is True and backend.read_property("path") == urls[0]
+                        and backend.read_property("idle-active") is False))
+                    assert await command("setPlayerCmd:stop") == (200, "OK")
+                finally:
+                    release.set()
+                    api._wait_for_mpv_audio_ready = readiness
                 assert await pending == (502, "Failed")
                 assert api.state.phase == PlaybackPhase.STOPPED and api.state.intent == "stop"
                 assert backend.read_property("idle-active") and not api.state.last_error
@@ -204,6 +229,7 @@ async def _exercise_short_admission(library: str, directory: Path) -> dict[str, 
                         "mpv_version": backend.read_property("mpv-version"),
                         "direct_http_success": True, "ordinary_queue_advanced_once": True,
                         "stop_confirmed": True, "stop_during_admission_wins": True,
+                        "retained_through_600ms_readiness_delay": True,
                         "staged_successor_tested": False}
     finally:
         backend.close()

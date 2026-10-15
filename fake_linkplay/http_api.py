@@ -3459,10 +3459,18 @@ class HttpApi:
 
         deadline = asyncio.get_running_loop().time() + timeout
         last_snapshot: dict[str, object] = {}
+        # Holding the source preserves the admission window; a few early
+        # observations avoid adding half a second to every audible start.
+        # Slow/unready sources return to the existing 500 ms cadence.
+        early_delays = iter((0.0, 0.025, 0.05, 0.1, 0.25))
         while asyncio.get_running_loop().time() < deadline:
             if generation != self._play_generation:
                 return False
-            await asyncio.sleep(0.5)
+            delay = min(next(early_delays, 0.5), deadline - asyncio.get_running_loop().time())
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if asyncio.get_running_loop().time() >= deadline:
+                break
             async with self._backend_lock:
                 snapshot = await self.mpv.snapshot()
                 if await self._apply_station_child_history_locked(generation, snapshot):
