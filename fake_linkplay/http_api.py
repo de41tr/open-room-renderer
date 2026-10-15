@@ -2821,9 +2821,7 @@ class HttpApi:
             artwork=selected.get("picurl", ""), id=f"preset:{selected['number']}",
             artist=selected.get("artist", ""), album=selected.get("album", ""),
         )], index=1)
-        queue.validate()
-        self.state.queue = queue
-        self._activate_queue_item()
+        await self._replace_queue(queue)
         await self._play_url(queue.current.url)
         self._schedule_event_notify()
 

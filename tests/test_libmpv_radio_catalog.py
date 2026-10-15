@@ -118,6 +118,35 @@ async def exercise(library: str, directory: Path):
                 selection = result["stations"][0]["id"]
                 saved = await post("/command", {"action": "favorite_radio", "id": selection})
                 assert not requests and backend.read_property("idle-active")
+                ordinary_url = str(media_server.make_url("/tone.mp3"))
+                backend._allowed_media.add(ordinary_url)
+                ordinary = api.favorites.add({"name": "Prior ordinary source", "url": ordinary_url})
+                saved_before = api.favorites.document()
+                failed_replacements = []
+                retired_before_lookup = []
+                async def unavailable(_, **kwargs):
+                    retired_before_lookup.append(backend.read_property("idle-active") and not backend.read_property("playlist"))
+                    raise radio_catalog.CatalogError("Synthetic directory outage")
+                for paused in (False, True):
+                    await post("/command", {"action": "favorite_play", "id": ordinary["id"]})
+                    await _decoder_progress(backend, ordinary_url, "mp3")
+                    if paused:
+                        await post("/command", {"action": "pause", "expected_generation": api.state.generation})
+                        assert backend.read_property("pause")
+                    with patch("fake_linkplay.http_api.resolve_catalog_station", unavailable):
+                        async with session.post(origin + "/orr/v1/favorites/" + saved["favorite_id"] + "/play") as response:
+                            assert response.status == 502
+                            assert (await response.json())["error"] == "playback_failed"
+                    assert backend.read_property("idle-active") and not backend.read_property("playlist")
+                    assert retired_before_lookup[-1]
+                    assert api.state.backend_url == api.state.backend_original_url == ""
+                    assert api.state.current_url == api.state.queue.current.url == station.reference
+                    view = await snapshot()
+                    assert view["transport"]["phase"] == "ERROR" and view["actions"]["stop"]
+                    assert not view["actions"]["pause"]
+                    assert api.favorites.document() == saved_before
+                    failed_replacements.append({"prior": "paused" if paused else "playing", "native_idle": True,
+                                                "native_playlist_empty": True, "favorites_preserved": True})
                 evidence = []
                 for codec, path, decoder in (("MP3", "tone.mp3", "mp3"), ("AAC", "tone.aac", "aac"),
                                              ("OGG", "chained.ogg", "vorbis")):
@@ -180,6 +209,7 @@ async def exercise(library: str, directory: Path):
                     assert backend.read_property("idle-active")
                 assert api.favorites.playback_snapshot(saved["favorite_id"])["url"] == station.reference
                 return {"decoded": evidence, "favorite_reresolved": True, "nested_playlist_not_fetched": True,
+                        "failed_favorite_replacements": failed_replacements,
                         "specific_bind_ephemeral_proxy": True, "hostile_playlist_formats": ["MP3", "OGG"], "icy_titles": titles,
                         "icy_single_source_load": True, "icy_canonical_favorite_preserved": True}
     finally:

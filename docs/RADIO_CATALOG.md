@@ -14,8 +14,13 @@ country code (for example `DE`) narrows results. Select **Play** or **Save favor
   reference, resolved again when played, so a changed stream URL is not frozen.
 - Results expire after 15 minutes and after a renderer restart. Search again if
   a selection expires. Clear discards results, including a late search response.
-- Directory outages do not change playback. Stations may disappear, be
-  geoblocked, or stop working; no availability or rights guarantee is implied.
+- Directory outages during search do not change playback. Playing a selection
+  or recalling a favorite first retires the previous source. If the new station
+  lookup fails, playback reports an error and the saved favorites remain intact;
+  the previous source is not resumed. If stopping the previous source cannot be
+  confirmed, replacement is rejected and silence remains unconfirmed. Stations
+  may disappear, be geoblocked, or stop working; no availability or rights
+  guarantee is implied.
 - This is an independent ORR catalog. It does not integrate WiiM Radio, provide a
   TuneIn catalog, or announce an additional service to WiiM Home.
 
@@ -54,11 +59,14 @@ manual URLs and the existing TuneIn resolver retain their previous behavior.
 
 - Targeted unit/real HTTP checks: bounded search, source filtering, browser
   admission, favorites and canonical queue ownership, expiry, source rejection,
-  and Stop superseding a pending station lookup.
+  and Stop superseding a pending station lookup. Favorite replacement also
+  rejects failed Stop confirmation and respects newer Stop/load ownership.
 - `tests/test_libmpv_radio_catalog.py`: opt-in real HTTP/proxy and libmpv/null
   decoding of generated MP3, favorite recall after changed AAC and Ogg URLs/codecs,
   and advancing chained Vorbis across a title change through one selected-source
-  request. Misleading M3U bodies fail under MP3 and OGG admission without fetching
+  request. Failed favorite lookup retires a playing or paused ordinary source
+  before directory resolution and preserves saved favorites. Misleading M3U
+  bodies fail under MP3 and OGG admission without fetching
   a nested target. Directory data/DNS are synthetic; the decoder is real. This is
   not production Unix IPC.
 - The existing hosted Chrome lane additionally checks the genuine desktop/mobile
