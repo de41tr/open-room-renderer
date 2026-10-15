@@ -1,7 +1,7 @@
 /* Same-origin UI. Canonical snapshots are the only source of displayed state. */
 (function () {
   "use strict";
-  const {FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
+  const {RadioSearch, streamTitleText, FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
   const $ = id => document.getElementById(id);
   const drafts = {seek: false, volume: false, mode: false, balance: false};
   let snapshot = null, queueSignature = "", favoritesSignature = "", artworkURL = null;
@@ -77,6 +77,8 @@
   }
   const control = new Controller(request, render);
   const outputInspection = new OutputInspection(request, renderOutputInspection);
+  const radioSearch = new RadioSearch(request, renderRadio);
+  let radioSignature = "";
   function renderOutputInspection() {
     outputInspection.observe(control.state);
     $("inspect-output").disabled = !outputInspection.canInspect(control.state);
@@ -104,6 +106,7 @@
     snapshot = control.state;
     noticeView();
     renderOutputInspection();
+    renderRadio();
     $("refresh").disabled = false;
     if (!snapshot) return;
     const {media, transport, gain, queue, dsp} = snapshot;
@@ -111,6 +114,9 @@
     text("device-name", snapshot.device.name || "Listening room");
     renderRoomRename();
     text("track-title", media.title || (queue.count ? "Untitled track" : "Ready when you are"));
+    const onAir = streamTitleText(snapshot, control.fresh);
+    text("stream-title", onAir);
+    $("stream-title").hidden = !onAir;
     text("track-artist", media.artist || (queue.count ? "Artist unavailable" : "Choose something from your favorites."));
     text("track-album", media.album);
     text("source-label", media.is_live ? "LIVE STREAM" : "OPEN ROOM");
@@ -177,6 +183,52 @@
     renderFavoriteDraft(ready);
   }
   function element(tag, className, value) { const item = document.createElement(tag); if (className) item.className = className; if (value !== undefined) item.textContent = value; return item; }
+  function renderRadio() {
+    radioSearch.observe(control.state);
+    $("radio-search").disabled = !control.fresh || radioSearch.pending;
+    $("radio-name").disabled = radioSearch.pending; $("radio-country").disabled = radioSearch.pending;
+    text("radio-status", radioSearch.message);
+    const signature = JSON.stringify([radioSearch.session, radioSearch.stations.map(item => item.id)]);
+    if (signature !== radioSignature) {
+      radioSignature = signature;
+      const rows = radioSearch.stations.map(station => {
+        const row = element("li", "radio-row"), copy = element("div", "item-copy");
+        copy.append(element("span", "item-title", station.name), element("span", "item-subtitle", [station.country, station.codec, station.bitrate ? `${station.bitrate} kbps` : ""].filter(Boolean).join(" · ")));
+        const actions = element("div", "radio-actions");
+        for (const [action, label] of [["radio_play", "Play"], ["favorite_radio", "Save favorite"], ["favorite_radio_target", "Replace favorite…"]]) {
+          const button = element("button", "button small", label); button.type = "button"; button.dataset.radioAction = action;
+          if (action === "favorite_radio_target") button.setAttribute("aria-label", `Use ${station.name} to replace a favorite`);
+          button.addEventListener("click", async () => {
+            if (radioSearch.session !== control.state?.session_id || !control.canMutate(action) || button.dataset.sent) return;
+            if (action === "favorite_radio_target") { openFavorite("radio", null, button, station); return; }
+            const session = radioSearch.session, serial = radioSearch.serial;
+            if (action === "favorite_radio") button.dataset.sent = "true";
+            const body = {action, id: station.id};
+            if (action === "radio_play") body.expected_generation = control.state.generation;
+            const result = await run(body, action === "radio_play" ? "Play radio" : "Save station");
+            if (session !== radioSearch.session || serial !== radioSearch.serial) return;
+            if (action === "favorite_radio") {
+              const saved = result.kind === "acknowledged" && control.favoritesFresh && control.favorites.some(item => item.id === result.favoriteId);
+              button.textContent = saved ? "Saved" : "Check favorites";
+              radioSearch.message = saved ? "Station saved in Favorites." : "Save request finished. Review Favorites and the request status above before saving again.";
+            } else radioSearch.message = "Play request finished. The player above shows the renderer’s confirmed status.";
+            renderRadio();
+          });
+          actions.append(button);
+        }
+        row.append(copy, actions); return row;
+      });
+      $("radio-results").replaceChildren(...rows);
+    }
+    $("radio-results").querySelectorAll("button").forEach(button => {
+      button.disabled = Boolean(button.dataset.sent) || radioSearch.session !== control.state?.session_id || !control.canMutate(button.dataset.radioAction) || button.dataset.radioAction === "favorite_radio_target" && !control.favorites.some(item => item.editable && /^[0-9a-f]{64}$/.test(item.revision || ""));
+    });
+  }
+  $("radio-form").addEventListener("submit", event => {
+    event.preventDefault();
+    if (control.fresh) radioSearch.search(control.state, $("radio-name").value, $("radio-country").value);
+  });
+  $("radio-clear").addEventListener("click", () => { radioSearch.clear(); $("radio-form").reset(); renderRadio(); });
   function currentEditor() { return control.fresh && snapshot?.dsp.status === "CONFIRMED" ? snapshot.dsp.editor : null; }
   function matchingBands(left, right) { return left.length === right.length && left.every((band, index) => band.param_name === right[index].param_name && band.value === right[index].value); }
   function renderSoundEditor() {
@@ -952,7 +1004,16 @@
   function renderFavoriteDraft(ready) {
     const context = dialogContext;
     if (!context) return;
-    // This detects observed changes, not an atomic server-side precondition.
+    if (context.mode === "radio" && !context.sent) {
+      if (context.session !== snapshot.session_id || context.radioSerial !== radioSearch.serial) context.stale = true;
+      if (control.fresh && control.favoritesFresh && context.favorite) {
+        const current = control.favorites.find(item => item.id === context.favorite.id);
+        if (favoriteRecord(current) !== context.record || current?.revision !== context.favorite.revision) context.stale = true;
+      }
+      $("favorite-radio-select").disabled = !ready || !control.favoritesFresh || context.pending || context.stale;
+    }
+    // Legacy dialogs detect observed changes; catalog replacement also has an
+    // exact-record server precondition, including hidden same-host URL changes.
     // Save current keeps the selection from opening, even if a later observation
     // changes back. A failed favorites read does not hide fresh selection changes.
     if (context.mode === "current" && control.fresh && (context.generation !== snapshot.generation || context.session !== snapshot.session_id)) context.stale = true;
@@ -963,21 +1024,30 @@
       const current = control.favorites.find(item => item.id === context.favorite.id);
       if (favoriteRecord(current) !== context.record) context.stale = true;
     }
-    $("favorite-submit").disabled = !ready || !control.favoritesFresh || context.pending || context.stale || context.sent;
+    $("favorite-submit").disabled = !ready || !control.favoritesFresh || context.pending || context.stale || context.sent || context.mode === "radio" && !context.favorite;
     if (context.stale && !context.pending && !context.sent) {
-      const guidance = context.mode === "current" ? "The current selection changed or the renderer restarted. Close this dialog and review the current track or stream before reopening Save current."
+      const guidance = context.mode === "radio" ? "This favorite, search or renderer session changed. Close this dialog, then search or choose the replacement again." : context.mode === "current" ? "The current selection changed or the renderer restarted. Close this dialog and review the current track or stream before reopening Save current."
         : "This favorite changed or is no longer available. Close this dialog and review the favorites list before reopening " + (context.mode === "target" ? "Change URL." : "Rename or Delete.");
       text("favorite-dialog-status", (context.resultText ? context.resultText + " " : "") + guidance);
     }
   }
-  function openFavorite(mode, favorite = null, opener = $(mode === "current" ? "save-current" : "add-favorite")) {
+  function openFavorite(mode, favorite = null, opener = $(mode === "current" ? "save-current" : "add-favorite"), station = null) {
     if ($("favorite-dialog").open || !control.canMutate("favorite_add") || !control.favoritesFresh || mode === "target" && !favorite?.editable) return;
-    dialogContext = {mode, favorite, record: favoriteRecord(favorite), stale: false, pending: false, sent: false, generation: snapshot.generation, session: snapshot.session_id, serial: ++dialogSerial};
+    if (mode === "radio" && (!station || radioSearch.session !== snapshot.session_id)) return;
+    dialogContext = {mode, favorite, station, radioSerial: radioSearch.serial, choices: control.favorites.filter(item => item.editable && /^[0-9a-f]{64}$/.test(item.revision || "")), record: favoriteRecord(favorite), stale: false, pending: false, sent: false, generation: snapshot.generation, session: snapshot.session_id, serial: ++dialogSerial};
     $("favorite-form").reset(); text("favorite-dialog-status", "");
-    const labels = {add: "Add favorite", current: "Save current as favorite", rename: "Rename favorite", target: "Change favorite URL", delete: "Delete favorite"};
-    text("favorite-dialog-heading", labels[mode]); text("favorite-submit", mode === "delete" ? "Delete favorite" : mode === "rename" ? "Save name" : mode === "target" ? "Change URL" : "Save favorite");
-    text("favorite-dialog-hint", {add: "Save a direct HTTP or HTTPS audio URL.", current: "Save the current track or stream using its original playable address.", rename: "Change the name saved on this renderer.", target: "Changes the saved address for future playback. Keeps the favorite’s name and ID. Does not fetch audio or change current playback.", delete: "Remove this saved favorite? Playback will not be stopped."}[mode]);
-    const target = mode === "target", urlVisible = mode === "add" || target;
+    const labels = {add: "Add favorite", current: "Save current as favorite", rename: "Rename favorite", target: "Change favorite URL", radio: "Replace favorite from radio search", delete: "Delete favorite"};
+    text("favorite-dialog-heading", labels[mode]); text("favorite-submit", mode === "delete" ? "Delete favorite" : mode === "rename" ? "Save name" : mode === "target" ? "Change URL" : mode === "radio" ? "Replace saved target" : "Save favorite");
+    text("favorite-dialog-hint", {add: "Save a direct HTTP or HTTPS audio URL.", current: "Save the current track or stream using its original playable address.", rename: "Change the name saved on this renderer.", target: "Changes the saved address for future playback. Keeps the favorite’s name and ID. Does not fetch audio or change current playback.", radio: "Use the selected station for this favorite’s future playback. Current playback, the queue and already admitted selections stay unchanged. Clear old metadata when changing stations, or explicitly keep it.", delete: "Remove this saved favorite? Playback will not be stopped."}[mode]);
+    const target = ["target", "radio"].includes(mode), urlVisible = mode === "add" || mode === "target";
+    $("favorite-radio-field").hidden = mode !== "radio";
+    $("favorite-radio-select").disabled = mode !== "radio"; $("favorite-radio-select").required = mode === "radio";
+    const prompt = element("option", "", "Choose a managed favorite…"); prompt.value = ""; prompt.disabled = true; prompt.selected = true;
+    const options = dialogContext.choices.map(item => {
+      const option = element("option", "", `${control.favorites.indexOf(item) + 1}. ${item.name} · ${item.id.slice(0, 8)}`); option.value = item.id; return option;
+    });
+    $("favorite-radio-select").replaceChildren(prompt, ...options); $("favorite-radio-select").value = "";
+    text("favorite-radio-station", station ? `Selected station: ${station.name} · ${station.country} · ${station.codec}${station.bitrate ? ` · ${station.bitrate} kbps` : ""}` : "");
     $("favorite-name-field").hidden = mode === "delete" || target; $("favorite-name").required = mode !== "delete" && !target;
     $("favorite-url-field").hidden = !urlVisible; $("favorite-url").required = urlVisible; $("favorite-url").disabled = false; $("favorite-url").value = "";
     text("favorite-url-label", target ? "Replacement audio URL" : "Audio URL");
@@ -987,8 +1057,9 @@
     $("favorite-name").value = favorite?.name || (mode === "current" ? snapshot.media.title : "");
     $("favorite-submit").classList.toggle("destructive", mode === "delete");
     $("favorite-submit").disabled = false;
+    renderFavoriteDraft(control.canMutate("favorite_add"));
     favoriteDialog.open(opener);
-    (mode === "delete" ? $("favorite-cancel") : mode === "target" ? $("favorite-url") : $("favorite-name")).focus();
+    (mode === "delete" ? $("favorite-cancel") : mode === "radio" ? $("favorite-radio-select") : mode === "target" ? $("favorite-url") : $("favorite-name")).focus();
   }
   function clearFavoriteForm() {
     dialogContext = null;
@@ -996,6 +1067,8 @@
     $("favorite-url").value = "";
     $("favorite-name").value = "";
     $("favorite-metadata").value = ""; $("favorite-metadata").disabled = true;
+    $("favorite-radio-select").replaceChildren(); $("favorite-radio-select").disabled = true;
+    text("favorite-radio-station", "");
     text("favorite-delete-name", ""); text("favorite-dialog-status", "");
   }
   function closeFavorite(restore = true) { favoriteDialog.close(restore); }
@@ -1004,6 +1077,14 @@
   ["favorite-close", "favorite-cancel"].forEach(id => $(id).addEventListener("click", closeFavorite));
   $("add-favorite").addEventListener("click", () => openFavorite("add"));
   $("save-current").addEventListener("click", () => openFavorite("current"));
+  $("favorite-radio-select").addEventListener("change", () => {
+    const context = dialogContext;
+    if (!context || context.mode !== "radio" || context.sent || context.stale) return;
+    context.favorite = context.choices.find(item => item.id === $("favorite-radio-select").value) || null;
+    context.record = favoriteRecord(context.favorite);
+    text("favorite-delete-name", context.favorite ? `Replace target of: ${context.favorite.name} · ${context.favorite.id.slice(0, 8)}` : "");
+    renderFavoriteDraft(control.canMutate("favorite_add"));
+  });
   $("favorite-form").addEventListener("submit", async event => {
     event.preventDefault();
     const context = dialogContext;
@@ -1012,31 +1093,34 @@
     if (context.stale || context.pending || context.sent || !control.canMutate("favorite_add")) return;
     const name = $("favorite-name").value;
     const url = $("favorite-url").value;
-    if (!["delete", "target"].includes(context.mode) && !name.trim()) { text("favorite-dialog-status", "Enter a name for this favorite."); $("favorite-name").focus(); return; }
+    if (!["delete", "target", "radio"].includes(context.mode) && !name.trim()) { text("favorite-dialog-status", "Enter a name for this favorite."); $("favorite-name").focus(); return; }
     if ((context.mode === "add" || context.mode === "target") && !safeAudioURL(url)) { text("favorite-dialog-status", "Use a direct HTTP or HTTPS URL without a username or password."); $("favorite-url").focus(); return; }
     const metadata = $("favorite-metadata").value;
-    if (context.mode === "target" && !["keep", "clear"].includes(metadata)) { text("favorite-dialog-status", "Choose whether to keep or clear the saved metadata."); $("favorite-metadata").focus(); return; }
+    if (["target", "radio"].includes(context.mode) && !["keep", "clear"].includes(metadata)) { text("favorite-dialog-status", "Choose whether to keep or clear the saved metadata."); $("favorite-metadata").focus(); return; }
     let body;
-    if (context.mode === "target") body = {action: "favorite_target", id: context.favorite.id, url, metadata};
+    if (context.mode === "radio") {
+      if (!context.favorite) { text("favorite-dialog-status", "Choose the managed favorite to replace."); $("favorite-radio-select").focus(); return; }
+      body = {action: "favorite_radio_target", id: context.favorite.id, station_id: context.station.id, metadata, expected_favorite: context.favorite.revision, expected_session: context.session};
+    } else if (context.mode === "target") body = {action: "favorite_target", id: context.favorite.id, url, metadata};
     else if (context.mode === "add") body = {action: "favorite_add", name, url};
     else if (context.mode === "current") body = {action: "favorite_current", name, expected_generation: context.generation};
     else if (context.mode === "rename") body = {action: "favorite_rename", id: context.favorite.id, name};
     else body = {action: "favorite_delete", id: context.favorite.id};
-    if (context.mode === "target") {
+    if (["target", "radio"].includes(context.mode)) {
       if (new TextEncoder().encode(url).length > 8192 || requestBytes(body) > MAX_REQUEST_BYTES) { text("favorite-dialog-status", "Use a URL of at most 8,192 UTF-8 bytes and a complete request within 32,768 bytes."); $("favorite-url").focus(); return; }
       // Single-use after synchronous admission, including rejected/unknown
       // outcomes. Clear the private field before POST/readback; this is input
       // cleanup, not secure memory erasure. Reopening is a new deliberate draft.
-      context.sent = true;
+      context.sent = true; $("favorite-radio-select").disabled = true;
       $("favorite-url").value = ""; $("favorite-url").disabled = true; $("favorite-metadata").disabled = true;
       text("favorite-cancel", "Done"); $("favorite-cancel").focus();
     }
     context.pending = true;
     text("favorite-dialog-status", "PENDING · Waiting for the renderer…");
-    const result = await run(body, {add: "Add favorite", current: "Save current", rename: "Rename favorite", target: "Change URL", delete: "Delete favorite"}[context.mode]);
+    const result = await run(body, {add: "Add favorite", current: "Save current", rename: "Rename favorite", target: "Change URL", radio: "Replace favorite target", delete: "Delete favorite"}[context.mode]);
     if (!dialogContext || dialogContext.serial !== context.serial) return;
     context.pending = false;
-    if (context.mode === "target") {
+    if (["target", "radio"].includes(context.mode)) {
       context.resultText = `${result.kind.toUpperCase()} · ${result.text}`;
       text("favorite-dialog-status", context.resultText);
       renderFavoriteDraft(control.canMutate("play"));
@@ -1155,7 +1239,7 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
   // Scrub private dialog input before navigation/BFCache, even if already closed.
   // Only local drafts are dismissed; sent commands and their outcomes stay live.
-  window.addEventListener("pagehide", () => { queueReview += 1; outputInspection.dismiss(); renderOutputInspection(); closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); curveExportDialog.close(false); curveImportDialog.close(false); favoritesExportDialog.close(false); favoritesRestoreDialog.close(false); });
+  window.addEventListener("pagehide", () => { radioSearch.clear(); renderRadio(); queueReview += 1; outputInspection.dismiss(); renderOutputInspection(); closePlaylist(false); closeFavorite(false); closePreset(false); closeExport(false); closeRoom(false); curveExportDialog.close(false); curveImportDialog.close(false); favoritesExportDialog.close(false); favoritesRestoreDialog.close(false); });
   window.addEventListener("online", () => poll());
   window.addEventListener("offline", () => { control.fresh = false; control.favoritesFresh = false; control.favoritesReadFailure = null; render(); });
   poll();

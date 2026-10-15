@@ -26,6 +26,27 @@ def _signal_group(process: subprocess.Popen, signum: int) -> bool:
         return False
 
 
+def _progress_tail(path: Path, previous_size: int, group: int, elapsed: float) -> int:
+    """Read only a bounded changed tail through an independent file offset."""
+    try:
+        with path.open("rb") as source:
+            size = source.seek(0, os.SEEK_END)
+            if size == previous_size:
+                return previous_size
+            source.seek(max(0, size - 8192))
+            recent = source.read(8192)
+            marker = recent.rfind(b"Timeout (")
+            excerpt = (recent[marker:marker + 1024] + recent[-1024:]
+                       if marker >= 0 and len(recent) - marker > 2048 else recent[-2048:])
+            tail = excerpt.decode("utf-8", errors="replace")
+    except OSError:
+        return previous_size
+    print(f"\n=== Native progress elapsed={elapsed:.1f}s group={group} tail<=2048B ===",
+          flush=True)
+    print(tail, end="" if tail.endswith("\n") else "\n", flush=True)
+    return size
+
+
 def run_groups(commands: list[list[str]], log_dir: Path, timeout: float) -> int:
     """Keep all groups running after a failure; bound and clean up their trees."""
     if len(commands) not in (2, 3) or any(not command for command in commands) or not 0 < timeout < math.inf:
@@ -40,7 +61,9 @@ def run_groups(commands: list[list[str]], log_dir: Path, timeout: float) -> int:
     previous = {sig: signal.signal(sig, interrupt) for sig in (signal.SIGINT, signal.SIGTERM)}
     children: list[tuple[subprocess.Popen | None, TextIO]] = []
     timed_out = cleanup_failed = False
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline, next_progress = started + timeout, started + 30
+    progress_sizes = [0] * len(commands)
     with ExitStack() as stack:
         try:
             for index, command in enumerate(commands, 1):
@@ -54,9 +77,16 @@ def run_groups(commands: list[list[str]], log_dir: Path, timeout: float) -> int:
                     process = None
                 children.append((process, log))
             while any(process is not None and process.poll() is None for process, _ in children):
-                timed_out = time.monotonic() >= deadline
+                now = time.monotonic()
+                timed_out = now >= deadline
                 if interrupted or timed_out:
                     break
+                if now >= next_progress:
+                    for index, (process, log) in enumerate(children):
+                        if process is not None and process.poll() is None:
+                            progress_sizes[index] = _progress_tail(
+                                Path(log.name), progress_sizes[index], index + 1, now - started)
+                    next_progress = now + 30
                 time.sleep(0.05)
         finally:
             # Also clean descendants left behind by an already-exited pytest.

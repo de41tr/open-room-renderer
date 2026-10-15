@@ -19,6 +19,8 @@ from test_playback_generations import StatefulBackend
 async def proxy_fixture(tmp_path, monkeypatch):
     upstream_requests = []
     validations = []
+    icy_headers = {"icy-metaint": "8192", "icy-name": "Synthetic station",
+                   "Set-Cookie": "synthetic-not-forwarded", "X-Upstream": "synthetic-not-forwarded"}
     async def upstream(request):
         upstream_requests.append((request.path, dict(request.headers)))
         if request.path == "/redirect-private":
@@ -33,6 +35,8 @@ async def proxy_fixture(tmp_path, monkeypatch):
         if request.path == "/error":
             return web.Response(status=500, text="synthetic private upstream detail")
         data = b"0123456789"
+        if request.path == "/icy":
+            return web.Response(body=data, headers=icy_headers)
         if request.path == "/gzip":
             return web.Response(body=gzip.compress(data, mtime=0), headers={"Content-Encoding": "gzip", "Content-Type": "application/octet-stream"})
         if request.headers.get("Range") == "bytes=2-5":
@@ -68,7 +72,7 @@ async def proxy_fixture(tmp_path, monkeypatch):
             return url
         async with ClientSession() as client:
             yield SimpleNamespace(api=api, client=client, base=base, select=select,
-                requests=upstream_requests, validations=validations, port=port)
+                requests=upstream_requests, validations=validations, port=port, icy_headers=icy_headers)
     finally:
         await runner.cleanup()
         await up_runner.cleanup()
@@ -78,13 +82,14 @@ async def proxy_fixture(tmp_path, monkeypatch):
 async def test_selected_media_range_and_public_redirect_are_preserved(proxy_fixture):
     env = proxy_fixture
     url = env.select("/redirect-public")
-    async with env.client.get(env.base + "/proxy/audio", params={"url": url}, headers={"Range": "bytes=2-5", "Authorization": "synthetic-not-forwarded", "Cookie": "synthetic-not-forwarded"}) as response:
+    async with env.client.get(env.base + "/proxy/audio", params={"url": url}, headers={"Icy-MetaData": "1", "Range": "bytes=2-5", "Authorization": "synthetic-not-forwarded", "Cookie": "synthetic-not-forwarded"}) as response:
         assert response.status == 206
         assert await response.read() == b"2345"
         assert response.headers["Content-Range"] == "bytes 2-5/10"
     assert [path for path, _ in env.requests] == ["/redirect-public", "/audio"]
     assert len(env.validations) == 2
     for _, headers in env.requests:
+        assert headers["Icy-MetaData"] == "1"
         assert headers["Range"] == "bytes=2-5"
         assert "Authorization" not in headers and "Cookie" not in headers
         assert headers["User-Agent"] == "OpenRoomRenderer/0.1"
@@ -206,4 +211,31 @@ async def test_compressed_media_bytes_match_forwarded_headers(proxy_fixture):
         assert response.status == 200 and response.headers["Content-Encoding"] == "gzip"
         assert int(response.headers["Content-Length"]) == len(data)
         assert gzip.decompress(data) == b"0123456789"
+    assert env.api._proxy_semaphore._value == 4
+
+
+async def test_icy_relay_is_a_narrow_request_and_response_allowlist(proxy_fixture):
+    env = proxy_fixture
+    url = env.select("/icy")
+    for request_value in (None, "0", "1", "1, 1"):
+        headers = {"Authorization": "synthetic-not-forwarded", "Cookie": "synthetic-not-forwarded"}
+        if request_value is not None:
+            headers["Icy-MetaData"] = request_value
+        async with env.client.get(env.base + "/proxy/audio", params={"url": url}, headers=headers) as response:
+            assert response.status == 200 and await response.read() == b"0123456789"
+            assert response.headers["icy-metaint"] == "8192"
+            assert not {"icy-name", "Set-Cookie", "X-Upstream"} & response.headers.keys()
+        forwarded = env.requests[-1][1]
+        assert forwarded.get("Icy-MetaData") == ("1" if request_value == "1" else None)
+        assert "Authorization" not in forwarded and "Cookie" not in forwarded
+
+
+@pytest.mark.parametrize("interval", ["0", "-1", "8192junk", "2147483648"])
+async def test_invalid_icy_framing_is_refused_before_body_delivery(proxy_fixture, interval):
+    env = proxy_fixture
+    env.icy_headers["icy-metaint"] = interval
+    async with env.client.get(env.base + "/proxy/audio", params={"url": env.select("/icy")},
+                              headers={"Icy-MetaData": "1"}) as response:
+        assert response.status == 502
+        assert await response.text() == "Invalid upstream metadata interval"
     assert env.api._proxy_semaphore._value == 4

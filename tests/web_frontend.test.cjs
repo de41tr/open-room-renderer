@@ -1,7 +1,7 @@
 /* Dependency-free control-flow tests; these are not browser/layout tests. */
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_MODES, validateEditor, MODES, validateState, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError} = require('../fake_linkplay/web_assets/controller.js');
+const {Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_MODES, validateEditor, MODES, validateState, streamTitleText, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError} = require('../fake_linkplay/web_assets/controller.js');
 const clone = value => JSON.parse(JSON.stringify(value));
 const revisionID = letter => letter.repeat(64);
 const eqLibraryWarning = 'Saved EQ presets could not be loaded. Stop the renderer service, repair or restore its saved EQ preset library, then restart it.';
@@ -2377,4 +2377,126 @@ test('queue rejection recovery refuses raw duplicate members before JSON.parse c
   const body = queueAdmissionRejection(); delete body.__status; h.hooks.post = () => ({status: 409, body});
   const result = await h.controller.mutate({action: 'playlist_remove', expected_generation: 7, index: 1}, 'Remove');
   assert.equal(result.kind, 'error'); assert.equal(result.queueEditRejected, undefined, 'Missing raw admission evidence must fail closed');
+});
+
+test('radio search is single-shot, bounded, and never sends a playback command', async () => {
+  const {RadioSearch} = require('../fake_linkplay/web_assets/controller.js');
+  const calls = [], wait = deferred();
+  const search = new RadioSearch(async (path, options) => { calls.push({path, options}); return wait.promise; });
+  const first = search.search(state(), 'Synthetic', 'de');
+  await search.search(state(), 'Duplicate', '');
+  assert.equal(calls.length, 1); assert.equal(calls[0].path, '/orr/v1/web/radio/search');
+  assert.deepEqual(calls[0].options.body, {action: 'search', name: 'Synthetic', country: 'DE'});
+  const station = {id: 'a'.repeat(32), name: 'Synthetic <radio>', country: 'DE', codec: 'MP3', bitrate: 128};
+  const ogg = {...station, id: 'b'.repeat(32), codec: 'OGG'};
+  wait.resolve({status: 200, body: {session_id: 'session-one', stations: [station, ogg]}});
+  await first; assert.deepEqual(search.stations, [station, ogg]); assert.equal(search.pending, false);
+});
+test('radio country browsing requires a name or country before sending one bounded search', async () => {
+  const {RadioSearch} = require('../fake_linkplay/web_assets/controller.js');
+  const calls = [], search = new RadioSearch(async (path, options) => {
+    calls.push({path, options}); return {status: 200, body: {session_id: 'session-one', stations: []}};
+  });
+  for (const [name, country] of [['', ''], [' ', ' '], ['', 'D1'], ['', 'DEU'], ['x', 'DE']]) {
+    await search.search(state(), name, country);
+    assert.equal(calls.length, 0); assert.match(search.message, /name.*country code.*or both/);
+  }
+  await search.search(state(), ' ', ' de ');
+  assert.equal(calls.length, 1); assert.equal(calls[0].path, '/orr/v1/web/radio/search');
+  assert.deepEqual(calls[0].options.body, {action: 'search', name: '', country: 'DE'});
+  assert.equal(calls[0].options.timeoutMs, 15000); assert.equal(search.pending, false);
+  assert.match(search.message, /Try another name or country/);
+});
+test('cleared or restarted radio search cannot restore late results', async () => {
+  const {RadioSearch} = require('../fake_linkplay/web_assets/controller.js');
+  for (const dismiss of [search => search.clear(), search => search.observe(state({session_id: 'new-session'}))]) {
+    const wait = deferred(), search = new RadioSearch(() => wait.promise);
+    const pending = search.search(state(), 'Synthetic', ''); dismiss(search);
+    wait.resolve({status: 200, body: {session_id: 'session-one', stations: [{id: 'a'.repeat(32), name: 'Late', country: '', codec: 'MP3', bitrate: 128}]}});
+    await pending; assert.deepEqual(search.stations, []); assert.equal(search.pending, false);
+  }
+});
+test('radio search rejects malformed results without optimistic playback', async () => {
+  const {RadioSearch} = require('../fake_linkplay/web_assets/controller.js');
+  const search = new RadioSearch(async () => ({status: 200, body: {session_id: 'session-one', stations: [{id: '../unsafe', name: 'Invalid'}]}}));
+  await search.search(state(), 'Synthetic', '');
+  assert.deepEqual(search.stations, []); assert.match(search.message, /unavailable/);
+});
+
+test('live stream title is optional, bounded and shown only for fresh owned playback', () => {
+  const live = state({transport: {...state().transport, phase: 'PLAYING', intent: 'play'},
+    media: {...state().media, title: 'Canonical station', is_live: true, stream_title: 'Artist - <script>literal</script>'}});
+  assert.equal(validateState(live), live);
+  assert.equal(streamTitleText(live, true), 'On air: Artist - <script>literal</script>');
+  assert.equal(streamTitleText(live, false), '');
+  for (const title of [undefined, null, '', 'Canonical station']) {
+    const view = {...live, media: {...live.media, stream_title: title}};
+    assert.equal(validateState(view), view); assert.equal(streamTitleText(view, true), '');
+  }
+  for (const title of [7, {}, 'é'.repeat(513)]) assert.throws(() => validateState({...live, media: {...live.media, stream_title: title}}));
+  for (const phase of ['STOPPED', 'ERROR', 'LOADING', 'BUFFERING']) assert.equal(streamTitleText({...live, transport: {...live.transport, phase}}, true), '');
+  assert.equal(streamTitleText({...live, transport: {...live.transport, status: 'PENDING'}}, true), '');
+  assert.equal(streamTitleText({...live, media: {...live.media, is_live: false}}, true), '');
+  assert.equal(streamTitleText({...live, transport: {...live.transport, phase: 'PAUSED'}}, true), 'On air: Artist - <script>literal</script>');
+});
+
+const repairFavorite = () => ({...favorite(), id: 'b'.repeat(32), name: 'My morning radio', revision: 'c'.repeat(64)});
+const repairStation = {id: 'a'.repeat(32), name: 'New <station>', country: 'DE', codec: 'MP3', bitrate: 128};
+async function repairDraft() {
+  const h = await appHarness();
+  h.setFavorites(favorites([repairFavorite(), {...favorite(), id: 'configured:1', editable: false, revision: ''}]));
+  await h.refresh();
+  h.setPost(() => ({session_id: 'session-one', stations: [repairStation]}));
+  h.ids.get('radio-country').value = 'DE'; await h.ids.get('radio-form').fire('submit'); await h.settle();
+  const opener = h.ids.get('radio-results').querySelectorAll('button').find(item => item.dataset.radioAction === 'favorite_radio_target');
+  assert.ok(opener && !opener.disabled); await opener.fire('click');
+  return {h, opener, commands: () => h.posts().filter(body => body.action !== 'search')};
+}
+async function chooseRepair(h) {
+  h.ids.get('favorite-radio-select').value = repairFavorite().id;
+  await h.ids.get('favorite-radio-select').fire('change'); h.ids.get('favorite-metadata').value = 'clear';
+}
+test('radio repair requires explicit managed selection and metadata, with safe names and cancellable keyboard focus', async () => {
+  const {h, opener, commands} = await repairDraft();
+  assert.equal(h.ids.get('favorite-radio-select').value, ''); assert.equal(h.ids.get('favorite-submit').disabled, true);
+  assert.equal(h.focused(), h.ids.get('favorite-radio-select'));
+  assert.match(h.ids.get('favorite-radio-station').textContent, /New <station>/); assert.equal(h.ids.get('favorite-radio-station').children.length, 0);
+  assert.equal(h.ids.get('favorite-radio-select').children.length, 2, 'Prompt and managed favorite only');
+  assert.equal(h.ids.get('favorite-url-field').hidden, true); assert.equal(h.ids.get('favorite-name-field').hidden, true);
+  await chooseRepair(h); h.ids.get('favorite-metadata').value = '';
+  await h.ids.get('favorite-form').fire('submit'); assert.equal(commands().length, 0);
+  assert.match(h.ids.get('favorite-dialog-status').textContent, /Choose whether/);
+  assert.match(h.ids.get('favorite-delete-name').textContent, /My morning radio/);
+  await h.ids.get('favorite-dialog').fire('cancel');
+  assert.equal(h.ids.get('favorite-dialog').open, false); assert.equal(h.focused(), opener);
+  assert.equal(h.ids.get('favorite-radio-select').children.length, 0); assert.equal(commands().length, 0);
+});
+test('radio repair latches hidden target changes, deletion, new search or restarted sessions without sending', async () => {
+  for (const change of ['revision', 'delete', 'clear', 'restart']) {
+    const {h, commands} = await repairDraft(); await chooseRepair(h);
+    if (change === 'clear') await h.ids.get('radio-clear').fire('click');
+    else if (change === 'restart') {h.setState(state({session_id: 'new-session'})); h.setFavorites(favorites([repairFavorite()], 'new-session'));}
+    else h.setFavorites(favorites(change === 'delete' ? [] : [{...repairFavorite(), revision: 'd'.repeat(64)}]));
+    await h.refresh(); await h.ids.get('favorite-form').fire('submit');
+    assert.equal(commands().length, 0); assert.equal(h.ids.get('favorite-submit').disabled, true);
+    assert.match(h.ids.get('favorite-dialog-status').textContent, /changed/);
+  }
+});
+test('radio repair sends once, retains ACK or UNKNOWN, and expiry requires a fresh deliberate selection', async () => {
+  for (const outcome of ['ack', 'lost', 'committed', 'expired']) {
+    const {h, commands} = await repairDraft(); await chooseRepair(h);
+    h.setPost(() => {
+      if (outcome === 'lost') throw new Error('private target');
+      if (outcome === 'committed') return {__status: 502, error: 'command_failed', outcome: 'UNKNOWN', committed: true, message: 'private target'};
+      return outcome === 'expired' ? {__status: 409, error: 'radio_expired', outcome: 'REJECTED', message: 'Selection expired'} : {request_acknowledged: true};
+    });
+    await h.ids.get('favorite-form').fire('submit');
+    assert.deepEqual(commands(), [{action: 'favorite_radio_target', id: repairFavorite().id, station_id: repairStation.id,
+      metadata: 'clear', expected_favorite: repairFavorite().revision, expected_session: 'session-one'}]);
+    assert.equal(h.ids.get('favorite-radio-select').disabled, true); assert.equal(h.ids.get('favorite-metadata').disabled, true);
+    assert.equal(h.ids.get('favorite-submit').disabled, true);
+    assert.match(h.ids.get('favorite-dialog-status').textContent, outcome === 'ack' ? /^ACKNOWLEDGED.*not verified/ : ['lost', 'committed'].includes(outcome) ? /^UNKNOWN.*No retry/ : /^ERROR.*Search again/);
+    assert.equal(h.ids.get('notice-kind').textContent, outcome === 'ack' ? 'ACKNOWLEDGED' : ['lost', 'committed'].includes(outcome) ? 'UNKNOWN' : 'ERROR');
+    await h.refresh(); await h.ids.get('favorite-form').fire('submit'); assert.equal(commands().length, 1);
+  }
 });

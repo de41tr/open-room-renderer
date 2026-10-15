@@ -238,7 +238,8 @@ def verify_client(directory: str | Path) -> tuple[Path, dict]:
     receipt = json.loads(_read(root / "client-receipt.json"))
     machine = platform.machine().lower()
     spec = ARCHIVES.get(machine)
-    if (spec is None or receipt.get("format") != 1 or receipt.get("version") != UPSTREAM_VERSION
+    if (not isinstance(receipt, dict) or spec is None
+            or receipt.get("format") != 1 or receipt.get("version") != UPSTREAM_VERSION
             or receipt.get("commit") != UPSTREAM_COMMIT or receipt.get("archive_sha256") != spec[1]):
         fail("Use an intact client installed from the pinned official archive.")
     binary = root / "go-librespot"

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .queue import QueueItem
 from .radio import RadioResolutionError, public_station_reference
+from .radio_catalog import CatalogError, station_reference
 
 
 def canonical_target_url(item: QueueItem) -> str:
@@ -20,4 +21,9 @@ def canonical_target_url(item: QueueItem) -> str:
             or provenance[0] != item.url or item.stream_type != "station"
             or type(item.duration) not in (int, float) or item.duration != 0):
         raise RadioResolutionError("Invalid station provenance")
+    if isinstance(provenance[1], str) and provenance[1].startswith("rb:"):
+        try:
+            return station_reference(provenance[1][3:])
+        except CatalogError:
+            raise RadioResolutionError("Invalid station provenance") from None
     return public_station_reference(provenance[1])

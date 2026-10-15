@@ -171,7 +171,7 @@ async def test_http_target_keeps_current_playback_until_explicit_recall(tmp_path
         assert backend.url == EXACT and api.state.queue.current.url == EXACT
         assert api.state.queue.current.title == "Library name"
         assert all(getattr(api.state.queue.current, key) == "" for key in ("artist", "album", "artwork"))
-        assert backend.calls == [("loadfile", FIRST), ("loadfile", EXACT)]
+        assert backend.calls == [("loadfile", FIRST), ("stop", None), ("loadfile", EXACT)]
 
 
 async def test_target_edit_cannot_retarget_an_admitted_snapshot_awaiting_resolution(tmp_path):
@@ -205,7 +205,7 @@ async def test_target_edit_cannot_retarget_an_admitted_snapshot_awaiting_resolut
                 assert response.status == 200
             assert backend.url == SECOND and resolved == [FIRST, SECOND]
             assert api.state.queue.current.title == "Library name"
-            assert backend.calls == [("loadfile", FIRST), ("loadfile", SECOND)]
+            assert backend.calls == [("loadfile", FIRST), ("stop", None), ("loadfile", SECOND)]
         finally:
             release.set()
             if not pending.done():

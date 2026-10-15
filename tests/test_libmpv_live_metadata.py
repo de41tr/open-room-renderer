@@ -28,6 +28,7 @@ from fake_linkplay.config import Config
 from fake_linkplay.mpv_backend import LIVE_STATION_BACK_BYTES
 from fake_linkplay.http_api import HttpApi
 from fake_linkplay.state import RendererState
+from fake_linkplay.web_ui import PREFIX
 from test_libmpv_formats import _generate_media, _decoder_progress
 from test_libmpv_recovery import _StationBackend
 from test_libmpv_integration import _eventually
@@ -166,6 +167,9 @@ async def _exercise(library: str, ffmpeg: str, directory: Path, scenario: str) -
         assert item.stream_type == "station" and item.duration == 0
         assert backend.read_property("options/demuxer-max-back-bytes") == LIVE_STATION_BACK_BYTES
         assert backend.read_property("options/demuxer-donate-buffer") is False
+        if explicit:
+            api.favorites.add_current("Saved station", item)
+        favorites = api.favorites.document()
         native_entry_id = backend.read_property("playlist")[0]["id"]
         last_position = -1
         for title in TITLES:
@@ -193,6 +197,13 @@ async def _exercise(library: str, ffmpeg: str, directory: Path, scenario: str) -
             else:
                 # An explicit title must survive two normal monitor passes.
                 await asyncio.sleep(2 * api._monitor_interval + 0.05)
+            await _eventually("owned live stream title", lambda: api.state.stream_title == title, timeout=3)
+            async with env.client.get(env.base + PREFIX + "/state") as response:
+                assert response.status == 200
+                view = await response.json()
+            assert view["media"]["stream_title"] == title
+            assert view["media"]["title"] == expected
+            assert api.favorites.document() == favorites
             progress = await _decoder_progress(backend, url, "mp3")
             assert progress["after"] > last_position
             last_position = progress["after"]
@@ -212,7 +223,7 @@ async def _exercise(library: str, ffmpeg: str, directory: Path, scenario: str) -
             assert item.metadata == metadata
             assert item.title_is_fallback is not explicit
             evidence["updates"].append({"native_media_title": title, "native_metadata": backend.read_property("metadata"),
-                "renderer_title": expected, "playback_before": progress["before"], "playback_after": progress["after"],
+                "renderer_title": expected, "web_stream_title": view["media"]["stream_title"], "playback_before": progress["before"], "playback_after": progress["after"],
                 "event_counts": {service: len(events) for service, events in env.events.items()},
                 "opaque_didl_exact": bool(metadata), "generated_didl_follows_title": not bool(metadata),
                 "all_http_soap_gena_surfaces": True})
@@ -226,6 +237,7 @@ async def _exercise(library: str, ffmpeg: str, directory: Path, scenario: str) -
             station_title_preserved=explicit)
         await env.soap("Stop")
         assert backend.read_property("idle-active") is True
+        assert api.state.stream_title == "" and api.web_api.snapshot()["media"]["stream_title"] is None
         await _eventually("stream source cleanup", fixture.finished.is_set, timeout=3)
     evidence["cleanup"] = {"handle_closed": True, "listener_closed": True, "no_pending_tasks": True}
     return evidence

@@ -27,3 +27,6 @@
 
 /* Private managed-favorites transfer follows the other bounded dialogs. */
 #favorites-export-dialog,#favorites-restore-dialog{max-width:560px;max-height:calc(100dvh - 36px);overflow:auto}#favorites-export-dialog .dialog-actions,#favorites-restore-dialog .dialog-actions{flex-wrap:wrap}#favorites-export-download{display:inline-flex;align-items:center;text-decoration:none}#favorites-export-summary:empty,#favorites-restore-summary:empty{display:none}#favorites-restore-file{width:100%;min-height:42px;border:1px solid #d8dfd1;border-radius:8px;padding:9px 11px;background:var(--paper);color:var(--ink);font-size:12px;overflow:hidden}@media(max-width:430px){#favorites-export-dialog,#favorites-restore-dialog{padding:19px}}
+
+/* Community station results share the existing library controls. */
+.radio-fields{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:12px}.radio-toolbar,.radio-actions{display:flex;gap:8px;flex-wrap:wrap}.radio-toolbar{margin:15px 0}.radio-results{list-style:none;padding:0;margin:14px 0;max-height:420px;overflow:auto}.radio-row{padding:12px 0;border-bottom:1px solid var(--line)}.radio-actions{margin-top:9px}.radio-card a{color:var(--accent)}@media(max-width:430px){.radio-fields{grid-template-columns:1fr}.radio-fields .form-field{margin-top:14px}}

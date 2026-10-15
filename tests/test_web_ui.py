@@ -855,3 +855,92 @@ async def test_external_html_navigation_retains_host_origin_and_exact_metadata_g
         async with session.get(base + "/ui/", headers=headers) as response:
             assert response.status == 403 and (await response.json())["outcome"] == "REJECTED"
         assert not api.mpv.calls
+
+
+def _live_title_snapshot(api, title="Artist & duo - <Song>"):
+    """One coherent native entry; no decoder behavior is fabricated by this unit."""
+    url = "https://radio.example.test/live.mp3"
+    api.state.queue = PlaybackQueue(items=[QueueItem(url, title="Canonical station", source="Radio",
+        stream_type="station", metadata="Opaque canonical metadata")], index=1)
+    api._activate_queue_item()
+    api.state.backend_url = api.state.backend_original_url = url
+    api.state.mark_playing(url)
+    api._native_current_id = 7
+    return {"media-title": title, "path": url, "filename": "live.mp3", "playlist-path": None,
+        "playlist": [{"id": 7, "filename": url, "current": True, "playing": True}],
+        "idle-active": False, "eof-reached": False, "pause": False, "playback-time": 4,
+        "track-list": [{"type": "audio", "selected": True}]}
+
+
+def test_live_stream_title_is_separate_bounded_plaintext_and_not_persisted(api):
+    observed = _live_title_snapshot(api)
+    api.favorites.add_current("Saved station", api.state.queue.current)
+    favorite = api.favorites.document()
+    for title in ("Artist & duo - <Song>", "Next artist - <script>literal()</script>"):
+        observed["media-title"] = title
+        api._apply_backend_snapshot(observed)
+        assert api.web_api.snapshot()["media"]["stream_title"] == title
+        assert api.web_api.snapshot()["media"]["title"] == "Canonical station"
+        assert api.state.queue.current.title == "Canonical station"
+        assert api.state.as_player_status()["Title"] == "Canonical station"
+        assert api.state.track_metadata == "Opaque canonical metadata"
+        assert api.favorites.document() == favorite
+    for hidden in (None, "", "live.mp3", observed["path"], "secret?token=value", "bad\nvalue",
+                   "https%3A%2F%2Fprivate.example.test%2F%3Ftoken%3Dvalue"):
+        observed["media-title"] = hidden
+        api._apply_backend_snapshot(observed)
+        assert api.web_api.snapshot()["media"]["stream_title"] is None
+    observed["media-title"] = "é" * 1000
+    api._apply_backend_snapshot(observed)
+    assert api.state.stream_title == "é" * 512
+
+
+@pytest.mark.parametrize("unavailable", ["missing_source", "foreign_source", "foreign_entry", "buffering",
+                                         "stop", "error", "new_selection", "new_generation", "uncertain"])
+def test_live_stream_title_clears_when_observation_or_owner_is_unavailable(api, unavailable):
+    observed = _live_title_snapshot(api)
+    api._apply_backend_snapshot(observed)
+    assert api.web_api.snapshot()["media"]["stream_title"]
+    if unavailable == "missing_source":
+        observed.pop("path")
+    elif unavailable == "foreign_source":
+        observed["path"] = observed["playlist"][0]["filename"] = "https://other.example.test/live.mp3"
+    elif unavailable == "foreign_entry":
+        observed["playlist"][0]["id"] = 8
+    elif unavailable == "buffering":
+        observed["paused-for-cache"] = True
+    elif unavailable == "stop":
+        api.state.mark_stop()
+    elif unavailable == "error":
+        api.state.mark_error()
+    elif unavailable == "new_selection":
+        api.state.queue.items[0] = QueueItem("https://other.example.test/track.mp3", title="Other")
+        api._activate_queue_item()
+    elif unavailable == "new_generation":
+        api._accept_playback_command("play")
+        api.state.phase = PlaybackPhase.LOADING
+    else:
+        api._native_output_uncertain = True
+    api._apply_backend_snapshot(observed)
+    assert api.state.stream_title == ""
+    assert api.web_api.snapshot()["media"]["stream_title"] is None
+
+
+async def test_delayed_old_generation_cannot_replace_newer_stream_title(api):
+    observed = _live_title_snapshot(api)
+    api._apply_backend_snapshot(observed)
+    started, release = asyncio.Event(), asyncio.Event()
+    async def delayed():
+        started.set()
+        await release.wait()
+        return observed
+    api.mpv.snapshot = delayed
+    old = asyncio.create_task(api.sync_mpv_state())
+    await started.wait()
+    api._accept_playback_command("play")
+    assert api.state.stream_title == ""
+    newer = {**observed, "media-title": "New generation song"}
+    api._apply_backend_snapshot(newer)
+    release.set()
+    await old
+    assert api.web_api.snapshot()["media"]["stream_title"] == "New generation song"

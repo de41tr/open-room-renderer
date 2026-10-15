@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import asdict
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp.test_utils import make_mocked_request
@@ -185,6 +186,70 @@ async def test_playback_errors_are_safe_502_and_not_storage_errors(tmp_path, fai
         assert api.state.status != "play" and api.state.transport_status == "ERROR_OCCURRED"
         assert api.state.current_url == FIRST and backend.idle
         assert backend.calls == ([("loadfile", FIRST), ("stop", None)] if failure == "backend" else [])
+
+
+@pytest.mark.parametrize("failure", ["rejected", "not_idle", "readback"])
+async def test_unconfirmed_stop_prevents_favorite_replacement(tmp_path, failure):
+    async with running(configured(tmp_path)) as (api, backend, server, session):
+        await api.execute(ParsedCommand("MCUKeyShortClick:1"), "127.0.0.1")
+        chosen = api.favorites.add({"name": "Replacement", "url": SECOND})
+        queue, saved = api.state.queue, api.favorites.document()
+        if failure == "rejected":
+            backend.stop = AsyncMock(side_effect=BackendError("Synthetic Stop refusal"))
+        elif failure == "not_idle":
+            backend.stop = AsyncMock()  # Acknowledged, but the old source is still active.
+        else:
+            backend.snapshot = AsyncMock(return_value={"backend-error": True})
+        api._resolve_playback_url = AsyncMock(return_value=SECOND)
+        async with session.post(server.make_url(BASE + "/" + chosen["id"] + "/play")) as response:
+            assert response.status == 502
+        assert api.state.queue is queue and api.state.current_url == FIRST
+        assert api.state.phase == PlaybackPhase.ERROR and "silence not confirmed" in api.state.last_error
+        assert api.favorites.document() == saved
+        api._resolve_playback_url.assert_not_awaited()
+        assert [url for name, url in backend.calls if name == "loadfile"] == [FIRST]
+
+
+@pytest.mark.parametrize("new_owner", ["stop", "play"])
+async def test_new_owner_during_retirement_prevents_stale_favorite_publication(tmp_path, new_owner):
+    async with running(configured(tmp_path)) as (api, backend, server, session):
+        await api.execute(ParsedCommand("MCUKeyShortClick:1"), "127.0.0.1")
+        chosen = api.favorites.add({"name": "Stale replacement", "url": SECOND})
+        queue, saved = api.state.queue, api.favorites.document()
+        entered, release = asyncio.Event(), asyncio.Event()
+        original = backend.stop
+        async def delayed_stop():
+            entered.set()
+            await release.wait()
+            await original()
+        backend.stop = delayed_stop
+        api._resolve_playback_url = AsyncMock(side_effect=lambda url: url)
+        pending = asyncio.create_task(session.post(server.make_url(BASE + "/" + chosen["id"] + "/play")))
+        newer = None
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            assert api.state.queue is queue and api.state.current_url == FIRST
+            api._resolve_playback_url.assert_not_awaited()
+            generation = api.state.generation
+            newer = asyncio.create_task(api._transport_command("stop") if new_owner == "stop" else api._play_url(C))
+            async with asyncio.timeout(2):
+                while api.state.generation == generation:
+                    await asyncio.sleep(0)
+            release.set()
+            async with await asyncio.wait_for(pending, 2) as response:
+                assert response.status == 502
+            await asyncio.wait_for(newer, 2)
+            assert backend.url == (C if new_owner == "play" else "")
+            assert api.state.current_url == (C if new_owner == "play" else FIRST)
+            assert api.state.phase == (PlaybackPhase.PLAYING if new_owner == "play" else PlaybackPhase.STOPPED)
+            assert [url for name, url in backend.calls if name == "loadfile"] == ([FIRST, C] if new_owner == "play" else [FIRST])
+            assert api.favorites.document() == saved
+        finally:
+            release.set()
+            for task in (pending, newer):
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(*(task for task in (pending, newer) if task is not None), return_exceptions=True)
 
 
 @pytest.mark.parametrize("outcome", ["success", "resolution_failure", "cancel"])

@@ -28,6 +28,7 @@ from .mpv_backend import BackendError
 from .persistence import AtomicWriteCommittedError, atomic_write_text
 from .queue import PlaybackQueue, QueueItem
 from .radio import RadioResolutionError
+from .radio_catalog import CatalogPlaybackUnavailable
 
 LOG = logging.getLogger(__name__)
 
@@ -387,6 +388,8 @@ class FavoritesApi:
             await self.play_snapshot(selected)
             return web.json_response({"request_acknowledged": True, "favorite_id": identifier})
         except FavoriteError as exc:
+            return web.json_response({"error": exc.code, "message": str(exc)}, status=exc.status)
+        except CatalogPlaybackUnavailable as exc:
             return web.json_response({"error": exc.code, "message": str(exc)}, status=exc.status)
         except (BackendError, OSError, TimeoutError):
             return web.json_response({"error": "playback_failed",

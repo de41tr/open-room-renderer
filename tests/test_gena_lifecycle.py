@@ -370,7 +370,7 @@ async def test_backend_loss_converges_without_polling_and_stays_failed_until_exp
     assert await command("setPlayerCmd:play:" + second) == "OK"
     await eventually(lambda: last_change("AVTransport").get("TransportState") == "PLAYING")
     assert last_change("AVTransport")["TransportStatus"] == "OK"
-    assert env.api.mpv.calls == [("load", first), ("load", second)]
+    assert env.api.mpv.calls == [("load", first), ("stop", None), ("load", second)]
     state = await command("getPlayerStatus")
     assert state["uri"] == second and state["status"] == "play" and state["transport_error"] == ""
 

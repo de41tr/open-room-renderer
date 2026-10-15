@@ -18,6 +18,7 @@ import json
 import math
 import re
 import secrets
+import time
 from urllib.parse import unquote, urlsplit
 
 from aiohttp import web
@@ -36,6 +37,7 @@ from .queue_playlist import encode_current_playlist
 from .web_playlists import (PLAYLIST_ACTIONS, WebPlaylistError, availability as playlist_availability,
                             prepare_edit, prepare_source, prepare_urls)
 from .radio import RadioResolutionError
+from .radio_catalog import CatalogError, CatalogPlaybackUnavailable, CatalogStation, search_stations
 from .state import PlaybackPhase, RendererState
 
 PREFIX = "/orr/v1/web"
@@ -58,7 +60,7 @@ _HEADERS = {
         "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
 }
 _GENERATION_ACTIONS = frozenset({"play", "pause", "next", "previous", "seek",
-                               "queue_select", "queue_mode", "favorite_current"}) | PLAYLIST_ACTIONS
+                               "queue_select", "queue_mode", "favorite_current", "radio_play"}) | PLAYLIST_ACTIONS
 _SCHEMAS = {
     **{name: {"expected_generation"} for name in ("play", "pause", "next", "previous")},
     "device_rename": {"name", "expected_device"},
@@ -66,6 +68,8 @@ _SCHEMAS = {
     "volume": {"value"}, "mute": {"value"}, "balance": {"value"}, "eq": {"enabled"},
     "queue_select": {"queue_name", "index", "expected_generation"},
     "queue_mode": {"queue_name", "mode", "expected_generation"},
+    "radio_play": {"id", "expected_generation"}, "favorite_radio": {"id"},
+    "favorite_radio_target": {"id", "station_id", "metadata", "expected_favorite", "expected_session"},
     "favorite_add": {"name", "url"}, "favorite_current": {"name", "expected_generation"},
     "favorite_rename": {"id", "name"}, "favorite_target": {"id", "url", "metadata"},
     "favorite_delete": {"id"}, "favorite_play": {"id"},
@@ -113,6 +117,8 @@ class WebCommand:
     url: str = ""
     id: str = ""
     metadata: str = ""
+    station_id: str = ""
+    expected_favorite: str = ""
     expected_dsp: str = ""
     expected_device: str = ""
     expected_session: str = ""
@@ -160,6 +166,7 @@ class WebDspExport:
 class WebRuntime:
     """Synchronous renderer-owned availability and uncertainty observations."""
     actions: frozenset[str]
+    catalog_proxy_available: bool = True
     transport_unknown: bool = False
     transport_pending: bool = False
     gain_pending: bool = False
@@ -263,6 +270,12 @@ def _title(value: object, urls: tuple[str, ...], fallback: str) -> str:
         if value in forms:
             return fallback
     return visible
+
+
+def safe_stream_title(value: object, urls: tuple[str, ...]) -> str:
+    """Bound literal live metadata, excluding source basenames and URL secrets."""
+    visible = _dsp_name(_title(value, urls, ""))
+    return visible.encode("utf-8")[:MAX_TEXT_BYTES].decode("utf-8", errors="ignore")
 
 
 def _queue_label(name: str) -> str:
@@ -525,6 +538,12 @@ def decode_command(encoded: bytes) -> WebCommand:
         if "url" in payload:
             _text(payload["url"], 8192, required=True)
             validate_url(payload["url"])
+        if action == "favorite_radio_target":
+            if (not isinstance(payload["station_id"], str) or not re.fullmatch(r"[0-9a-f]{32}", payload["station_id"])
+                    or not isinstance(payload["expected_favorite"], str) or not _DSP_TOKEN.fullmatch(payload["expected_favorite"])
+                    or not isinstance(payload["expected_session"], str) or not _SESSION_TOKEN.fullmatch(payload["expected_session"])
+                    or payload["metadata"] not in ("keep", "clear")):
+                raise ValueError
         if action == "favorite_target":
             validate_target_edit(payload["url"], payload["metadata"])
         return WebCommand(**payload)
@@ -560,6 +579,8 @@ class WebControlApi:
         self._csrf_token = secrets.token_urlsafe(32)
         self._session_id = secrets.token_urlsafe(24)
         self._revision = 0
+        self._radio_busy = False
+        self._radio_results: dict[str, tuple[float, CatalogStation]] = {}
         # Keyed presentation tokens conceal raw plugin/name identifiers; they
         # are derived views, not a second revision counter or state authority.
         self._dsp_key = secrets.token_bytes(32)
@@ -615,6 +636,13 @@ class WebControlApi:
     def _error(code: str, status: int, outcome: str = "REJECTED", *, committed: bool = False,
                effect: str | None = None) -> web.Response:
         messages = {
+            "radio_proxy_unavailable": "The local radio proxy could not start. Check the renderer startup log and restart it after resolving the local listener error.",
+            "radio_unavailable": "Radio-Browser is unavailable. Try searching again later.",
+            "radio_busy": "A station search is already running. Wait for it to finish.",
+            "radio_expired": "This station selection expired. Search again before choosing it.",
+            "stale_favorite": "This favorite or renderer session changed. Reopen Replace favorite and review the selection.",
+            "configured_read_only": "Configured favorites are read-only.",
+            "radio_invalid": "Enter a station name (2–80 characters), a two-letter country code, or both.",
             "stale_output_inspection": "The renderer session changed. Refresh before inspecting again.",
             "output_inspection_busy": "An output inspection is already running. No new inspection was started.",
             "output_inspection_unavailable": "Output inspection is unavailable in this renderer.",
@@ -801,6 +829,11 @@ class WebControlApi:
                 "message": "Playback state is unconfirmed. Stop is available for recovery." if transport_status == "ERROR"
                     else "Waiting for renderer confirmation." if transport_status == "PENDING" else ""},
             "media": {"title": title, "artist": _display(state.artist), "album": _display(state.album),
+                "stream_title": (safe_stream_title(state.stream_title, (item.url, item.resolved_url,
+                    state.current_url, state.resolved_url, state.backend_url, state.backend_original_url)) or None)
+                    if (item and item.stream_type == "station" and state.intent in {"play", "pause"}
+                        and state.phase in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}
+                        and transport_status == "CONFIRMED" and state.backend_url) else None,
                 "artwork": safe_artwork(state.album_art_uri), "is_live": bool(item and item.stream_type == "station"),
                 "position_seconds": max(0, int(state.curpos)) if item and transport_status == "CONFIRMED" else None,
                 "duration_seconds": _duration(state.totlen)},
@@ -816,6 +849,10 @@ class WebControlApi:
             "dsp": dsp, "actions": actions,
         }
 
+    def favorite_revision(self, entry: dict[str, object]) -> str:
+        """Session-bound exact saved record identity; never disclose its URL."""
+        return self._dsp_digest("favorite", entry)
+
     def favorites_snapshot(self) -> dict[str, object]:
         document = self._favorites.document()
         records = []
@@ -829,6 +866,7 @@ class WebControlApi:
             # Never expose those legacy basename/query projections here.
             title = _title(entry["title"], (entry["url"],), "")
             records.append({"id": entry["id"], "editable": entry["editable"],
+                "revision": self.favorite_revision(entry) if entry["editable"] else "",
                 "name": _display(entry["name"], "Favorite"), "title": title,
                 "artist": _display(entry["artist"]), "album": _display(entry["album"]),
                 "artwork": safe_artwork(entry["artwork"]), "target_label": _display(target, "Saved target")})
@@ -847,6 +885,24 @@ class WebControlApi:
             if command.action == "queue_select" and not 1 <= command.index <= state.queue.count:
                 raise WebAdmissionError("unavailable", 409)
         runtime = self._runtime()
+        if command.action == "favorite_radio_target":
+            if not secrets.compare_digest(command.expected_session, self._session_id):
+                raise WebAdmissionError("stale_favorite", 409)
+            if command.id.startswith("configured:"):
+                raise WebAdmissionError("configured_read_only", 403)
+            entry = next((entry for entry in self._favorites.document()["favorites"]
+                          if entry["id"] == command.id and entry["editable"]), None)
+            if entry is None or not secrets.compare_digest(command.expected_favorite, self.favorite_revision(entry)):
+                raise WebAdmissionError("stale_favorite", 409)
+        if command.action in {"radio_play", "favorite_radio", "favorite_radio_target"}:
+            found = self._radio_results.get(command.station_id if command.action == "favorite_radio_target" else command.id)
+            if found is None or time.monotonic() - found[0] > 900:
+                raise WebAdmissionError("radio_expired", 409)
+            if command.action == "radio_play" and not runtime.catalog_proxy_available:
+                raise WebAdmissionError("radio_proxy_unavailable", 503)
+            if command.action == "radio_play" and (runtime.transport_unknown or runtime.transport_pending):
+                raise WebAdmissionError("unavailable", 409)
+            command = replace(command, name=found[1].name, url=found[1].reference)
         if command.action in {"play", "pause", "next", "previous", "seek"} and command.action not in runtime.actions:
             raise WebAdmissionError("unavailable", 409)
         if command.action == "queue_mode" and runtime.queue_mode_locked:
@@ -928,6 +984,38 @@ class WebControlApi:
         finally:
             self._output_inspection_busy = False
 
+    async def _radio_search(self, encoded: bytes) -> web.Response:
+        payload = _decode_request(encoded)
+        if payload.keys() != {"action", "name", "country"} or payload["action"] != "search":
+            raise WebAdmissionError("radio_invalid", 400)
+        name, country = payload["name"], payload["country"]
+        if (not isinstance(name, str) or name.strip() and not 2 <= len(name.strip()) <= 80
+                or _INVALID_TEXT.search(name) or not isinstance(country, str)
+                or country and not re.fullmatch(r"[A-Z]{2}", country)
+                or not name.strip() and not country):
+            raise WebAdmissionError("radio_invalid", 400)
+        if self._radio_busy:
+            raise WebAdmissionError("radio_busy", 409)
+        self._radio_busy = True
+        try:
+            stations = await search_stations(name, country)
+            now = time.monotonic()
+            self._radio_results = {key: value for key, value in self._radio_results.items()
+                                   if now - value[0] <= 900}
+            results = []
+            for station in stations:
+                token = secrets.token_hex(16)
+                self._radio_results[token] = (now, station)
+                results.append({"id": token, "name": station.name, "country": station.country,
+                                "codec": station.codec, "bitrate": station.bitrate})
+            while len(self._radio_results) > 100:
+                del self._radio_results[next(iter(self._radio_results))]
+            return web.json_response({"session_id": self._session_id, "stations": results}, headers=_HEADERS)
+        except CatalogError:
+            return self._error("radio_unavailable", 503, "ERROR")
+        finally:
+            self._radio_busy = False
+
     async def handle(self, request: web.Request) -> web.Response:
         dispatched = False
         try:
@@ -963,11 +1051,13 @@ class WebControlApi:
                             return self._error("favorites_unavailable", 503, "ERROR")
                         raise
                 return web.json_response(value, headers=_HEADERS)
-            if path not in {PREFIX + "/command", PREFIX + "/playlist/export", PREFIX + "/output/inspect", PREFIX + "/dsp/export", PREFIX + "/favorites/export"}:
+            if path not in {PREFIX + "/command", PREFIX + "/playlist/export", PREFIX + "/output/inspect", PREFIX + "/dsp/export", PREFIX + "/favorites/export", PREFIX + "/radio/search"}:
                 raise WebAdmissionError("not_found", 404)
             if request.method != "POST":
                 raise WebAdmissionError("method_not_allowed", 405)
             encoded = await self._body(request, origin)
+            if path == PREFIX + "/radio/search":
+                return await self._radio_search(encoded)
             if path == PREFIX + "/favorites/export":
                 return self._favorites_export(encoded)
             if path == PREFIX + "/dsp/export":
@@ -980,7 +1070,7 @@ class WebControlApi:
             dispatched = True
             result = await self._dispatch(command)
             return web.json_response({"request_acknowledged": True, **(result or {})}, headers=_HEADERS)
-        except WebAdmissionError as exc:
+        except (WebAdmissionError, CatalogPlaybackUnavailable) as exc:
             return self._error(exc.code, exc.status)
         except WebDspCommandError as exc:
             return self._error("command_failed", 502, "UNKNOWN", effect=exc.effect)

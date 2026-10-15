@@ -573,6 +573,48 @@ def test_shell_helpers_no_longer_elevate_or_default_to_port80():
     assert "sys.version_info >= (3, 11)" in setup
 
 
+@pytest.mark.parametrize("output,returncode", [
+    ('[{"name": "example-package", "version": "1.0"}]', 0),
+    ('[{"name": "example-package", "version": "1.0"}]', 1),
+    ("invalid JSON", 0),
+])
+def test_native_package_inventory_keeps_warnings_separate(
+        tmp_path, monkeypatch, capfd, output, returncode):
+    installer = load_script("install-native")
+    monkeypatch.setattr(installer, "environment", lambda **kwargs: {"alsa_pcm_accessible": False})
+    prefix = tmp_path / "native"
+    real_run = subprocess.run
+
+    def skip_package_build(args, **kwargs):
+        if args[1:3] == ["-m", "venv"]:
+            python = prefix / "venv/bin/python"
+            python.parent.mkdir(parents=True)
+            python.write_text(
+                f"#!{sys.executable}\nimport sys\n"
+                "sys.stderr.write('WARNING: temporary pip cache is unavailable\\n')\n"
+                f"sys.stdout.write({output!r})\nsys.exit({returncode})\n")
+            python.chmod(0o700)
+        elif args[1:4] != ["-m", "pip", "install"] and args[0] != str(prefix / "venv/bin/open-room-renderer"):
+            return real_run(args, **kwargs)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(installer.subprocess, "run", skip_package_build)
+    succeeded = returncode == 0 and output != "invalid JSON"
+    assert installer.main(["--prefix", str(prefix)]) == (0 if succeeded else 2)
+    captured = capfd.readouterr()
+    assert "WARNING: temporary pip cache is unavailable" in captured.err
+    receipt = json.loads((prefix / "installation-receipt.json").read_text())
+    assert receipt["mode"] == ("installed" if succeeded else "installation-incomplete")
+    if succeeded:
+        assert receipt["packages"] == json.loads(output)
+    else:
+        assert "Installation error:" in captured.err
+        assert "packages" not in receipt
+    manifest = json.loads((prefix / installer.MANIFEST).read_text())
+    assert {"venv/bin/python", "installation-receipt.json", "uninstall.py"} <= {
+        entry["path"] for entry in manifest["files"]}
+
+
 def test_incomplete_install_has_safe_manifest(installer, tmp_path, monkeypatch):
     prefix = tmp_path / "partial"
     def failed_venv(*args, **kwargs):
