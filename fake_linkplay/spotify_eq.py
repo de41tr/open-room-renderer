@@ -146,6 +146,16 @@ class SpotifyEqSource:
             self._entry_id = item["id"]
         return item["id"] == self._entry_id
 
+    async def _current_reader(self, generation: int, *, during_control: bool = False) -> bool:
+        def current():
+            return (self.active and not self.stopping and not self.failed and self.api is not None
+                    and generation == self.api.state.generation
+                    and (during_control or not self._lock.locked()))
+        if not current():
+            return False
+        snapshot = await self.api.mpv.snapshot()
+        return current() and not snapshot.get("backend-error") and self._owns_snapshot(snapshot)
+
     async def _spawn(self, binary: Path, directory: Path):
         # No account/environment tokens, user configuration or upstream logs are
         # inherited. The verified client needs only its native system libraries.
@@ -232,7 +242,8 @@ class SpotifyEqSource:
 
     async def observe(self) -> None:
         api = self.api
-        if not self.active or self.starting or self.stopping or self.failed or self._observing or api is None:
+        if (not self.active or self.starting or self.stopping or self.failed
+                or self._observing or self._lock.locked() or api is None):
             return
         self._observing = True
         generation = api.state.generation
@@ -241,6 +252,17 @@ class SpotifyEqSource:
             provider = await self._read_provider()
             async with api._backend_lock:
                 snapshot = await api.mpv.snapshot()
+                status = provider.get("status")
+                # An app Resume only restarts the producer. If ORR previously
+                # paused its reader, reconcile that one owned reader as well.
+                # Never race a newer Web control, Stop, or source generation.
+                if (self.active and not self.stopping and not self._lock.locked()
+                        and generation == api.state.generation and not snapshot.get("backend-error")
+                        and self._owns_snapshot(snapshot) and snapshot.get("pause") is True
+                        and status and not status["paused"] and not status["stopped"]):
+                    await api._gain_reconciling_call(api.mpv.resume(
+                        current=lambda: self._current_reader(generation)))
+                    snapshot = await api.mpv.snapshot()
             if not self.active or self.stopping or generation != api.state.generation:
                 return
             if snapshot.get("backend-error") or not self._owns_snapshot(snapshot):
@@ -304,7 +326,8 @@ class SpotifyEqSource:
                     async with api._backend_lock:
                         if not self._owns_snapshot(await api.mpv.snapshot()):
                             raise BackendError("Spotify PCM ownership changed before control")
-                        await api._gain_reconciling_call(api.mpv.resume())
+                        await api._gain_reconciling_call(api.mpv.resume(
+                            current=lambda: self._current_reader(generation, during_control=True)))
                 result = await asyncio.to_thread(control, "127.0.0.1", self.profile["port"],
                     str(self.process.pid), command, None, self._validate_child)
                 status = (result.get("provider_after") or {}).get("status")
@@ -325,26 +348,39 @@ class SpotifyEqSource:
                 api.state.mark_error("Spotify transport unconfirmed; Stop before changing sources")
                 raise BackendError("Spotify transport unconfirmed") from None
 
-    async def _stop(self) -> None:
-        async with self._lock:
-            self.stopping = True
-            api = self.api
-            if api is not None:
-                api._accept_playback_command("stop")
-                api.state.mark_transitioning()
+    async def _reap_producer(self) -> None:
+        # go-librespot has no child-process launch in this pinned mode.
+        child = self.process
+        if child is not None and child.returncode is None:
             try:
-                # Terminate/reap the producer before Stop can release the reader.
-                # go-librespot has no child-process launch in this pinned mode.
-                child = self.process
-                if child is not None and child.returncode is None:
-                    child.terminate()
-                    try:
-                        await asyncio.wait_for(child.wait(), 3)
-                    except TimeoutError:
-                        child.kill()
-                        await asyncio.wait_for(child.wait(), 3)
-                if child is not None and child.returncode is None:
-                    raise BackendError("Spotify producer exit was not confirmed")
+                child.terminate()
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(child.wait(), 3)
+            except TimeoutError:
+                try:
+                    child.kill()
+                except ProcessLookupError:
+                    pass
+                await asyncio.wait_for(child.wait(), 3)
+        if child is not None and child.returncode is None:
+            raise BackendError("Spotify producer exit was not confirmed")
+
+    async def _stop(self) -> None:
+        api = self.api
+        if api is not None:
+            api._accept_playback_command("stop")
+            api.state.mark_transitioning()
+        try:
+            # Reap even if a provider control still holds the lifecycle lock.
+            # Its owned connection then closes; shutdown cannot leave a live
+            # producer merely because the control used its whole HTTP deadline.
+            await self._reap_producer()
+            async with self._lock:
+                # Startup might have been awaiting child creation when close()
+                # set stopping. Capture/reap that child before reader release.
+                await self._reap_producer()
                 if api is not None and self.fifo is not None:
                     async with api._backend_lock:
                         snapshot = await api.mpv.snapshot()
@@ -352,7 +388,7 @@ class SpotifyEqSource:
                             raise BackendError("Spotify output release is unknown")
                         if snapshot.get("idle-active") is not True:
                             if not self._owns_snapshot(snapshot):
-                                raise BackendError("Spotify output ownership changed; stop the foreground renderer")
+                                raise BackendError("Spotify output ownership changed; stop the renderer")
                             await api.mpv.stop()
                             snapshot = await api.mpv.snapshot()
                         if snapshot.get("idle-active") is not True:
@@ -373,17 +409,25 @@ class SpotifyEqSource:
                         api._activate_queue_item()
                     api.state.mark_stop()
                     api._schedule_event_notify()
-            except (OSError, BackendError, TimeoutError):
-                self.failed = True
-                if api is not None:
-                    api.state.mark_error("Spotify stop unconfirmed; no new source may start")
-                raise BackendError("Spotify stop unconfirmed; stop the foreground renderer") from None
+        except (OSError, BackendError, TimeoutError):
+            self.failed = True
+            if api is not None:
+                api.state.mark_error("Spotify stop unconfirmed; no new source may start")
+            raise BackendError("Spotify stop unconfirmed; stop the renderer") from None
 
     async def close(self) -> None:
         if not self.active:
             return
         if self._stop_task is None:
             self.stopping = True
+            # Do not wait behind a blocked provider control before interrupting
+            # our own producer. Closing its socket releases that control's lock;
+            # only _stop's reaping + native idle proof release source ownership.
+            if self.process is not None and self.process.returncode is None:
+                try:
+                    self.process.terminate()
+                except ProcessLookupError:
+                    pass
             self._stop_task = asyncio.create_task(self._stop())
         # A cancelled HTTP waiter must not abandon child reaping or enable a
         # replacement while cleanup is still running. Failed stops stay blocked.

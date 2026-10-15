@@ -91,6 +91,12 @@ async def exercise(library: str, root: Path):
         await api.execute(ParsedCommand('EQOff'), '127.0.0.1')
         assert backend.read_property('af') == []
         await _eventually('bypass PCM samples', lambda: sink.stat().st_size >= 16000*2*4*(boundary+1.8), 7)
+        # Model app Resume after ORR paused the native reader. The provider
+        # fixture still reports play; reconciliation uses the existing DSP guard.
+        await backend.pause()
+        assert backend.read_property('pause') is True
+        await source.observe()
+        assert backend.read_property('pause') is False
         await source.close()
         assert child.returncode is not None and not runtime.exists() and source.keepalive is None
         assert api.spotify_source is None and backend.read_property('idle-active') is True

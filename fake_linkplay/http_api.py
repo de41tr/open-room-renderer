@@ -211,7 +211,7 @@ class HttpApi:
         if state.phase == PlaybackPhase.ERROR or getattr(mpv, "gain_confirmed", True) is False:
             state.gain_confirmed = False
         self.mpv = mpv
-        self.spotify_source = None  # Only an explicit foreground Spotify EQ run can attach it.
+        self.spotify_source = None  # Only an explicit Spotify EQ startup can attach it.
         self.on_rename = on_rename
         self._rename_lock = asyncio.Lock()
         self.queue_url = ""

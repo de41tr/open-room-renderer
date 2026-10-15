@@ -208,3 +208,62 @@ async def test_config_opt_in_uses_same_service_and_holds_listeners(tmp_path, mon
     assert len(called) == 1 and path.read_bytes() == before
     with socket.socket() as released:
         released.bind(('127.0.0.1', port))
+
+
+@pytest.mark.asyncio
+async def test_stop_interrupts_own_producer_before_waiting_for_control_lock(tmp_path, monkeypatch):
+    source, api, backend = await started(tmp_path, monkeypatch)
+    await source._lock.acquire()  # A bounded provider request is still in flight.
+    waiter = asyncio.create_task(source.close())
+    await asyncio.sleep(0)
+    assert source.child.terminated and source.stopping
+    for _ in range(10):
+        await asyncio.sleep(0)
+        if source.child.returncode is not None:
+            break
+    assert source.child.returncode is not None  # Reaped before the lock is free.
+    assert api.spotify_source is source and source.active and backend.stops == 0
+    source._lock.release()
+    await waiter
+    assert source.child.returncode is not None and backend.stops == 1
+    assert not source.active and api.spotify_source is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('superseded', [False, 'before_resume', 'during_gain'])
+async def test_spotify_app_resume_releases_only_current_paused_reader(tmp_path, monkeypatch, superseded):
+    from unittest.mock import AsyncMock
+    source, api, backend = await started(tmp_path, monkeypatch)
+    native_snapshot = backend.snapshot
+    paused = True
+    async def snapshot():
+        return {**await native_snapshot(), 'pause': paused, 'core-idle': paused,
+                'audio-params': {'samplerate': 44100}, 'paused-for-cache': False}
+    async def resume(*, current):
+        nonlocal paused
+        if superseded == 'during_gain':
+            api._accept_playback_command('pause')
+        if not await current():
+            raise BackendError('synthetic current guard rejected stale resume')
+        paused = False
+        return {'error': 'success'}
+    async def provider():
+        if superseded == 'before_resume':
+            api._accept_playback_command('pause')
+        return {'status': {'paused': False, 'stopped': False, 'buffering': False}, 'track': None}
+    backend.snapshot = snapshot
+    backend.resume = AsyncMock(side_effect=resume)
+    source._read_provider = provider
+    try:
+        await source.observe()
+        if superseded:
+            if superseded == 'before_resume':
+                backend.resume.assert_not_awaited()
+            else:
+                backend.resume.assert_awaited_once()
+            assert paused and not source.failed
+        else:
+            backend.resume.assert_awaited_once()
+            assert not paused and api.state.gain_confirmed
+    finally:
+        await source.close()
