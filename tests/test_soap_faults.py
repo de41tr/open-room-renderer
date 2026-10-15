@@ -238,3 +238,127 @@ async def test_invalid_seek_time_is_rejected_before_any_mutation(api, target):
     assert fault_code(response) == "402"
     api._seek_command.assert_not_awaited()
     assert asdict(api.state) == before and not api.mpv.calls
+
+
+CREATE_QUEUE_REJECTION_HEADER = "X-Open-Room-CreateQueue-Rejection"
+# Pin the pre-diagnostic wire body, independently of fault_xml().
+INVALID_ARGS_BODY = (
+    b'<?xml version="1.0" encoding="utf-8"?>'
+    b'<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault>'
+    b'<faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>'
+    b'<detail><UPnPError xmlns="urn:schemas-upnp-org:control-1-0">'
+    b'<errorCode>402</errorCode><errorDescription>Invalid Args</errorDescription>'
+    b'</UPnPError></detail></s:Fault></s:Body></s:Envelope>'
+)
+
+
+@pytest.mark.parametrize("context,reason", [
+    ("", "queue-context-missing"),
+    ("<PlayList>", "queue-xml"),
+    ("<Other/>", "queue-structure"),
+    ("<PlayList><ListInfo/><ListInfo/></PlayList>", "queue-structure"),
+    ("<PlayList><Count>1</Count></PlayList>", "queue-count"),
+    ("<PlayList><Count>bad</Count></PlayList>", "queue-count"),
+    ("<PlayList><Count>0</Count><ListInfo><Count>1</Count></ListInfo></PlayList>", "queue-count"),
+    ("<PlayList><Index>1</Index></PlayList>", "queue-index"),
+    ("<PlayList><Index>bad</Index></PlayList>", "queue-index"),
+    ("<PlayList><Tracks><Track1><Title>synthetic-private-title</Title></Track1></Tracks></PlayList>", "queue-track-url"),
+    ("<PlayList><LoopMode>5</LoopMode></PlayList>", "queue-loop"),
+    ("<PlayList><LoopMode>bad</LoopMode></PlayList>", "queue-loop"),
+    ("<PlayList><Tracks><Track1><URL>https://media.example.test/private?token=synthetic-secret</URL>"
+     "<Duration>nan</Duration></Track1></Tracks></PlayList>", "queue-duration"),
+    ("<PlayList><QueueName/></PlayList>", "queue-name"),
+    ("<PlayList><Count>1001</Count></PlayList>", "queue-limit"),
+    ("<PlayList>" + "<Extension>" * 33 + "</Extension>" * 33 + "</PlayList>", "queue-limit"),
+    ("<PlayList><ListInfo><SourceName>synthetic-private-provider</SourceName>"
+     "<StreamId>s123</StreamId></ListInfo></PlayList>", "provider-source"),
+    ("<PlayList><ListInfo><SourceName>newTuneIn</SourceName>"
+     "<StreamId>synthetic-private-id</StreamId></ListInfo></PlayList>", "provider-station-id"),
+    ("<PlayList><ListInfo><SourceName>newTuneIn</SourceName><StreamId>s123</StreamId>"
+     "<StreamType>synthetic-private-type</StreamType></ListInfo></PlayList>", "provider-stream-type"),
+])
+async def test_create_queue_rejection_reason_preserves_fault_and_state(api, context, reason):
+    from unittest.mock import Mock
+
+    before = asdict(api.state)
+    api._resolve_station_id = AsyncMock()
+    api._schedule_event_notify = Mock()
+    response = await api.soap(request("CreateQueue", f"<QueueContext>{escape(context)}</QueueContext>", "PlayQueue"))
+    assert response.status == 500
+    assert response.body == INVALID_ARGS_BODY
+    assert response.headers[CREATE_QUEUE_REJECTION_HEADER] == reason
+    assert response.content_type == "text/xml"
+    assert asdict(api.state) == before
+    assert api.queue_context == ""
+    assert not api.mpv.calls
+    api._resolve_station_id.assert_not_awaited()
+    api._schedule_event_notify.assert_not_called()
+    assert "synthetic-private" not in str(dict(response.headers))
+    assert "synthetic-secret" not in str(dict(response.headers))
+    assert "example.test" not in str(dict(response.headers))
+
+
+@pytest.mark.parametrize("kind", ["malformed", "duplicate", "nested", "double_action", "dtd"])
+async def test_create_queue_framing_reason_preserves_fault(api, kind):
+    req = request("CreateQueue", "<QueueContext>&lt;PlayList/&gt;</QueueContext>", "PlayQueue")
+    body = await req.text()
+    if kind == "malformed":
+        body = "<synthetic-private-broken>"
+    elif kind == "duplicate":
+        body = body.replace("</u:CreateQueue>", "<QueueContext>synthetic-private</QueueContext></u:CreateQueue>")
+    elif kind == "nested":
+        body = body.replace("&lt;PlayList/&gt;", "<synthetic-private/>")
+    elif kind == "double_action":
+        body = body.replace("</s:Body>", "<synthetic-private/></s:Body>")
+    else:
+        body = '<!DOCTYPE synthetic-private []>' + body
+    req.text = AsyncMock(return_value=body)
+    before = asdict(api.state)
+    response = await api.soap(req)
+    assert response.status == 500
+    assert response.body == INVALID_ARGS_BODY
+    assert response.headers[CREATE_QUEUE_REJECTION_HEADER] == "soap-framing"
+    assert asdict(api.state) == before
+    assert not api.mpv.calls
+
+
+@pytest.mark.parametrize("error_type", [ValueError, TypeError, OverflowError])
+async def test_create_queue_unknown_exception_never_copies_text(api, error_type):
+    api._execute_soap_side_effect = AsyncMock(side_effect=error_type("https://private.example.test/?token=synthetic-secret\r\nX-Injected: yes"))
+    response = await api.soap(request("CreateQueue", "<QueueContext>&lt;PlayList/&gt;</QueueContext>", "PlayQueue"))
+    assert response.status == 500
+    assert response.body == INVALID_ARGS_BODY
+    assert response.headers[CREATE_QUEUE_REJECTION_HEADER] == "unknown"
+    assert set(response.headers) == {"Content-Type", CREATE_QUEUE_REJECTION_HEADER}
+
+
+async def test_create_queue_unclassified_or_untrusted_reason_is_closed(api):
+    from fake_linkplay.soap import SoapFault
+
+    for reason in (None, "https://private.example.test/?token=synthetic-secret\r\nX-Injected: yes"):
+        api._execute_soap_side_effect = AsyncMock(side_effect=SoapFault(402, "Invalid Args", queue_rejection=reason))
+        response = await api.soap(request("CreateQueue", service="PlayQueue"))
+        assert response.body == INVALID_ARGS_BODY
+        assert response.headers[CREATE_QUEUE_REJECTION_HEADER] == "unknown"
+        assert set(response.headers) == {"Content-Type", CREATE_QUEUE_REJECTION_HEADER}
+
+
+async def test_create_queue_diagnostic_is_request_local_and_402_only(api):
+    rejected = await api.soap(request("CreateQueue", service="PlayQueue"))
+    assert rejected.headers[CREATE_QUEUE_REJECTION_HEADER] == "queue-context-missing"
+    for req, status, code in [
+        (request("CreateQueue", "<QueueContext>&lt;PlayList/&gt;</QueueContext>", "PlayQueue"), 200, None),
+        (request("ReplaceQueue", service="PlayQueue"), 500, "402"),
+        (request("SetVolume", service="RenderingControl"), 500, "402"),
+        (request("CreateQueue", service="AVTransport"), 500, "401"),
+        (request("CreateQueue", service="PlayQueue", header='"urn:example:wrong#CreateQueue"'), 500, "401"),
+    ]:
+        response = await api.soap(req)
+        assert response.status == status
+        assert CREATE_QUEUE_REJECTION_HEADER not in response.headers
+        if code:
+            assert fault_code(response) == code
+    api._execute_soap_side_effect = AsyncMock(side_effect=BackendError("synthetic-private"))
+    response = await api.soap(request("CreateQueue", service="PlayQueue"))
+    assert fault_code(response) == "501"
+    assert CREATE_QUEUE_REJECTION_HEADER not in response.headers
