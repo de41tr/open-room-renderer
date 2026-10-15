@@ -1903,22 +1903,11 @@ class HttpApi:
             if not parsed.args or (name == "playlist" and len(parsed.args) > 1 and parsed.args[1] != "0"):
                 raise ValueError("Unsupported playlist index")
             url = parsed.args[0]
-            # Validate the candidate before stopping staged native playback or
-            # touching the current selection, generation or metadata.
+            # Validate before retiring any output or publishing the selection.
             queue = PlaybackQueue(items=[QueueItem(url=url, source="CustomRadio")], index=1)
             if self._native_stage is not None or self._native_current_id is not None or self._native_output_uncertain:
                 await self._transport_command("stop")
-            self.queue_url = url
-            self.queue_title = url.rsplit("/", 1)[-1] or "Network stream"
-            self.queue_source = "CustomRadio"
-            self.queue_search_url = url
-            self.queue_pic_url = ""
-            self.state.track_source = self.queue_source
-            self.state.play_medium = "STATION-NETWORK"
-            self.state.album_art_uri = ""
-            self.state.track_metadata = self._didl_metadata(url, self.queue_title, self.queue_source)
-            self.state.queue = queue
-            self._activate_queue_item()
+            await self._replace_queue(queue)
             await self._play_url(url)
             self._schedule_event_notify()
             return "OK"

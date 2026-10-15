@@ -51,4 +51,4 @@ async def test_playlist_rejects_invalid_input_before_displacing_current_playback
     async with local_renderer.session.get(local_renderer.base_url + "/httpapi.asp",
             params={"command": "setPlayerCmd:playlist:" + quote(MEDIA_URI, safe="") + ":0"}) as response:
         assert response.status == 200 and await response.text() == "OK"
-    assert backend.calls == calls + [("loadfile", MEDIA_URI)]
+    assert backend.calls == calls + [("stop", None), ("loadfile", MEDIA_URI)]
