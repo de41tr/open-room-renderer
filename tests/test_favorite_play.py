@@ -61,7 +61,7 @@ async def test_http_stable_recall_after_compaction_preserves_exact_display(tmp_p
         assert {field: getattr(item, field) for field in ("title", "artist", "album", "artwork")} == {
             field: metadata[field] for field in ("title", "artist", "album", "artwork")}
         assert item.source == "Preset" and api.state.status == "play"
-        assert backend.calls == [("loadfile", SECOND)]
+        assert backend.calls == [("loadfile", SECOND), ("resume", None)]
 
 
 async def test_invalid_unknown_deleted_and_body_requests_do_not_mutate_playback(tmp_path):
@@ -129,7 +129,7 @@ async def test_edits_during_resolution_cannot_retarget_admitted_snapshot(tmp_pat
             assert item.id == "preset:4" and item.artwork == FIRST
             async with session.post(server.make_url(BASE + "/" + chosen["id"] + "/play")) as response:
                 assert response.status == 404
-            assert backend.calls == [("loadfile", SECOND)]
+            assert backend.calls == [("loadfile", SECOND), ("resume", None)]
         finally:
             release.set()
             if not pending.done():

@@ -146,7 +146,7 @@ async def test_failed_resume_does_not_report_known_gain(api):
 @pytest.mark.asyncio
 async def test_cancelled_load_does_not_report_known_gain(api):
     entered = asyncio.Event()
-    async def uncertain(*args):
+    async def uncertain(*args, **kwargs):
         entered.set()
         await asyncio.Future()
     api.mpv.loadfile = uncertain

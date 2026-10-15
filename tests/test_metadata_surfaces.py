@@ -98,9 +98,14 @@ class MetadataBackend:
     snapshot_path: str | None = None
     loads: list[str] = field(default_factory=list)
 
-    async def loadfile(self, url: str, options: dict[str, str] | None = None) -> None:
+    async def loadfile(self, url: str, options: dict[str, str] | None = None, *, start_paused=False) -> None:
         self.loads.append(url)
-        self.url, self.idle, self.paused = url, False, False
+        self.url, self.idle, self.paused = url, False, start_paused
+
+    async def resume(self, *, current=None):
+        if current is not None and not await current():
+            raise BackendError("Playback command superseded")
+        self.paused = False
 
     async def stop(self) -> None:
         self.url, self.idle, self.paused = "", True, False

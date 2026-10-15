@@ -37,8 +37,8 @@ class NativeBackend(StatefulBackend):
         self.playlist_path = None
         self.duration = 30.0
 
-    async def loadfile(self, url, options=None):
-        result = await super().loadfile(url, options)
+    async def loadfile(self, url, options=None, *, start_paused=False):
+        result = await super().loadfile(url, options, start_paused=start_paused)
         self.serial += 1
         self.entry_id = self.serial
         self.entries = [{"id": self.entry_id, "filename": url}]
@@ -353,7 +353,7 @@ async def test_seek_at_native_transition_uses_actual_successor_duration_and_id(t
     assert api.state.queue.index == 2 and api.state.curpos == 8
     assert api.state.phase == PlaybackPhase.PLAYING and not api.mpv.paused
     assert mutations(api, "seek") == [8]
-    assert mutations(api, "pause") == [None] and mutations(api, "resume") == [None]
+    assert mutations(api, "pause") == [None] and mutations(api, "resume") == [None, None]
     assert mutations(api, "load") == [A]
 
 

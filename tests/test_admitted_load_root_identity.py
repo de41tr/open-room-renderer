@@ -13,8 +13,8 @@ from test_native_queue_staging import A, B, C, make_api, start
 
 def acknowledge(api, data=None):
     original = api.mpv.loadfile
-    async def load(url, options=None):
-        result = await original(url, options)
+    async def load(url, options=None, *, start_paused=False):
+        result = await original(url, options, start_paused=start_paused)
         return {**result, "data": {"playlist_entry_id": api.mpv.entry_id} if data is None else data}
     api.mpv.loadfile = load
 

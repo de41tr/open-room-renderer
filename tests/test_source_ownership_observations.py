@@ -182,7 +182,7 @@ async def test_explicit_owner_recovery_reuses_checked_stop_and_load(tmp_path, ki
     else:
         assert api.state.phase == PlaybackPhase.PLAYING and api.mpv.url == selected
         assert api.state.gain_confirmed
-        assert api.mpv.calls[calls:] == [("stop", None), ("load", selected)]
+        assert api.mpv.calls[calls:] == [("stop", None), ("load", selected), ("resume", None)]
 
 
 async def test_failed_explicit_stop_cannot_load_or_claim_silence(tmp_path):

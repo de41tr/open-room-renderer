@@ -26,21 +26,23 @@ class StatefulBackend:
         self.load_started = asyncio.Event()
         self.release_load = None
 
-    async def loadfile(self, url, options=None):
+    async def loadfile(self, url, options=None, *, start_paused=False):
         self.calls.append(("load", url))
         self.load_started.set()
         if self.release_load:
             await self.release_load.wait()
         if self.fail:
             raise BackendError("synthetic load failure")
-        self.url, self.idle, self.paused = url, False, False
+        self.url, self.idle, self.paused = url, False, start_paused
         return {"error": "success"}
 
     async def pause(self):
         self.calls.append(("pause", None))
         self.paused = True
 
-    async def resume(self):
+    async def resume(self, *, current=None):
+        if current is not None and not await current():
+            raise BackendError("Playback command superseded")
         self.calls.append(("resume", None))
         self.paused = False
 
@@ -173,7 +175,7 @@ async def test_new_source_wins_over_old_resolver(api):
         await old
     assert api.state.current_url == second
     assert api.mpv.url == second
-    assert api.mpv.calls == [("load", second)]
+    assert api.mpv.calls == [("load", second), ("resume", None)]
 
 
 @pytest.mark.asyncio
@@ -266,7 +268,7 @@ async def test_stop_then_http_resume_reloads_selected_media(api):
     assert api.state.backend_url == ""
     await api.execute(ParsedCommand("resume"), "192.0.2.1")
     assert api.mpv.url == url
-    assert [c[0] for c in api.mpv.calls] == ["load", "stop", "load"]
+    assert [c[0] for c in api.mpv.calls] == ["load", "resume", "stop", "load", "resume"]
     assert api.state.phase == PlaybackPhase.PLAYING
 
 
