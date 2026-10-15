@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import ExitStack
 import errno
 import logging
 import re
@@ -71,7 +72,7 @@ async def _start_catalog_proxy(api: HttpApi, runners: list[web.AppRunner]) -> No
         LOG.warning("Radio catalog loopback proxy unavailable; ordinary renderer startup continues")
 
 
-async def serve(config_path: str | None = None) -> None:
+async def serve(config_path: str | None = None, *, spotify_source=None) -> None:
     """Start HTTP, discovery, mDNS, and mpv services until interrupted.
 
     Args:
@@ -83,8 +84,22 @@ async def serve(config_path: str | None = None) -> None:
         runtime state through lower-level handlers.
     """
 
-    cfg = (load_startup_config("configs/config.example.yaml", missing_ok=True)
-           if config_path is None else load_startup_config(config_path))
+    # Opt-in reserves the existing listener addresses before identity/state or
+    # mpv access. A duplicate invocation cannot stop/adopt the running renderer.
+    with ExitStack() as resources:
+        listener_sockets = None
+        def prepare(cfg):
+            nonlocal spotify_source, listener_sockets
+            if cfg.spotify_eq_profile is None and spotify_source is None:
+                return
+            from .spotify_eq import prepare_activation
+            spotify_source, listener_sockets = prepare_activation(cfg, spotify_source, resources)
+        cfg = (load_startup_config("configs/config.example.yaml", missing_ok=True, before_state=prepare)
+               if config_path is None else load_startup_config(config_path, before_state=prepare))
+        await _serve(cfg, spotify_source=spotify_source, listener_sockets=listener_sockets)
+
+
+async def _serve(cfg, *, spotify_source=None, listener_sockets=None) -> None:
     setup_logging(cfg.log_level)
     state = RendererState.from_config(cfg)
     mpv = MpvBackend(
@@ -115,6 +130,8 @@ async def serve(config_path: str | None = None) -> None:
         # setup receives the same cleanup as a fully running service. One
         # cleanup failure must not strand the remaining listeners or child.
         resources = []
+        if spotify_source is not None:
+            resources.append(("Spotify PCM source", spotify_source.close))
         if mdns is not None:
             resources.append(("mDNS", mdns.stop))
         if ssdp is not None:
@@ -163,7 +180,10 @@ async def serve(config_path: str | None = None) -> None:
             runners.append(runner)
             await runner.setup()
             try:
-                await web.TCPSite(runner, cfg.bind_address, port).start()
+                if listener_sockets is None:
+                    await web.TCPSite(runner, cfg.bind_address, port).start()
+                else:
+                    await web.SockSite(runner, listener_sockets[port]).start()
             except OSError as exc:
                 if exc.errno != errno.EADDRINUSE:
                     raise
@@ -189,6 +209,15 @@ async def serve(config_path: str | None = None) -> None:
         LOG.info("mpv socket: %s", cfg.mpv_socket)
         LOG.info("Acceptance: ./scripts/acceptance-open-source-client.sh")
         LOG.info('Curl: curl "http://%s:%s/httpapi.asp?command=getStatusEx" | jq', cfg.resolved_advertise_ip, cfg.http_api_port)
+        if spotify_source is not None:
+            try:
+                await spotify_source.start(api)
+            except (BackendError, OSError, ValueError):
+                # Keep the normal service/UI available; do not turn an account
+                # or receiver failure into the unit's automatic restart loop.
+                spotify_source.failed = True
+                state.mark_error("Spotify startup unconfirmed; Stop before changing sources")
+                LOG.warning("Spotify startup unconfirmed; no automatic receiver retry")
         await asyncio.Event().wait()
     except asyncio.CancelledError:
         if not signal_requested:
@@ -393,6 +422,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "discover":
         return run_discovery(args)
     if args.cmd == "spotify":
+        if args.spotify_cmd == "eq":
+            from .spotify_eq import run_eq
+            return run_eq(args)
         if args.spotify_cmd in {"receiver", "install-client"}:
             from .spotify_receiver import run_receiver
             return run_receiver(args)

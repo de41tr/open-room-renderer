@@ -174,6 +174,11 @@ user-service cgroups before selecting one direct-ALSA engine. Spotify bypasses
 ORR EQ/balance; account, provider-policy and physical XU4/KA17 acceptance remain
 open. It is opt-in; setup never activates a client.
 
+A separate opt-in [Spotify-through-existing-EQ foreground candidate](docs/SPOTIFY_EQ.md)
+keeps the ORR Web UI/EQ active using upstream's PCM pipe output. It supports local
+Spotify-app discovery without mandatory browser pairing. It is not activated
+or account/XU4/DAC-accepted; the legacy exclusive mode above stays unchanged.
+
 The `open-room-renderer spotify diagnose --port PORT` command reads an
 already running local go-librespot sidecar. It does not start a player or control
 audio. See [the read-only Spotify diagnostic](docs/SPOTIFY_DIAGNOSTIC.md) for

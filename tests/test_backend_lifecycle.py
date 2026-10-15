@@ -456,7 +456,7 @@ class ServiceHarness:
         self.cleanup_error = cleanup_error
         cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", http_api_port=18080, upnp_port=18081, mirror_port_80=True, enable_ssdp=True)
         self.cfg = cfg
-        monkeypatch.setattr(cli, "load_startup_config", lambda _: cfg)
+        monkeypatch.setattr(cli, "load_startup_config", lambda _, **kwargs: cfg)
         monkeypatch.setattr(cli, "setup_logging", lambda _: None)
         backend = SimpleNamespace()
         async def backend_start():
@@ -558,6 +558,18 @@ async def test_cli_backend_start_failure_keeps_control_api_available(monkeypatch
         harness.backend.stop.assert_not_awaited()
     if backend_error in {"start", "stop"}:
         harness.backend.initialize_gain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_spotify_failure_keeps_service_available_without_restart(monkeypatch):
+    harness = ServiceHarness(monkeypatch)
+    source = SimpleNamespace(failed=False, close=AsyncMock())
+    source.start = AsyncMock(side_effect=BackendError('synthetic Spotify startup failure'))
+    await cli._serve(harness.cfg, spotify_source=source)
+    source.start.assert_awaited_once_with(harness.api)
+    source.close.assert_awaited_once()
+    assert source.failed and harness.state.phase == PlaybackPhase.ERROR
+    assert 'site0.start' in harness.events and harness.events[-1] == 'backend.close'
 
 
 @pytest.mark.asyncio
@@ -942,7 +954,7 @@ def test_real_process_signals_cannot_abandon_startup_or_teardown(phase, signal_n
             asyncio.get_running_loop().call_soon(send_signal)
             await asyncio.sleep(0.03)
             print("cleanup_finished", flush=True)
-        cli.load_startup_config = lambda _: Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", enable_ssdp=False)
+        cli.load_startup_config = lambda _, **kwargs: Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", enable_ssdp=False)
         cli.setup_logging = lambda _: None
         cli.MpvBackend = lambda *args, **kwargs: SimpleNamespace(start=start_backend, stop=noop, initialize_gain=noop, stop_process=stop_backend)
         cli.HttpApi = lambda *args, **kwargs: SimpleNamespace(cfg=args[0], app=lambda: object(), initialize_channel_balance=noop)
