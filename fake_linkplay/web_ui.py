@@ -23,6 +23,7 @@ from urllib.parse import unquote, urlsplit
 
 from aiohttp import web
 
+from . import diagnostics as diagnostic
 from .canonical_target import canonical_target_url
 from .device_name import DeviceNameCommittedError, validate_device_name
 from .favorites import FavoriteError, FavoritesStore, decode_favorites_document, validate_target_edit
@@ -564,6 +565,7 @@ class WebControlApi:
                  dsp_snapshot: Callable[[], dict[str, object]], favorites: FavoritesStore,
                  dispatch: Callable[[WebCommand], Awaitable[dict[str, object] | None]],
                  allowed_hosts: tuple[str, ...],
+                 diagnostics: Callable[[], object] | None = None,
                  inspect_output: Callable[[], Awaitable[dict[str, object]]] | None = None,
                  export_dsp_curve: Callable[[WebDspExport], Awaitable[tuple[bytes, bool]]] | None = None) -> None:
         self._current_state = current_state
@@ -572,6 +574,7 @@ class WebControlApi:
         self._dsp_snapshot = dsp_snapshot
         self._favorites = favorites
         self._dispatch = dispatch
+        self._diagnostics = diagnostics
         self._inspect_output = inspect_output
         self._export_dsp_curve = export_dsp_curve
         self._output_inspection_busy = False
@@ -585,6 +588,10 @@ class WebControlApi:
         # are derived views, not a second revision counter or state authority.
         self._dsp_key = secrets.token_bytes(32)
         self._export_key = secrets.token_bytes(32)
+
+    @property
+    def diagnostics(self):
+        return self._diagnostics() if self._diagnostics is not None else None
 
     def _dsp_digest(self, kind: str, value: object) -> str:
         encoded = json.dumps([kind, value], sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -667,6 +674,8 @@ class WebControlApi:
             "favorites_unavailable": "Managed favorites could not be loaded. Stop the renderer service, repair or restore its saved favorites library, then restart it.",
             "command_failed": "Command outcome is unknown. Refresh before any explicit retry.",
         }
+        if outcome == "UNKNOWN":
+            diagnostic.uncertain()
         payload = {"error": code, "message": messages.get(code, "Browser request was not admitted."),
                    "outcome": outcome}
         if committed:
@@ -1016,6 +1025,7 @@ class WebControlApi:
         finally:
             self._radio_busy = False
 
+    @diagnostic.diagnosed("web")
     async def handle(self, request: web.Request) -> web.Response:
         dispatched = False
         try:
@@ -1066,7 +1076,9 @@ class WebControlApi:
                 return await self._output_inspection(encoded)
             if path == PREFIX + "/playlist/export":
                 return self._playlist_export(decode_playlist_export(encoded))
-            command = self._admit(decode_command(encoded))
+            command = decode_command(encoded)
+            diagnostic.web_command(command)
+            command = self._admit(command)
             dispatched = True
             result = await self._dispatch(command)
             return web.json_response({"request_acknowledged": True, **(result or {})}, headers=_HEADERS)
@@ -1079,7 +1091,9 @@ class WebControlApi:
         except AtomicWriteCommittedError:
             code = "device_rename_committed" if dispatched and command.action == "device_rename" else "command_failed"
             return self._error(code, 502, "UNKNOWN", committed=True)
-        except Exception:
+        except Exception as exc:
+            if isinstance(exc, BackendError):
+                diagnostic.backend_failure(exc)
             # Core operations can have effects before raising, including
             # rejected native navigation/seek and persistence-after-commit.
             return self._error("command_failed" if dispatched else "read_failed", 502 if dispatched else 503,

@@ -43,6 +43,7 @@ aiohttp app in fake_linkplay.http_api
 - `fake_linkplay/eventing.py`: GENA admission/leases, registry, sequence numbers, coalescing, bounded delivery/retry tasks and cancellation/drain; consumes only a synchronous XML snapshot provider.
 - `fake_linkplay/metadata_formatting.py`: pure metadata artwork/live-tag, resource-URI and duration edits; no state, network or backend access.
 - `fake_linkplay/state.py`: in-memory renderer state and status payload generation.
+- `fake_linkplay/diagnostics.py`: leased private source observations, bounded read aggregation and off-loop snapshots; no backend authority. See [source diagnostics](SOURCE_DIAGNOSTICS.md).
 - `fake_linkplay/queue.py` and `queue_policy.py`: canonical items/indices and pure repeat/shuffle traversal; backend admission stays in HttpApi.
 - `fake_linkplay/queue_protocol.py`: pure authored queue/URL validation and bounded request framing, shared without client transport imports.
 - `fake_linkplay/queue_client.py`: HTTP transport, response parsing, uncertain-outcome policy and queue CLI adapter.

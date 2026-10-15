@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "name": "Showcase direct radio",
+  "index": 1,
+  "mode": "normal",
+  "urls": [
+    "https://st01.sslstream.dlf.de/dlf/01/128/mp3/stream.mp3?aggregator=web",
+    "http://fritz.de/livemp3"
+  ]
+}
