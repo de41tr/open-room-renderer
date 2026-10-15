@@ -165,9 +165,27 @@ async def _exercise(library: str, directory: Path) -> dict[str, Any]:
         await at(tracks[2])
         await api.sync_mpv_state()
         assert api.state.queue.index == 2
-        await idle()
-        await api.sync_mpv_state()
-        await api._queue_advance_task
+        # Observe the final child through EOF within the same six-second
+        # bound. A single idle/property sample can be torn during teardown;
+        # only the actual canonical successor completes this check.
+        saw_idle = False
+        try:
+            async with asyncio.timeout(6):
+                while True:
+                    await api.sync_mpv_state()
+                    saw_idle |= backend.read_property("idle-active") is True
+                    advance = api._queue_advance_task
+                    if advance is not None:
+                        await advance
+                    if api.state.queue.index == 3 and api.state.phase == PlaybackPhase.PLAYING:
+                        break
+                    assert api.state.phase != PlaybackPhase.ERROR, (api.state.last_error, await backend.snapshot())
+                    await asyncio.sleep(.025)
+        except TimeoutError as exc:
+            raise AssertionError(("Container EOF did not load its canonical successor",
+                                  api.state.phase, api.state.intent, api.state.queue.index,
+                                  await backend.snapshot())) from exc
+        assert saw_idle
         assert api.state.queue.index == 3 and backend.read_property("path") == str(tracks[0])
         evidence["cases"]["first_level_container"] = {"ack_replaced_by_exact_parent_children": True,
             "one_canonical_item_through_children": True, "canonical_successor_after_container_eof": True}
