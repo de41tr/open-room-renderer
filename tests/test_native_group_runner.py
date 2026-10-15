@@ -31,6 +31,28 @@ def command(code):
     return [sys.executable, "-c", code]
 
 
+def test_progress_tail_preserves_writer_offset_and_suppresses_unchanged_logs(runner, tmp_path, capsys):
+    path = tmp_path / "active.log"
+    with path.open("w+") as writer:
+        writer.write("x" * 4096 + "ready\n"); writer.flush()
+        position = writer.tell()
+        size = runner._progress_tail(path, 0, 2, 30)
+        assert writer.tell() == position
+        output = capsys.readouterr().out
+        assert "elapsed=30.0s group=2" in output and output.endswith("ready\n")
+        assert output.count("x") == 2042
+        assert runner._progress_tail(path, size, 2, 60) == size
+        assert capsys.readouterr().out == ""
+        writer.write("continued\n"); writer.flush()
+    assert path.read_text() == "x" * 4096 + "ready\ncontinued\n"
+    path.write_bytes(b"old" * 4096 + b"Timeout (0:01:00)!\napplication-frame\n"
+                     + b"x" * 4096 + b"framework-tail\n")
+    runner._progress_tail(path, 0, 2, 90)
+    output = capsys.readouterr().out
+    assert "application-frame" in output and output.endswith("framework-tail\n")
+    assert len(output.split("===\n", 1)[1].encode()) == 2048
+
+
 def test_groups_overlap_and_retain_complete_separate_logs(runner, tmp_path, capsys):
     commands = []
     for index in range(2):
