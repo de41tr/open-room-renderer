@@ -675,6 +675,10 @@ class HttpApi:
             self.state.phase = PlaybackPhase.STOPPED
             return
         self.state.phase = PlaybackPhase.BUFFERING
+        if self._station_recovery_task is not None and not self._station_recovery_task.done():
+            # Duplicate EOF/idle observations cannot erase the active retry's
+            # more specific failed-load diagnosis or start another cycle.
+            return
         self.state.last_error = {
             "source_eof": "Station source ended; retry pending",
             "source_stall": "Station source stalled; retry pending",
