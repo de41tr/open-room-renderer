@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from .audio_device import validate_audio_device
+from .ipc_provenance import SocketProvenance
 from .log_safety import redact_media_urls
 
 # A finite history preserves mpv's timed ICY transitions. Zero can prune an
@@ -93,6 +94,7 @@ class MpvBackend:
     _shutdown_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _reap_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _owned_process: asyncio.subprocess.Process | None = field(default=None, init=False, repr=False)
+    _provenance: SocketProvenance = field(init=False, repr=False)
     _owned_socket_identity: tuple[int, int] | None = field(default=None, init=False, repr=False)
     _spawn_attempted: bool = field(default=False, init=False, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
@@ -130,6 +132,7 @@ class MpvBackend:
 
     def __post_init__(self) -> None:
         self.audio_device = validate_audio_device(self.audio_device, auto_spawn=self.auto_spawn)
+        self._provenance = SocketProvenance(self.socket_path)
         self._desired_volume = max(0, min(100, int(self.initial_volume)))
         self._desired_mute = bool(self.initial_mute)
 
@@ -193,8 +196,15 @@ class MpvBackend:
 
     async def _start_once(self) -> None:
         ready = False
+        guard = self._provenance.startup_guard(self.auto_spawn and self._owned_process is None)
+        guard_entered = False
         try:
+            recovery_allowed = guard.__enter__()
+            guard_entered = True
             async with asyncio.timeout(self._startup_timeout):
+                if recovery_allowed and self.auto_spawn and not self._spawn_attempted:
+                    if self._provenance.recover_previous_boot():
+                        LOG.info("removed peer-proven owned mpv IPC left by a previous boot")
                 if self._socket_exists():
                     # A refused preexisting socket is not evidence of ownership.
                     # In particular do not launch mpv, which could replace it.
@@ -259,11 +269,18 @@ class MpvBackend:
             self._startup_error = str(exc)
             raise
         finally:
-            if not ready and self._owned_process is not None:
-                await self._reap_owned_process()
+            try:
+                if not ready and self._owned_process is not None:
+                    await self._reap_owned_process()
+            finally:
+                # Keep the cooperating-start lock until failed children have
+                # been reaped, not merely until the first startup exception.
+                if guard_entered:
+                    guard.__exit__(None, None, None)
 
     async def _probe_socket(self, *, owned_identity: tuple[int, int] | None = None) -> int | None:
         """Check readiness and, on Linux, identify the connected peer process."""
+        snapshot = self._provenance.snapshot() if owned_identity is not None else None
         _, writer = await asyncio.open_unix_connection(self.socket_path)
         try:
             peer_pid = self._peer_pid(writer)
@@ -273,6 +290,8 @@ class MpvBackend:
                     and peer_pid == self._owned_process.pid
                     and self._socket_identity() == owned_identity):
                 self._owned_socket_identity = owned_identity
+                if snapshot is not None and tuple(snapshot[:2]) == owned_identity:
+                    self._provenance.remember(snapshot)
             return peer_pid
         except (AttributeError, OSError, TypeError, struct.error):
             return None
@@ -343,6 +362,7 @@ class MpvBackend:
             except (OSError, BackendError) as exc:
                 LOG.warning("could not clean up owned mpv IPC socket: %s", redact_sensitive(exc))
             self._owned_socket_identity = None
+        self._provenance.forget()
         # Keep the process handle on wait failure instead of claiming a reap.
         self._owned_process = None
         if self.process is process:

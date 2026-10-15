@@ -145,6 +145,16 @@ unit; review [Getting Started](GETTING_STARTED.md) before enabling it.
 Use `ORR_CONFIG=/absolute/path/config.yaml ./scripts/run.sh` to retain an explicit
 custom YAML profile. The old `fake-linkplay` command remains a compatibility alias.
 
+On Linux, normal renderer startup can recover its own IPC socket after an
+abrupt reboot only when a private, peer-verified ownership receipt from an
+earlier boot matches the unchanged socket. The receipt stays beside the socket
+with mode `0600`; its directory must be private and must not traverse symlinks.
+Recovery also requires the same host identity; copying a runtime directory
+between hosts, or cloning host identities, is not a supported recovery setup.
+Unmarked sockets from older installations, same-boot leftovers and changed or
+foreign paths still require manual review. This does not change Spotify's
+separate startup guard or prove physical audio. No state/config migration occurs.
+
 The `status`, `play`, `pause`, `resume`, `stop` and `volume` CLI commands print
 successful HTTP response bodies and exit zero. HTTP errors, redirects, timeouts
 and connection failures exit nonzero with a short error on stderr. Redirects are
