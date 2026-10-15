@@ -554,6 +554,13 @@
         const response = await this.request("/orr/v1/web/radio/search", {method: "POST", headers: {"X-ORR-CSRF": state.csrf_token}, body: {action: "search", name, country}, timeoutMs: 15000});
         if (serial !== this.serial) return;
         const body = response.body, ids = new Set();
+        if (response.status === 503 && isObject(body) && body.error === "radio_unavailable" && body.outcome === "ERROR") {
+          // Only this fixed server classification identifies a catalog failure.
+          // Do not expose provider details or imply every favorite is independent
+          // of the directory: saved catalog stations still need its resolver.
+          this.message = "Radio-Browser search is unavailable. Try again later, or use Favorites → + Add with a direct audio URL from the station’s official website. Playback was not changed.";
+          return;
+        }
         if (response.status !== 200 || !isObject(body) || body.session_id !== this.session || !Array.isArray(body.stations) || body.stations.length > 20) throw new Error();
         for (const station of body.stations) {
           if (!isObject(station) || !/^[0-9a-f]{32}$/.test(station.id) || ids.has(station.id) || !string(station.name) || !station.name.trim() || station.name.length > 256 || !string(station.country) || !/^(?:[A-Z]{2})?$/.test(station.country) || !["MP3", "AAC", "AAC+", "OGG"].includes(station.codec) || !integer(station.bitrate) || station.bitrate > 10000) throw new Error();
