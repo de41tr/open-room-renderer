@@ -267,3 +267,78 @@ async def test_spotify_app_resume_releases_only_current_paused_reader(tmp_path, 
             assert not paused and api.state.gain_confirmed
     finally:
         await source.close()
+
+
+@pytest.mark.asyncio
+async def test_web_return_requires_enabled_profile_confirmed_stop_and_fresh_generation(tmp_path, monkeypatch):
+    from test_web_ui import serving, state, command
+    source, api, backend = await started(tmp_path, monkeypatch)
+    await source.close()
+    created = []
+    def factory():
+        fresh = Source(source.root, dict(source.profile))
+        created.append(fresh)
+        return fresh
+    async with serving(api) as (session, base):
+        snapshot = await state(session, base)
+        assert snapshot['spotify'] == {'configured': False, 'active': False, 'waiting_for_app': False}
+        code, _ = await command(session, base, snapshot['csrf_token'], {
+            'action': 'spotify_start', 'expected_generation': snapshot['generation']})
+        assert code == 409 and not created
+        api.spotify_source_factory = factory
+        snapshot = await state(session, base)
+        assert snapshot['actions']['spotify_start'] is True
+        # Neither arbitrary profiles nor stale intent can activate anything.
+        for body in ({'action': 'spotify_start', 'expected_generation': snapshot['generation'], 'path': '/unused'},
+                     {'action': 'spotify_start'},
+                     {'action': 'spotify_start', 'expected_generation': snapshot['generation'] - 1}):
+            code, _ = await command(session, base, snapshot['csrf_token'], body)
+            assert code in {400, 409} and not created
+        api.state.backend_url = '/synthetic-busy-source'
+        code, _ = await command(session, base, snapshot['csrf_token'], {
+            'action': 'spotify_start', 'expected_generation': snapshot['generation']})
+        assert code == 409 and not created
+        api.state.backend_url = ''
+        code, _ = await command(session, base, snapshot['csrf_token'], {
+            'action': 'spotify_start', 'expected_generation': snapshot['generation']})
+        assert code == 200 and len(created) == 1
+        active = await state(session, base)
+        assert active['spotify'] == {'configured': True, 'active': True, 'waiting_for_app': True}
+        assert active['actions']['spotify_start'] is False
+        code, _ = await command(session, base, snapshot['csrf_token'], {
+            'action': 'spotify_start', 'expected_generation': active['generation']})
+        assert code == 409 and len(created) == 1
+        await api.close_spotify()  # Service cleanup closes the new instance, not only the original.
+        assert created[0].child.returncode is not None and not created[0].runtime
+        assert api.spotify_source is None and api.spotify_source_factory is None
+        assert not api.web_api.snapshot()['actions']['spotify_start']
+
+
+@pytest.mark.asyncio
+async def test_stop_during_restart_preflight_wins_without_play_or_child(tmp_path, monkeypatch):
+    source, api, backend = await started(tmp_path, monkeypatch)
+    await source.close()
+    fresh = Source(source.root, dict(source.profile))
+    api.spotify_source_factory = lambda: fresh
+    entered, release = asyncio.Event(), asyncio.Event()
+    snapshot = backend.snapshot
+    async def blocked_snapshot():
+        entered.set()
+        await release.wait()
+        return await snapshot()
+    backend.snapshot = blocked_snapshot
+    before = api.state.generation
+    start = asyncio.create_task(api._start_spotify())
+    await entered.wait()
+    stop = asyncio.create_task(api._transport_command('stop'))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert fresh.stopping
+    release.set()
+    with pytest.raises(BackendError):
+        await start
+    await stop
+    assert api.state.generation == before + 1  # Only Stop accepted; no late Play.
+    assert not hasattr(fresh, 'child') and api.spotify_source is None
+    assert api.state.status == 'stop' and backend.idle
+    assert not list(source.root.glob('pcm-*'))

@@ -2527,3 +2527,46 @@ test('radio repair sends once, retains ACK or UNKNOWN, and expiry requires a fre
     await h.refresh(); await h.ids.get('favorite-form').fire('submit'); assert.equal(commands().length, 1);
   }
 });
+
+test('Spotify return is opt-in, generation-fenced and never automatically retried', async () => {
+  const h = harness();
+  await h.controller.refresh();
+  assert.equal(h.controller.canMutate('spotify_start'), false);
+  const available = state({spotify: {configured: true, active: false, waiting_for_app: false},
+    actions: {...state().actions, spotify_start: true}});
+  h.setState(available); await h.controller.refresh();
+  assert.equal(h.controller.canMutate('spotify_start'), true);
+  const body = guardedAction(h.controller.state, 'spotify_start');
+  assert.deepEqual(body, {action: 'spotify_start', expected_generation: 7});
+  h.hooks.post = async () => { throw new Error('synthetic lost response'); };
+  const outcome = await h.controller.mutate(body, 'Start Spotify');
+  assert.equal(outcome.kind, 'unknown');
+  assert.equal(h.posts().length, 1);
+  h.controller.fresh = false;
+  assert.equal(h.controller.canMutate('spotify_start'), false);
+  assert.equal(h.controller.canMutate('stop'), true);
+  assert.throws(() => validateState({...available, spotify: {configured: 'true', active: false, waiting_for_app: false}}));
+  assert.throws(() => validateState({...available, actions: {...available.actions, spotify_start: 'yes'}}));
+});
+
+test('Spotify card appears only for configured profile and wires one explicit start', async () => {
+  const h = await appHarness();
+  assert.equal(h.ids.get('spotify-card').hidden, true);
+  const next = state({spotify: {configured: true, active: false, waiting_for_app: false},
+    actions: {...state().actions, spotify_start: true}});
+  h.setState(next); await h.refresh();
+  assert.equal(h.ids.get('spotify-card').hidden, false);
+  assert.equal(h.ids.get('spotify-start').disabled, false);
+  await h.ids.get('spotify-start').fire('click');
+  const sent = h.requests.filter(request => request.options.method === 'POST');
+  assert.equal(sent.length, 1);
+  assert.deepEqual(JSON.parse(sent[0].options.body), {action: 'spotify_start', expected_generation: 7});
+  next.spotify = {configured: true, active: true, waiting_for_app: true};
+  next.actions.spotify_start = false;
+  next.transport = {phase: 'BUFFERING', intent: 'play', status: 'PENDING', message: ''};
+  h.setState(next); await h.refresh();
+  assert.equal(h.ids.get('spotify-start').disabled, true);
+  assert.match(h.ids.get('spotify-status').textContent, /Waiting for your Spotify app/);
+  assert.equal(h.ids.get('stop').disabled, false);
+  assert.equal(h.requests.filter(request => request.options.method === 'POST').length, 1);
+});

@@ -78,7 +78,9 @@ A deployment adapter should keep these distinct fixed stages:
 4. The user selects it in their Spotify app. Confirm actual playback and EQ by
    the real app/listening acceptance, not merely process or API readiness.
 5. Stop or normal-source selection reaps the receiver and keeps ORR usable.
-   Removing the key and restarting restores the ordinary startup path.
+   After a confirmed Stop, **Start Spotify** in the existing Web UI starts a
+   fresh receiver using only this already enabled profile. Removing the key
+   and restarting restores the ordinary startup path.
 
 This candidate supplies the application behavior, not a host-specific updater or
 remote service-control adapter. Existing host guards must gain an explicit,
@@ -134,10 +136,17 @@ is stable across runs. The user may need to select it anew after restart.
   reaps this receiver before stopping its FIFO reader. Replacement is allowed
   only after actual mpv idle. A failed/unknown stop blocks replacement rather
   than starting another owner. Stop does not restart Spotify automatically.
-- After Stop, the same ORR process/UI can play normal sources. To enable Spotify
-  again, explicitly restart the enabled existing service, or exit the foreground
-  run and explicitly run it again. This first
-  candidate does not add automatic source takeover or a new UI activation button.
+- After Stop, the same ORR process/UI can play normal sources. To return to
+  Spotify, stop the current source, wait for confirmed **STOPPED**, then choose
+  **Start Spotify** in the Spotify card. This creates one fresh receiver in the
+  same renderer; it needs no config edit or service restart. The card exists
+  only for an already enabled profile, accepts no paths/account settings, and
+  never retries or takes over a playing source automatically. Select the device
+  again in the Spotify app and remember its initial volume is 0.
+- The waiting card means the owned receiver reported no session yet. It does
+  not establish actual mDNS visibility or account eligibility. Transport stays
+  `BUFFERING` / Web `PENDING` until real native audio is observed. A stale view
+  is explicitly marked unknown, and Stop stays available.
 - Ctrl-C/SIGTERM tears down the owned receiver and renderer. Then use the
   previously authorized normal renderer start path. Existing service boot
   settings, renderer config, favorites and saved EQ remain in place.
@@ -155,7 +164,10 @@ Nothing in software status is a physical sound or audibility measurement.
 
 - Focused tests cover private nonactivating setup, existing-service opt-in,
   real listener collision before any state/backend access, failed Stop blocking
-  a new source, and cancellation not abandoning producer cleanup.
+  a new source, and cancellation not abandoning producer cleanup. The fixed Web
+  return rejects disabled profiles, busy readers, stale generations and extra
+  path parameters. Stop during restart preflight prevents any new Play/child;
+  service shutdown closes the current receiver, including a restarted instance.
 - The same native null-output case holds an owned child without FIFO open,
   session or PCM for 11 seconds while the real monitor/status path runs. It
   stays waiting (`BUFFERING` / Web `PENDING`, only Stop), rather than timing out
@@ -173,6 +185,8 @@ Nothing in software status is a physical sound or audibility measurement.
   The same test also proves live EQ bypass with continued native position
   progress through null output. The CI-only production Unix IPC test repeats
   that live-bypass/source-return proof using the real production transport.
+  Both paths also return explicitly to a fresh synthetic receiver through the
+  typed Web action, keeping the same backend and existing balance graph.
 - **Known measurement-path limitation:** mpv 0.37's untimed `ao=pcm` file sink
   stalls after a live filter removal with this paced FIFO. The live untimed-file
   transition is not claimed as passing. Static digital amplitudes and live

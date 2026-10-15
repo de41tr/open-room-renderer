@@ -562,9 +562,24 @@ async def test_cli_backend_start_failure_keeps_control_api_available(monkeypatch
 
 @pytest.mark.asyncio
 async def test_spotify_failure_keeps_service_available_without_restart(monkeypatch):
+    from pathlib import Path
     harness = ServiceHarness(monkeypatch)
-    source = SimpleNamespace(failed=False, close=AsyncMock())
-    source.start = AsyncMock(side_effect=BackendError('synthetic Spotify startup failure'))
+    source = SimpleNamespace(failed=False, stopping=False, root=Path('/synthetic-profile'),
+                             profile={}, close=AsyncMock())
+    async def start(api):
+        api.spotify_source = source
+        raise BackendError('synthetic Spotify startup failure')
+    async def close():
+        harness.api.spotify_source_factory = None
+        await harness.api.spotify_source.close()
+    source.start = AsyncMock(side_effect=start)
+    # Match the real API cleanup contract in this service-resource fixture.
+    original_api = cli.HttpApi
+    def api_factory(*args, **kwargs):
+        api = original_api(*args, **kwargs)
+        api.close_spotify = close
+        return api
+    monkeypatch.setattr(cli, 'HttpApi', api_factory)
     await cli._serve(harness.cfg, spotify_source=source)
     source.start.assert_awaited_once_with(harness.api)
     source.close.assert_awaited_once()

@@ -405,6 +405,8 @@
     if (dsp.editor !== null) { if (dsp.status !== "CONFIRMED") throw new Error("Unconfirmed sound editor"); validateEditor(dsp.editor); }
     if (!isObject(actions) || !["play", "pause", "stop", "next", "previous", "seek", "queue_select", "queue_mode", "save_current"].every(key => typeof actions[key] === "boolean")) throw new Error("Invalid actions snapshot");
     if (PLAYLIST_ACTIONS.some(action => actions[action] !== undefined && typeof actions[action] !== "boolean")) throw new Error("Invalid playlist actions");
+    if (state.spotify !== undefined && (!exactFields(state.spotify, ["configured", "active", "waiting_for_app"]) || Object.values(state.spotify).some(value => typeof value !== "boolean"))) throw new Error("Invalid Spotify availability");
+    if (actions.spotify_start !== undefined && typeof actions.spotify_start !== "boolean") throw new Error("Invalid Spotify action");
     return state;
   }
   function streamTitleText(state, fresh) {
@@ -451,7 +453,7 @@
   function guardedAction(state, action, values = {}) {
     if (!state) throw new Error("Read renderer state first");
     const body = {action, ...values};
-    if (["play", "pause", "next", "previous", "seek", "queue_select", "queue_mode", "favorite_current", ...PLAYLIST_ACTIONS].includes(action)) body.expected_generation = state.generation;
+    if (["play", "pause", "next", "previous", "seek", "queue_select", "queue_mode", "favorite_current", "spotify_start", ...PLAYLIST_ACTIONS].includes(action)) body.expected_generation = state.generation;
     if (["queue_select", "queue_mode"].includes(action)) body.queue_name = state.queue.name;
     if (action === "favorite_restore") body.expected_session = state.session_id;
     if (action.startsWith("dsp_")) {
@@ -598,7 +600,7 @@
     changed() { this.onChange(this); }
     get busy() { return this.active.size > 0; }
     get stopBusy() { return Array.from(this.active.values()).some(item => item.action === "stop"); }
-    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (action !== "device_rename" || /^[0-9a-f]{64}$/.test(this.state.device.revision || "")) && (!action.startsWith("favorite_") || this.favoritesFresh && (action !== "favorite_restore" || !this.favorites.some(item => item.editable))) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor && (!DSP_LIBRARY_ACTIONS.includes(action) || this.state.dsp.editor.library_unavailable !== true))) && (!action.startsWith("playlist_") || playlistAvailable(this.state, action) && (action === "playlist_replace" || this.playlistEditable))); }
+    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (action !== "spotify_start" || this.state.spotify?.configured === true && this.state.actions.spotify_start === true) && (action !== "device_rename" || /^[0-9a-f]{64}$/.test(this.state.device.revision || "")) && (!action.startsWith("favorite_") || this.favoritesFresh && (action !== "favorite_restore" || !this.favorites.some(item => item.editable))) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor && (!DSP_LIBRARY_ACTIONS.includes(action) || this.state.dsp.editor.library_unavailable !== true))) && (!action.startsWith("playlist_") || playlistAvailable(this.state, action) && (action === "playlist_replace" || this.playlistEditable))); }
     refresh() {
       this.readAgain = true;
       if (!this.readPromise) {

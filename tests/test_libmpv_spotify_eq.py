@@ -266,16 +266,35 @@ async def live_exercise(root, backend, transport):
         assert await backend.get_property('current-ao') == 'null'
         assert await backend.get_property('option-info/demuxer-max-bytes/set-locally') is False
         await api.execute(ParsedCommand('stop'), '127.0.0.1')
+        # Explicit return uses only the already configured source factory and
+        # the existing typed Web dispatch, without a renderer/service restart.
+        from fake_linkplay.web_ui import decode_command
+        api.spotify_source_factory = lambda: SyntheticSource(root, dict(p))
+        command = api.web_api._admit(decode_command(json.dumps({
+            'action': 'spotify_start', 'expected_generation': api.state.generation}).encode()))
+        await api._web_dispatch(command)
+        restarted = api.spotify_source
+        assert restarted is not source and restarted.process.pid != child.pid
+        deadline = asyncio.get_running_loop().time() + 4
+        while api.state.phase != PlaybackPhase.PLAYING:
+            assert asyncio.get_running_loop().time() < deadline
+            await restarted.observe()
+            await asyncio.sleep(.05)
+        assert 'pan' in str(await backend.get_property('af'))
+        await api.close_spotify()
+        assert restarted.process.returncode is not None and not restarted.runtime
+        assert await backend.get_property('idle-active') is True
         return {'lane': 'REAL_SOFTWARE_TESTED/' + transport + '/synthetic-FIFO',
                 'unpaced_written_audio_ahead_seconds': [before_ahead, after_ahead],
                 'waiting_without_session_or_pcm_seconds': 11, 'later_explicit_pcm': True,
                 'existing_balance_filter': True, 'live_eq_bypass_progress': [before_bypass, after_bypass],
                 'mpv_version': await backend.get_property('mpv-version'),
-                'producer_reaped': True, 'ordinary_source_return': True,
+                'producer_reaped': True, 'ordinary_source_return': True, 'explicit_web_return': True,
                 'output': 'null, no DAC', 'Spotify': 'NOT_STARTED'}
     finally:
         if monitor is not None:
             monitor.cancel()
             await asyncio.gather(monitor, return_exceptions=True)
+        await api.close_spotify()
         await source.close()
         await backend.stop_process()

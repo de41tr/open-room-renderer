@@ -107,6 +107,7 @@ async def _serve(cfg, *, spotify_source=None, listener_sockets=None) -> None:
         initial_volume=state.volume, initial_mute=state.mute,
         audio_device=cfg.mpv_audio_device,
     )
+    api = None
     runners: list[web.AppRunner] = []
     ssdp: SsdpServer | None = None
     mdns: MdnsAdvertiser | None = None
@@ -131,7 +132,7 @@ async def _serve(cfg, *, spotify_source=None, listener_sockets=None) -> None:
         # cleanup failure must not strand the remaining listeners or child.
         resources = []
         if spotify_source is not None:
-            resources.append(("Spotify PCM source", spotify_source.close))
+            resources.append(("Spotify PCM source", api.close_spotify if api is not None else spotify_source.close))
         if mdns is not None:
             resources.append(("mDNS", mdns.stop))
         if ssdp is not None:
@@ -215,9 +216,14 @@ async def _serve(cfg, *, spotify_source=None, listener_sockets=None) -> None:
             except (BackendError, OSError, ValueError):
                 # Keep the normal service/UI available; do not turn an account
                 # or receiver failure into the unit's automatic restart loop.
-                spotify_source.failed = True
-                state.mark_error("Spotify startup unconfirmed; Stop before changing sources")
+                if not spotify_source.stopping and api.spotify_source is spotify_source:
+                    spotify_source.failed = True
+                    state.mark_error("Spotify startup unconfirmed; Stop before changing sources")
                 LOG.warning("Spotify startup unconfirmed; no automatic receiver retry")
+            # Keep only the prevalidated local profile, never a browser path or
+            # credentials. A click creates one new disposable runtime/child.
+            from .spotify_eq import SpotifyEqSource
+            api.spotify_source_factory = lambda: SpotifyEqSource(spotify_source.root, dict(spotify_source.profile))
         await asyncio.Event().wait()
     except asyncio.CancelledError:
         if not signal_requested:

@@ -212,6 +212,7 @@ class HttpApi:
             state.gain_confirmed = False
         self.mpv = mpv
         self.spotify_source = None  # Only an explicit Spotify EQ startup can attach it.
+        self.spotify_source_factory = None  # Set only by an already enabled service invocation.
         self.on_rename = on_rename
         self._rename_lock = asyncio.Lock()
         self.queue_url = ""
@@ -391,9 +392,17 @@ class HttpApi:
             and not self._station_recovery_loading
             and not any(task is not None and not task.done() for task in
                         (self._station_recovery_task, self._queue_advance_task)))
+        if playlist_stopped and self.spotify_source_factory is not None and self.spotify_source is None:
+            actions.add("spotify_start")
+        spotify = self.spotify_source
         recovery = self._station_recovery
         current_recovery = recovery is not None and self._station_recovery_is_current(recovery)
         return WebRuntime(
+            spotify_configured=self.spotify_source_factory is not None,
+            spotify_active=spotify is not None,
+            spotify_waiting=bool(spotify is not None and not spotify.starting and not spotify.stopping
+                and not spotify.failed and spotify._provider
+                and spotify._provider.get("session_observation") == "NO_SESSION"),
             station_recovery_pending=bool(current_recovery and self._station_recovery_task is not None
                 and not self._station_recovery_task.done()),
             station_recovery_attempts=recovery.attempts if current_recovery else None,
@@ -432,6 +441,8 @@ class HttpApi:
         transport = {"play": "resume", "pause": "pause", "stop": "stop", "next": "next", "previous": "prev"}
         if action in transport:
             await self.execute(ParsedCommand(transport[action]), "")
+        elif action == "spotify_start":
+            await self._start_spotify()
         elif action in PLAYLIST_ACTIONS:
             # Admission and detached preparation ran synchronously immediately
             # before dispatch. Its stopped/backend-empty guard means the
@@ -495,6 +506,33 @@ class HttpApi:
         else:
             raise ValueError("Unsupported browser action")
         return None
+
+    async def _start_spotify(self) -> None:
+        # No hidden Stop or queued start intent: only the already configured
+        # profile and a confirmed stopped renderer can enter this fixed action.
+        if "spotify_start" not in self._web_runtime().actions:
+            raise WebAdmissionError("unavailable", 409)
+        source = self.spotify_source_factory()
+        try:
+            # start attaches ownership before its first await. Stop and normal
+            # source selection can interrupt it, but must await confirmed cleanup.
+            await source.start(self)
+        except asyncio.CancelledError:
+            await source.close()
+            raise
+        except (BackendError, OSError, ValueError):
+            if self.spotify_source is source and not source.stopping:
+                source.failed = True
+                self.state.mark_error("Spotify startup unconfirmed; Stop before changing sources")
+                self._schedule_event_notify()
+            raise BackendError("Spotify startup was not confirmed") from None
+
+    async def close_spotify(self) -> None:
+        # Disable admission synchronously before closing the current, possibly
+        # restarted child. Shutdown must never retain only the initial instance.
+        self.spotify_source_factory = None
+        if self.spotify_source is not None:
+            await self.spotify_source.close()
 
     async def _state_monitor_context(self, app):
         """Share one backend observer between all configured HTTP listeners."""

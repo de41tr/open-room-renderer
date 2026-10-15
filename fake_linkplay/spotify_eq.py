@@ -178,6 +178,9 @@ class SpotifyEqSource:
         return result
 
     async def start(self, api) -> None:
+        if api.spotify_source is not None:
+            raise BackendError("Stop the current Spotify source before starting another")
+        generation = api.state.generation
         self.api = api
         api.spotify_source = self
         self.active = True  # Competing source commands must wait for confirmed Stop.
@@ -199,7 +202,9 @@ class SpotifyEqSource:
                 before = await api.mpv.snapshot()
                 if before.get("backend-error") or before.get("idle-active") is not True:
                     raise BackendError("Spotify requires an idle, owned renderer")
-                api._accept_playback_command("play")
+                if self.stopping or api.spotify_source is not self or generation != api.state.generation:
+                    raise BackendError("Spotify startup was superseded")
+                generation = api._accept_playback_command("play")
                 api.state.queue = PlaybackQueue(items=[QueueItem(
                     SOURCE_URL, title="Spotify Connect", source="Spotify", stream_type="live")], index=1)
                 api._activate_queue_item()
@@ -222,8 +227,8 @@ class SpotifyEqSource:
                     if asyncio.get_running_loop().time() >= deadline:
                         raise BackendError("Spotify PCM source ownership was not confirmed")
                     await asyncio.sleep(0.025)
-            if self.stopping:
-                raise BackendError("Spotify startup was stopped")
+            if self.stopping or api.spotify_source is not self or generation != api.state.generation:
+                raise BackendError("Spotify startup was superseded")
             self.process = await self._spawn(binary, directory)
             # NO_SESSION is healthy discovery readiness, never authentication or
             # playback evidence. An unrelated loopback listener is never queried.

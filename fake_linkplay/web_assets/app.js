@@ -107,6 +107,13 @@
     noticeView();
     renderOutputInspection();
     renderRadio();
+    $("spotify-card").hidden = snapshot?.spotify?.configured !== true;
+    $("spotify-start").disabled = !control.canMutate("spotify_start");
+    text("spotify-status", !control.fresh ? "Read current state before starting Spotify."
+      : snapshot?.spotify?.waiting_for_app ? "Waiting for your Spotify app. Select this device, then raise Spotify volume carefully."
+      : snapshot?.spotify?.active ? "Spotify source selected. Use Spotify for tracks; Stop releases the receiver."
+      : control.canMutate("spotify_start") ? "Start the receiver, then select this device in your Spotify app."
+      : "Stop the current source before starting Spotify.");
     $("refresh").disabled = false;
     if (!snapshot) return;
     const {media, transport, gain, queue, dsp} = snapshot;
@@ -972,6 +979,7 @@
   async function run(body, label) { const result = await control.mutate(body, label); return result; }
   function command(action, values = {}) { return guardedAction(snapshot, action, values); }
   ["play", "pause", "stop", "next", "previous"].forEach(action => $(action).addEventListener("click", () => run(command(action), action[0].toUpperCase() + action.slice(1))));
+  $("spotify-start").addEventListener("click", () => run(command("spotify_start"), "Start Spotify"));
   $("mute").addEventListener("click", () => run(command("mute", {value: !snapshot.gain.mute}), snapshot.gain.mute ? "Unmute" : "Mute"));
   $("volume-zero").addEventListener("click", () => {
     if (snapshot?.gain.status !== "UNKNOWN" || !control.canMutate("volume")) return;
