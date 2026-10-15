@@ -56,10 +56,11 @@ from .radio import RadioResolution, RadioResolutionError, resolve_station
 from .persistence import (AtomicWriteCommittedError, atomic_write_text, encode_active_dsp,
                           load_active_dsp, save_gain, validate_eq_records)
 from .queue import PlaybackQueue, QueueError, QueueItem, parse_didl_metadata, parse_queue_context, serialize_queue_context
+from .queue_diagnostics import QueueRejectionReason
 from .queue_policy import (NORMAL, ShuffleRandom, is_shuffle, natural_successor, parse_loop_mode,
                            parse_play_mode, play_mode_name, shuffle_available, shuffle_cycle,
                            shuffle_exhausted, shuffle_step)
-from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SoapFault, fault_xml, parse_request
+from .soap import MUTATING_ACTIONS, SERVICE_ALIASES, SERVICE_TYPES, SoapFault, fault_xml, parse_request
 from .state import PlaybackPhase, RendererState
 from .startup_state import StartupStateError, _INITIAL_BALANCE_ERROR, _read_state
 from .upnp_description import add_plex_stream_service, add_stream_service_sentinels, avtransport_response_fields, connection_manager_properties, description_xml, get_control_device_info_response_fields, new_tunein_stream_service, playqueue_response_fields, scpd_xml, soap_response, stream_mask_with_plex, stream_services_capability
@@ -3363,9 +3364,12 @@ class HttpApi:
     async def _materialize_radio_queue(self, queue: PlaybackQueue) -> None:
         """Resolve a header-only station under the current command generation."""
         station_id = queue.stream_id or self._radio_station_from_url(queue.search_url, allow_opml=False)
-        if (queue.source != "newTuneIn" or not re.fullmatch(r"s[0-9]{1,32}", station_id)
-                or queue.stream_type not in {"", "station"}):
-            raise SoapFault(402, "Invalid Args")
+        if queue.source != "newTuneIn":
+            raise SoapFault(402, "Invalid Args", queue_rejection=QueueRejectionReason.PROVIDER_SOURCE)
+        if not re.fullmatch(r"s[0-9]{1,32}", station_id):
+            raise SoapFault(402, "Invalid Args", queue_rejection=QueueRejectionReason.PROVIDER_STATION_ID)
+        if queue.stream_type not in {"", "station"}:
+            raise SoapFault(402, "Invalid Args", queue_rejection=QueueRejectionReason.PROVIDER_STREAM_TYPE)
         if self.state.backend_url or self.state.status in {"play", "pause", "transition"}:
             await self._transport_command("stop")
         generation = self._accept_playback_command("stop")
@@ -4179,11 +4183,16 @@ class HttpApi:
         """Handle UPnP SOAP actions and return small XML response envelopes."""
 
         body = await request.text()
+        service_path = request.match_info.get("service") or {"/upnp/transport": "AVTransport", "/upnp/rendering": "RenderingControl"}.get(getattr(request, "path", ""), "")
+        soap_action = request.headers.get("SOAPACTION", "")
+        # Identify the intended action even if SOAP framing fails. No payload values
+        # or exception text are used to construct the diagnostic response header.
+        create_queue = (SERVICE_ALIASES.get(service_path.lower()) == "PlayQueue"
+                        and soap_action.strip().strip('"') == f"{SERVICE_TYPES['PlayQueue']}#CreateQueue")
+        rejection_stage = QueueRejectionReason.SOAP_FRAMING
         try:
-            service, action, action_body = parse_request(
-                request.match_info.get("service") or {"/upnp/transport": "AVTransport", "/upnp/rendering": "RenderingControl"}.get(getattr(request, "path", ""), ""),
-                request.headers.get("SOAPACTION", ""), body,
-            )
+            service, action, action_body = parse_request(service_path, soap_action, body)
+            rejection_stage = QueueRejectionReason.UNKNOWN
             if action in MUTATING_ACTIONS[service]:
                 await self._execute_soap_side_effect(action, action_body)
                 result = self._playqueue_response_fields(action, action_body) if action == "UserLogin" else ""
@@ -4218,11 +4227,16 @@ class HttpApi:
                 raise SoapFault(401, "Invalid Action")
             response_text = soap_response(action, service, result)
         except SoapFault as exc:
-            return web.Response(status=500, text=fault_xml(exc), content_type="text/xml")
+            headers = {}
+            if create_queue and exc.code == 402:
+                reason = exc.queue_rejection if isinstance(exc.queue_rejection, QueueRejectionReason) else rejection_stage
+                headers["X-Open-Room-CreateQueue-Rejection"] = reason.value
+            return web.Response(status=500, text=fault_xml(exc), content_type="text/xml", headers=headers)
         except (BackendError, OSError, TimeoutError):
             return web.Response(status=500, text=fault_xml(SoapFault(501, "Action Failed")), content_type="text/xml")
         except (ValueError, TypeError, OverflowError):
-            return web.Response(status=500, text=fault_xml(SoapFault(402, "Invalid Args")), content_type="text/xml")
+            headers = {"X-Open-Room-CreateQueue-Rejection": rejection_stage.value} if create_queue else {}
+            return web.Response(status=500, text=fault_xml(SoapFault(402, "Invalid Args")), content_type="text/xml", headers=headers)
         self._log_http_detail(request, body, 200, response_text)
         return web.Response(text=response_text, content_type="text/xml")
 
@@ -4757,7 +4771,8 @@ class HttpApi:
             "Seek": "Target",
         }
         if action in required and not self._xml_text(body, required[action]).strip():
-            raise SoapFault(402, "Invalid Args")
+            reason = QueueRejectionReason.MISSING_CONTEXT if action == "CreateQueue" else None
+            raise SoapFault(402, "Invalid Args", queue_rejection=reason)
         if action == "Play":
             speed = self._xml_text(body, "Speed")
             if speed and speed != "1":
@@ -4882,8 +4897,8 @@ class HttpApi:
             context = self._xml_text(body, "QueueContext")
             try:
                 queue = parse_queue_context(context, name=self._xml_text(body, "QueueName") or None)
-            except QueueError:
-                raise SoapFault(402, "Invalid Args") from None
+            except QueueError as exc:
+                raise SoapFault(402, "Invalid Args", queue_rejection=exc.reason) from None
             if queue.items or not (queue.source or queue.stream_id or queue.search_url):
                 await self._replace_queue(queue)
                 return

@@ -9,6 +9,8 @@ from html import escape
 import re
 from xml.etree import ElementTree as ET
 
+from .queue_diagnostics import QueueRejectionReason
+
 SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 SERVICE_TYPES = {
     "AVTransport": "urn:schemas-upnp-org:service:AVTransport:1",
@@ -40,10 +42,11 @@ MUTATING_ACTIONS = {
 
 class SoapFault(Exception):
     """A public, non-sensitive UPnP failure description."""
-    def __init__(self, code: int, description: str) -> None:
+    def __init__(self, code: int, description: str, *, queue_rejection: QueueRejectionReason | None = None) -> None:
         super().__init__(description)
         self.code = code
         self.description = description
+        self.queue_rejection = queue_rejection
 
 
 def fault_xml(fault: SoapFault) -> str:
