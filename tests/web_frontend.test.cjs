@@ -2422,6 +2422,22 @@ test('radio search rejects malformed results without optimistic playback', async
   await search.search(state(), 'Synthetic', '');
   assert.deepEqual(search.stations, []); assert.match(search.message, /unavailable/);
 });
+test('radio search catalog failure guides a manual direct favorite without replay or raw errors', async () => {
+  const h = await appHarness();
+  h.setPost(() => ({__status: 503, error: 'radio_unavailable', outcome: 'ERROR', message: 'private provider details'}));
+  h.ids.get('radio-name').value = 'Synthetic';
+  await h.ids.get('radio-form').fire('submit'); await h.settle();
+  const message = h.ids.get('radio-status').textContent;
+  assert.match(message, /Radio-Browser search is unavailable/);
+  assert.match(message, /Favorites → \+ Add.*direct audio URL/);
+  assert.match(message, /Playback was not changed/);
+  assert.doesNotMatch(message, /private provider details/);
+  assert.equal(h.ids.get('radio-search').disabled, false);
+  assert.equal(h.ids.get('add-favorite').disabled, false);
+  await h.ids.get('add-favorite').fire('click');
+  assert.equal(h.ids.get('favorite-dialog').open, true);
+  assert.deepEqual(h.posts(), [{action: 'search', name: 'Synthetic', country: ''}]);
+});
 
 test('live stream title is optional, bounded and shown only for fresh owned playback', () => {
   const live = state({transport: {...state().transport, phase: 'PLAYING', intent: 'play'},
