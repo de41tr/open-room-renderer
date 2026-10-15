@@ -125,8 +125,10 @@
     $("playback-state").dataset.kind = control.fresh ? transport.status.toLowerCase() : "unknown";
     // A fresh explanation supplements, never replaces, uncertain request outcomes.
     const recovery = control.fresh ? transport.recovery : null;
-    $("playback-recovery").hidden = !recovery;
-    text("playback-recovery", recovery?.message || "");
+    const recoveryMessage = recovery?.message || (control.fresh && transport.status === "ERROR"
+      ? "Playback is not confirmed. Choose Stop, then check for STOPPED before trying another source. The reported state does not confirm physical silence." : "");
+    $("playback-recovery").hidden = !recoveryMessage;
+    text("playback-recovery", recoveryMessage);
     const image = safeArtwork(media.artwork);
     if (image !== artworkURL) {
       artworkURL = image;

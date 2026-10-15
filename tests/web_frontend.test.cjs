@@ -2026,15 +2026,26 @@ test('recovery guidance never erases sticky unknown outcomes or sends a retry', 
   const h = await appHarness(); h.setPost(() => {throw new Error('lost response');});
   await h.ids.get('play').fire('click'); await h.settle();
   assert.equal(h.posts().length, 1); assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN');
-  for (const kind of ['station_exhausted', 'backend_control']) {
-    h.setState(state({transport: {phase: 'ERROR', intent: 'play', status: 'ERROR', message: 'Playback state is unconfirmed. Stop is available for recovery.', recovery: {kind, message: kind === 'station_exhausted' ? 'Automatic station recovery is exhausted. Choose Play to try again.' : 'Backend control failed. Playback and silence are unconfirmed.'}}, actions: {...state().actions, pause: false, next: false, previous: false, seek: false}}));
+  for (const kind of ['station_exhausted', 'backend_control', null]) {
+    const recovery = kind && {kind, message: kind === 'station_exhausted' ? 'Automatic station recovery is exhausted. Choose Play to try again.' : 'Backend control failed. Playback and silence are unconfirmed.'};
+    h.setState(state({transport: {phase: 'ERROR', intent: 'play', status: 'ERROR', message: 'Playback state is unconfirmed. Stop is available for recovery.', recovery}, actions: {...state().actions, pause: false, next: false, previous: false, seek: false}}));
     await h.refresh();
     assert.equal(h.ids.get('playback-recovery').hidden, false);
+    if (kind) assert.equal(h.ids.get('playback-recovery').textContent, recovery.message);
+    else assert.match(h.ids.get('playback-recovery').textContent, /Choose Stop.*STOPPED.*another source.*does not confirm physical silence/);
     assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN');
     assert.match(h.ids.get('notice-text').textContent, /outcome unknown/i);
     assert.equal(h.ids.get('stop').disabled, false); assert.equal(h.ids.get('pause').disabled, true); assert.equal(h.ids.get('next').disabled, true);
     assert.equal(h.posts().length, 1);
   }
+  h.offline(); assert.equal(h.ids.get('playback-recovery').hidden, true);
+  await h.refresh(); assert.equal(h.ids.get('playback-recovery').hidden, false);
+  h.setPost(() => {h.setState(state()); return {request_acknowledged: true};});
+  await h.ids.get('stop').fire('click');
+  assert.equal(h.ids.get('playback-state').textContent, 'STOPPED');
+  assert.equal(h.ids.get('playback-recovery').hidden, true);
+  assert.match(h.ids.get('notice-text').textContent, /Earlier request outcome unknown: Play/);
+  assert.deepEqual(h.posts().map(item => item.action), ['play', 'stop']);
 });
 
 // Output inspection is a separate, explicit read workflow, never a playback mutation.
