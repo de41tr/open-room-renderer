@@ -93,6 +93,31 @@ def short_backend(*, auto_spawn=True):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["none", "entry", "track", "bitrate_unavailable"])
+async def test_audio_format_snapshot_fences_current_entry_and_decoded_track(change):
+    backend = short_backend(auto_spawn=False)
+    backend.command = AsyncMock(side_effect=lambda args, **_: {"error": "success", "data": False})
+    entry = {"id": 7, "filename": "https://source.example.test/no-format-hint", "current": True, "playing": True}
+    track = {"id": 1, "type": "audio", "selected": True, "codec": "flac"}
+    reads = {}
+    async def property(name):
+        reads[name] = reads.get(name, 0) + 1
+        if name == "path": return entry["filename"]
+        if name == "playlist": return [{**entry, "id": 8 if change == "entry" and reads[name] > 1 else 7}]
+        if name == "track-list": return [{**track, "codec": "mp3" if change == "track" and reads[name] > 1 else "flac"}]
+        if name == "audio-bitrate": return None if change == "bitrate_unavailable" else 234567.5
+        return None
+    backend.get_property = property
+    observed = await backend.snapshot()
+    if change in {"entry", "track"}:
+        assert observed["audio-info"] is None
+    else:
+        assert observed["audio-info"] == {"entry_id": 7, "codec": "flac",
+            "bitrate_bps": None if change == "bitrate_unavailable" else 234567}
+    assert reads["audio-bitrate"] == 1
+
+
+@pytest.mark.asyncio
 async def test_concurrent_start_and_commands_spawn_exactly_one_owned_child(monkeypatch, ipc):
     backend = short_backend()
     process = FakeProcess()
@@ -456,7 +481,7 @@ class ServiceHarness:
         self.cleanup_error = cleanup_error
         cfg = Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", http_api_port=18080, upnp_port=18081, mirror_port_80=True, enable_ssdp=True)
         self.cfg = cfg
-        monkeypatch.setattr(cli, "load_startup_config", lambda _: cfg)
+        monkeypatch.setattr(cli, "load_startup_config", lambda _, **kwargs: cfg)
         monkeypatch.setattr(cli, "setup_logging", lambda _: None)
         backend = SimpleNamespace()
         async def backend_start():
@@ -558,6 +583,33 @@ async def test_cli_backend_start_failure_keeps_control_api_available(monkeypatch
         harness.backend.stop.assert_not_awaited()
     if backend_error in {"start", "stop"}:
         harness.backend.initialize_gain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_spotify_failure_keeps_service_available_without_restart(monkeypatch):
+    from pathlib import Path
+    harness = ServiceHarness(monkeypatch)
+    source = SimpleNamespace(failed=False, stopping=False, root=Path('/synthetic-profile'),
+                             profile={}, close=AsyncMock())
+    async def start(api):
+        api.spotify_source = source
+        raise BackendError('synthetic Spotify startup failure')
+    async def close():
+        harness.api.spotify_source_factory = None
+        await harness.api.spotify_source.close()
+    source.start = AsyncMock(side_effect=start)
+    # Match the real API cleanup contract in this service-resource fixture.
+    original_api = cli.HttpApi
+    def api_factory(*args, **kwargs):
+        api = original_api(*args, **kwargs)
+        api.close_spotify = close
+        return api
+    monkeypatch.setattr(cli, 'HttpApi', api_factory)
+    await cli._serve(harness.cfg, spotify_source=source)
+    source.start.assert_awaited_once_with(harness.api)
+    source.close.assert_awaited_once()
+    assert source.failed and harness.state.phase == PlaybackPhase.ERROR
+    assert 'site0.start' in harness.events and harness.events[-1] == 'backend.close'
 
 
 @pytest.mark.asyncio
@@ -942,7 +994,7 @@ def test_real_process_signals_cannot_abandon_startup_or_teardown(phase, signal_n
             asyncio.get_running_loop().call_soon(send_signal)
             await asyncio.sleep(0.03)
             print("cleanup_finished", flush=True)
-        cli.load_startup_config = lambda _: Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", enable_ssdp=False)
+        cli.load_startup_config = lambda _, **kwargs: Config(uuid="00000000-0000-4000-8000-000000000000", advertise_ip="192.0.2.1", enable_ssdp=False)
         cli.setup_logging = lambda _: None
         cli.MpvBackend = lambda *args, **kwargs: SimpleNamespace(start=start_backend, stop=noop, initialize_gain=noop, stop_process=stop_backend)
         cli.HttpApi = lambda *args, **kwargs: SimpleNamespace(cfg=args[0], app=lambda: object(), initialize_channel_balance=noop)

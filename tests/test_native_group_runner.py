@@ -400,7 +400,7 @@ def test_both_default_lanes_partition_every_file_once_and_keep_budgets():
     assert jobs["renderer-tests"]["timeout-minutes"] == 15
 
 
-def test_native_opt_in_remains_exactly_two_unchanged_groups():
+def test_native_opt_in_remains_two_groups_with_existing_caps():
     native = yaml.safe_load((ROOT / ".github/workflows/renderer-tests.yml").read_text())["jobs"]["renderer-tests"]
     step = next(step for step in native["steps"] if step["name"] ==
                 "Run explicit real libmpv null and digital-PCM lanes")
@@ -410,7 +410,7 @@ def test_native_opt_in_remains_exactly_two_unchanged_groups():
     assert step["timeout-minutes"] == 7
     assert groups == [
         [f"tests/test_libmpv_{name}.py" for name in (
-            "integration", "gain", "dsp", "recovery", "dsp_restore", "formats", "live_metadata",
+            "integration", "gain", "dsp", "recovery", "spotify_eq", "dsp_restore", "formats", "live_metadata",
             "live_hls", "invalid_media", "repeat_queue", "shuffle_queue")],
         [f"tests/test_libmpv_{name}.py" for name in (
             "load_options", "station_cache", "load_cleanup", "station_playlist_cache",

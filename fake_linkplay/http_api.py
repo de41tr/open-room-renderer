@@ -211,6 +211,8 @@ class HttpApi:
         if state.phase == PlaybackPhase.ERROR or getattr(mpv, "gain_confirmed", True) is False:
             state.gain_confirmed = False
         self.mpv = mpv
+        self.spotify_source = None  # Only an explicit Spotify EQ startup can attach it.
+        self.spotify_source_factory = None  # Set only by an already enabled service invocation.
         self.on_rename = on_rename
         self._rename_lock = asyncio.Lock()
         self.queue_url = ""
@@ -390,9 +392,17 @@ class HttpApi:
             and not self._station_recovery_loading
             and not any(task is not None and not task.done() for task in
                         (self._station_recovery_task, self._queue_advance_task)))
+        if playlist_stopped and self.spotify_source_factory is not None and self.spotify_source is None:
+            actions.add("spotify_start")
+        spotify = self.spotify_source
         recovery = self._station_recovery
         current_recovery = recovery is not None and self._station_recovery_is_current(recovery)
         return WebRuntime(
+            spotify_configured=self.spotify_source_factory is not None,
+            spotify_active=spotify is not None,
+            spotify_waiting=bool(spotify is not None and not spotify.starting and not spotify.stopping
+                and not spotify.failed and spotify._provider
+                and spotify._provider.get("session_observation") == "NO_SESSION"),
             station_recovery_pending=bool(current_recovery and self._station_recovery_task is not None
                 and not self._station_recovery_task.done()),
             station_recovery_attempts=recovery.attempts if current_recovery else None,
@@ -431,6 +441,8 @@ class HttpApi:
         transport = {"play": "resume", "pause": "pause", "stop": "stop", "next": "next", "previous": "prev"}
         if action in transport:
             await self.execute(ParsedCommand(transport[action]), "")
+        elif action == "spotify_start":
+            await self._start_spotify()
         elif action in PLAYLIST_ACTIONS:
             # Admission and detached preparation ran synchronously immediately
             # before dispatch. Its stopped/backend-empty guard means the
@@ -495,6 +507,33 @@ class HttpApi:
             raise ValueError("Unsupported browser action")
         return None
 
+    async def _start_spotify(self) -> None:
+        # No hidden Stop or queued start intent: only the already configured
+        # profile and a confirmed stopped renderer can enter this fixed action.
+        if "spotify_start" not in self._web_runtime().actions:
+            raise WebAdmissionError("unavailable", 409)
+        source = self.spotify_source_factory()
+        try:
+            # start attaches ownership before its first await. Stop and normal
+            # source selection can interrupt it, but must await confirmed cleanup.
+            await source.start(self)
+        except asyncio.CancelledError:
+            await source.close()
+            raise
+        except (BackendError, OSError, ValueError):
+            if self.spotify_source is source and not source.stopping:
+                source.failed = True
+                self.state.mark_error("Spotify startup unconfirmed; Stop before changing sources")
+                self._schedule_event_notify()
+            raise BackendError("Spotify startup was not confirmed") from None
+
+    async def close_spotify(self) -> None:
+        # Disable admission synchronously before closing the current, possibly
+        # restarted child. Shutdown must never retain only the initial instance.
+        self.spotify_source_factory = None
+        if self.spotify_source is not None:
+            await self.spotify_source.close()
+
     async def _state_monitor_context(self, app):
         """Share one backend observer between all configured HTTP listeners."""
         self._app_users += 1
@@ -547,6 +586,9 @@ class HttpApi:
             await asyncio.sleep(self._monitor_interval)
             diagnostic.safe(self, "tick")
             self._prune_expired_subscribers()
+            if self.spotify_source is not None:
+                await self.spotify_source.observe()
+                continue
             if self.state.phase in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING, PlaybackPhase.STOPPED, PlaybackPhase.ERROR}:
                 continue
             try:
@@ -1204,6 +1246,9 @@ class HttpApi:
 
     async def sync_mpv_state(self) -> None:
         """Apply an observation only to the generation that requested it."""
+        if self.spotify_source is not None:
+            await self.spotify_source.observe()
+            return
         generation = self.state.generation
         try:
             async with self._backend_lock:
@@ -1228,6 +1273,7 @@ class HttpApi:
         # An absent, incoherent or unavailable observation cannot retain an
         # earlier on-air title. sync_mpv_state already fences the generation.
         self.state.stream_title = ""
+        self.state.audio_codec, self.state.audio_bitrate_bps = "", None
         old_phase = self.state.phase
         if self.state.phase in {PlaybackPhase.COMMAND_ACCEPTED, PlaybackPhase.LOADING}:
             return
@@ -1355,6 +1401,18 @@ class HttpApi:
                 and snap["duration"] > 0):
             self.state.totlen = int(snap["duration"]) + self._playback_offset_sec
         selected = self.state.queue.current
+        audio_info = snap.get("audio-info")
+        active_entry = self._native_active(snap)
+        if (selected and selected.url == self.state.current_url == self.state.backend_original_url
+                and self.state.intent in {"play", "pause"}
+                and self.state.phase in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED}
+                and not self._native_output_uncertain and selected_audio and coherent_source
+                and self._native_control_source_matches(snap)
+                and isinstance(audio_info, dict) and active_entry is not None
+                and type(audio_info.get("entry_id")) is int and audio_info["entry_id"] == active_entry.get("id")):
+            codec, bitrate = audio_info.get("codec"), audio_info.get("bitrate_bps")
+            self.state.audio_codec = codec if isinstance(codec, str) and re.fullmatch(r"[a-zA-Z0-9_+-]{1,40}", codec) else ""
+            self.state.audio_bitrate_bps = bitrate if type(bitrate) is int and 1 <= bitrate <= 1_000_000_000 else None
         if (selected and selected.stream_type == "station" and selected.duration == 0
                 and selected.url == self.state.current_url == self.state.backend_original_url
                 and self.state.intent in {"play", "pause"}
@@ -1388,6 +1446,9 @@ class HttpApi:
 
     async def _transport_command(self, command: str) -> None:
         """Serialize mutations and verify the actual backend acknowledgement."""
+        if self.spotify_source is not None:
+            await self.spotify_source.transport(command)
+            return
         if command == "pause" and not (self.queue_url or self.state.current_url):
             raise SoapFault(701, "Transition Not Available")
         if command == "resume" and self._native_output_uncertain:
@@ -1485,6 +1546,8 @@ class HttpApi:
         The caller owns completion, so HTTP, SOAP and Previous have the same
         success semantics and shutdown can cancel every confirmation task.
         """
+        if self.spotify_source is not None:
+            raise BackendError("Use the Spotify app to seek within this source")
         item = self.state.queue.current
         if (item and item.stream_type == "station") or self.queue_stream_type == "station":
             raise SoapFault(710, "Seek Mode Not Supported")
@@ -1961,6 +2024,9 @@ class HttpApi:
             return "OK"
         if name in {"pause", "resume", "onepause", "stop"}:
             command = "resume" if name == "onepause" else name
+            if self.spotify_source is not None:
+                await self._transport_command(command)
+                return "OK"
             if command == "resume" and not self.state.current_url:
                 raise BackendError("No media selected")
             if command == "resume" and (not self.state.backend_url or self.state.intent == "stop" or self.state.backend_original_url != self.state.current_url or self.state.phase in {PlaybackPhase.STOPPED, PlaybackPhase.ERROR}):
@@ -2834,6 +2900,8 @@ class HttpApi:
 
     def _require_catalog_proxy(self, url: str) -> None:
         """Reject known unavailable catalog playback before changing ownership."""
+        if isinstance(url, str) and url.lower().startswith("orr-spotify:"):
+            raise BackendError("Spotify PCM is an internally owned source; use an explicit Spotify EQ run")
         if self.catalog_proxy_port == 0 and station_from_reference(url):
             raise CatalogPlaybackUnavailable()
 
@@ -2852,6 +2920,8 @@ class HttpApi:
     async def _play_url(self, url: str) -> None:
         """Resolve/load once and confirm only this generation's actual audio."""
         self._require_catalog_proxy(url)
+        if self.spotify_source is not None:
+            await self._transport_command("stop")
         if self._native_stage is not None or self._native_current_id is not None or self._native_output_uncertain:
             await self._transport_command("stop")
         if not self.state.queue.current or self.state.queue.current.url != url:
@@ -4554,6 +4624,7 @@ class HttpApi:
         queue = self.state.queue
         item = queue.current
         self.state.stream_title = ""
+        self.state.audio_codec, self.state.audio_bitrate_bps = "", None
         self.queue_name = queue.name
         self.queue_url = item.url if item else ""
         self.queue_resolved_url = item.resolved_url if item else ""
@@ -4676,6 +4747,8 @@ class HttpApi:
 
     async def _replace_queue(self, queue: PlaybackQueue) -> None:
         queue.validate()
+        if self.spotify_source is not None:
+            await self._transport_command("stop")
         if self.state.backend_url or self.state.status in {"play", "pause", "transition"}:
             await self._transport_command("stop")
         self._accept_playback_command("stop")
@@ -4843,7 +4916,7 @@ class HttpApi:
         if action == "SetAVTransportURI":
             url = self._xml_text(body, "CurrentURI")
             if url:
-                if self.state.backend_url or self.state.status in {"play", "pause", "transition"}:
+                if self.spotify_source is not None or self.state.backend_url or self.state.status in {"play", "pause", "transition"}:
                     await self._transport_command("stop")
                 else:
                     self._accept_playback_command("stop")
@@ -4866,6 +4939,9 @@ class HttpApi:
                 self._schedule_event_notify(("rendertransport1", "AVTransport"))
             return
         if action == "Play":
+            if self.spotify_source is not None:
+                await self._transport_command("resume")
+                return
             url = self.queue_url or self.state.current_url
             if self._native_output_uncertain:
                 await self._play_url(url)
@@ -5213,6 +5289,8 @@ class HttpApi:
         duration does not make a finite file live, and an unloaded PAUSED
         selection cannot seek. Runtime uncertainty is never cached in state.
         """
+        if self.spotify_source is not None:
+            return self.spotify_source.actions()
         state, queue = self.state, self.state.queue
         selected = bool(self.queue_url or state.current_url)
         healthy = (state.phase != PlaybackPhase.ERROR and not self._native_output_uncertain

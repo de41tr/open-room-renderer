@@ -2527,3 +2527,64 @@ test('radio repair sends once, retains ACK or UNKNOWN, and expiry requires a fre
     await h.refresh(); await h.ids.get('favorite-form').fire('submit'); assert.equal(commands().length, 1);
   }
 });
+
+test('Spotify return is opt-in, generation-fenced and never automatically retried', async () => {
+  const h = harness();
+  await h.controller.refresh();
+  assert.equal(h.controller.canMutate('spotify_start'), false);
+  const available = state({spotify: {configured: true, active: false, waiting_for_app: false},
+    actions: {...state().actions, spotify_start: true}});
+  h.setState(available); await h.controller.refresh();
+  assert.equal(h.controller.canMutate('spotify_start'), true);
+  const body = guardedAction(h.controller.state, 'spotify_start');
+  assert.deepEqual(body, {action: 'spotify_start', expected_generation: 7});
+  h.hooks.post = async () => { throw new Error('synthetic lost response'); };
+  const outcome = await h.controller.mutate(body, 'Start Spotify');
+  assert.equal(outcome.kind, 'unknown');
+  assert.equal(h.posts().length, 1);
+  h.controller.fresh = false;
+  assert.equal(h.controller.canMutate('spotify_start'), false);
+  assert.equal(h.controller.canMutate('stop'), true);
+  assert.throws(() => validateState({...available, spotify: {configured: 'true', active: false, waiting_for_app: false}}));
+  assert.throws(() => validateState({...available, actions: {...available.actions, spotify_start: 'yes'}}));
+});
+
+test('Spotify card appears only for configured profile and wires one explicit start', async () => {
+  const h = await appHarness();
+  assert.equal(h.ids.get('spotify-card').hidden, true);
+  const next = state({spotify: {configured: true, active: false, waiting_for_app: false},
+    actions: {...state().actions, spotify_start: true}});
+  h.setState(next); await h.refresh();
+  assert.equal(h.ids.get('spotify-card').hidden, false);
+  assert.equal(h.ids.get('spotify-start').disabled, false);
+  await h.ids.get('spotify-start').fire('click');
+  const sent = h.requests.filter(request => request.options.method === 'POST');
+  assert.equal(sent.length, 1);
+  assert.deepEqual(JSON.parse(sent[0].options.body), {action: 'spotify_start', expected_generation: 7});
+  next.spotify = {configured: true, active: true, waiting_for_app: true};
+  next.actions.spotify_start = false;
+  next.transport = {phase: 'BUFFERING', intent: 'play', status: 'PENDING', message: ''};
+  h.setState(next); await h.refresh();
+  assert.equal(h.ids.get('spotify-start').disabled, true);
+  assert.match(h.ids.get('spotify-status').textContent, /Waiting for your Spotify app/);
+  assert.equal(h.ids.get('stop').disabled, false);
+  assert.equal(h.requests.filter(request => request.options.method === 'POST').length, 1);
+});
+
+test('current codec and bitrate show observed estimates and clear on stale or unowned playback', () => {
+  const {audioFormatText} = require('../fake_linkplay/web_assets/controller.js');
+  const playing = state({transport: {...state().transport, phase: 'PLAYING', status: 'CONFIRMED'},
+    media: {...state().media, audio: {codec: 'mp3', bitrate_bps: 128000, bitrate_kind: 'estimate'}}});
+  validateState(playing);
+  assert.equal(audioFormatText(playing, true), 'Codec: MP3 · Bitrate: ≈128 kb/s (estimate)');
+  for (const phase of ['STOPPED', 'ERROR', 'LOADING', 'BUFFERING']) {
+    assert.equal(audioFormatText({...playing, transport: {...playing.transport, phase}}, true), 'Codec: unknown · Bitrate: unknown');
+  }
+  assert.equal(audioFormatText(playing, false), 'Codec: unknown · Bitrate: unknown');
+  assert.equal(audioFormatText({...playing, media: {...playing.media, audio: {codec: 'flac', bitrate_bps: null, bitrate_kind: 'unavailable'}}}, true), 'Codec: FLAC · Bitrate: unknown');
+  for (const audio of [{codec: '<script>', bitrate_bps: null, bitrate_kind: 'unavailable'},
+      {codec: 'aac', bitrate_bps: -1, bitrate_kind: 'estimate'},
+      {codec: 'aac', bitrate_bps: 128000, bitrate_kind: 'exact'}]) {
+    assert.throws(() => validateState({...playing, media: {...playing.media, audio}}));
+  }
+});

@@ -275,6 +275,8 @@ def add_spotify_parser(subparsers) -> None:
     add_prepare_parser(commands)
     from .spotify_receiver import add_receiver_parser
     add_receiver_parser(commands)
+    from .spotify_eq import add_eq_parser
+    add_eq_parser(commands)
     diagnose = commands.add_parser("diagnose", help="observe an already running go-librespot sidecar",
         description="Read-only, sidecar-reported observations. No installation, login, playback or shared DSP.")
     diagnose.add_argument("--host", default="127.0.0.1", help="numeric loopback only (default: 127.0.0.1)")

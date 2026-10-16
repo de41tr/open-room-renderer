@@ -1,7 +1,7 @@
 /* Same-origin UI. Canonical snapshots are the only source of displayed state. */
 (function () {
   "use strict";
-  const {RadioSearch, streamTitleText, FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
+  const {RadioSearch, streamTitleText, audioFormatText, FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
   const $ = id => document.getElementById(id);
   const drafts = {seek: false, volume: false, mode: false, balance: false};
   let snapshot = null, queueSignature = "", favoritesSignature = "", artworkURL = null;
@@ -107,6 +107,13 @@
     noticeView();
     renderOutputInspection();
     renderRadio();
+    $("spotify-card").hidden = snapshot?.spotify?.configured !== true;
+    $("spotify-start").disabled = !control.canMutate("spotify_start");
+    text("spotify-status", !control.fresh ? "Read current state before starting Spotify."
+      : snapshot?.spotify?.waiting_for_app ? "Waiting for your Spotify app. Select this device, then raise Spotify volume carefully."
+      : snapshot?.spotify?.active ? "Spotify source selected. Use Spotify for tracks; Stop releases the receiver."
+      : control.canMutate("spotify_start") ? "Start the receiver, then select this device in your Spotify app."
+      : "Stop the current source before starting Spotify.");
     $("refresh").disabled = false;
     if (!snapshot) return;
     const {media, transport, gain, queue, dsp} = snapshot;
@@ -119,6 +126,7 @@
     $("stream-title").hidden = !onAir;
     text("track-artist", media.artist || (queue.count ? "Artist unavailable" : "Choose something from your favorites."));
     text("track-album", media.album);
+    text("audio-format", audioFormatText(snapshot, control.fresh));
     text("source-label", media.is_live ? "LIVE STREAM" : "OPEN ROOM");
     const phaseLabel = transport.status === "ERROR" ? "ERROR" : transport.status === "PENDING" && ["PLAYING", "PAUSED", "STOPPED"].includes(transport.phase) ? "PENDING" : transport.phase.replaceAll("_", " ");
     text("playback-state", control.fresh ? phaseLabel : "UNKNOWN · STALE");
@@ -972,6 +980,7 @@
   async function run(body, label) { const result = await control.mutate(body, label); return result; }
   function command(action, values = {}) { return guardedAction(snapshot, action, values); }
   ["play", "pause", "stop", "next", "previous"].forEach(action => $(action).addEventListener("click", () => run(command(action), action[0].toUpperCase() + action.slice(1))));
+  $("spotify-start").addEventListener("click", () => run(command("spotify_start"), "Start Spotify"));
   $("mute").addEventListener("click", () => run(command("mute", {value: !snapshot.gain.mute}), snapshot.gain.mute ? "Unmute" : "Mute"));
   $("volume-zero").addEventListener("click", () => {
     if (snapshot?.gain.status !== "UNKNOWN" || !control.canMutate("volume")) return;

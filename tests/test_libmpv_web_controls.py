@@ -23,6 +23,7 @@ import locale
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Any
 
@@ -44,6 +45,98 @@ from tools.native_probe_supervisor import run_probe
 
 
 BASE = "/orr/v1/web"
+
+
+async def _exercise_audio_formats(library: str, directory: Path) -> dict[str, Any]:
+    """Two real codecs through the own-UI API; no extension/catalog inference."""
+    wave = directory / "original.wav"
+    _write_tone(wave, 440)
+    tracks = tuple(directory / name for name in ("actual.mp3", "actual.flac"))
+    for track in tracks:
+        options = ["-c:a", "libmp3lame", "-b:a", "128k"] if track.suffix == ".mp3" else ["-c:a", "flac"]
+        subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-i", str(wave),
+                        *options, str(track)], check=True, timeout=10)
+    backend = _StagingBackend(library, tracks)
+    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", state_dir=str(directory / "state"),
+        bind_address="127.0.0.1", advertise_ip="127.0.0.1", auto_spawn_mpv=False,
+        enable_ssdp=False, enable_mdns=False, native_queue_staging=False)
+    api = HttpApi(cfg, RendererState.from_config(cfg), backend)
+    app = api.app()
+    async def source(request):
+        return web.FileResponse(tracks[int(request.match_info["index"])])
+    app.router.add_get("/source/{index}/misleading.mp3", source)
+    server = TestServer(app, shutdown_timeout=1)
+    evidence = {"lane": "REAL_LIBMPV/null/WEB_AUDIO_FORMAT", "samples": []}
+    try:
+        await backend.initialize_gain()
+        await api.initialize_channel_balance()
+        await server.start_server()
+        cfg.http_api_port = cfg.upnp_port = server.port
+        origin = str(server.make_url("/")).rstrip("/")
+        urls = [str(server.make_url(f"/source/{index}/misleading.mp3")) for index in range(2)]
+        backend._allowed_media = set(urls)
+        async with ClientSession(timeout=ClientTimeout(total=10), trust_env=False) as session:
+            async def get(path="state"):
+                async with session.get(server.make_url(BASE + "/" + path)) as response:
+                    assert response.status == 200
+                    return await response.json()
+            async def command(action, **fields):
+                state = await get()
+                async with session.post(server.make_url(BASE + "/command"),
+                        headers={"Origin": origin, "X-ORR-CSRF": state["csrf_token"]},
+                        json={"action": action, **fields}) as response:
+                    payload = await response.json()
+                    assert response.status == 200, payload
+            async def format_ready(codec, phase="PLAYING"):
+                async with asyncio.timeout(6):
+                    while True:
+                        state = await get()
+                        audio = state["media"]["audio"]
+                        if state["transport"]["phase"] == phase and audio["codec"] == codec and audio["bitrate_bps"]:
+                            return state
+                        await asyncio.sleep(.05)
+            for index, codec in enumerate(("mp3", "flac")):
+                await command("favorite_add", name=f"Original {index}", url=urls[index])
+                favorite = (await get("favorites"))["favorites"][-1]
+                await command("favorite_play", id=favorite["id"])
+                state = await format_ready(codec)
+                selected = [track for track in backend.read_property("track-list")
+                            if track.get("type") == "audio" and track.get("selected") is True]
+                assert len(selected) == 1 and selected[0]["codec"] == codec
+                assert backend.read_property("current-ao") == "null"
+                assert backend.read_property("playback-time") > 0
+                assert state["media"]["audio"]["bitrate_kind"] == "estimate"
+                if codec == "mp3":
+                    assert 120000 <= state["media"]["audio"]["bitrate_bps"] <= 136000
+                await command("pause", expected_generation=state["generation"])
+                assert (await format_ready(codec, "PAUSED"))["media"]["audio"]["codec"] == codec
+                evidence["samples"].append({"codec": codec, "bitrate_bps": state["media"]["audio"]["bitrate_bps"],
+                    "bitrate_kind": "estimate", "native_decoded_match": True, "pause_preserved": True})
+            await command("stop")
+            stopped = await get()
+            assert stopped["transport"]["phase"] == "STOPPED"
+            assert stopped["media"]["audio"] == {"codec": None, "bitrate_bps": None, "bitrate_kind": "unavailable"}
+            assert backend.read_property("idle-active") is True
+            evidence["stop_cleared"] = True
+            evidence["mpv_version"] = backend.read_property("mpv-version")
+            return evidence
+    finally:
+        await server.close()
+        backend.close()
+
+
+@pytest.mark.skipif(not os.environ.get("ORR_TEST_LIBMPV_PATH"), reason="Explicit real libmpv opt-in required")
+def test_real_web_codec_and_packet_bitrate(tmp_path):
+    root = Path(__file__).resolve().parents[1]
+    library = str(Path(os.environ["ORR_TEST_LIBMPV_PATH"]).resolve())
+    env = {**os.environ, "PYTHONPATH": str(root) + os.pathsep + str(root / "tests")}
+    result = run_probe([sys.executable, str(Path(__file__).resolve()), "--audio-format-probe", library, str(tmp_path)],
+                       cwd=root, env=env, timeout=30)
+    assert result.returncode == 0, f"Native format proof failed\n{result.stdout}\n{result.stderr}"
+    evidence = json.loads(result.stdout)
+    assert [entry["codec"] for entry in evidence["samples"]] == ["mp3", "flac"]
+    assert evidence["stop_cleared"]
+    print(json.dumps(evidence, sort_keys=True))
 
 
 def _native_source(backend: _StagingBackend, url: str) -> dict[str, Any] | None:
@@ -1065,12 +1158,14 @@ def test_real_libmpv_web_controls(tmp_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    assert len(sys.argv) == 4 and sys.argv[1] == "--probe"
+    assert len(sys.argv) == 4 and sys.argv[1] in {"--probe", "--audio-format-probe"}
     locale.setlocale(locale.LC_NUMERIC, "C")
 
     async def main():
         async with asyncio.timeout(30):
             directory = Path(sys.argv[3])
+            if sys.argv[1] == "--audio-format-probe":
+                return await _exercise_audio_formats(sys.argv[2], directory)
             evidence = await _exercise(sys.argv[2], directory)
             evidence["unavailable_saved_eq"] = await _exercise_unavailable(
                 sys.argv[2], directory, evidence["dsp"]["native_combined_graph"])

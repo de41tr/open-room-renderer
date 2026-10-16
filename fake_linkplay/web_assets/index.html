@@ -6,7 +6,8 @@
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="light">
   <title>Open Room Renderer</title>
-  <link rel="icon" href="/ui/favicon.ico">
+  <link rel="icon" type="image/png" href="/ui/logo.png">
+  <link rel="apple-touch-icon" href="/ui/logo.png">
   <link rel="stylesheet" href="/ui/style.css">
   <script src="/ui/controller.js" defer></script>
   <script src="/ui/app.js" defer></script>
@@ -14,7 +15,7 @@
 <body>
   <a class="skip-link" href="#main">Skip to controls</a>
   <header class="site-header shell">
-    <a class="brand" href="/ui/" aria-label="Open Room Renderer home"><span class="brand-mark" aria-hidden="true">or</span><span>open room<span class="brand-subtitle">NETWORK AUDIO RENDERER</span></span></a>
+    <a class="brand" href="/ui/" aria-label="Open Room Renderer home"><img class="brand-mark" src="/ui/logo.png" width="485" height="483" alt="" aria-hidden="true"><span>open room<span class="brand-subtitle">NETWORK AUDIO RENDERER</span></span></a>
     <div class="connection"><span id="connection-dot" class="connection-dot" aria-hidden="true"></span><span id="connection-label">Connecting</span><button id="refresh" class="button subtle small" type="button">Refresh</button></div>
   </header>
   <main id="main" class="shell" tabindex="-1">
@@ -27,8 +28,8 @@
           <div class="section-heading"><h2 id="now-playing-heading">Now playing</h2><span id="playback-state" class="state-pill">UNKNOWN</span></div>
           <p id="playback-recovery" class="field-hint" role="status" aria-live="polite" hidden></p>
           <div class="now-playing">
-            <div class="artwork"><div id="artwork-fallback" class="artwork-fallback" aria-hidden="true"><span class="record"><span class="record-center"></span></span></div><img id="artwork" hidden alt="" referrerpolicy="no-referrer" decoding="async"></div>
-            <div class="track-info"><p class="eyebrow" id="source-label">OPEN ROOM</p><h3 id="track-title">Ready when you are</h3><p id="stream-title" class="artist" hidden></p><p id="track-artist" class="artist">Choose something from your favorites.</p><p id="track-album" class="album"></p></div>
+            <div class="artwork"><div id="artwork-fallback" class="artwork-fallback" aria-hidden="true"><img src="/ui/logo.png" width="485" height="483" alt=""></div><img id="artwork" hidden alt="" referrerpolicy="no-referrer" decoding="async"></div>
+            <div class="track-info"><p class="eyebrow" id="source-label">OPEN ROOM</p><h3 id="track-title">Ready when you are</h3><p id="stream-title" class="artist" hidden></p><p id="track-artist" class="artist">Choose something from your favorites.</p><p id="track-album" class="album"></p><p id="audio-format" class="field-hint" title="Current decoded audio. Bitrate is mpv’s packet estimate and can vary; this is not the DAC output rate.">Codec: unknown · Bitrate: unknown</p></div>
           </div>
           <form id="seek-form" class="seek-form">
             <div class="range-heading"><label for="seek">Track position</label><span id="seek-hint">Position unavailable</span></div>
@@ -94,6 +95,11 @@
       </div>
       <div class="library-column">
         <section class="card queue-card" aria-labelledby="queue-heading"><div class="section-heading"><h2 id="queue-heading">Up next <span id="queue-count" class="count">0</span></h2><span class="muted" id="queue-name">Current queue</span></div><div class="playlist-toolbar"><button id="playlist-load" class="button small" type="button" disabled>Load playlist</button><button id="playlist-add" class="button subtle small" type="button" disabled>+ Add URLs</button><button id="playlist-export" class="button subtle small" type="button" disabled>Export JSON</button></div><p id="playlist-availability" class="field-hint"></p><p id="queue-empty" class="empty-state">Your queue will appear here.</p><ol id="queue-list" class="queue-list"></ol><p class="field-hint queue-hint">Select a track to play it. Queue edits keep playback stopped and reset shuffle history.</p><p class="field-hint">Loaded queues are kept for this renderer session. Keep your original playlist file.</p></section>
+        <section id="spotify-card" class="card" aria-labelledby="spotify-heading" hidden>
+          <div class="section-heading"><h2 id="spotify-heading">Spotify</h2><button id="spotify-start" class="button small" type="button" disabled>Start Spotify</button></div>
+          <p id="spotify-status" class="field-hint" role="status" aria-live="polite"></p>
+          <p class="field-hint">Uses your configured receiver and the existing ORR EQ. Spotify starts at volume 0. Its app volume and ORR volume/mute are separate controls.</p>
+        </section>
         <section class="card radio-card" aria-labelledby="radio-heading">
           <div class="section-heading"><h2 id="radio-heading">Internet radio</h2><a href="https://www.radio-browser.info/" target="_blank" rel="noopener noreferrer" class="muted">Radio-Browser</a></div>
           <p class="field-hint">Search by station name or country in the public community directory. Leave the name blank to browse a country. Direct MP3/AAC/Ogg streams (chained Vorbis verified); availability and regional restrictions vary. This is an independent ORR catalog.</p>
@@ -108,7 +114,7 @@
         <section class="card favorites-card" aria-labelledby="favorites-heading"><div class="section-heading"><h2 id="favorites-heading">Favorites <span id="favorites-count" class="count">0</span></h2><button id="add-favorite" class="button small" type="button" disabled>+ Add</button></div><div class="playlist-toolbar"><button id="favorites-backup" class="button subtle small" type="button" disabled>Backup JSON</button><button id="favorites-restore" class="button subtle small" type="button" disabled>Restore JSON</button></div><p id="favorites-empty" class="empty-state">Keep a few good things within reach.<br>Add a stream or save what’s playing.</p><ul id="favorites-list" class="favorites-list"></ul><button id="save-current" class="button save-current" type="button" disabled>+ Save current as favorite</button><p id="favorites-note" class="field-hint"></p></section>
       </div>
     </div>
-    <footer class="footer"><span class="footer-brand">open room renderer <span class="alpha">ALPHA</span></span><p>Trusted LAN only. Anyone on your network with access to this renderer can control playback. Do not expose this service to the internet.</p><p id="freshness" class="freshness">No state received yet.</p></footer>
+    <footer class="footer"><span class="footer-brand"><img src="/ui/logo.png" width="24" height="24" alt="" aria-hidden="true">open room renderer <span class="alpha">ALPHA</span></span><p>Trusted LAN only. Anyone on your network with access to this renderer can control playback. Do not expose this service to the internet.</p><p id="freshness" class="freshness">No state received yet.</p></footer>
   </main>
   <dialog id="favorites-export-dialog" aria-labelledby="favorites-export-heading" aria-describedby="favorites-export-hint"><form id="favorites-export-form" autocomplete="off">
     <div class="section-heading"><h2 id="favorites-export-heading">Back up managed favorites</h2><button id="favorites-export-close" class="button subtle small" type="button" aria-label="Close favorites backup">Close</button></div>

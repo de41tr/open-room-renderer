@@ -1,5 +1,7 @@
 # Open Room Renderer
 
+![open room — NETWORK AUDIO RENDERER](docs/assets/open-room-banner.jpg)
+
 A tiny Linux audio box you can run on a laptop or Raspberry Pi: it shows up on your LAN, accepts local playback commands, and plays audio through `mpv`.
 
 It is an independent, experimental Linux/mpv-based local network audio renderer for hobbyist audio setups. Think: garage speaker, workshop radio, kitchen Raspberry Pi, or “I have an old Linux box and want it to behave like a network audio sink”.
@@ -173,6 +175,11 @@ CLI for Spotify, renderer and off modes. It stops/checks whole owned systemd
 user-service cgroups before selecting one direct-ALSA engine. Spotify bypasses
 ORR EQ/balance; account, provider-policy and physical XU4/KA17 acceptance remain
 open. It is opt-in; setup never activates a client.
+
+A separate opt-in [Spotify-through-existing-EQ candidate](docs/SPOTIFY_EQ.md)
+keeps the existing ORR service/UI/EQ active using upstream's PCM pipe output. It supports local
+Spotify-app discovery without mandatory browser pairing. It is not activated
+or account/XU4/DAC-accepted; the legacy exclusive mode above stays unchanged.
 
 The `open-room-renderer spotify diagnose --port PORT` command reads an
 already running local go-librespot sidecar. It does not start a player or control

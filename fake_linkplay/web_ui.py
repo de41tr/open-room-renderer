@@ -51,6 +51,7 @@ _ASSETS = {"/": ("index.html", "text/html"), "/ui/": ("index.html", "text/html")
            "/ui/style.css": ("style.css", "text/css"),
            "/ui/controller.js": ("controller.js", "text/javascript"),
            "/ui/app.js": ("app.js", "text/javascript"),
+           "/ui/logo.png": ("logo.png", "image/png"),
            "/ui/favicon.ico": (None, "image/x-icon")}
 _HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
@@ -61,9 +62,9 @@ _HEADERS = {
         "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
 }
 _GENERATION_ACTIONS = frozenset({"play", "pause", "next", "previous", "seek",
-                               "queue_select", "queue_mode", "favorite_current", "radio_play"}) | PLAYLIST_ACTIONS
+                               "queue_select", "queue_mode", "favorite_current", "radio_play", "spotify_start"}) | PLAYLIST_ACTIONS
 _SCHEMAS = {
-    **{name: {"expected_generation"} for name in ("play", "pause", "next", "previous")},
+    **{name: {"expected_generation"} for name in ("play", "pause", "next", "previous", "spotify_start")},
     "device_rename": {"name", "expected_device"},
     "stop": set(), "seek": {"seconds", "expected_generation"},
     "volume": {"value"}, "mute": {"value"}, "balance": {"value"}, "eq": {"enabled"},
@@ -167,6 +168,9 @@ class WebDspExport:
 class WebRuntime:
     """Synchronous renderer-owned availability and uncertainty observations."""
     actions: frozenset[str]
+    spotify_configured: bool = False
+    spotify_active: bool = False
+    spotify_waiting: bool = False
     catalog_proxy_available: bool = True
     transport_unknown: bool = False
     transport_pending: bool = False
@@ -807,10 +811,12 @@ class WebControlApi:
                                                          PlaybackPhase.BUFFERING} or runtime.transport_pending else "CONFIRMED")
         gain_status = ("PENDING" if runtime.gain_pending else "CONFIRMED"
                        if state.gain_confirmed and runtime.backend_gain_confirmed else "UNKNOWN")
+        audio_visible = bool(item and state.backend_url and state.intent in {"play", "pause"}
+            and state.phase in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED} and transport_status == "CONFIRMED")
         title = (_title(state.title, (item.url, item.resolved_url, state.current_url,
                     state.resolved_url, state.backend_url, state.backend_original_url), f"Track {queue.index}")
                  if item else "No selection")
-        actions = {name: name in runtime.actions for name in ("play", "pause", "stop", "next", "previous", "seek")}
+        actions = {name: name in runtime.actions for name in ("play", "pause", "stop", "next", "previous", "seek", "spotify_start")}
         can_save = False
         if item is not None:
             try:
@@ -838,6 +844,9 @@ class WebControlApi:
                 "message": "Playback state is unconfirmed. Stop is available for recovery." if transport_status == "ERROR"
                     else "Waiting for renderer confirmation." if transport_status == "PENDING" else ""},
             "media": {"title": title, "artist": _display(state.artist), "album": _display(state.album),
+                "audio": {"codec": (state.audio_codec or None) if audio_visible else None,
+                    "bitrate_bps": state.audio_bitrate_bps if audio_visible else None,
+                    "bitrate_kind": "estimate" if audio_visible and state.audio_bitrate_bps is not None else "unavailable"},
                 "stream_title": (safe_stream_title(state.stream_title, (item.url, item.resolved_url,
                     state.current_url, state.resolved_url, state.backend_url, state.backend_original_url)) or None)
                     if (item and item.stream_type == "station" and state.intent in {"play", "pause"}
@@ -856,6 +865,8 @@ class WebControlApi:
                      "artist": _display(entry.artist), "album": _display(entry.album),
                      "duration_seconds": _duration(entry.duration)} for number, entry in enumerate(queue.items, 1)]},
             "dsp": dsp, "actions": actions,
+            "spotify": {"configured": runtime.spotify_configured, "active": runtime.spotify_active,
+                        "waiting_for_app": runtime.spotify_waiting},
         }
 
     def favorite_revision(self, entry: dict[str, object]) -> str:
@@ -912,7 +923,7 @@ class WebControlApi:
             if command.action == "radio_play" and (runtime.transport_unknown or runtime.transport_pending):
                 raise WebAdmissionError("unavailable", 409)
             command = replace(command, name=found[1].name, url=found[1].reference)
-        if command.action in {"play", "pause", "next", "previous", "seek"} and command.action not in runtime.actions:
+        if command.action in {"play", "pause", "next", "previous", "seek", "spotify_start"} and command.action not in runtime.actions:
             raise WebAdmissionError("unavailable", 409)
         if command.action == "queue_mode" and runtime.queue_mode_locked:
             raise WebAdmissionError("unavailable", 409)
@@ -1044,7 +1055,8 @@ class WebControlApi:
                     # blocked by our intentionally unchanged image CSP.
                     return web.Response(status=204, content_type=content_type, headers=_HEADERS)
                 body = files("fake_linkplay").joinpath("web_assets", filename).read_bytes()
-                return web.Response(body=body, content_type=content_type, charset="utf-8", headers=_HEADERS)
+                return web.Response(body=body, content_type=content_type,
+                                    charset=None if content_type.startswith("image/") else "utf-8", headers=_HEADERS)
             if path in {PREFIX + "/state", PREFIX + "/favorites"}:
                 if request.method != "GET":
                     raise WebAdmissionError("method_not_allowed", 405)

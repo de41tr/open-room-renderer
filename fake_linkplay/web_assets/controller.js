@@ -397,6 +397,12 @@
     if (!isObject(media) || ![media.title, media.artist, media.album].every(string) || !(media.artwork === null || string(media.artwork)) || typeof media.is_live !== "boolean" || !optionalNumber(media.position_seconds) || !optionalNumber(media.duration_seconds)) throw new Error("Invalid media snapshot");
     if (media.stream_title !== undefined && media.stream_title !== null
         && (!string(media.stream_title) || new TextEncoder().encode(media.stream_title).length > 1024)) throw new Error("Invalid stream title");
+    if (media.audio !== undefined) {
+      const audio = media.audio;
+      if (!isObject(audio) || !(audio.codec === null || (string(audio.codec) && /^[a-zA-Z0-9_+-]{1,40}$/.test(audio.codec)))
+          || !(audio.bitrate_bps === null || (integer(audio.bitrate_bps) && audio.bitrate_bps >= 1 && audio.bitrate_bps <= 1000000000))
+          || audio.bitrate_kind !== (audio.bitrate_bps === null ? "unavailable" : "estimate")) throw new Error("Invalid audio format");
+    }
     if (!isObject(gain) || !["CONFIRMED", "PENDING", "UNKNOWN"].includes(gain.status) || !(gain.volume === null || (integer(gain.volume) && gain.volume <= 100)) || !optionalBoolean(gain.mute)) throw new Error("Invalid gain snapshot");
     if (!isObject(queue) || !string(queue.name) || !integer(queue.count) || queue.count > 1000 || !integer(queue.index) || !Object.hasOwn(MODES, queue.mode) || !Array.isArray(queue.items) || queue.items.length !== queue.count || (queue.count === 0 ? queue.index !== 0 : queue.index < 1 || queue.index > queue.count)) throw new Error("Invalid queue snapshot");
     if (queue.playlist_edit_reason !== undefined && !["supported", "empty_queue", "unsupported_queue"].includes(queue.playlist_edit_reason)) throw new Error("Invalid queue edit capability");
@@ -405,6 +411,8 @@
     if (dsp.editor !== null) { if (dsp.status !== "CONFIRMED") throw new Error("Unconfirmed sound editor"); validateEditor(dsp.editor); }
     if (!isObject(actions) || !["play", "pause", "stop", "next", "previous", "seek", "queue_select", "queue_mode", "save_current"].every(key => typeof actions[key] === "boolean")) throw new Error("Invalid actions snapshot");
     if (PLAYLIST_ACTIONS.some(action => actions[action] !== undefined && typeof actions[action] !== "boolean")) throw new Error("Invalid playlist actions");
+    if (state.spotify !== undefined && (!exactFields(state.spotify, ["configured", "active", "waiting_for_app"]) || Object.values(state.spotify).some(value => typeof value !== "boolean"))) throw new Error("Invalid Spotify availability");
+    if (actions.spotify_start !== undefined && typeof actions.spotify_start !== "boolean") throw new Error("Invalid Spotify action");
     return state;
   }
   function streamTitleText(state, fresh) {
@@ -412,6 +420,16 @@
     return fresh && media.is_live && transport.status === "CONFIRMED"
       && ["PLAYING", "PAUSED"].includes(transport.phase) && title && title !== media.title
       ? `On air: ${title}` : "";
+  }
+  function audioFormatText(state, fresh) {
+    const {media, transport} = state;
+    const active = fresh && transport.status === "CONFIRMED" && ["PLAYING", "PAUSED"].includes(transport.phase);
+    const audio = active ? media.audio : null;
+    const raw = audio?.codec;
+    const codec = raw ? (/^pcm_/i.test(raw) ? "PCM" : raw.toUpperCase()) : "unknown";
+    const bitrate = audio?.bitrate_kind === "estimate" && audio.bitrate_bps > 0
+      ? `≈${Math.max(1, Math.round(audio.bitrate_bps / 1000))} kb/s (estimate)` : "unknown";
+    return `Codec: ${codec} · Bitrate: ${bitrate}`;
   }
   function validateFavorites(payload, session) {
     if (!isObject(payload) || payload.version !== 1 || !string(payload.session_id) || !payload.session_id || (session !== undefined && payload.session_id !== session) || !Array.isArray(payload.favorites)) throw new Error("Invalid favorites snapshot");
@@ -451,7 +469,7 @@
   function guardedAction(state, action, values = {}) {
     if (!state) throw new Error("Read renderer state first");
     const body = {action, ...values};
-    if (["play", "pause", "next", "previous", "seek", "queue_select", "queue_mode", "favorite_current", ...PLAYLIST_ACTIONS].includes(action)) body.expected_generation = state.generation;
+    if (["play", "pause", "next", "previous", "seek", "queue_select", "queue_mode", "favorite_current", "spotify_start", ...PLAYLIST_ACTIONS].includes(action)) body.expected_generation = state.generation;
     if (["queue_select", "queue_mode"].includes(action)) body.queue_name = state.queue.name;
     if (action === "favorite_restore") body.expected_session = state.session_id;
     if (action.startsWith("dsp_")) {
@@ -598,7 +616,7 @@
     changed() { this.onChange(this); }
     get busy() { return this.active.size > 0; }
     get stopBusy() { return Array.from(this.active.values()).some(item => item.action === "stop"); }
-    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (action !== "device_rename" || /^[0-9a-f]{64}$/.test(this.state.device.revision || "")) && (!action.startsWith("favorite_") || this.favoritesFresh && (action !== "favorite_restore" || !this.favorites.some(item => item.editable))) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor && (!DSP_LIBRARY_ACTIONS.includes(action) || this.state.dsp.editor.library_unavailable !== true))) && (!action.startsWith("playlist_") || playlistAvailable(this.state, action) && (action === "playlist_replace" || this.playlistEditable))); }
+    canMutate(action) { return action === "stop" ? Boolean(this.state && !this.stopBusy) : Boolean(this.state && this.fresh && !this.busy && (action !== "spotify_start" || this.state.spotify?.configured === true && this.state.actions.spotify_start === true) && (action !== "device_rename" || /^[0-9a-f]{64}$/.test(this.state.device.revision || "")) && (!action.startsWith("favorite_") || this.favoritesFresh && (action !== "favorite_restore" || !this.favorites.some(item => item.editable))) && (!action.startsWith("dsp_") || (this.state.dsp.status === "CONFIRMED" && this.state.dsp.editor && (!DSP_LIBRARY_ACTIONS.includes(action) || this.state.dsp.editor.library_unavailable !== true))) && (!action.startsWith("playlist_") || playlistAvailable(this.state, action) && (action === "playlist_replace" || this.playlistEditable))); }
     refresh() {
       this.readAgain = true;
       if (!this.readPromise) {
@@ -760,5 +778,5 @@
       return result;
     }
   }
-  return {RadioSearch, FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesDocument, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveDocument, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, streamTitleText, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
+  return {RadioSearch, FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesDocument, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveDocument, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, validateOutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, PLAYLIST_ACTIONS, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_MODES, DSP_FIELDS, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, validateEditor, validateState, streamTitleText, audioFormatText, validateFavorites, safeAudioURL, safeArtwork, formatTime, guardedAction, commandError};
 });
