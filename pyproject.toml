@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
   "aiohttp>=3.9",
+  "tidalapi==0.8.11",
   "PyYAML>=6.0",
   "requests>=2.31",
   "zeroconf>=0.132",

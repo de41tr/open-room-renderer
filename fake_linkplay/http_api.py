@@ -192,11 +192,17 @@ class HttpApi:
 
     def __init__(self, cfg: Config, state: RendererState, mpv: MpvBackend, *, on_rename: Callable[[], Awaitable[None]] | None = None,
                  shuffle_rng: ShuffleRandom | None = None, _startup: bool = False,
-                 tidal_account: TidalAccountBridge | None = None) -> None:
+                 tidal_account: TidalAccountBridge | None = None, tidal_login=None) -> None:
         """Create an API handler bound to config, renderer state, and mpv."""
 
         self.cfg = cfg
         self.tidal_account = tidal_account  # Explicit opt-in; no service advertisement.
+        self.tidal_login = tidal_login
+        if _startup and self.tidal_login is None:
+            from .tidal_device_auth import TidalDeviceLoginManager
+            from .tidal_session import TidalSessionStore
+            self.tidal_login = TidalDeviceLoginManager(TidalSessionStore(
+                Path.home() / ".local/share/open-room-renderer/components/tidal"))
         # None reuses the main IPv4 listener; zero means optional setup failed.
         self.catalog_proxy_port: int | None = None
         self.state = state
@@ -338,6 +344,12 @@ class HttpApi:
 
         app = web.Application()
         app.cleanup_ctx.append(self._state_monitor_context)
+        if self.tidal_login is not None:
+            from .web_tidal import WebTidalLogin
+            app.add_routes(WebTidalLogin(self.web_api, self.tidal_login).routes())
+            async def close_tidal_login(app):
+                await self.tidal_login.close()
+            app.on_cleanup.append(close_tidal_login)
         app.add_routes(self.web_api.routes())
         app.add_routes(self.favorites_api.routes())
         app.add_routes(QueuePlaylistApi(lambda: self.state.queue).routes())

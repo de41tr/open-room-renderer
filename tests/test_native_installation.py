@@ -145,10 +145,10 @@ def test_stage_load_restart_distinct_identity_and_safe_uninstall(installer, tmp_
         assert receipt["source"]["source_sha256"]
         assert not (prefix / "venv").exists()
         assets = prefix / "source/fake_linkplay/web_assets"
-        assert {path.name for path in assets.iterdir()} == {"index.html", "style.css", "controller.js", "app.js", "logo.png"}
+        assert {path.name for path in assets.iterdir()} == {"index.html", "style.css", "controller.js", "app.js", "logo.png", "tidal.html", "tidal.js"}
         manifest = json.loads((prefix / installer.MANIFEST).read_text())
         entries = {entry["path"]: entry for entry in manifest["files"]}
-        for name in ("index.html", "style.css", "controller.js", "app.js", "logo.png"):
+        for name in ("index.html", "style.css", "controller.js", "app.js", "logo.png", "tidal.html", "tidal.js"):
             body = (ROOT / "fake_linkplay/web_assets" / name).read_bytes()
             assert (assets / name).read_bytes() == body
             assert entries[f"source/fake_linkplay/web_assets/{name}"]["sha256"] == hashlib.sha256(body).hexdigest()
@@ -792,7 +792,7 @@ def test_staged_web_assets_are_allowlisted_and_all_affect_source_receipt(install
     snapshot = prefix / "source"
     assets = snapshot / "fake_linkplay/web_assets"
     original = installer.source_receipt(snapshot)["source_sha256"]
-    for name in ("index.html", "style.css", "controller.js", "app.js", "logo.png"):
+    for name in ("index.html", "style.css", "controller.js", "app.js", "logo.png", "tidal.html", "tidal.js"):
         path = assets / name
         body = path.read_bytes()
         path.write_bytes(body + b"\nChanged asset\n")
@@ -803,7 +803,7 @@ def test_staged_web_assets_are_allowlisted_and_all_affect_source_receipt(install
     assert installer.source_receipt(snapshot)["source_sha256"] == original
     selected = installer.source_files(snapshot)
     assert {path.name for path in selected if path.parent == assets} == {
-        "index.html", "style.css", "controller.js", "app.js", "logo.png"}
+        "index.html", "style.css", "controller.js", "app.js", "logo.png", "tidal.html", "tidal.js"}
 
 
 @pytest.mark.parametrize("replacement", ["missing", "file_symlink", "directory_symlink"])
