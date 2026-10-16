@@ -1,8 +1,11 @@
 """Offline session-storage checks with disposable files and synthetic tokens."""
 from dataclasses import FrozenInstanceError, replace
+import errno
 import json
 import os
 import stat
+import subprocess
+import sys
 import traceback
 
 import pytest
@@ -237,3 +240,77 @@ def test_save_replaces_complete_private_file_atomically(tmp_path, monkeypatch, s
     store.save(TidalSession("synthetic-new-access"))
     assert calls == ["session.json"]
     assert store.load() == TidalSession("synthetic-new-access")
+
+
+def test_lease_excludes_same_store_other_instance_and_other_process(tmp_path, session):
+    store = TidalSessionStore(tmp_path / "private")
+    store.save(session)
+    replacement = TidalSession("synthetic-replacement-access")
+    with store.lease() as lease:
+        assert lease.load() == store.load() == session
+        for competing in (store, TidalSessionStore(store.directory)):
+            with pytest.raises(TidalSessionError, match="already in progress"):
+                competing.save(replacement)
+            with pytest.raises(TidalSessionError, match="already in progress"):
+                competing.clear()
+            with pytest.raises(TidalSessionError, match="already in progress"):
+                with competing.lease():
+                    pytest.fail("competing ownership must not be granted")
+        subprocess.run([sys.executable, "-c", """
+import sys
+from fake_linkplay.tidal_session import TidalSession, TidalSessionError, TidalSessionStore
+store = TidalSessionStore(sys.argv[1])
+for operation in (store.clear, lambda: store.save(TidalSession('synthetic-competing-access'))):
+    try:
+        operation()
+    except TidalSessionError as error:
+        assert 'already in progress' in str(error)
+    else:
+        raise AssertionError('competing process changed a leased session')
+""", str(store.directory)], check=True, capture_output=True, timeout=5)
+        assert lease.load() == session
+        store.directory.chmod(0o750)
+        with pytest.raises(TidalSessionError, match="must be private"):
+            lease.save(replacement)
+        store.directory.chmod(0o700)
+        assert lease.load() == session
+        lease.save(replacement)
+    assert store.load() == replacement
+    assert [p.name for p in store.directory.iterdir()] == ["session.json"]
+    with pytest.raises(TidalSessionError, match="no longer active"):
+        lease.save(session)
+    assert store.clear()
+
+
+def test_exception_releases_new_directory_lease_and_invalidates_saved_capability(tmp_path, session):
+    store = TidalSessionStore(tmp_path / "private")
+    with pytest.raises(OSError, match="synthetic aborted operation"):
+        with store.lease() as lease:
+            assert lease.load() is None
+            with pytest.raises(TidalSessionError, match="already in progress"):
+                store.clear()
+            raise OSError("synthetic aborted operation")
+    assert store.directory.stat().st_mode & 0o777 == 0o700
+    assert list(store.directory.iterdir()) == []
+    # A stale capability must not operate on a descriptor reused by a new lease.
+    with store.lease() as next_lease:
+        for operation in (lease.load, lambda: lease.save(session)):
+            with pytest.raises(TidalSessionError, match="no longer active"):
+                operation()
+        next_lease.save(session)
+    assert store.load() == session
+
+
+def test_unsupported_lock_fails_closed_without_altering_existing_session(tmp_path, monkeypatch, session):
+    store = TidalSessionStore(tmp_path / "private")
+    store.save(session)
+
+    def unsupported(*args):
+        raise OSError(errno.EOPNOTSUPP, ACCESS)
+
+    monkeypatch.setattr(tidal_session.fcntl, "flock", unsupported)
+    for operation in (store.clear, lambda: store.save(TidalSession("synthetic-replacement-access"))):
+        with pytest.raises(TidalSessionError, match="ownership is unavailable") as error:
+            operation()
+        assert ACCESS not in "".join(traceback.format_exception(error.value))
+    assert store.load() == session

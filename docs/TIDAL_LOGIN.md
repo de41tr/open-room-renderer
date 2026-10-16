@@ -92,6 +92,12 @@ separately; check storage before retrying. The stored schema contains
 (with the store's schema version). A missing refresh token is stored as null; an old refresh token is never reused.
 There is no automatic token refresh.
 
+The login owns a nonblocking exclusive lease on the private session directory
+until it finishes or is cancelled. A concurrent login, save, or local logout
+fails explicitly as busy instead of silently changing the pending account.
+Cancel the pending login before requesting local logout. Read-only session
+checks remain possible. No lock file or persistent service is installed.
+
 Exit status:
 
 - `0`: a complete OAuth session was saved on this host; playback remains unproven

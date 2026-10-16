@@ -280,6 +280,17 @@ def _token_session(value: dict) -> TidalSession:
 async def login(client: TidalClientIdentity, scope: str, store: TidalSessionStore, *,
                 timeout: float = 180, probe_v1_session: bool = False,
                 no_browser: bool = False, announce=print) -> LoginResult:
+    """Own the session across browser consent so delayed login cannot overwrite logout."""
+    _configuration(client, scope, timeout)
+    with store.lease() as lease:
+        return await _login_owned(client, scope, lease, timeout=timeout,
+                                  probe_v1_session=probe_v1_session,
+                                  no_browser=no_browser, announce=announce)
+
+
+async def _login_owned(client: TidalClientIdentity, scope: str, store: TidalSessionStore, *,
+                timeout: float = 180, probe_v1_session: bool = False,
+                no_browser: bool = False, announce=print) -> LoginResult:
     """Save only after a complete grant and identity; failures preserve storage.
 
     probe_v1_session is operator confirmation that their client is separately

@@ -7,8 +7,9 @@ Tokens are plaintext on disk protected by Unix ownership and permissions.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
+import fcntl
 import json
 import math
 import os
@@ -89,7 +90,7 @@ def _fingerprint(info: os.stat_result) -> tuple:
 class TidalSessionStore:
     """Store one session in an explicitly supplied private Linux directory.
 
-    Only save creates the final directory; its ancestors must already exist.
+    Save or lease creates the final directory; its ancestors must already exist.
     Existing unsafe files/directories are rejected, never permission-repaired.
     load returns None only for missing storage, and raises for invalid storage.
     clear removes the stored session only; it does not revoke provider tokens.
@@ -142,25 +143,66 @@ class TidalSessionStore:
         _file_info(info)
         return info
 
+    @staticmethod
+    @contextmanager
+    def _locked(directory: int):
+        try:
+            fcntl.flock(directory, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise TidalSessionError("Another TIDAL session operation is already in progress.") from None
+        except OSError:
+            raise TidalSessionError("Exclusive TIDAL session ownership is unavailable.") from None
+        lease = _TidalSessionLease(directory)
+        try:
+            yield lease
+        finally:
+            lease._directory_fd = None
+            # The enclosing directory context closes its descriptor and releases
+            # the lock. No persistent lock file, shared flag, or reentrant bypass.
+
+    @contextmanager
+    def lease(self):
+        """Own storage across a login attempt; conflicts fail without waiting.
+
+        Use the yielded object's load/save methods while ownership is held.
+        Ordinary save/clear, even through this same store, cannot bypass it.
+        """
+        with ExitStack() as stack:
+            try:
+                directory = stack.enter_context(self._directory(create=True))
+            except OSError:
+                raise TidalSessionError("The private TIDAL directory could not be opened.") from None
+            with self._locked(directory) as lease:
+                yield lease
+
     def load(self) -> TidalSession | None:
         try:
             with self._directory() as directory:
-                if self._entry(directory) is None:
-                    return None
-                fd = os.open(_SESSION_FILE, _FILE_FLAGS, dir_fd=directory)
-                try:
-                    before = os.fstat(fd)
-                    _file_info(before)
-                    if before.st_size > MAX_SESSION_BYTES:
-                        raise TidalSessionError("Stored TIDAL session exceeds the size limit.")
-                    with os.fdopen(fd, "rb", closefd=False) as source:
-                        data = source.read(MAX_SESSION_BYTES + 1)
-                    if len(data) > MAX_SESSION_BYTES:
-                        raise TidalSessionError("Stored TIDAL session exceeds the size limit.")
-                    if _fingerprint(before) != _fingerprint(os.fstat(fd)):
-                        raise TidalSessionError("Stored TIDAL session changed while being read.")
-                finally:
-                    os.close(fd)
+                return self._load_at(directory)
+        except FileNotFoundError:
+            return None
+        except OSError:
+            raise TidalSessionError("The private TIDAL session could not be read.") from None
+
+    @staticmethod
+    def _load_at(directory: int) -> TidalSession | None:
+        try:
+            if TidalSessionStore._entry(directory) is None:
+                return None
+            fd = os.open(_SESSION_FILE, _FILE_FLAGS, dir_fd=directory)
+            try:
+                before = os.fstat(fd)
+                _file_info(before)
+                if before.st_size > MAX_SESSION_BYTES:
+                    raise TidalSessionError("Stored TIDAL session exceeds the size limit.")
+                with os.fdopen(fd, "rb", closefd=False) as source:
+                    data = source.read(MAX_SESSION_BYTES + 1)
+                if len(data) > MAX_SESSION_BYTES:
+                    raise TidalSessionError("Stored TIDAL session exceeds the size limit.")
+                if _fingerprint(before) != _fingerprint(os.fstat(fd)):
+                    raise TidalSessionError("Stored TIDAL session changed while being read.")
+            finally:
+                os.close(fd)
         except FileNotFoundError:
             return None
         except OSError:
@@ -176,6 +218,11 @@ class TidalSessionStore:
             raise TidalSessionError("Stored TIDAL session data is invalid.") from None
 
     def save(self, session: TidalSession) -> None:
+        with self.lease() as lease:
+            lease.save(session)
+
+    @staticmethod
+    def _save_at(directory: int, session: TidalSession) -> None:
         if type(session) is not TidalSession:
             raise TidalSessionError("A validated TIDAL session is required.")
         session.__post_init__()
@@ -190,28 +237,27 @@ class TidalSessionStore:
         if len(data) > MAX_SESSION_BYTES:
             raise TidalSessionError("TIDAL session data exceeds the size limit.")
         try:
-            with self._directory(create=True) as directory:
-                self._entry(directory)
-                name = ".session-" + secrets.token_hex(16) + ".tmp"
-                fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
-                             0o600, dir_fd=directory)
+            TidalSessionStore._entry(directory)
+            name = ".session-" + secrets.token_hex(16) + ".tmp"
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                         0o600, dir_fd=directory)
+            try:
                 try:
-                    try:
-                        os.fchmod(fd, 0o600)
-                        with os.fdopen(fd, "wb", closefd=False) as output:
-                            output.write(data)
-                            output.flush()
-                            os.fsync(fd)
-                    finally:
-                        os.close(fd)
-                    self._entry(directory)
-                    os.replace(name, _SESSION_FILE, src_dir_fd=directory, dst_dir_fd=directory)
-                    os.fsync(directory)
+                    os.fchmod(fd, 0o600)
+                    with os.fdopen(fd, "wb", closefd=False) as output:
+                        output.write(data)
+                        output.flush()
+                        os.fsync(fd)
                 finally:
-                    try:
-                        os.unlink(name, dir_fd=directory)
-                    except FileNotFoundError:
-                        pass
+                    os.close(fd)
+                TidalSessionStore._entry(directory)
+                os.replace(name, _SESSION_FILE, src_dir_fd=directory, dst_dir_fd=directory)
+                os.fsync(directory)
+            finally:
+                try:
+                    os.unlink(name, dir_fd=directory)
+                except FileNotFoundError:
+                    pass
         except OSError:
             raise TidalSessionError("The private TIDAL session could not be saved.") from None
 
@@ -219,12 +265,38 @@ class TidalSessionStore:
         """Delete only the private session; return whether one was present."""
         try:
             with self._directory() as directory:
-                if self._entry(directory) is None:
-                    return False
-                os.unlink(_SESSION_FILE, dir_fd=directory)
-                os.fsync(directory)
-                return True
+                with self._locked(directory):
+                    if self._entry(directory) is None:
+                        return False
+                    os.unlink(_SESSION_FILE, dir_fd=directory)
+                    os.fsync(directory)
+                    return True
         except FileNotFoundError:
             return False
         except OSError:
             raise TidalSessionError("The private TIDAL session could not be removed.") from None
+
+
+class _TidalSessionLease:
+    """A scoped capability, invalidated before its owned descriptor is closed."""
+
+    def __init__(self, directory: int):
+        self._directory_fd: int | None = directory
+
+    def _active_directory(self) -> int:
+        if self._directory_fd is None:
+            raise TidalSessionError("The TIDAL session lease is no longer active.")
+        try:
+            info = os.fstat(self._directory_fd)
+        except OSError:
+            raise TidalSessionError("The TIDAL session lease is unavailable.") from None
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o700):
+            raise TidalSessionError("The TIDAL directory must be private and owned by you.")
+        return self._directory_fd
+
+    def load(self) -> TidalSession | None:
+        return TidalSessionStore._load_at(self._active_directory())
+
+    def save(self, session: TidalSession) -> None:
+        TidalSessionStore._save_at(self._active_directory(), session)

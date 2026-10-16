@@ -343,3 +343,26 @@ def test_cli_success_does_not_claim_xu4_or_playback_acceptance(tmp_path, monkeyp
     output = capsys.readouterr().out
     assert "v1 session access was not tested" in output
     assert "Full playback, entitlement, XU4 transfer and renderer adoption remain unverified" in output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["clear", "save"])
+async def test_pending_login_exclusively_owns_session(login_harness, monkeypatch, operation):
+    store, _, emitted, _, _ = login_harness
+    from fake_linkplay.tidal_session import TidalSessionError
+    other = TidalSessionStore(store.directory)
+
+    async def request(url, **kwargs):
+        with pytest.raises(TidalSessionError, match="already in progress"):
+            if operation == "clear":
+                other.clear()
+            else:
+                other.save(TidalSession("synthetic-concurrent-session"))
+        return dict(TOKEN)
+
+    monkeypatch.setattr(auth, "_request_json", request)
+    await auth.login(CLIENT, SCOPE, store, announce=emitted.append)
+    assert store.load().access_token == ACCESS
+    # Ownership ends on completion; explicit logout is effective afterward.
+    assert other.clear()
+    assert store.load() is None
