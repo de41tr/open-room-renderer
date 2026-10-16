@@ -1,6 +1,7 @@
 """Offline library-login lifecycle checks; no real library or credentials."""
 import asyncio
 from concurrent.futures import Future
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 import logging
@@ -78,7 +79,8 @@ async def test_safe_challenge_checked_storage_and_utc_expiry(tmp_path):
     assert (await manager.status())["user_code"] == "ABCDE"
     session.polling.set_result(True)
     result = await settled(manager)
-    assert result == {"state": "connected", "active": False, "session_saved": True}
+    assert result == {"state": "connected", "active": False, "session_saved": True,
+                      "session_status": "stored"}
     assert_no_secrets(result)
     assert all(thread != threading.get_ident() for _, thread in session.calls)
     saved = store.load()
@@ -104,6 +106,66 @@ async def test_existing_session_rejected_before_library_or_network(tmp_path):
     await settled(manager)
     assert store.load() == original
     await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_status_after_restart_tracks_only_local_session_without_library_or_writes(tmp_path, monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(tidal_device_auth, "time", SimpleNamespace(
+        time=lambda: now[0], monotonic=lambda: 100.0,
+    ))
+    monkeypatch.setattr(tidal_device_auth, "_library_session", lambda: pytest.fail("status initialized tidalapi"))
+    store = TidalSessionStore(tmp_path / "private")
+    manager = TidalDeviceLoginManager(store)
+    assert await manager.status() == {"state": "idle", "active": False,
+                                      "session_saved": False, "session_status": "missing"}
+    assert not store.directory.exists()
+    saved = TidalSession("synthetic-access-secret", "synthetic-refresh-secret", 2000.0,
+                         "12345", "ZZ", client_id="synthetic-device-client",
+                         auth_flow="tidalapi-device-v0.8.11")
+    store.save(saved)
+    before = (store.directory / "session.json").read_bytes()
+    for moment, expected in ((1000.0, "stored"), (2000.0, "expired"), (2001.0, "expired")):
+        now[0] = moment
+        # A fresh process has no remembered login attempt or sharing consent.
+        result = await TidalDeviceLoginManager(store).status()
+        assert result == {"state": "idle", "active": False,
+                          "session_saved": False, "session_status": expected}
+        assert_no_secrets(result)
+        assert "synthetic-device-client" not in json.dumps(result)
+        assert str(store.directory) not in json.dumps(result)
+        assert (store.directory / "session.json").read_bytes() == before
+    store.save(replace(saved, expires_at=3000.0))
+    assert (await manager.status())["session_status"] == "stored"
+    store.clear()
+    assert (await manager.status())["session_status"] == "missing"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change,expected", [
+    ({"client_id": None, "auth_flow": None}, "unsupported"),
+    ({"refresh_token": None}, "unsupported"),
+    ({"expires_at": None}, "unsupported"),
+    ({"user_id": "01"}, "unsupported"),
+    ({"country_code": None}, "unsupported"),
+    ({"access_token": "synthetic token with spaces"}, "unsupported"),
+    ("corrupt", "unavailable"),
+    ("permissions", "unavailable"),
+])
+async def test_status_rejects_incomplete_legacy_or_unreadable_records_safely(tmp_path, change, expected):
+    store = TidalSessionStore(tmp_path / "private")
+    saved = TidalSession("synthetic-access-secret", "synthetic-refresh-secret", 2000000000.0,
+                         "12345", "ZZ", client_id="synthetic-device-client",
+                         auth_flow="tidalapi-device-v0.8.11")
+    store.save(replace(saved, **change) if isinstance(change, dict) else saved)
+    path = store.directory / "session.json"
+    if change == "corrupt":
+        path.write_text('{"synthetic-access-secret": "broken"}')
+    elif change == "permissions":
+        path.chmod(0o644)
+    manager = TidalDeviceLoginManager(store, session_factory=lambda: pytest.fail("status started login"))
+    assert await manager.status() == {"state": "idle", "active": False,
+                                      "session_saved": False, "session_status": expected}
 
 
 @pytest.mark.asyncio

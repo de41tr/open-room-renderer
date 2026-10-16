@@ -221,8 +221,31 @@ class TidalDeviceLoginManager:
             pass  # Cancellation and the worker may both acknowledge readiness.
 
     async def status(self) -> dict:
-        """Return a fresh safe snapshot; no account lookup or token refresh."""
-        return self._snapshot()
+        """Report local storage separately from this process's login attempt.
+
+        Stored means a complete, unexpired local device record, not current
+        provider acceptance or playback entitlement. Never initialize tidalapi,
+        acquire a write lease, refresh tokens, or expose record fields here.
+        """
+        session_status = await asyncio.to_thread(self._session_status)
+        return {**self._snapshot(), "session_status": session_status}
+
+    def _session_status(self) -> str:
+        try:
+            session = self._store.load()  # Existing schema/provenance and file-safety validation.
+        except TidalSessionError:
+            return "unavailable"
+        if session is None:
+            return "missing"
+        if (session.auth_flow != "tidalapi-device-v0.8.11" or not session.client_id
+                or session.expires_at is None or not session.country_code
+                or type(session.user_id) is not str
+                or not re.fullmatch(r"[1-9][0-9]{0,18}", session.user_id)
+                or int(session.user_id) > 2**63 - 1
+                or any(type(token) is not str or not re.fullmatch(r"[\x21-\x7e]{1,16384}", token)
+                       for token in (session.access_token, session.refresh_token))):
+            return "unsupported"
+        return "expired" if session.expires_at <= time.time() else "stored"
 
     async def start(self) -> dict:
         async with self._api_lock:

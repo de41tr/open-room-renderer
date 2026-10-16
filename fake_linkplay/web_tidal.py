@@ -97,6 +97,8 @@ class WebTidalLogin:
             result = dict(result)
             result["account_shared"] = bool(self.account and self.account.shared)
             allowed = {"state", "active", "verification_uri", "user_code", "expires_in", "expires_at", "retry_after", "account_shared", "playback_requested", "refresh_outcome", "sharing_warning"}
+            if result.get("session_status") in ("missing", "stored", "expired", "unsupported", "unavailable"):
+                allowed.add("session_status")
             safe_errors = {"dependency_unavailable", "session_exists", "storage_unavailable", "invalid_challenge", "login_failed", "expired", "unsafe_debug", "invalid_timeout", "session_unavailable", "client_mismatch", "invalid_response", "identity_mismatch", "refresh_failed", "commit_failed"}
             if result.get("error") in safe_errors:
                 allowed.add("error")
@@ -105,7 +107,7 @@ class WebTidalLogin:
             return self.admission._error(error.code, error.status)
         except Exception:
             return web.json_response({"state": "error", "active": False,
-                                      "message": "Device login unavailable. No completed adoption confirmed."},
+                                      "message": "TIDAL action unavailable. Its outcome was not confirmed."},
                                      status=503, headers=_HEADERS)
 
     async def _handle_test(self, request, origin):
