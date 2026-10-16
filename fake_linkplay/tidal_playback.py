@@ -4,7 +4,7 @@ Only a saved, unexpired tidalapi 0.8.11 device session is accepted. The result
 is a private CDN candidate, not evidence that audio played or a full asset was
 provided. Callers must keep its URL out of public status, queues and logs, and
 use the public-only, DNS-pinned media proxy before playback. No token refresh,
-DRM handling, playlist expansion or provider-provided endpoint is supported.
+DRM handling, automatic collection paging or provider-provided endpoint is supported.
 """
 from __future__ import annotations
 
@@ -43,6 +43,9 @@ _MESSAGES = {
     "unsupported_manifest": "Only a single unencrypted TIDAL BTS audio candidate is supported.",
     "unsupported_asset": "TIDAL returned a preview or another unsupported asset presentation.",
     "unsafe_destination": "The TIDAL audio candidate has an unsafe or unavailable destination.",
+    "invalid_page_selection": "Select one bounded TIDAL album-tracks or playlist-items page.",
+    "invalid_page_response": "TIDAL returned an inconsistent catalogue page.",
+    "unsupported_page": "Only nonempty pages of explicitly streamable audio tracks are supported.",
 }
 
 
@@ -128,13 +131,19 @@ async def _request_json(http, track_id: str, session: TidalSession, *,
                         playback: bool = False, quality: str = "HIGH") -> dict:
     # URLs are constructed here; neither callers nor provider JSON choose an
     # endpoint. The Bearer header is only ever sent to this fixed API origin.
-    _unexpired(session)
-    url = _API_TRACKS + track_id
+    path = "tracks/" + track_id
     params = {"countryCode": session.country_code}
     if playback:
-        url += "/playbackinfopostpaywall"
+        path += "/playbackinfopostpaywall"
         params.update(playbackmode="STREAM", audioquality=quality, assetpresentation="FULL")
-    async with http.request("GET", url, params=params, allow_redirects=False, headers={
+    return await _request_api_json(http, path, session, params)
+
+
+async def _request_api_json(http, path: str, session: TidalSession, params: dict) -> dict:
+    """Shared bounded fixed-origin reader; paths come only from local admission."""
+    _unexpired(session)
+    async with http.request("GET", "https://api.tidal.com/v1/" + path,
+                            params=params, allow_redirects=False, headers={
         "Authorization": "Bearer " + session.access_token,
         "Accept": "application/json", "Accept-Encoding": "identity",
     }) as response:
@@ -266,6 +275,37 @@ class TidalPlaybackResolver:
             return hmac.compare_digest(fingerprint, _session_fingerprint(session))
         except (ValueError, TypeError, OSError, OverflowError):
             return False
+
+    async def resolve_page(self, catalogue_url: str):
+        """Read exactly one validated page under the existing private store lease."""
+        from .tidal_page import TidalPageCandidate, page_track_ids, parse_page_request
+        request = parse_page_request(catalogue_url)
+        try:
+            with self._store.lease() as lease:
+                session = _device_session(lease.load())
+                params = dict(request.params)
+                if params.get("countryCode", session.country_code) != session.country_code:
+                    raise TidalPlaybackError("invalid_page_selection")
+                params["countryCode"] = session.country_code
+                async with asyncio.timeout(15):
+                    async with aiohttp.ClientSession(
+                        trust_env=False, auto_decompress=False,
+                        timeout=aiohttp.ClientTimeout(total=15),
+                        cookie_jar=aiohttp.DummyCookieJar(),
+                    ) as http:
+                        value = await _request_api_json(http, request.path, session, params)
+                    track_ids = page_track_ids(value, request)
+                    _unexpired(session)
+                    return TidalPageCandidate(request.catalogue_url, track_ids,
+                                              _session_fingerprint(session), float(session.expires_at))
+        except TidalPlaybackError:
+            raise
+        except TidalSessionError:
+            raise TidalPlaybackError("storage_unavailable") from None
+        except (aiohttp.ClientError, OSError, TimeoutError):
+            raise TidalPlaybackError("request_failed") from None
+        except (ValueError, TypeError, UnicodeError, RecursionError, OverflowError):
+            raise TidalPlaybackError("invalid_page_response") from None
 
     async def resolve_track(self, track_id: str, quality: str = "HIGH") -> TidalTrackCandidate:
         if (type(track_id) is not str or not re.fullmatch(r"[1-9][0-9]{0,19}", track_id)

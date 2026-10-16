@@ -388,3 +388,17 @@ async def test_candidate_fingerprint_rejects_replaced_or_deleted_session(harness
     store.clear()
     assert not resolver.session_matches(fingerprint)
     assert len(requests) == 2
+
+
+def test_session_available_is_local_only_and_requires_valid_device_session(tmp_path):
+    store = TidalSessionStore(tmp_path / "local-readiness")
+    resolver = playback.TidalPlaybackResolver(store)
+    assert resolver.session_available() is False
+    store.save(SESSION)
+    assert resolver.session_available() is True
+    store.save(replace(SESSION, expires_at=999))
+    assert resolver.session_available() is False
+    store.save(replace(SESSION, client_id=None, auth_flow=None))
+    assert resolver.session_available() is False
+    store.save(SESSION)
+    assert resolver.session_available() is True

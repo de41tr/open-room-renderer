@@ -11,7 +11,8 @@ from fake_linkplay.http_api import HttpApi, ParsedCommand
 from fake_linkplay.mpv_backend import BackendError
 from fake_linkplay.state import RendererState
 from test_soap_faults import FakeBackend
-from test_tidal_queue_playback import configured
+from fake_linkplay.tidal_queue import TidalQueueSelection, parse_tidal_queue
+from test_tidal_queue_playback import configured, explicit_context
 from test_web_ui import serving, state as web_state
 from test_web_tidal import Manager as SyntheticLogin
 
@@ -182,6 +183,9 @@ async def test_idle_gain_is_reduced_before_load_and_never_restored(api):
     lease = await start_playing(api)
     assert api.mpv.calls[0] == ("volume", 1)
     assert api.mpv.actual_volume == 1
+    assert api.state.queue.count == api.state.queue.index == 1
+    assert api.state.queue.current.id == "42"
+    assert api.state.queue.current._tidal_test_lease is api.tidal_test
     assert [name for name, _ in api.mpv.calls].count("load") == 1
     stopped, code = await api.tidal_test.stop(lease)
     assert code == 200 and stopped["state"] == "stopped"
@@ -387,6 +391,7 @@ async def test_loopback_start_status_stop_use_existing_csrf_and_private_schema(a
 
 @pytest.mark.parametrize("change", [
     {"track_id": 42}, {"track_id": "0"}, {"track_id": "01"},
+    {"track_id": ["42", "43"]}, {"tracks": ["42", "43"]},
     {"track_id": "1" * 20}, {"track_id": "٤٢"},
     {"duration_seconds": True}, {"duration_seconds": 0},
     {"duration_seconds": 121}, {"duration_seconds": 1.0},
@@ -465,9 +470,21 @@ async def test_http_wrong_method_status_body_and_host_are_rejected(api):
         assert not api.mpv.calls and not api.tidal_playback.calls
 
 
-async def test_foreign_pending_resolution_refuses_admission_without_gain_change(api):
+@pytest.mark.parametrize("selection", ["single_track", "explicit_queue", "header_page"])
+async def test_foreign_pending_resolution_refuses_admission_without_gain_change(api, selection):
     api.tidal_playback.wait = asyncio.Event()
-    foreign = asyncio.create_task(api._play_tidal_track("43"))
+    if selection == "header_page":
+        async def pending_page(url):
+            api.tidal_playback.calls.append(("page", url))
+            await api.tidal_playback.wait.wait()
+            raise AssertionError("The pending page must be cancelled")
+        api.tidal_playback.resolve_page = pending_page
+        play = api._play_tidal_selection(TidalQueueSelection(
+            "Page", "https://api.tidal.com/v1/albums/123/tracks?limit=3"), require_shared=True)
+    else:
+        play = (api._play_tidal_track("43") if selection == "single_track" else
+                api._play_tidal_selection(parse_tidal_queue(explicit_context()), require_shared=True))
+    foreign = asyncio.create_task(play)
     try:
         await wait_resolution(api)
         value, code = await api.tidal_test.start("42", 60)
@@ -476,6 +493,7 @@ async def test_foreign_pending_resolution_refuses_admission_without_gain_change(
     finally:
         foreign.cancel()
         await asyncio.gather(foreign, return_exceptions=True)
+    assert not api._tidal_pending_resolutions
 
 
 async def test_progress_and_decoding_come_only_from_owned_native_observations(api):
