@@ -41,6 +41,11 @@ include the four static assets.
 - Private current-queue JSON export with a redacted review, explicit consent and
   a user-clicked download link; no automatic download or durable-save claim.
 
+Choosing an EQ preset does not load it. The local choice survives a volume change,
+favorite recall or temporarily unavailable readback, while preset controls stay
+unavailable until the renderer confirms its current list. A removed preset or a
+renderer-session change clears the choice. Loading always requires an explicit click.
+
 Sliders show a local draft and require an explicit Apply/Set/Seek action. Cancel
 sends nothing. Polling does not overwrite an unfinished edit. The supported
 shuffle modes do not imply an independent shuffle-plus-repeat-one combination.
