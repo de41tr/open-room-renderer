@@ -249,9 +249,12 @@ class HttpApi:
         self.queue_duration_sec = 0
         self._backend_lock = asyncio.Lock()
         self._gain_command_lock = asyncio.Lock()
+        from .tidal_test import TidalTestLease
+        self.tidal_test = TidalTestLease(self)
         self._gain_operations = 0
         self._gain_uncertain = not self.state.gain_confirmed
         self._proxy_sources: dict[str, int] = {}
+        self._tidal_pending_resolutions: set[asyncio.Task] = set()
         self._proxy_semaphore = asyncio.Semaphore(4)
         self._state_monitor_task: asyncio.Task | None = None
         self._app_users = 0
@@ -357,7 +360,7 @@ class HttpApi:
         if self.tidal_login is not None:
             from .web_tidal import WebTidalLogin
             app.add_routes(WebTidalLogin(self.web_api, self.tidal_login,
-                                        self.tidal_account if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None, self._play_tidal_track, self.tidal_refresh).routes())
+                                        self.tidal_account if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None, self._play_tidal_track, self.tidal_refresh, self.tidal_test).routes())
             async def close_tidal_login(app):
                 await self.tidal_login.close()
             app.on_cleanup.append(close_tidal_login)
@@ -571,6 +574,7 @@ class HttpApi:
         finally:
             self._app_users -= 1
             if self._app_users == 0 and self._state_monitor_task is not None:
+                await self.tidal_test.close()
                 # Invalidate before any cleanup await. An in-flight load keeps
                 # the backend lock until its actual identity has been recorded.
                 self._invalidate_station_recovery()
@@ -641,10 +645,12 @@ class HttpApi:
         self._pending_seek_target = None
 
     def _accept_playback_command(self, intent: str, *, preserve_native: bool = False) -> int:
+        self.tidal_test.command_allowed()
         self._invalidate_playback_work()
         self._proxy_sources.clear()
         native_ready = self._native_ready_generation == self.state.generation
         generation = self.state.accept_command(intent)
+        self.tidal_test.command_accepted(generation)
         if intent == "stop":
             self._station_child_history_attempt = None
         stage = self._native_stage
@@ -1472,6 +1478,15 @@ class HttpApi:
 
     async def _transport_command(self, command: str) -> None:
         """Serialize mutations and verify the actual backend acknowledgement."""
+        self.tidal_test.command_allowed()
+        test = self.tidal_test
+        if test.controls_owned_source():
+            if command != "stop":
+                raise BackendError("Bounded TIDAL test permits only Stop transport control")
+            result, code = await test.stop(test._lease_id)
+            if code != 200:
+                raise BackendError("Bounded TIDAL test stop unconfirmed")
+            return
         if self.spotify_source is not None:
             await self.spotify_source.transport(command)
             return
@@ -1572,6 +1587,7 @@ class HttpApi:
         The caller owns completion, so HTTP, SOAP and Previous have the same
         success semantics and shutdown can cancel every confirmation task.
         """
+        self.tidal_test.guard_same_source_control()
         if self.spotify_source is not None:
             raise BackendError("Use the Spotify app to seek within this source")
         item = self.state.queue.current
@@ -2105,6 +2121,9 @@ class HttpApi:
     async def _set_confirmed_gain(self, *, volume: int | None = None, mute: bool | None = None) -> None:
         """Publish and persist only backend-confirmed gain, in command order."""
         async with self._gain_command_lock:
+            test = getattr(self, "tidal_test", None)
+            if test is not None:
+                test.guard_gain(volume)
             try:
                 if volume is not None:
                     await self._gain_reconciling_call(self.mpv.volume(volume))
@@ -2945,7 +2964,15 @@ class HttpApi:
 
     async def _play_url(self, url: str) -> None:
         """Resolve/load once and confirm only this generation's actual audio."""
+        self.tidal_test.command_allowed()
         self._require_catalog_proxy(url)
+        test = self.tidal_test
+        if test.controls_owned_source() and asyncio.current_task() is not test._play_task:
+            if url == self.state.current_url:
+                test.guard_same_source_control()
+            result, code = await test.stop(test._lease_id)
+            if code != 200:
+                raise BackendError("Bounded TIDAL test stop unconfirmed")
         if self.spotify_source is not None:
             await self._transport_command("stop")
         if self._native_stage is not None or self._native_current_id is not None or self._native_output_uncertain:
@@ -2967,8 +2994,11 @@ class HttpApi:
 
     async def _load_playback_url(self, url: str, generation: int, *, recovery: StationRecovery | None = None) -> bool:
         """Load and confirm audio; False means a stale recovery was deferred."""
+        test_lease = self.state.queue.current._tidal_test_lease if self.state.queue.current else None
+
         def current() -> bool:
             return (generation == self.state.generation
+                    and (test_lease is None or test_lease.admitted())
                     and (recovery is None or self._station_recovery_is_current(recovery)))
 
         queue, item, index = self.state.queue, self.state.queue.current, self.state.queue.index
@@ -2991,6 +3021,9 @@ class HttpApi:
                     and identity in {load_identity, ("", "")})
 
         async def silence_failed_load() -> None:
+            if test_lease is not None:
+                await test_lease.cleanup_failed_load()
+                return
             if not owns_load():
                 return
             # Include lock acquisition, Stop acknowledgement and idle readback
@@ -3094,6 +3127,8 @@ class HttpApi:
                         raise BackendError("Backend control failed before queue advance")
                     if self._reject_foreign_source_observation(snapshot, ""):
                         return False
+                if test_lease is not None:
+                    await test_lease.before_load()
                 if (selected and selected._tidal_track is not None
                         and not self.tidal_playback.session_matches(selected._tidal_session_fingerprint)):
                     raise SourcePlaybackError("TIDAL session changed", "source_resolution")
@@ -3125,12 +3160,15 @@ class HttpApi:
                         # Only entering the guarded mutation consumes the
                         # initially materialized target, even if ACK fails.
                         selected._radio_resolution_attempted = True
+                    load_kwargs = {"current": test_lease.before_load} if test_lease is not None else {}
                     load_reply = await self._gain_reconciling_call(
-                        self.mpv.loadfile(playback_url, mpv_options, start_paused=True))
+                        self.mpv.loadfile(playback_url, mpv_options, start_paused=True, **load_kwargs))
                     data = load_reply.get("data") if isinstance(load_reply, dict) else None
                     entry_id = data.get("playlist_entry_id") if isinstance(data, dict) else None
                     if type(entry_id) is int and entry_id >= 0:
                         self._admitted_load_entry_id = entry_id
+                    if test_lease is not None:
+                        await test_lease.record_load(playback_url, entry_id)
                     # Record actual backend identity even if a newer owner
                     # command arrived during the bounded, locked mutation.
                     self.state.backend_url = playback_url
@@ -3185,6 +3223,8 @@ class HttpApi:
                 # unpause. An earlier snapshot cannot authorize that mutation.
                 if not may_resume():
                     return False
+                if test_lease is not None:
+                    await test_lease.before_resume()
                 snapshot = await self.mpv.snapshot()
                 if not may_resume():
                     return False
@@ -3510,16 +3550,30 @@ class HttpApi:
     def _tidal_sharing_enabled(self):
         return isinstance(self.tidal_account, TidalDeviceAccountBridge) and self.tidal_account.shared
 
-    async def _play_tidal_track(self, track_id: str, quality: str = "HIGH", name: str = "CurrentQueue", *, require_shared: bool = False):
+    async def _play_tidal_track(self, track_id: str, quality: str = "HIGH", name: str = "CurrentQueue", *, require_shared: bool = False, _test_lease=None):
+        self.tidal_test.command_allowed()
+        task = asyncio.current_task()
+        self._tidal_pending_resolutions.add(task)
+        try:
+            return await self._play_tidal_track_inner(track_id, quality, name,
+                                                     require_shared=require_shared, _test_lease=_test_lease)
+        finally:
+            self._tidal_pending_resolutions.discard(task)
+
+    async def _play_tidal_track_inner(self, track_id: str, quality: str = "HIGH", name: str = "CurrentQueue", *, require_shared: bool = False, _test_lease=None):
         from .tidal_playback import TidalPlaybackError
         if (self.tidal_playback is None or self.catalog_proxy_port == 0
                 or require_shared and not self._tidal_sharing_enabled()):
             raise BackendError("Experimental TIDAL playback is unavailable")
+        if _test_lease is not None:
+            _test_lease.check()
         generation, previous = self.state.generation, self.state.queue
         try:
             candidate = await self.tidal_playback.resolve_track(track_id, quality)
         except TidalPlaybackError:
             raise BackendError("TIDAL track resolution failed") from None
+        if _test_lease is not None:
+            _test_lease.check()
         if (generation != self.state.generation or self.state.queue is not previous
                 or candidate.session_expires_at <= time.time()
                 or require_shared and not self._tidal_sharing_enabled()):
@@ -3529,10 +3583,13 @@ class HttpApi:
                          album=candidate.album, duration=candidate.duration,
                          content_type=candidate.content_type)
         item._tidal_track = (track_id, quality)
+        item._tidal_test_lease = _test_lease
         item._tidal_require_shared = require_shared
         item._tidal_candidate = candidate
         queue = PlaybackQueue(name=name, source="Tidal", items=[item], index=1)
         await self._replace_queue(queue)
+        if _test_lease is not None:
+            _test_lease.bind(queue)
         if self.state.queue is not queue or (require_shared and not self._tidal_sharing_enabled()):
             raise BackendError("TIDAL playback command superseded")
         await self._play_queue_index(1, queue.name)
@@ -4859,6 +4916,7 @@ class HttpApi:
         await self._play_queue_index(self.state.queue.index + delta, selection=selection)
 
     async def _replace_queue(self, queue: PlaybackQueue) -> None:
+        self.tidal_test.command_allowed()
         queue.validate()
         if self.spotify_source is not None:
             await self._transport_command("stop")

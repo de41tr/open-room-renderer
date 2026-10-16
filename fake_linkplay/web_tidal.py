@@ -16,22 +16,25 @@ PREFIX = "/orr/v1/tidal"
 
 
 class WebTidalLogin:
-    def __init__(self, admission, manager, account=None, play_track=None, session_refresh=None):
+    def __init__(self, admission, manager, account=None, play_track=None, session_refresh=None, test_lease=None):
         self.admission = admission
         self.manager = manager
         self.account = account
         self.play_track = play_track
         self.session_refresh = session_refresh
+        self.test_lease = test_lease
 
     def routes(self):
         return [web.route("*", path, self.handle) for path in
-                ("/ui/tidal", "/ui/tidal.js", PREFIX + "/status", PREFIX + "/start", PREFIX + "/cancel", PREFIX + "/share", PREFIX + "/unshare", PREFIX + "/play", PREFIX + "/refresh")]
+                ("/ui/tidal", "/ui/tidal.js", PREFIX + "/status", PREFIX + "/start", PREFIX + "/cancel", PREFIX + "/share", PREFIX + "/unshare", PREFIX + "/play", PREFIX + "/refresh", PREFIX + "/test/status", PREFIX + "/test/start", PREFIX + "/test/stop")]
 
     async def handle(self, request):
         try:
             origin = self.admission._origin(request)
             if request.raw_path.split("?", 1)[0] != request.path:
                 raise WebAdmissionError("not_found", 404)
+            if request.path.startswith(PREFIX + "/test/"):
+                return await self._handle_test(request, origin)
             if request.path in {"/ui/tidal", "/ui/tidal.js"}:
                 if request.method != "GET":
                     raise WebAdmissionError("method_not_allowed", 405)
@@ -104,3 +107,48 @@ class WebTidalLogin:
             return web.json_response({"state": "error", "active": False,
                                       "message": "Device login unavailable. No completed adoption confirmed."},
                                      status=503, headers=_HEADERS)
+
+    async def _handle_test(self, request, origin):
+        if self.test_lease is None:
+            raise WebAdmissionError("test_unavailable", 409)
+        action = request.path.rsplit("/", 1)[-1]
+        if action == "status":
+            if request.method != "GET":
+                raise WebAdmissionError("method_not_allowed", 405)
+            self.admission._bodyless(request)
+            result, status = await self.test_lease.status(), 200
+        else:
+            if request.method != "POST":
+                raise WebAdmissionError("method_not_allowed", 405)
+            raw = await self.admission._body(request, origin)
+            try:
+                pairs = json.loads(raw, object_pairs_hook=lambda value: value)
+                fields = ({"track_id", "duration_seconds", "volume_percent", "confirm_experimental_playback"}
+                          if action == "start" else {"lease_id", "stop"})
+                if (type(pairs) is not list or len(pairs) != len(fields)
+                        or any(type(pair) is not tuple or len(pair) != 2 for pair in pairs)
+                        or {key for key, _ in pairs} != fields):
+                    raise ValueError()
+                payload = dict(pairs)
+                if action == "start":
+                    if (payload["confirm_experimental_playback"] is not True
+                            or type(payload["track_id"]) is not str
+                            or not re.fullmatch(r"[1-9][0-9]{0,18}", payload["track_id"])
+                            or type(payload["duration_seconds"]) is not int
+                            or not 1 <= payload["duration_seconds"] <= 120
+                            or type(payload["volume_percent"]) is not int or payload["volume_percent"] != 1):
+                        raise ValueError()
+                elif (payload["stop"] is not True or type(payload["lease_id"]) is not str
+                      or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", payload["lease_id"])):
+                    raise ValueError()
+            except (ValueError, TypeError, UnicodeError):
+                raise WebAdmissionError() from None
+            if action == "start":
+                result, status = await self.test_lease.start(payload["track_id"], payload["duration_seconds"])
+            else:
+                result, status = await self.test_lease.stop(payload["lease_id"])
+        allowed = {"capability_version", "available", "state", "lease_id", "remaining_seconds",
+                   "volume_percent", "volume_confirmed", "error", "playback_position_seconds",
+                   "observed_progress_seconds", "decoded_audio_observed"}
+        return web.json_response({key: value for key, value in result.items() if key in allowed},
+                                 status=status, headers=_HEADERS)

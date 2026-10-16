@@ -2,7 +2,7 @@
 
 This optional private test surface uses the existing renderer listener and its
 Host/Origin/CSRF admission. It adds no login, LAN identity or listener. No general
-TIDAL capability is advertised. The helper must not fall back to `/tidal/play`.
+TIDAL capability is advertised. The helper must not fall back to `/orr/v1/tidal/play`.
 
 ## Requests
 
@@ -15,7 +15,9 @@ TIDAL capability is advertised. The helper must not fall back to `/tidal/play`.
 - `POST /orr/v1/tidal/test/stop`: exact JSON object
   `{"lease_id":"<opaque value returned by start>","stop":true}`.
   A mismatched lease never stops any source. Repeating stop for the current,
-  already terminal lease is harmless and returns its actual terminal result.
+  successfully terminated lease is harmless and returns its actual result.
+  An explicit retry after `stop_unconfirmed` repeats only an owned stop, after
+  rechecking its exact native ownership; it never claims an unobserved success.
 
 POSTs require the existing same-origin `Origin` and `X-ORR-CSRF` token obtained
 from the renderer's existing web bootstrap. Existing method/body/Host/Origin/CSRF
@@ -84,6 +86,12 @@ Timer cancellation is not a substitute for backend stop. Renderer shutdown
 invalidates pending work and attempts a bounded owned stop; failed/unknown stop
 remains `stop_unconfirmed`. A renderer process/OS failure cannot guarantee a
 stop; a disconnected or crashed *host helper* does not affect the lease.
+
+While the test owns its source, ordinary Pause, Resume/Play and Seek for that
+same source are temporarily refused. Stop remains available through either the
+test endpoint or ordinary transport. New source selection can proceed after
+confirmed owned cleanup; a later independent source is never stopped by the old
+lease. A new test is refused while any previous lease task is still settling.
 
 The test does not select/change output device, EQ, mute or old gain restoration.
 The 1% setting remains after termination. Existing unrelated active sources

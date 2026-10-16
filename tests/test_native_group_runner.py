@@ -124,10 +124,32 @@ def assert_trees_stopped(tmp_path, count=2):
             try:
                 if state.read_text().split()[2] == "Z":
                     break
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
                 break
             assert time.monotonic() < deadline, f"Owned process {pid} remains live"
             time.sleep(.01)
+
+
+@pytest.mark.parametrize("error", [ProcessLookupError, PermissionError])
+def test_tree_observation_accepts_only_disappeared_process(tmp_path, monkeypatch, error):
+    for suffix in ("parent", "descendant"):
+        (tmp_path / f"tree-0.{suffix}").write_text("12345")
+    original_read = Path.read_text
+    original_exists = Path.exists
+    proc = Path("/proc/12345/stat")
+
+    def read(path, *args, **kwargs):
+        if path == proc:
+            raise error("process observation")
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(Path, "exists", lambda path: True if path == proc else original_exists(path))
+    if error is ProcessLookupError:
+        assert_trees_stopped(tmp_path, count=1)
+    else:
+        with pytest.raises(PermissionError):
+            assert_trees_stopped(tmp_path, count=1)
 
 
 def test_timeout_kills_owned_trees_and_preserves_unrelated_process(runner, trees, tmp_path, capsys):

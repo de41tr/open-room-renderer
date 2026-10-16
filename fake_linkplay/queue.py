@@ -55,6 +55,7 @@ class QueueItem:
     _radio_station: tuple[str, str] | None = field(default=None, init=False, repr=False)
     _radio_resolution_attempted: bool = field(default=False, init=False, repr=False)
     # Provider-owned runtime evidence; never parsed, serialized or persisted.
+    _tidal_test_lease: object | None = field(default=None, init=False, repr=False, compare=False)
     _tidal_track: tuple[str, str] | None = field(default=None, init=False, repr=False)
     _tidal_candidate: object | None = field(default=None, init=False, repr=False)
     _tidal_stream_url: str = field(default="", init=False, repr=False)

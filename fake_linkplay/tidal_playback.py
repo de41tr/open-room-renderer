@@ -249,6 +249,14 @@ class TidalPlaybackResolver:
     def __init__(self, store: TidalSessionStore):
         self._store = store
 
+    def session_available(self) -> bool:
+        """Local-only readiness gate; never refresh or disclose a session."""
+        try:
+            _device_session(self._store.load())
+            return True
+        except (TidalSessionError, TidalPlaybackError, OSError):
+            return False
+
     def session_matches(self, fingerprint: bytes) -> bool:
         """Recheck the private session immediately before consuming a candidate."""
         if type(fingerprint) is not bytes or len(fingerprint) != 32:
