@@ -603,6 +603,7 @@ class MpvBackend:
 
     async def loadfile(
         self, url: str, options: dict[str, str] | None = None, *, start_paused: bool = False,
+        current: Callable[[], Awaitable[bool]] | None = None,
     ) -> dict[str, Any]:
         """Confirm DSP/gain, optionally holding the source for admission."""
 
@@ -614,17 +615,24 @@ class MpvBackend:
             async with self._gain_lock:
                 # External mpv may have restarted or changed since the last load.
                 await self._initialize_gain_locked(force=True)
+                if current is not None:
+                    return await self._loadfile_locked(url, options, start_paused=start_paused, current=current)
                 return await self._loadfile_locked(url, options, start_paused=start_paused)
 
     async def _loadfile_locked(
         self, url: str, options: dict[str, str] | None, *, start_paused: bool = False,
+        current: Callable[[], Awaitable[bool]] | None = None,
     ) -> dict[str, Any]:
         """Keep source loading serialized with gain initialization and changes."""
 
+        if current is not None and not await current():
+            raise BackendError("Playback admission ended before load")
         if start_paused:
             # Retain audio during admission instead of racing the first
             # readiness sample. A global hold also survives playlist expansion.
             await self.checked_command(["set_property", "pause", True])
+        if current is not None and not await current():
+            raise BackendError("Playback admission ended before load")
         LOG.info("mpv loadfile replace url=%s options=%s", redact_sensitive(url), redact_sensitive(options or {}))
         command: list[Any] | dict[str, Any] = ["loadfile", url, "replace"]
         if options:

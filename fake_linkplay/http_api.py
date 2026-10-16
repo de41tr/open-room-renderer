@@ -192,19 +192,27 @@ class HttpApi:
 
     def __init__(self, cfg: Config, state: RendererState, mpv: MpvBackend, *, on_rename: Callable[[], Awaitable[None]] | None = None,
                  shuffle_rng: ShuffleRandom | None = None, _startup: bool = False,
-                 tidal_account: TidalAccountBridge | None = None, tidal_login=None) -> None:
+                 tidal_account: TidalAccountBridge | None = None, tidal_login=None, tidal_playback=None, tidal_refresh=None) -> None:
         """Create an API handler bound to config, renderer state, and mpv."""
 
         self.cfg = cfg
         self.tidal_account = tidal_account  # Explicit opt-in; no service advertisement.
         self.tidal_login = tidal_login
+        self.tidal_playback = tidal_playback
+        self.tidal_refresh = tidal_refresh
         if _startup and self.tidal_login is None:
             from .tidal_device_auth import TidalDeviceLoginManager
             from .tidal_session import TidalSessionStore
             store = TidalSessionStore(Path.home() / ".local/share/open-room-renderer/components/tidal")
             self.tidal_login = TidalDeviceLoginManager(store)
+            from .tidal_playback import TidalPlaybackResolver
+            self.tidal_playback = TidalPlaybackResolver(store)
             if self.tidal_account is None:
                 self.tidal_account = TidalDeviceAccountBridge(store)
+            if self.tidal_refresh is None:
+                from .tidal_refresh import TidalSessionRefreshManager
+                callback = self.tidal_account._session_refreshed if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None
+                self.tidal_refresh = TidalSessionRefreshManager(store, on_committed=callback)
         # None reuses the main IPv4 listener; zero means optional setup failed.
         self.catalog_proxy_port: int | None = None
         self.state = state
@@ -241,9 +249,12 @@ class HttpApi:
         self.queue_duration_sec = 0
         self._backend_lock = asyncio.Lock()
         self._gain_command_lock = asyncio.Lock()
+        from .tidal_test import TidalTestLease
+        self.tidal_test = TidalTestLease(self)
         self._gain_operations = 0
         self._gain_uncertain = not self.state.gain_confirmed
         self._proxy_sources: dict[str, int] = {}
+        self._tidal_pending_resolutions: set[asyncio.Task] = set()
         self._proxy_semaphore = asyncio.Semaphore(4)
         self._state_monitor_task: asyncio.Task | None = None
         self._app_users = 0
@@ -349,7 +360,7 @@ class HttpApi:
         if self.tidal_login is not None:
             from .web_tidal import WebTidalLogin
             app.add_routes(WebTidalLogin(self.web_api, self.tidal_login,
-                                        self.tidal_account if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None).routes())
+                                        self.tidal_account if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None, self._play_tidal_track, self.tidal_refresh, self.tidal_test).routes())
             async def close_tidal_login(app):
                 await self.tidal_login.close()
             app.on_cleanup.append(close_tidal_login)
@@ -563,6 +574,7 @@ class HttpApi:
         finally:
             self._app_users -= 1
             if self._app_users == 0 and self._state_monitor_task is not None:
+                await self.tidal_test.close()
                 # Invalidate before any cleanup await. An in-flight load keeps
                 # the backend lock until its actual identity has been recorded.
                 self._invalidate_station_recovery()
@@ -633,10 +645,12 @@ class HttpApi:
         self._pending_seek_target = None
 
     def _accept_playback_command(self, intent: str, *, preserve_native: bool = False) -> int:
+        self.tidal_test.command_allowed()
         self._invalidate_playback_work()
         self._proxy_sources.clear()
         native_ready = self._native_ready_generation == self.state.generation
         generation = self.state.accept_command(intent)
+        self.tidal_test.command_accepted(generation)
         if intent == "stop":
             self._station_child_history_attempt = None
         stage = self._native_stage
@@ -1464,6 +1478,15 @@ class HttpApi:
 
     async def _transport_command(self, command: str) -> None:
         """Serialize mutations and verify the actual backend acknowledgement."""
+        self.tidal_test.command_allowed()
+        test = self.tidal_test
+        if test.controls_owned_source():
+            if command != "stop":
+                raise BackendError("Bounded TIDAL test permits only Stop transport control")
+            result, code = await test.stop(test._lease_id)
+            if code != 200:
+                raise BackendError("Bounded TIDAL test stop unconfirmed")
+            return
         if self.spotify_source is not None:
             await self.spotify_source.transport(command)
             return
@@ -1564,6 +1587,7 @@ class HttpApi:
         The caller owns completion, so HTTP, SOAP and Previous have the same
         success semantics and shutdown can cancel every confirmation task.
         """
+        self.tidal_test.guard_same_source_control()
         if self.spotify_source is not None:
             raise BackendError("Use the Spotify app to seek within this source")
         item = self.state.queue.current
@@ -2097,6 +2121,9 @@ class HttpApi:
     async def _set_confirmed_gain(self, *, volume: int | None = None, mute: bool | None = None) -> None:
         """Publish and persist only backend-confirmed gain, in command order."""
         async with self._gain_command_lock:
+            test = getattr(self, "tidal_test", None)
+            if test is not None:
+                test.guard_gain(volume)
             try:
                 if volume is not None:
                     await self._gain_reconciling_call(self.mpv.volume(volume))
@@ -2937,7 +2964,15 @@ class HttpApi:
 
     async def _play_url(self, url: str) -> None:
         """Resolve/load once and confirm only this generation's actual audio."""
+        self.tidal_test.command_allowed()
         self._require_catalog_proxy(url)
+        test = self.tidal_test
+        if test.controls_owned_source() and asyncio.current_task() is not test._play_task:
+            if url == self.state.current_url:
+                test.guard_same_source_control()
+            result, code = await test.stop(test._lease_id)
+            if code != 200:
+                raise BackendError("Bounded TIDAL test stop unconfirmed")
         if self.spotify_source is not None:
             await self._transport_command("stop")
         if self._native_stage is not None or self._native_current_id is not None or self._native_output_uncertain:
@@ -2959,8 +2994,11 @@ class HttpApi:
 
     async def _load_playback_url(self, url: str, generation: int, *, recovery: StationRecovery | None = None) -> bool:
         """Load and confirm audio; False means a stale recovery was deferred."""
+        test_lease = self.state.queue.current._tidal_test_lease if self.state.queue.current else None
+
         def current() -> bool:
             return (generation == self.state.generation
+                    and (test_lease is None or test_lease.admitted())
                     and (recovery is None or self._station_recovery_is_current(recovery)))
 
         queue, item, index = self.state.queue, self.state.queue.current, self.state.queue.index
@@ -2983,6 +3021,9 @@ class HttpApi:
                     and identity in {load_identity, ("", "")})
 
         async def silence_failed_load() -> None:
+            if test_lease is not None:
+                await test_lease.cleanup_failed_load()
+                return
             if not owns_load():
                 return
             # Include lock acquisition, Stop acknowledgement and idle readback
@@ -3086,6 +3127,11 @@ class HttpApi:
                         raise BackendError("Backend control failed before queue advance")
                     if self._reject_foreign_source_observation(snapshot, ""):
                         return False
+                if test_lease is not None:
+                    await test_lease.before_load()
+                if (selected and selected._tidal_track is not None
+                        and not self.tidal_playback.session_matches(selected._tidal_session_fingerprint)):
+                    raise SourcePlaybackError("TIDAL session changed", "source_resolution")
                 if resolution_failed:
                     raise SourcePlaybackError("Source resolution failed", "source_resolution") from None
                 if station_id and selected and not selected.stream_type and selected.duration == 0:
@@ -3114,12 +3160,15 @@ class HttpApi:
                         # Only entering the guarded mutation consumes the
                         # initially materialized target, even if ACK fails.
                         selected._radio_resolution_attempted = True
+                    load_kwargs = {"current": test_lease.before_load} if test_lease is not None else {}
                     load_reply = await self._gain_reconciling_call(
-                        self.mpv.loadfile(playback_url, mpv_options, start_paused=True))
+                        self.mpv.loadfile(playback_url, mpv_options, start_paused=True, **load_kwargs))
                     data = load_reply.get("data") if isinstance(load_reply, dict) else None
                     entry_id = data.get("playlist_entry_id") if isinstance(data, dict) else None
                     if type(entry_id) is int and entry_id >= 0:
                         self._admitted_load_entry_id = entry_id
+                    if test_lease is not None:
+                        await test_lease.record_load(playback_url, entry_id)
                     # Record actual backend identity even if a newer owner
                     # command arrived during the bounded, locked mutation.
                     self.state.backend_url = playback_url
@@ -3130,25 +3179,25 @@ class HttpApi:
                     load_identity = (playback_url, url)
                     self._playback_offset_sec = 0
                     if self.state.current_url == url:
-                        self.state.resolved_url = direct_url
+                        self.state.resolved_url = "" if selected and selected._tidal_track else direct_url
                 finally:
                     if recovery is not None:
                         self._station_recovery_loading = False
             if not current():
                 raise BackendError("Playback command superseded")
             self._playback_offset_sec = 0
-            self.state.resolved_url = direct_url
+            self.state.resolved_url = "" if selected and selected._tidal_track else direct_url
             self.state.backend_url = playback_url
             selected = self.state.queue.current
             if selected and selected.url == url:
-                selected.resolved_url = direct_url
+                selected.resolved_url = "" if selected._tidal_track else direct_url
                 if station_id:
                     selected._radio_station = (url, station_id)
-                self.queue_resolved_url = direct_url
+                self.queue_resolved_url = "" if selected._tidal_track else direct_url
                 self.queue_context = serialize_queue_context(self.state.queue)
                 if not selected.metadata:
                     self.state.track_metadata = self._didl_metadata(
-                        direct_url, self.state.title, self.queue_source, self.queue_pic_url,
+                        url if selected._tidal_track else direct_url, self.state.title, self.queue_source, self.queue_pic_url,
                         self.queue_is_live, artist=selected.artist, album=selected.album,
                         item_id=selected.id or None)
                     if selected.duration > 0:
@@ -3174,6 +3223,8 @@ class HttpApi:
                 # unpause. An earlier snapshot cannot authorize that mutation.
                 if not may_resume():
                     return False
+                if test_lease is not None:
+                    await test_lease.before_resume()
                 snapshot = await self.mpv.snapshot()
                 if not may_resume():
                     return False
@@ -3269,6 +3320,11 @@ class HttpApi:
         return True
 
     def _backend_playback_url(self, original_url: str, direct_url: str) -> str:
+        if self._active_tidal_item() is not None:
+            # The provider candidate must use the existing public-only pinned proxy.
+            if self.catalog_proxy_port == 0:
+                raise BackendError("TIDAL media proxy is unavailable")
+            return self._local_audio_proxy_url(direct_url, port=self.catalog_proxy_port)
         if station_from_reference(original_url):
             # Community-directory URLs never go directly to the native player.
             # The existing selected-source proxy pins every public redirect hop.
@@ -3299,6 +3355,11 @@ class HttpApi:
         if (item is not None and item.url == original_url == self.state.current_url
                 and item.stream_type == "station" and item.duration == 0):
             options.update(LIVE_STATION_HISTORY_OPTIONS)
+        if item is not None and item._tidal_track is not None:
+            formats = {"audio/flac": "flac", "audio/x-flac": "flac", "audio/mp4": "mov", "audio/mpeg": "mp3", "audio/aac": "aac", "audio/ogg": "ogg"}
+            if item.content_type not in formats:
+                raise BackendError("Unsupported TIDAL media format")
+            options.update({"demuxer": "lavf", "demuxer-lavf-format": formats[item.content_type], "ytdl": "no"})
         if station_from_reference(original_url):
             # A misleading catalog entry must never become an mpv playlist
             # with arbitrary nested URLs. Force an admitted audio/container
@@ -3445,6 +3506,26 @@ class HttpApi:
 
     async def _resolve_playback_url(self, url: str) -> str | RadioResolution:
         """Resolve recognized public station references, never arbitrary JSON."""
+        selected = self._active_tidal_item()
+        if selected is not None and selected.url == url:
+            if selected._tidal_require_shared and not self._tidal_sharing_enabled():
+                raise BackendError("TIDAL account sharing is unavailable")
+            from .tidal_playback import TidalPlaybackError
+            try:
+                candidate = selected._tidal_candidate
+                selected._tidal_candidate = None
+                if candidate is None:
+                    candidate = await self.tidal_playback.resolve_track(*selected._tidal_track)
+                if (self.state.queue.current is not selected or candidate.session_expires_at <= time.time()
+                        or selected._tidal_require_shared and not self._tidal_sharing_enabled()):
+                    raise BackendError("TIDAL selection changed")
+                if not self.tidal_playback.session_matches(candidate.session_fingerprint):
+                    raise BackendError("TIDAL session changed")
+                selected._tidal_session_fingerprint = candidate.session_fingerprint
+                selected._tidal_stream_url = candidate.stream_url
+                return candidate.stream_url
+            except TidalPlaybackError:
+                raise BackendError("TIDAL track resolution failed") from None
         catalog_id = station_from_reference(url)
         station_id = "rb:" + catalog_id if catalog_id else self._radio_station_from_url(url)
         if station_id:
@@ -3461,6 +3542,57 @@ class HttpApi:
         if host in {"api.radiotime.com", "opml.radiotime.com"}:
             raise BackendError("Unsupported public radio reference")
         return url
+
+    def _active_tidal_item(self):
+        item = self.state.queue.current
+        return item if item is not None and item._tidal_track is not None else None
+
+    def _tidal_sharing_enabled(self):
+        return isinstance(self.tidal_account, TidalDeviceAccountBridge) and self.tidal_account.shared
+
+    async def _play_tidal_track(self, track_id: str, quality: str = "HIGH", name: str = "CurrentQueue", *, require_shared: bool = False, _test_lease=None):
+        self.tidal_test.command_allowed()
+        task = asyncio.current_task()
+        self._tidal_pending_resolutions.add(task)
+        try:
+            return await self._play_tidal_track_inner(track_id, quality, name,
+                                                     require_shared=require_shared, _test_lease=_test_lease)
+        finally:
+            self._tidal_pending_resolutions.discard(task)
+
+    async def _play_tidal_track_inner(self, track_id: str, quality: str = "HIGH", name: str = "CurrentQueue", *, require_shared: bool = False, _test_lease=None):
+        from .tidal_playback import TidalPlaybackError
+        if (self.tidal_playback is None or self.catalog_proxy_port == 0
+                or require_shared and not self._tidal_sharing_enabled()):
+            raise BackendError("Experimental TIDAL playback is unavailable")
+        if _test_lease is not None:
+            _test_lease.check()
+        generation, previous = self.state.generation, self.state.queue
+        try:
+            candidate = await self.tidal_playback.resolve_track(track_id, quality)
+        except TidalPlaybackError:
+            raise BackendError("TIDAL track resolution failed") from None
+        if _test_lease is not None:
+            _test_lease.check()
+        if (generation != self.state.generation or self.state.queue is not previous
+                or candidate.session_expires_at <= time.time()
+                or require_shared and not self._tidal_sharing_enabled()):
+            raise BackendError("TIDAL playback command superseded")
+        item = QueueItem(url=candidate.catalogue_url, title=candidate.title,
+                         source="Tidal", id=candidate.track_id, artist=candidate.artist,
+                         album=candidate.album, duration=candidate.duration,
+                         content_type=candidate.content_type)
+        item._tidal_track = (track_id, quality)
+        item._tidal_test_lease = _test_lease
+        item._tidal_require_shared = require_shared
+        item._tidal_candidate = candidate
+        queue = PlaybackQueue(name=name, source="Tidal", items=[item], index=1)
+        await self._replace_queue(queue)
+        if _test_lease is not None:
+            _test_lease.bind(queue)
+        if self.state.queue is not queue or (require_shared and not self._tidal_sharing_enabled()):
+            raise BackendError("TIDAL playback command superseded")
+        await self._play_queue_index(1, queue.name)
 
     async def _materialize_radio_queue(self, queue: PlaybackQueue) -> None:
         """Resolve a header-only station under the current command generation."""
@@ -4002,16 +4134,21 @@ class HttpApi:
         allowed = {self.state.current_url, self.state.resolved_url}
         if selected:
             allowed.update((selected.url, selected.resolved_url))
+            if selected._tidal_track is not None:
+                allowed.add(selected._tidal_stream_url)
         return bool(url) and (url in allowed or self._proxy_sources.get(url) == self.state.generation)
 
     async def _open_proxy_source(self, original_url: str, headers: dict[str, str]):
         """Validate and pin every redirect hop; never forward client credentials."""
         url = original_url
-        allowed_lan = () if station_from_reference(self.state.current_url) else self.cfg.proxy_allowed_lan_hosts
+        tidal = self._active_tidal_item() is not None
+        allowed_lan = () if tidal or station_from_reference(self.state.current_url) else self.cfg.proxy_allowed_lan_hosts
         seen: set[str] = set()
         for _ in range(6):
             if not self._proxy_source_allowed(original_url):
                 raise NetworkPolicyError("Media selection changed")
+            if tidal and urlsplit(url).scheme != "https":
+                raise NetworkPolicyError("TIDAL media requires HTTPS")
             target = await resolve_proxy_target(url, allowed_lan)
             if target.url in seen:
                 raise NetworkPolicyError("Redirect loop")
@@ -4026,6 +4163,8 @@ class HttpApi:
                 upstream = await session.get(target.url, allow_redirects=False)
                 if upstream.status not in {301, 302, 303, 307, 308}:
                     return session, upstream
+                if tidal:
+                    raise NetworkPolicyError("TIDAL media redirects are unsupported")
                 location = upstream.headers.get("Location", "")
                 if not location:
                     raise NetworkPolicyError("Redirect has no destination")
@@ -4041,7 +4180,7 @@ class HttpApi:
 
     async def proxy_audio(self, request: web.Request) -> web.StreamResponse:
         """Serve only selected media to the local backend, with SSRF-safe hops."""
-        if not (self.cfg.proxy_on_demand_audio or self.cfg.range_seek_reload or station_from_reference(self.state.current_url)):
+        if not (self.cfg.proxy_on_demand_audio or self.cfg.range_seek_reload or station_from_reference(self.state.current_url) or self._active_tidal_item() is not None):
             return web.Response(status=404)
         try:
             if not ipaddress.ip_address(request.remote or "").is_loopback:
@@ -4777,6 +4916,7 @@ class HttpApi:
         await self._play_queue_index(self.state.queue.index + delta, selection=selection)
 
     async def _replace_queue(self, queue: PlaybackQueue) -> None:
+        self.tidal_test.command_allowed()
         queue.validate()
         if self.spotify_source is not None:
             await self._transport_command("stop")
@@ -5022,6 +5162,16 @@ class HttpApi:
             return
         if action in {"CreateQueue", "ReplaceQueue"}:
             context = self._xml_text(body, "QueueContext")
+            if self._xml_text(context, "SourceName") == "Tidal":
+                from .tidal_queue import parse_tidal_queue, TidalQueueError
+                try:
+                    selection = parse_tidal_queue(context, name=self._xml_text(body, "QueueName") or None)
+                    if len(selection.tracks) != 1 or selection.start_index != 1:
+                        raise TidalQueueError("Only single-track selections are supported")
+                except TidalQueueError:
+                    raise SoapFault(402, "Invalid Args") from None
+                await self._play_tidal_track(selection.tracks[0].track_id, selection.request_quality, selection.name, require_shared=True)
+                return
             try:
                 queue = parse_queue_context(context, name=self._xml_text(body, "QueueName") or None)
             except QueueError as exc:

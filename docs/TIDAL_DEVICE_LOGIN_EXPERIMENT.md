@@ -71,9 +71,11 @@ authentication. Status endpoints still return no credentials or account identity
 
 The saved record carries the actual device-flow client ID and the pinned
 `tidalapi-device-v0.8.11` provenance. Older records without this provenance
-cannot be shared as library-device sessions. Sharing expires with the token,
-is invalidated by a changed record, and resets on process restart. **Stop
-account sharing** disables projection without deleting or revoking the grant.
+cannot be shared as library-device sessions. Token expiry suspends projection;
+a verified same-account refresh can renew that prior decision. An arbitrary
+changed record invalidates sharing, and process restart clears it. **Stop
+account sharing** revokes even a suspended sharing decision without deleting
+or revoking the provider grant.
 
 The adoption-only response includes the encoded actual client ID but omits
 `redirectURI`: no registered callback for this device client is established.
@@ -86,3 +88,54 @@ full-playback or XU4 acceptance.
 
 Schema-2 device records require the new reader. Returning to an older release
 preserves the private file but that release refuses to read its newer format.
+
+## Explicit single-track playback test
+
+With a valid private device session, enter one numeric TIDAL track
+ID and choose **Test this track on the renderer**. This action replaces the
+current queue and starts the existing player; it is not an automatic login
+side effect. This local test does not require LAN account sharing. The matching single-track TIDAL `CreateQueue` selection also uses
+this path only after explicit LAN account sharing and starts playback, consistent with the current top-level queue
+capability version. Multi-track/header-only collections remain unsupported.
+
+The small provider adapter uses the saved device access token for bounded,
+fixed-origin TIDAL v1 metadata and `playbackinfopostpaywall` requests. It does
+not invoke the library's recursive refresh wrapper. Expiry or HTTP 401 fails
+explicitly; there is no unattended refresh/recovery claim. LOW/HIGH/LOSSLESS
+are supported requests, AUTO requests HIGH, and HI_RES is rejected.
+
+Only one unencrypted direct BTS audio candidate is accepted. Explicit preview,
+DRM/key fields, MPD/HLS and unsafe destinations are rejected. Missing
+`assetPresentation` remains unknown, rather than inheriting the library's
+FULL default. Even an explicit FULL response is not proof of complete audio.
+The real provider grant, full decoded duration and audible output must still
+be validated on the target.
+
+The signed media URL stays in private runtime fields. Public queue/UPnP/status
+retain the canonical catalogue identity. Actual media uses the existing
+loopback-only proxy with public-address DNS pinning, no LAN exceptions, no
+TIDAL media redirects, and no API authorization header forwarded to the CDN.
+No new listener or native TIDAL capability is enabled by this step.
+
+## Explicit same-account session refresh
+
+**Refresh the saved session** performs one bounded renewal using the regular
+pinned library's device-client configuration. It does not start a login or
+playback. The private session directory remains exclusively leased across the
+exchange and the returned access token's `/v1/sessions` identity verification.
+A valid rotated refresh token is retained; if the provider omits rotation, the
+existing refresh token is retained. Only a complete same-account result is
+saved atomically. No credentials or account identity appear in the response.
+
+Previously enabled LAN sharing follows this verified same-account/client
+rotation, without enabling sharing for a previously unshared session. An
+arbitrary file replacement, changed identity, explicit unshare or process
+restart still requires a fresh sharing decision. Cached playback candidates
+bound to the old record cannot authorize a new load after rotation.
+
+A failure after the exchange starts is reported as an uncertain outcome:
+there is no automatic retry, implicit re-login or background recovery. A
+filesystem failure after replacement may also mean the provider or local
+session changed despite the error. Inspect the protected session locally
+before deciding on another explicit attempt. Ordinary status polling never
+contacts the provider. Unattended refresh remains unsupported in this step.

@@ -108,3 +108,51 @@ async def test_account_sharing_is_explicit_revocable_and_never_in_status(api, tm
         async with session.get(base + "/orr/v1/tidal/status") as response:
             assert (await response.json())["account_shared"] is False
         assert not api.mpv.calls
+
+
+@pytest.mark.asyncio
+async def test_private_play_requires_confirmation_but_no_lan_account_sharing(api, tmp_path):
+    from unittest.mock import AsyncMock
+    from test_tidal_queue_playback import configured
+    await configured(api, tmp_path)
+    api.tidal_login = Manager()
+    api._play_tidal_track = AsyncMock()
+    await api.tidal_account.set_shared(False)
+    async with serving(api) as (session, base):
+        boot = await state(session, base)
+        headers = {"Origin": base, "X-ORR-CSRF": boot["csrf_token"]}
+        async with session.post(base + "/orr/v1/tidal/play", json={"track_id": "42", "confirm_experimental_playback": False}, headers=headers) as response:
+            assert response.status == 400
+        api._play_tidal_track.assert_not_awaited()
+        async with session.post(base + "/orr/v1/tidal/play", json={"track_id": "42", "confirm_experimental_playback": True}, headers=headers) as response:
+            assert response.status == 200
+            assert (await response.json())["playback_requested"] is True
+        api._play_tidal_track.assert_awaited_once_with("42")
+
+
+@pytest.mark.asyncio
+async def test_explicit_refresh_reuses_admission_and_does_not_export_session(api):
+    class Refresh:
+        calls = 0
+        async def refresh(self):
+            self.calls += 1
+            return {'state': 'refreshed', 'session_saved': True, 'refresh_outcome': 'saved',
+                    'sharing_warning': False, 'access_token': 'SYNTHETIC_SECRET',
+                    'refresh_token': 'SYNTHETIC_SECRET', 'user_id': 'SYNTHETIC_SECRET'}
+    manager = Manager()
+    refresh = Refresh()
+    api.tidal_login, api.tidal_refresh = manager, refresh
+    async with serving(api) as (session, base):
+        boot = await state(session, base)
+        async with session.post(base + '/orr/v1/tidal/refresh', json={'confirm_session_refresh': True}) as response:
+            assert response.status == 403
+        assert refresh.calls == 0
+        headers = {'Origin': base, 'X-ORR-CSRF': boot['csrf_token']}
+        async with session.post(base + '/orr/v1/tidal/refresh', json={'confirm_session_refresh': True}, headers=headers) as response:
+            assert response.status == 200
+            body = await response.text()
+            assert 'SYNTHETIC_SECRET' not in body
+            assert (await response.json())['refresh_outcome'] == 'saved'
+        async with session.get(base + '/orr/v1/tidal/status') as response:
+            assert response.status == 200
+        assert refresh.calls == 1 and manager.starts == 0 and not api.mpv.calls
