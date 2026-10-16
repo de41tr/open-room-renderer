@@ -118,3 +118,26 @@ def test_private_address_placeholder_survives_repeat_sanitization(sanitize):
 ])
 def test_ambiguous_encoded_wrappers_are_masked_as_a_whole(value):
     assert redact_media_urls(value) == "[redacted-media-url]"
+
+
+@pytest.mark.parametrize("action", ["GetUserInfo", "UserLogin", "UserLogout"])
+def test_account_detail_logs_omit_bodies_and_unrecognized_credential_fields(tmp_path, caplog, action):
+    from aiohttp.test_utils import make_mocked_request
+    from fake_linkplay.state import RendererState
+    from test_playback_generations import StatefulBackend
+
+    cfg = configured(tmp_path)
+    cfg.log_wiim_http_details = True
+    api = HttpApi(cfg, RendererState.from_config(cfg), StatefulBackend())
+    request = make_mocked_request("POST", "/upnp/control/PlayQueue?opaque=SYNTHETIC_QUERY_SECRET",
+        headers={"SOAPACTION": f'"urn:schemas-wiimu-com:service:PlayQueue:1#{action}"',
+                 "X-Unrecognized": "SYNTHETIC_HEADER_SECRET"})
+    caplog.set_level(logging.INFO, logger="fake_linkplay.http_api")
+    api._log_http_detail(request, "<Code>SYNTHETIC_CODE_SECRET</Code>", 200,
+        '<Result>{&quot;access_token&quot;:&quot;SYNTHETIC_TOKEN_SECRET&quot;,'
+        '&quot;futureField&quot;:&quot;SYNTHETIC_FUTURE_SECRET&quot;}</Result>')
+    logs = "\n".join(record.getMessage() for record in caplog.records)
+    assert "WIIM_HTTP_DETAIL" in logs
+    assert action in logs
+    assert "[account payload omitted]" in logs
+    assert "SYNTHETIC_" not in logs

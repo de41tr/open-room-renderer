@@ -36,6 +36,7 @@ dev = [
   "pywiim",
 ]
 mdns = []
+tidal = ["cryptography>=41"]
 
 [project.scripts]
 open-room-renderer = "fake_linkplay.cli:main"
