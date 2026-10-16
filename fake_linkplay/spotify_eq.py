@@ -23,6 +23,7 @@ import sys
 import tempfile
 
 from .config import StartupConfigError
+from . import diagnostics as diagnostic
 from .mpv_backend import BackendError
 from .queue import PlaybackQueue, QueueItem
 from .spotify_client import verify_client
@@ -117,6 +118,26 @@ class SpotifyEqSource:
         self._entry_id = None
         self._observing = False
         self._provider = None
+        self._diagnostic_task = None
+        self._diagnostic_test_id = None
+
+    def _diagnostic_tick(self) -> None:
+        recorder = getattr(self.api, "diagnostics", None)
+        enabled = (self.active and not self.starting and not self.stopping
+                   and recorder is not None and diagnostic.safe(self.api, "active"))
+        if not enabled:
+            if self._diagnostic_task is not None:
+                self._diagnostic_task.cancel()
+            return
+        if self._diagnostic_task is not None and not self._diagnostic_task.done():
+            if self._diagnostic_test_id != recorder.window["test_id"]:
+                self._diagnostic_task.cancel()
+            return
+        if self._diagnostic_test_id == recorder.window["test_id"]:
+            return  # No reconnect, including after an unconfirmed observation.
+        from .spotify_source_diagnostic import watch
+        self._diagnostic_test_id = recorder.window["test_id"]
+        self._diagnostic_task = asyncio.create_task(watch(self, recorder, self._diagnostic_test_id))
 
     def _validate_child(self) -> None:
         if not self.active or self.stopping or self.process is None or self.process.returncode is not None:
@@ -247,6 +268,7 @@ class SpotifyEqSource:
 
     async def observe(self) -> None:
         api = self.api
+        self._diagnostic_tick()
         if (not self.active or self.starting or self.stopping or self.failed
                 or self._observing or self._lock.locked() or api is None):
             return
@@ -382,6 +404,8 @@ class SpotifyEqSource:
             # Its owned connection then closes; shutdown cannot leave a live
             # producer merely because the control used its whole HTTP deadline.
             await self._reap_producer()
+            if self._diagnostic_task is not None:
+                await asyncio.gather(self._diagnostic_task, return_exceptions=True)
             async with self._lock:
                 # Startup might have been awaiting child creation when close()
                 # set stopping. Capture/reap that child before reader release.
@@ -425,6 +449,8 @@ class SpotifyEqSource:
             return
         if self._stop_task is None:
             self.stopping = True
+            if self._diagnostic_task is not None:
+                self._diagnostic_task.cancel()
             # Do not wait behind a blocked provider control before interrupting
             # our own producer. Closing its socket releases that control's lock;
             # only _stop's reaping + native idle proof release source ownership.
