@@ -114,7 +114,12 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
         self._shared_session = None
 
     @property
-    def shared(self):
+    def sharing_requested(self):
+        """Existing exact-record consent, including a suspended expired record.
+
+        This authorizes only an on-demand resolution attempt, never export of
+        expired credentials. Explicit Unshare clears it even during refresh.
+        """
         session = self._shared_session
         if session is None:
             return False
@@ -124,9 +129,14 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
             valid = False
         if not valid:
             self._shared_session = None
+        return valid
+
+    @property
+    def shared(self):
         # Expiry suspends projection, but a verified refresh of this exact
         # same owner may renew the existing explicit opt-in.
-        return bool(valid and session.expires_at and session.expires_at > time.time())
+        return bool(self.sharing_requested and self._shared_session.expires_at
+                    and self._shared_session.expires_at > time.time())
 
     async def set_shared(self, enabled: bool):
         async with self._lock:

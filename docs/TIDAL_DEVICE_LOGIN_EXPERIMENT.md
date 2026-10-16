@@ -41,7 +41,7 @@ Close and restart behavior must not be represented as provider logout.
 
 ## Explicit limits
 
-This milestone does not start audio, advertise a native TIDAL capability,
+Login itself does not start audio, advertise a native TIDAL capability,
 automatically share the saved account, resolve a track, refresh a token, or
 establish full-playback rights. Those require separate actual acceptance checks.
 The independent own-client PKCE CLI remains available as a separate route.
@@ -81,8 +81,9 @@ The adoption-only response includes the encoded actual client ID but omits
 `redirectURI`: no registered callback for this device client is established.
 Static APK review shows the authenticated account path validates with Bearer
 `/v1/sessions`; its local redirect fallback is not proof of a network callback.
-Native app OAuth re-login is unsupported. There is no automatic refresh here;
-expired sessions fail closed. No TIDAL capability is advertised. Successful
+Native app OAuth re-login is unsupported. GetUserInfo remains a local-only read;
+expired sessions cannot be exported until a separate refresh completes. No TIDAL
+capability is advertised. Successful
 SOAP tests are synthetic interoperability checks, not Android, catalogue,
 full-playback or XU4 acceptance.
 
@@ -118,8 +119,10 @@ This is synthetic local queue coverage, not native-app/provider acceptance.
 
 The small provider adapter uses the saved device access token for bounded,
 fixed-origin TIDAL v1 metadata and `playbackinfopostpaywall` requests. It does
-not invoke the library's recursive refresh wrapper. Expiry or HTTP 401 fails
-explicitly; there is no unattended refresh/recovery claim. LOW/HIGH/LOSSLESS
+not invoke the library's recursive refresh wrapper. A recognized expiry can
+trigger one bounded refresh under the same exclusive owner before the requested
+track or page GET. An unknown expiry or HTTP 401 fails without refresh/retry.
+No timer, startup or status read contacts the provider. LOW/HIGH/LOSSLESS
 are supported requests, AUTO requests HIGH, and HI_RES is rejected.
 
 Only one unencrypted direct BTS audio candidate is accepted. Explicit preview,
@@ -151,9 +154,23 @@ arbitrary file replacement, changed identity, explicit unshare or process
 restart still requires a fresh sharing decision. Cached playback candidates
 bound to the old record cannot authorize a new load after rotation.
 
-A failure after the exchange starts is reported as an uncertain outcome:
+A failed exchange is uncertain unless OAuth explicitly rejects the grant:
 there is no automatic retry, implicit re-login or background recovery. A
 filesystem failure after replacement may also mean the provider or local
-session changed despite the error. Inspect the protected session locally
-before deciding on another explicit attempt. Ordinary status polling never
-contacts the provider. Unattended refresh remains unsupported in this step.
+session changed despite the error. Recovery needs an explicit local action;
+an existing marked grant is never retried. Ordinary status polling never
+contacts the provider. On-demand playback refresh uses this same owner, deadline,
+identity verification and synchronous consent callback. Explicit Unshare during
+refresh always wins; expiry does not turn a suspended opt-in into shared access.
+
+Before a refresh POST, a private atomic 0600 NOFOLLOW sidecar records only a
+fingerprint of the full session and the uncertain outcome. Cancellation, lost
+responses and process restart cannot automatically repeat that grant. Confirmed
+OAuth invalid_grant is retained as rejected and requires a new login; other
+uncertain attempts remain blocked. Both automatic and manual refresh refuse the
+same marked record. A durable successful rotation clears the marker.
+
+Recovery requires explicit local session recovery before a new login. The web
+Start button still cannot overwrite an existing record; this patch adds no
+credential-reset or logout endpoint. Offline tests do not establish live-provider
+refresh acceptance or full playback.

@@ -65,16 +65,60 @@ test('expired and unsupported local sessions block new login while Unshare remai
     await h.consent();
     assert.equal(h.elements.start.disabled, true);
     assert.equal(h.elements.share.disabled, true);
-    assert.equal(h.elements.play.disabled, true);
+    assert.equal(h.elements.play.disabled, kind !== 'expired');
     assert.equal(h.elements['refresh-session'].disabled, kind !== 'expired');
     assert.equal(h.elements.unshare.disabled, false);
-    if (kind === 'expired') assert.match(h.elements.status.textContent, /expired.*Refresh the saved session/);
+    if (kind === 'expired') assert.match(h.elements.status.textContent, /expired.*explicit track test can attempt one session refresh.*Refresh the saved session/);
     h.setPost(async (url, body) => {
       assert.ok(url.endsWith('/unshare'));
       assert.deepEqual(body, {stop_lan_account_sharing: true});
       return {ok: true, json: async () => ({})};
     });
     await h.click('unshare');
+    assert.equal(h.posts().length, 1);
+  }
+});
+
+test('expired session permits only an explicit Play request, with no UI refresh or sharing side effect', async () => {
+  const h = await harness(snapshot('expired'));
+  await h.poll();
+  assert.equal(h.posts().length, 0);
+  assert.equal(h.elements.start.disabled, true);
+  assert.equal(h.elements.share.disabled, true);
+  h.elements.track.value = '42';
+  h.setPost(async (url, body) => {
+    assert.ok(url.endsWith('/play'));
+    assert.deepEqual(body, {track_id: '42', confirm_experimental_playback: true});
+    h.setStatus(snapshot('stored'));
+    return {ok: true, json: async () => ({playback_requested: true})};
+  });
+  await h.click('play');
+  await h.poll();
+  assert.equal(h.posts().length, 1);
+  assert.match(h.elements.status.textContent, /Playback was requested.*unverified/);
+  assert.equal(h.elements.share.disabled, false);
+  assert.doesNotMatch(h.elements.status.textContent, /sharing.*enabled/);
+});
+
+test('refresh marker results retain distinct recovery guidance without new login or override requests', async () => {
+  for (const [error, refresh_outcome] of [['refresh_result_uncertain', 'uncertain'], ['refresh_rejected', 'rejected']]) {
+    const h = await harness(snapshot('expired'));
+    await h.consent();
+    h.setPost(async (url, body) => {
+      assert.ok(url.endsWith('/refresh'));
+      assert.deepEqual(body, {confirm_session_refresh: true});
+      return {ok: true, json: async () => ({state: 'error', error, refresh_outcome})};
+    });
+    await h.click('refresh-session');
+    await h.poll();
+    assert.match(h.elements.status.textContent, /Further refresh attempts are blocked.*Explicitly recover the local session.*existing record will not be replaced/);
+    assert.doesNotMatch(h.elements.status.textContent, /Refresh was not started/);
+    if (refresh_outcome === 'rejected') {
+      assert.match(h.elements.status.textContent, /TIDAL rejected the saved refresh grant/);
+      assert.doesNotMatch(h.elements.status.textContent, /uncertain|may have rotated/);
+    } else assert.match(h.elements.status.textContent, /previous session refresh has an uncertain result/);
+    assert.equal(h.elements.start.disabled, true);
+    assert.equal(h.elements.unshare.disabled, false);
     assert.equal(h.posts().length, 1);
   }
 });

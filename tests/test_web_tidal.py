@@ -133,12 +133,16 @@ async def test_private_play_requires_confirmation_but_no_lan_account_sharing(api
 
 
 @pytest.mark.asyncio
-async def test_explicit_refresh_reuses_admission_and_does_not_export_session(api):
+@pytest.mark.parametrize("error,outcome", [
+    (None, "saved"), ("refresh_result_uncertain", "uncertain"), ("refresh_rejected", "rejected"),
+])
+async def test_explicit_refresh_reuses_admission_and_does_not_export_session(api, error, outcome):
     class Refresh:
         calls = 0
         async def refresh(self):
             self.calls += 1
-            return {'state': 'refreshed', 'session_saved': True, 'refresh_outcome': 'saved',
+            return {'state': 'refreshed' if error is None else 'error',
+                    'session_saved': error is None, 'refresh_outcome': outcome, 'error': error,
                     'sharing_warning': False, 'access_token': 'SYNTHETIC_SECRET',
                     'refresh_token': 'SYNTHETIC_SECRET', 'user_id': 'SYNTHETIC_SECRET'}
     manager = Manager()
@@ -154,7 +158,9 @@ async def test_explicit_refresh_reuses_admission_and_does_not_export_session(api
             assert response.status == 200
             body = await response.text()
             assert 'SYNTHETIC_SECRET' not in body
-            assert (await response.json())['refresh_outcome'] == 'saved'
+            value = await response.json()
+            assert value['refresh_outcome'] == outcome
+            assert value.get('error') == error
         async with session.get(base + '/orr/v1/tidal/status') as response:
             assert response.status == 200
         assert refresh.calls == 1 and manager.starts == 0 and not api.mpv.calls

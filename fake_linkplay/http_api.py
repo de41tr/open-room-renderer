@@ -206,13 +206,13 @@ class HttpApi:
             store = TidalSessionStore(Path.home() / ".local/share/open-room-renderer/components/tidal")
             self.tidal_login = TidalDeviceLoginManager(store)
             from .tidal_playback import TidalPlaybackResolver
-            self.tidal_playback = TidalPlaybackResolver(store)
             if self.tidal_account is None:
                 self.tidal_account = TidalDeviceAccountBridge(store)
             if self.tidal_refresh is None:
                 from .tidal_refresh import TidalSessionRefreshManager
                 callback = self.tidal_account._session_refreshed if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None
                 self.tidal_refresh = TidalSessionRefreshManager(store, on_committed=callback)
+            self.tidal_playback = TidalPlaybackResolver(store, refresh_manager=self.tidal_refresh)
         # None reuses the main IPv4 listener; zero means optional setup failed.
         self.catalog_proxy_port: int | None = None
         self.state = state
@@ -3511,7 +3511,7 @@ class HttpApi:
         selected = self._active_tidal_item()
         if selected is not None and selected.url == url:
             generation, queue, index = self.state.generation, self.state.queue, self.state.queue.index
-            if selected._tidal_require_shared and not self._tidal_sharing_enabled():
+            if selected._tidal_require_shared and not self._tidal_sharing_requested():
                 raise BackendError("TIDAL account sharing is unavailable")
             from .tidal_playback import TidalPlaybackError
             try:
@@ -3559,6 +3559,9 @@ class HttpApi:
     def _tidal_sharing_enabled(self):
         return isinstance(self.tidal_account, TidalDeviceAccountBridge) and self.tidal_account.shared
 
+    def _tidal_sharing_requested(self):
+        return isinstance(self.tidal_account, TidalDeviceAccountBridge) and self.tidal_account.sharing_requested
+
     async def _play_tidal_track(self, track_id: str, quality: str = "HIGH", name: str = "CurrentQueue", *, require_shared: bool = False, _test_lease=None):
         self.tidal_test.command_allowed()
         task = asyncio.current_task()
@@ -3586,7 +3589,7 @@ class HttpApi:
                 from .tidal_page import parse_page_request
                 from .tidal_queue import TidalTrackSelection
                 if (self.tidal_playback is None or self.catalog_proxy_port == 0
-                        or require_shared and not self._tidal_sharing_enabled()):
+                        or require_shared and not self._tidal_sharing_requested()):
                     raise BackendError("Experimental TIDAL playback is unavailable")
                 generation, previous = self.state.generation, self.state.queue
                 try:
@@ -3612,7 +3615,7 @@ class HttpApi:
         """Admit explicit provider identities; bounded leases remain single-track."""
         from .tidal_playback import TidalPlaybackError
         if (not selection.tracks or self.tidal_playback is None or self.catalog_proxy_port == 0
-                or require_shared and not self._tidal_sharing_enabled()):
+                or require_shared and not self._tidal_sharing_requested()):
             raise BackendError("Experimental TIDAL playback is unavailable")
         if _test_lease is not None:
             if len(selection.tracks) != 1 or selection.start_index != 1:

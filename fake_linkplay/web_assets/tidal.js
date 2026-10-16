@@ -13,7 +13,7 @@
     const sessions = {
       missing: "No TIDAL session is stored on this renderer.",
       stored: "An unexpired TIDAL device session is stored locally. Current provider access, playback and app adoption remain unverified.",
-      expired: "The stored TIDAL session has expired. Use Refresh the saved session explicitly before sharing or testing playback.",
+      expired: "The stored TIDAL session has expired. An explicit track test can attempt one session refresh before requesting playback. You can also use Refresh the saved session before sharing.",
       unsupported: "The stored TIDAL record is incomplete or has unsupported login provenance. Review the local session setup; a new login will not replace it.",
       unavailable: "Private TIDAL session storage could not be read safely. Check the local storage setup before another attempt."
     };
@@ -25,7 +25,7 @@
     byId("start").disabled = busy || pending || value.retry_after > 0 || !csrf || !byId("consent").checked || value.session_status !== "missing" || value.state === "closed";
     byId("cancel").disabled = busy || !pending;
     byId("share").disabled = busy || pending || !csrf || !stored || value.account_shared === true;
-    byId("play").disabled = busy || pending || !csrf || !stored;
+    byId("play").disabled = busy || pending || !csrf || !refreshable;
     byId("refresh-session").disabled = busy || pending || !csrf || !refreshable;
     byId("unshare").disabled = busy || !csrf;
     if (value.account_shared === true) byId("status").textContent += " Account sharing with trusted LAN controllers is enabled.";
@@ -58,9 +58,11 @@
           invalid_response: "Refresh returned an unsupported response. Inspect the local session before another explicit attempt.",
           identity_mismatch: "The refreshed account did not match the saved session. Stop and review the local session.",
           refresh_failed: "Refresh failed or timed out. Inspect the local session before another explicit attempt.",
-          commit_failed: "Refreshed credentials could not be confirmed saved. Inspect the local session before another explicit attempt."
+          commit_failed: "Refreshed credentials could not be confirmed saved. Inspect the local session before another explicit attempt.",
+          refresh_result_uncertain: "A previous session refresh has an uncertain result. Further refresh attempts are blocked. Explicitly recover the local session before a new login; the existing record will not be replaced.",
+          refresh_rejected: "TIDAL rejected the saved refresh grant. Further refresh attempts are blocked. Explicitly recover the local session, then start a new login; the existing record will not be replaced."
         };
-        notice = result.refresh_outcome === "saved" ? (result.sharing_warning ? "Session refresh saved, but account sharing was not renewed. Playback remains unverified." : "Session refresh saved. Playback remains unverified.") : `${errors[result.error] || "Session refresh was not confirmed."} ${result.refresh_outcome === "uncertain" ? "The provider may have rotated credentials. Do not retry automatically." : "Refresh was not started."}`;
+        notice = result.refresh_outcome === "saved" ? (result.sharing_warning ? "Session refresh saved, but account sharing was not renewed. Playback remains unverified." : "Session refresh saved. Playback remains unverified.") : `${errors[result.error] || "Session refresh was not confirmed."} ${result.refresh_outcome === "rejected" ? "The refresh grant was rejected; local session recovery is required." : result.refresh_outcome === "uncertain" ? "The provider may have rotated credentials. Do not retry automatically." : "Refresh was not started."}`;
       }
       if (action === "play" && result.playback_requested === true) notice = "Playback was requested. Complete-track playback remains unverified.";
       render(result);

@@ -99,7 +99,7 @@ class WebTidalLogin:
             allowed = {"state", "active", "verification_uri", "user_code", "expires_in", "expires_at", "retry_after", "account_shared", "playback_requested", "refresh_outcome", "sharing_warning"}
             if result.get("session_status") in ("missing", "stored", "expired", "unsupported", "unavailable"):
                 allowed.add("session_status")
-            safe_errors = {"dependency_unavailable", "session_exists", "storage_unavailable", "invalid_challenge", "login_failed", "expired", "unsafe_debug", "invalid_timeout", "session_unavailable", "client_mismatch", "invalid_response", "identity_mismatch", "refresh_failed", "commit_failed"}
+            safe_errors = {"dependency_unavailable", "session_exists", "storage_unavailable", "invalid_challenge", "login_failed", "expired", "unsafe_debug", "invalid_timeout", "session_unavailable", "client_mismatch", "invalid_response", "identity_mismatch", "refresh_failed", "commit_failed", "refresh_result_uncertain", "refresh_rejected"}
             if result.get("error") in safe_errors:
                 allowed.add("error")
             return web.json_response({key: value for key, value in result.items() if key in allowed}, headers=_HEADERS)

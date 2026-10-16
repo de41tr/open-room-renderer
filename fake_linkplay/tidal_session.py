@@ -8,8 +8,10 @@ Tokens are plaintext on disk protected by Unix ownership and permissions.
 from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 import fcntl
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -21,6 +23,7 @@ import stat
 MAX_SESSION_BYTES = 65536
 _TOKEN_LIMIT = 16384
 _SESSION_FILE = "session.json"
+_REFRESH_FILE = "refresh-attempt"
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 
@@ -96,6 +99,13 @@ def _fingerprint(info: os.stat_result) -> tuple:
             info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
+def _session_fingerprint(session: TidalSession) -> bytes:
+    """Private full-record binding; never expose through status or diagnostics."""
+    record = json.dumps(asdict(session), sort_keys=True, separators=(",", ":"),
+                        ensure_ascii=True, allow_nan=False).encode("ascii")
+    return hashlib.sha256(record).digest()
+
+
 class TidalSessionStore:
     """Store one session in an explicitly supplied private Linux directory.
 
@@ -144,9 +154,9 @@ class TidalSessionStore:
             os.close(fd)
 
     @staticmethod
-    def _entry(directory: int) -> os.stat_result | None:
+    def _entry(directory: int, name: str = _SESSION_FILE) -> os.stat_result | None:
         try:
-            info = os.stat(_SESSION_FILE, dir_fd=directory, follow_symlinks=False)
+            info = os.stat(name, dir_fd=directory, follow_symlinks=False)
         except FileNotFoundError:
             return None
         _file_info(info)
@@ -194,19 +204,19 @@ class TidalSessionStore:
             raise TidalSessionError("The private TIDAL session could not be read.") from None
 
     @staticmethod
-    def _load_at(directory: int) -> TidalSession | None:
+    def _read_at(directory: int, name: str, limit: int) -> bytes | None:
         try:
-            if TidalSessionStore._entry(directory) is None:
+            if TidalSessionStore._entry(directory, name) is None:
                 return None
-            fd = os.open(_SESSION_FILE, _FILE_FLAGS, dir_fd=directory)
+            fd = os.open(name, _FILE_FLAGS, dir_fd=directory)
             try:
                 before = os.fstat(fd)
                 _file_info(before)
-                if before.st_size > MAX_SESSION_BYTES:
+                if before.st_size > limit:
                     raise TidalSessionError("Stored TIDAL session exceeds the size limit.")
                 with os.fdopen(fd, "rb", closefd=False) as source:
-                    data = source.read(MAX_SESSION_BYTES + 1)
-                if len(data) > MAX_SESSION_BYTES:
+                    data = source.read(limit + 1)
+                if len(data) > limit:
                     raise TidalSessionError("Stored TIDAL session exceeds the size limit.")
                 if _fingerprint(before) != _fingerprint(os.fstat(fd)):
                     raise TidalSessionError("Stored TIDAL session changed while being read.")
@@ -216,6 +226,13 @@ class TidalSessionStore:
             return None
         except OSError:
             raise TidalSessionError("The private TIDAL session could not be read.") from None
+        return data
+
+    @staticmethod
+    def _load_at(directory: int) -> TidalSession | None:
+        data = TidalSessionStore._read_at(directory, _SESSION_FILE, MAX_SESSION_BYTES)
+        if data is None:
+            return None
         try:
             value = json.loads(data.decode("utf-8"), object_pairs_hook=_unique_object)
             if (type(value) is not dict or type(value.get("schema")) is not int
@@ -231,6 +248,28 @@ class TidalSessionStore:
             return TidalSession(**{key: item for key, item in value.items() if key != "schema"})
         except (ValueError, TypeError, UnicodeError, RecursionError):
             raise TidalSessionError("Stored TIDAL session data is invalid.") from None
+
+    @staticmethod
+    def _refresh_outcome_at(directory: int, session: TidalSession) -> str | None:
+        marker = TidalSessionStore._read_at(directory, _REFRESH_FILE, 75)
+        if marker is None:
+            return None
+        match = re.fullmatch(rb"([a-f0-9]{64}) (uncertain|rejected)\n", marker)
+        if match is None:
+            raise TidalSessionError("Stored TIDAL refresh marker is invalid.")
+        if hmac.compare_digest(match[1], _session_fingerprint(session).hex().encode("ascii")):
+            return match[2].decode("ascii")
+        return None
+
+    def refresh_outcome(self, session: TidalSession) -> str | None:
+        """Local-only retry guard; an old-record marker does not block rotation."""
+        try:
+            with self._directory() as directory:
+                return self._refresh_outcome_at(directory, session)
+        except FileNotFoundError:
+            return None
+        except OSError:
+            raise TidalSessionError("The private TIDAL refresh marker could not be read.") from None
 
     def save(self, session: TidalSession) -> None:
         with self.lease() as lease:
@@ -254,8 +293,12 @@ class TidalSessionStore:
             raise TidalSessionError("TIDAL session data could not be encoded.") from None
         if len(data) > MAX_SESSION_BYTES:
             raise TidalSessionError("TIDAL session data exceeds the size limit.")
+        TidalSessionStore._write_at(directory, _SESSION_FILE, data)
+
+    @staticmethod
+    def _write_at(directory: int, target: str, data: bytes) -> None:
         try:
-            TidalSessionStore._entry(directory)
+            TidalSessionStore._entry(directory, target)
             name = ".session-" + secrets.token_hex(16) + ".tmp"
             fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
                          0o600, dir_fd=directory)
@@ -268,8 +311,8 @@ class TidalSessionStore:
                         os.fsync(fd)
                 finally:
                     os.close(fd)
-                TidalSessionStore._entry(directory)
-                os.replace(name, _SESSION_FILE, src_dir_fd=directory, dst_dir_fd=directory)
+                TidalSessionStore._entry(directory, target)
+                os.replace(name, target, src_dir_fd=directory, dst_dir_fd=directory)
                 os.fsync(directory)
             finally:
                 try:
@@ -318,3 +361,22 @@ class _TidalSessionLease:
 
     def save(self, session: TidalSession) -> None:
         TidalSessionStore._save_at(self._active_directory(), session)
+
+    def refresh_outcome(self, session: TidalSession) -> str | None:
+        return TidalSessionStore._refresh_outcome_at(self._active_directory(), session)
+
+    def mark_refresh_attempt(self, session: TidalSession, *, rejected: bool = False) -> None:
+        # Durable before the POST: crashes, cancellation and restart must not
+        # repeat a possibly consumed refresh token. Never store raw credentials.
+        outcome = b"rejected" if rejected else b"uncertain"
+        marker = _session_fingerprint(session).hex().encode("ascii") + b" " + outcome + b"\n"
+        TidalSessionStore._write_at(self._active_directory(), _REFRESH_FILE, marker)
+
+    def clear_refresh_attempt(self) -> None:
+        directory = self._active_directory()
+        try:
+            if TidalSessionStore._entry(directory, _REFRESH_FILE) is not None:
+                os.unlink(_REFRESH_FILE, dir_fd=directory)
+                os.fsync(directory)
+        except OSError:
+            raise TidalSessionError("The private TIDAL refresh marker could not be removed.") from None

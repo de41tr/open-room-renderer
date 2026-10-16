@@ -257,6 +257,48 @@ async def test_deadline_during_delayed_resolution_fences_late_candidate(api):
     assert api.mpv.idle
 
 
+async def test_deadline_during_refresh_never_loads_after_rotation(api, monkeypatch):
+    from fake_linkplay import tidal_playback
+    from fake_linkplay.tidal_refresh import TidalSessionRefreshManager
+    from test_tidal_refresh import TOKEN, config
+    resolver = api.tidal_playback
+    store = resolver.store
+    original = resolver.resolve_track
+    entered, release = asyncio.Event(), asyncio.Event()
+    now = [100.0]
+    api.tidal_test._clock = lambda: now[0]
+    expired_now = resolver.record.expires_at + 1
+    monkeypatch.setattr(tidal_playback.time, "time", lambda: expired_now)
+
+    async def request(url, **kwargs):
+        if "data" in kwargs:
+            entered.set()
+            await release.wait()
+            return TOKEN
+        return {"userId": 42, "countryCode": "DE"}
+
+    manager = TidalSessionRefreshManager(store, config_factory=config, request_json=request,
+                                         on_committed=api.tidal_account._session_refreshed)
+
+    async def refresh_then_resolve(*args, **kwargs):
+        with store.lease() as lease:
+            assert (await manager.refresh_owned(lease, only_if_expired=True))["state"] == "refreshed"
+        resolver.record = store.load()
+        return await original(*args, **kwargs)
+
+    resolver.resolve_track = refresh_then_resolve
+    _, code = await api.tidal_test.start("42", 1)
+    assert code == 202
+    await entered.wait()
+    now[0] = 102.0
+    assert (await wait_state(api, TERMINAL))["state"] == "expired"
+    release.set()
+    await api.tidal_test._play_task
+    assert store.load().refresh_token == TOKEN["refresh_token"]
+    assert not any(name in {"load", "resume"} for name, _ in api.mpv.calls)
+    assert api.mpv.idle
+
+
 async def test_deadline_during_backend_lock_wait_prevents_load(api):
     now = [100.0]
     api.tidal_test._clock = lambda: now[0]

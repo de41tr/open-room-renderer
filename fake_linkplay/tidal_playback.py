@@ -1,17 +1,17 @@
 """Explicit single-track TIDAL resolution, never background provider access.
 
-Only a saved, unexpired tidalapi 0.8.11 device session is accepted. The result
+Only a saved tidalapi 0.8.11 device session is accepted. An explicitly wired
+refresh owner may renew a recognized expiry once before provider access. The result
 is a private CDN candidate, not evidence that audio played or a full asset was
 provided. Callers must keep its URL out of public status, queues and logs, and
-use the public-only, DNS-pinned media proxy before playback. No token refresh,
-DRM handling, automatic collection paging or provider-provided endpoint is supported.
+use the public-only, DNS-pinned media proxy before playback. No 401 retry, DRM
+handling, automatic collection paging or provider-provided endpoint is supported.
 """
 from __future__ import annotations
 
 import asyncio
 import base64
-from dataclasses import asdict, dataclass
-import hashlib
+from dataclasses import dataclass
 import hmac
 import json
 import math
@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 import aiohttp
 
 from .network_policy import NetworkPolicyError, resolve_proxy_target
-from .tidal_session import TidalSession, TidalSessionError, TidalSessionStore
+from .tidal_session import TidalSession, TidalSessionError, TidalSessionStore, _session_fingerprint
 
 MAX_RESPONSE_BYTES = 65536
 MAX_MANIFEST_BYTES = 32768
@@ -35,6 +35,9 @@ _MESSAGES = {
     "invalid_selection": "Select one numeric TIDAL track and LOW, HIGH or LOSSLESS quality.",
     "session_required": "An unexpired tidalapi device-login session is required for TIDAL playback.",
     "session_expired": "The TIDAL session has expired or has no verified expiry; sign in again explicitly.",
+    "refresh_result_uncertain": "The previous TIDAL refresh outcome is uncertain; explicit local session recovery is required before another login.",
+    "refresh_rejected": "TIDAL rejected the refresh grant; explicit local session recovery and a new login are required.",
+    "refresh_failed": "TIDAL session refresh could not complete; no playback request was sent.",
     "storage_unavailable": "Private TIDAL storage is unavailable or already in use.",
     "unauthorized": "TIDAL rejected this session; sign in again explicitly.",
     "provider_rejected": "TIDAL rejected the playback request.",
@@ -106,7 +109,7 @@ def _unexpired(session: TidalSession) -> None:
         raise TidalPlaybackError("session_expired")
 
 
-def _device_session(session: TidalSession | None) -> TidalSession:
+def _device_session(session: TidalSession | None, *, allow_expired=False) -> TidalSession:
     if (session is None or session.auth_flow != "tidalapi-device-v0.8.11"
             or not session.client_id or not session.country_code
             or type(session.user_id) is not str
@@ -114,17 +117,9 @@ def _device_session(session: TidalSession | None) -> TidalSession:
             or int(session.user_id) > 2**63 - 1
             or not re.fullmatch(r"[\x21-\x7e]{1,16384}", session.access_token)):
         raise TidalPlaybackError("session_required")
-    _unexpired(session)
+    if not allow_expired:
+        _unexpired(session)
     return session
-
-
-def _session_fingerprint(session: TidalSession) -> bytes:
-    # Include every session field, including credentials and provenance. This
-    # transient digest binds a candidate to the exact record that resolved it;
-    # it must never enter public status, serialized queues or diagnostics.
-    record = json.dumps(asdict(session), sort_keys=True, separators=(",", ":"),
-                        ensure_ascii=True, allow_nan=False).encode("ascii")
-    return hashlib.sha256(record).digest()
 
 
 async def _request_json(http, track_id: str, session: TidalSession, *,
@@ -255,16 +250,34 @@ async def _public_candidate_url(value: object) -> str:
 class TidalPlaybackResolver:
     """Constructing a resolver performs no I/O; resolve only on explicit play."""
 
-    def __init__(self, store: TidalSessionStore):
+    def __init__(self, store: TidalSessionStore, *, refresh_manager=None):
         self._store = store
+        self._refresh = refresh_manager
 
     def session_available(self) -> bool:
         """Local-only readiness gate; never refresh or disclose a session."""
         try:
-            _device_session(self._store.load())
-            return True
+            session = _device_session(self._store.load(), allow_expired=self._refresh is not None)
+            if session.expires_at is None:
+                return False
+            return (session.expires_at > time.time()
+                    or self._refresh is not None and type(session.refresh_token) is str
+                    and bool(re.fullmatch(r"[\x21-\x7e]{1,16384}", session.refresh_token))
+                    and self._store.refresh_outcome(session) is None)
         except (TidalSessionError, TidalPlaybackError, OSError):
             return False
+
+    async def _session_owned(self, lease):
+        session = _device_session(lease.load(), allow_expired=True)
+        if (self._refresh is not None and session.expires_at is not None
+                and session.expires_at <= time.time()):
+            result = await self._refresh.refresh_owned(lease, only_if_expired=True)
+            if result["state"] not in {"current", "refreshed"}:
+                code = result.get("error")
+                if code not in {"refresh_rejected", "refresh_result_uncertain", "storage_unavailable"}:
+                    code = "refresh_result_uncertain" if result["refresh_outcome"] == "uncertain" else "refresh_failed"
+                raise TidalPlaybackError(code)
+        return _device_session(lease.load())
 
     def session_matches(self, fingerprint: bytes) -> bool:
         """Recheck the private session immediately before consuming a candidate."""
@@ -282,10 +295,11 @@ class TidalPlaybackResolver:
         request = parse_page_request(catalogue_url)
         try:
             with self._store.lease() as lease:
-                session = _device_session(lease.load())
+                session = _device_session(lease.load(), allow_expired=True)
                 params = dict(request.params)
                 if params.get("countryCode", session.country_code) != session.country_code:
                     raise TidalPlaybackError("invalid_page_selection")
+                session = await self._session_owned(lease)
                 params["countryCode"] = session.country_code
                 async with asyncio.timeout(15):
                     async with aiohttp.ClientSession(
@@ -314,7 +328,7 @@ class TidalPlaybackResolver:
         quality = "HIGH" if quality == "AUTO" else quality
         try:
             with self._store.lease() as lease:
-                session = _device_session(lease.load())
+                session = await self._session_owned(lease)
                 async with asyncio.timeout(15):
                     async with aiohttp.ClientSession(
                         trust_env=False, auto_decompress=False,
