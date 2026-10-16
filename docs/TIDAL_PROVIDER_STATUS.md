@@ -15,7 +15,7 @@ Implemented and tested with synthetic data:
   strict JSON, atomic writes and ownership/no-follow checks. The caller must
   keep it outside release, renderer configuration and favorites directories.
 - Standard AES-based account-field compatibility encoding, implemented with
-  optional `cryptography` (`pip install '.[tidal]'`). This format uses a public
+  the pinned `pyaes` dependency already used by the regular TIDAL library. This format uses a public
   identifier and provides **no secrecy or authentication**. It must not be used
   for at-rest protection. LAN delivery needs an explicitly authorized trust
   boundary; account request/response payloads are omitted from detail logs.
@@ -30,9 +30,8 @@ Not implemented or established by this milestone:
 - TIDAL `UserLogin` remains unsupported. The observed app flow does not itself
   establish public-client PKCE compatibility. An independently authorized
   external login and account adoption is a separate possible integration step.
-- Native ARMv7 availability of the optional cryptography package. Default
-  installations do not gain that dependency. The Python 3.11 CI lane installs
-  the extra to test actual synthetic codec vectors.
+- Target installation of the runtime dependencies. The codec now uses pure-
+  Python `pyaes`, rather than requiring a separate native cryptography extra.
 
 A live release requires the legitimate account/client path, capability and
 playback acceptance, token/URL renewal, controller behavior and target-device

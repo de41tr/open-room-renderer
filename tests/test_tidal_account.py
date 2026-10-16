@@ -15,8 +15,8 @@ from fake_linkplay.tidal_codec import decode_account_field
 from fake_linkplay.tidal_session import TidalSession, TidalSessionStore
 from test_soap_faults import FakeBackend, fault_code, request
 
-crypto = pytest.mark.skipif(importlib.util.find_spec("cryptography") is None,
-                           reason="optional TIDAL cryptography dependency")
+crypto = pytest.mark.skipif(importlib.util.find_spec("pyaes") is None,
+                           reason="TIDAL pyaes dependency")
 UUID = "0123456789abcdef-SYNTHETIC-ONLY"
 CLIENT = TidalClientIdentity("synthetic-client", "https://renderer.example.test/tidal/callback")
 

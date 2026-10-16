@@ -26,8 +26,8 @@ TIDAL Connect, renderer startup integration, or a ready-to-use XU4 login.
   exactly `0700`. Unsafe files, symlinks, and unsafe ancestors are rejected.
   Credentials are **plaintext at rest**, protected by ownership and file modes.
 - Install the project's normal dependencies in your local Python 3.11+ setup.
-  This CLI does not need the optional `cryptography` extra. That extra is for
-  the separate account-field compatibility bridge, not OAuth or storage.
+  The account-field bridge uses the base `pyaes` dependency; no separate native
+  cryptography extra is needed.
 
 ## Run locally
 

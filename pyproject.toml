@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
   "aiohttp>=3.9",
   "tidalapi==0.8.11",
+  "pyaes==1.6.1",
   "PyYAML>=6.0",
   "requests>=2.31",
   "zeroconf>=0.132",
@@ -37,7 +38,7 @@ dev = [
   "pywiim",
 ]
 mdns = []
-tidal = ["cryptography>=41"]
+tidal = []  # Compatibility extra; account codec dependency is now in the base install.
 
 [project.scripts]
 open-room-renderer = "fake_linkplay.cli:main"
