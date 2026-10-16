@@ -1,7 +1,7 @@
 /* Same-origin UI. Canonical snapshots are the only source of displayed state. */
 (function () {
   "use strict";
-  const {RadioSearch, streamTitleText, FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
+  const {RadioSearch, streamTitleText, audioFormatText, FAVORITES_EXPORT_FILENAME, FAVORITES_TRANSFER_CHANGED, favoritesRestoreBody, validateFavoritesExportSummary, validateFavoritesExportDocument, favoritesTransferFailure, FavoritesRestoreDraft, CURVE_EXPORT_FILENAME, CURVE_TRANSFER_CHANGED, curveImportBody, validateCurveExportSummary, validateCurveExportDocument, curveTransferFailure, CurveImportDraft, OutputInspection, outputInspectionLines, Controller, EXPORT_FILENAME, exportIdentity, exportObject, validateExportSummary, validateExportDocument, exportFailure, readExportResponse, PlaylistDraft, MAX_REQUEST_BYTES, requestBytes, playlistAvailable, pastedURLs, playlistPreview, DspDraft, DSP_KEYS, DSP_LIBRARY_UNAVAILABLE_MESSAGE, MODES, safeAudioURL, safeArtwork, formatTime, guardedAction} = window.RendererControl;
   const $ = id => document.getElementById(id);
   const drafts = {seek: false, volume: false, mode: false, balance: false};
   let snapshot = null, queueSignature = "", favoritesSignature = "", artworkURL = null;
@@ -126,6 +126,7 @@
     $("stream-title").hidden = !onAir;
     text("track-artist", media.artist || (queue.count ? "Artist unavailable" : "Choose something from your favorites."));
     text("track-album", media.album);
+    text("audio-format", audioFormatText(snapshot, control.fresh));
     text("source-label", media.is_live ? "LIVE STREAM" : "OPEN ROOM");
     const phaseLabel = transport.status === "ERROR" ? "ERROR" : transport.status === "PENDING" && ["PLAYING", "PAUSED", "STOPPED"].includes(transport.phase) ? "PENDING" : transport.phase.replaceAll("_", " ");
     text("playback-state", control.fresh ? phaseLabel : "UNKNOWN · STALE");

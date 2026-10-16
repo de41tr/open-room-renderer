@@ -243,6 +243,10 @@ async def live_exercise(root, backend, transport):
             assert asyncio.get_running_loop().time() < deadline
             await source.observe()
             await asyncio.sleep(.05)
+        unavailable = {'codec': None, 'bitrate_bps': None, 'bitrate_kind': 'unavailable'}
+        # The mpv input is decoded PCM, not Spotify's original encoded stream.
+        # The integrated UI must never relabel its raw rate as provider quality.
+        assert api.web_api.snapshot()['media']['audio'] == unavailable
         assert 'g=-12.000' in str(await backend.get_property('af'))
         before_bypass = await backend.get_property('playback-time')
         before_ahead = source.write_progress.stat().st_size * .02 - before_bypass
@@ -263,6 +267,8 @@ async def live_exercise(root, backend, transport):
         assert await backend.get_property('idle-active') is True
         await api._play_url(str(track))
         assert api.state.phase == PlaybackPhase.PLAYING
+        await api.sync_mpv_state()
+        assert api.web_api.snapshot()['media']['audio']['codec'] == 'pcm_s16le'
         assert await backend.get_property('current-ao') == 'null'
         assert await backend.get_property('option-info/demuxer-max-bytes/set-locally') is False
         await api.execute(ParsedCommand('stop'), '127.0.0.1')
@@ -280,6 +286,7 @@ async def live_exercise(root, backend, transport):
             assert asyncio.get_running_loop().time() < deadline
             await restarted.observe()
             await asyncio.sleep(.05)
+        assert api.web_api.snapshot()['media']['audio'] == unavailable
         assert 'pan' in str(await backend.get_property('af'))
         await api.close_spotify()
         assert restarted.process.returncode is not None and not restarted.runtime

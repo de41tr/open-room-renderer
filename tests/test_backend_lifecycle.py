@@ -93,6 +93,31 @@ def short_backend(*, auto_spawn=True):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["none", "entry", "track", "bitrate_unavailable"])
+async def test_audio_format_snapshot_fences_current_entry_and_decoded_track(change):
+    backend = short_backend(auto_spawn=False)
+    backend.command = AsyncMock(side_effect=lambda args, **_: {"error": "success", "data": False})
+    entry = {"id": 7, "filename": "https://source.example.test/no-format-hint", "current": True, "playing": True}
+    track = {"id": 1, "type": "audio", "selected": True, "codec": "flac"}
+    reads = {}
+    async def property(name):
+        reads[name] = reads.get(name, 0) + 1
+        if name == "path": return entry["filename"]
+        if name == "playlist": return [{**entry, "id": 8 if change == "entry" and reads[name] > 1 else 7}]
+        if name == "track-list": return [{**track, "codec": "mp3" if change == "track" and reads[name] > 1 else "flac"}]
+        if name == "audio-bitrate": return None if change == "bitrate_unavailable" else 234567.5
+        return None
+    backend.get_property = property
+    observed = await backend.snapshot()
+    if change in {"entry", "track"}:
+        assert observed["audio-info"] is None
+    else:
+        assert observed["audio-info"] == {"entry_id": 7, "codec": "flac",
+            "bitrate_bps": None if change == "bitrate_unavailable" else 234567}
+    assert reads["audio-bitrate"] == 1
+
+
+@pytest.mark.asyncio
 async def test_concurrent_start_and_commands_spawn_exactly_one_owned_child(monkeypatch, ipc):
     backend = short_backend()
     process = FakeProcess()

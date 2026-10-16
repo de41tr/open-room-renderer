@@ -23,7 +23,10 @@ include the four static assets.
   output configuration and two mpv properties, with identifiers hidden and no
   playback commands. Stop remains reachable while this non-modal read runs.
 - Now Playing: safe title/artist/album, optional artwork, live-stream label,
-  canonical playback phase and reported position/duration.
+  canonical playback phase, reported position/duration, and current decoded
+  codec plus bitrate. Bitrate is explicitly a varying mpv packet estimate in
+  kb/s, not a catalog/filename claim or the DAC sample rate. Missing, stopped,
+  loading, uncertain or stale observations show unknown rather than old values.
 - Play, Pause, Stop, Next, Previous, bounded Seek, volume and mute.
 - Current queue, explicit track selection, and the five supported modes:
   in order, repeat one, repeat all, shuffle once, shuffle with repeat all.

@@ -1,5 +1,7 @@
 # Open Room Renderer
 
+![open room — NETWORK AUDIO RENDERER](docs/assets/open-room-banner.jpg)
+
 A tiny Linux audio box you can run on a laptop or Raspberry Pi: it shows up on your LAN, accepts local playback commands, and plays audio through `mpv`.
 
 It is an independent, experimental Linux/mpv-based local network audio renderer for hobbyist audio setups. Think: garage speaker, workshop radio, kitchen Raspberry Pi, or “I have an old Linux box and want it to behave like a network audio sink”.

@@ -179,6 +179,7 @@ async def exercise(browser: Browser, api: HttpApi, backend, base: str,
     assert await _property(backend, "current-ao") == "null"
     tracks = await _property(backend, "track-list")
     assert any(t.get("type") == "audio" and t.get("selected") and t.get("codec") == "pcm_s16le" for t in tracks), tracks
+    await browser.wait("document.querySelector('#audio-format').textContent.startsWith('Codec: PCM · Bitrate: ≈') && document.querySelector('#audio-format').textContent.endsWith('kb/s (estimate)')")
     await browser.wait("!document.querySelector('#pause').disabled")
     await browser.click("#pause")
     await browser.wait("document.querySelector('#playback-state').textContent === 'PAUSED' && document.querySelector('#playback-state').dataset.kind === 'confirmed'")
@@ -188,6 +189,7 @@ async def exercise(browser: Browser, api: HttpApi, backend, base: str,
     assert all(item["status"] == 200 and item["request_acknowledged"] is True for item in commands), commands
     evidence[label]["native"] = {"codec": "pcm_s16le", "ao": "null", "pause": True,
         "initial_time": position, "advanced_time": later, "ui_phase": "PAUSED"}
+    evidence[label]["native"]["ui_audio_format"] = await browser.inspect("document.querySelector('#audio-format').textContent")
 
     # Native dialog focus, tab sequence and dismissal, then a fresh opening.
     before_export = (len(evidence["http_commands"]), evidence["media_requests"])
@@ -281,6 +283,48 @@ async def exercise(browser: Browser, api: HttpApi, backend, base: str,
     assert not [entry for entry in console if entry.get("level") == "SEVERE"], console
 
 
+async def exercise_spotify_integration(browser, api, backend, workspace, artifacts, label):
+    """Real UI/FIFO wiring with our own tone producer; no Spotify daemon/account."""
+    from unittest.mock import patch
+    from fake_linkplay import spotify_eq
+    from test_libmpv_spotify_eq import SyntheticSource
+
+    root = workspace / (label + "-synthetic-pcm")
+    root.mkdir(mode=0o700)
+    profile = {"client_dir": str(root / "unused-client"), "client_sha256": "a" * 64,
+               "name": "Synthetic source", "bitrate": 160, "port": 3678, "device_id": "b" * 40}
+    queue = api.state.queue
+    source = None
+    try:
+        with patch.object(spotify_eq, "verify_client", return_value=(Path(sys.executable), {"binary_sha256": "a" * 64})):
+            api.spotify_source_factory = lambda: SyntheticSource(root, dict(profile))
+            await browser.click("#refresh")
+            await browser.wait("!document.querySelector('#spotify-card').hidden && !document.querySelector('#spotify-start').disabled")
+            assert await browser.inspect("document.querySelector('.brand-mark').naturalWidth") == 485
+            await browser.click("#spotify-start")
+            await browser.wait("document.querySelector('#playback-state').textContent === 'PLAYING'")
+            source = api.spotify_source
+            assert source is not None and source.process.returncode is None
+            assert await _property(backend, "path") == str(source.fifo)
+            assert await _property(backend, "audio-params/samplerate") == 44100
+            await browser.wait("document.querySelector('#audio-format').textContent === 'Codec: unknown · Bitrate: unknown'")
+            assert await browser.inspect("document.querySelector('#spotify-start').disabled")
+            assert await browser.inspect("document.documentElement.scrollWidth <= innerWidth + 1")
+            await browser.screenshot(artifacts / (label + "-spotify-integration.png"))
+            await browser.click("#stop")
+            await browser.wait("document.querySelector('#playback-state').textContent === 'STOPPED' && !document.querySelector('#spotify-start').disabled")
+            assert source.process.returncode is not None and not source.runtime
+            assert await _property(backend, "idle-active") is True
+            return {"explicit_browser_start_stop": True, "original_logo_loaded": True,
+                    "codec_cleared": True, "raw_pcm_not_provider_bitrate": True,
+                    "source": "owned synthetic tone producer; Spotify not started", "output": "null, no DAC"}
+    finally:
+        await api.close_spotify()
+        if source is not None:
+            await source.close()
+        await api._replace_queue(queue)
+
+
 async def smoke(artifacts: Path, evidence: dict):
     chrome, driver, mpv = (shutil.which(name) for name in ("google-chrome", "chromedriver", "mpv"))
     assert chrome and driver and mpv, "Installed google-chrome, chromedriver and mpv are required; no fallback or download"
@@ -369,6 +413,8 @@ async def smoke(artifacts: Path, evidence: dict):
                                         await exercise(browser, api, backend, base, artifacts, downloads, mobile=mobile, evidence=evidence)
                                         evidence[label]["radio_catalog"] = await exercise_catalog(
                                             browser, api, backend, base, artifacts, label)
+                                        evidence[label]["spotify_integration"] = await exercise_spotify_integration(
+                                            browser, api, backend, workspace, artifacts, label)
                                     except BaseException:
                                         await browser.diagnostics(artifacts, label + "-failure")
                                         raise

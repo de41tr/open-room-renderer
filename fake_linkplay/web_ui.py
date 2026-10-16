@@ -51,6 +51,7 @@ _ASSETS = {"/": ("index.html", "text/html"), "/ui/": ("index.html", "text/html")
            "/ui/style.css": ("style.css", "text/css"),
            "/ui/controller.js": ("controller.js", "text/javascript"),
            "/ui/app.js": ("app.js", "text/javascript"),
+           "/ui/logo.png": ("logo.png", "image/png"),
            "/ui/favicon.ico": (None, "image/x-icon")}
 _HEADERS = {
     "Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
@@ -810,6 +811,8 @@ class WebControlApi:
                                                          PlaybackPhase.BUFFERING} or runtime.transport_pending else "CONFIRMED")
         gain_status = ("PENDING" if runtime.gain_pending else "CONFIRMED"
                        if state.gain_confirmed and runtime.backend_gain_confirmed else "UNKNOWN")
+        audio_visible = bool(item and state.backend_url and state.intent in {"play", "pause"}
+            and state.phase in {PlaybackPhase.PLAYING, PlaybackPhase.PAUSED} and transport_status == "CONFIRMED")
         title = (_title(state.title, (item.url, item.resolved_url, state.current_url,
                     state.resolved_url, state.backend_url, state.backend_original_url), f"Track {queue.index}")
                  if item else "No selection")
@@ -841,6 +844,9 @@ class WebControlApi:
                 "message": "Playback state is unconfirmed. Stop is available for recovery." if transport_status == "ERROR"
                     else "Waiting for renderer confirmation." if transport_status == "PENDING" else ""},
             "media": {"title": title, "artist": _display(state.artist), "album": _display(state.album),
+                "audio": {"codec": (state.audio_codec or None) if audio_visible else None,
+                    "bitrate_bps": state.audio_bitrate_bps if audio_visible else None,
+                    "bitrate_kind": "estimate" if audio_visible and state.audio_bitrate_bps is not None else "unavailable"},
                 "stream_title": (safe_stream_title(state.stream_title, (item.url, item.resolved_url,
                     state.current_url, state.resolved_url, state.backend_url, state.backend_original_url)) or None)
                     if (item and item.stream_type == "station" and state.intent in {"play", "pause"}
@@ -1049,7 +1055,8 @@ class WebControlApi:
                     # blocked by our intentionally unchanged image CSP.
                     return web.Response(status=204, content_type=content_type, headers=_HEADERS)
                 body = files("fake_linkplay").joinpath("web_assets", filename).read_bytes()
-                return web.Response(body=body, content_type=content_type, charset="utf-8", headers=_HEADERS)
+                return web.Response(body=body, content_type=content_type,
+                                    charset=None if content_type.startswith("image/") else "utf-8", headers=_HEADERS)
             if path in {PREFIX + "/state", PREFIX + "/favorites"}:
                 if request.method != "GET":
                     raise WebAdmissionError("method_not_allowed", 405)
