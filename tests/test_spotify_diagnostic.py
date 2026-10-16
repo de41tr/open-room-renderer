@@ -116,6 +116,7 @@ async def test_real_loopback_snapshot_is_allowlisted_and_does_not_resolve_names(
     assert result["snapshot_freshness"] == "snapshot_only"
     assert result["audio_output"] == result["shared_dsp"] == "unverified"
     assert result["events"]["channel"] == "not_requested"
+    assert result["events"]["observations"] == []
     assert SECRET not in json.dumps(result)
     assert set(result["status"]) == {*diagnostic._BOOLEAN_FIELDS, "volume", "volume_steps", "volume_fraction"}
 
@@ -226,7 +227,8 @@ async def test_events_are_only_hints_known_unknown_and_null_data_refresh_status(
         result = await client(port).diagnose(.08)
     assert result["status"]["paused"] is True  # Event did not mutate the snapshot.
     assert result["events"] == {"channel": "observed", "end_reason": "duration_limit",
-        "messages_received": 2, "unknown_types": 1, "snapshot_refreshes": 4, "complete_history": False}
+        "messages_received": 2, "unknown_types": 1, "snapshot_refreshes": 4, "complete_history": False,
+        "observations": [{"type": "playing"}]}
     assert statuses == 5
     assert SECRET not in json.dumps(result)
     assert {path for _, path, _ in requests} == {"/", "/status", "/events"}
@@ -241,14 +243,57 @@ async def test_event_flood_has_message_and_request_budget(monkeypatch):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         for _ in range(20):
-            await ws.send_json({"type": "volume", "data": {"secret": SECRET}})
+            await ws.send_json({"type": "playback_error", "data": {
+                "stage": "load", "kind": "restricted", "unplayable": True, "message": SECRET}})
         await ws.receive()
         return ws
     async with peer(handler) as (port, requests):
         result = await client(port).diagnose(.5)
     assert result["events"]["end_reason"] == "message_limit"
     assert result["events"]["messages_received"] == 3
+    assert len(result["events"]["observations"]) == 3
+    assert SECRET not in json.dumps(result)
     assert len(requests) == 8  # root + initial + WS + resync + three hints + final status
+
+
+@pytest.mark.asyncio
+async def test_real_websocket_error_categories_are_ordered_private_and_not_audio_evidence():
+    payloads = [
+        {"type": "will_play", "data": {"uri": SECRET}},
+        {"type": "playback_error", "data": {"stage": "load", "kind": "restricted", "unplayable": True,
+            "message": SECRET, "uri": SECRET, "context_uri": SECRET, "play_origin": SECRET}},
+        {"type": "playback_error", "data": {"stage": "playback", "kind": "unknown", "unplayable": False}},
+        {"type": "playback_error", "data": None},
+        {"type": "playback_error", "data": {"stage": [SECRET], "kind": SECRET, "unplayable": 1}},
+        {"type": "not_playing", "data": {"uri": SECRET}},
+        {"type": "stopped", "data": {"play_origin": SECRET}},
+    ]
+    async def handler(request):
+        if request.path != "/events":
+            return await ordinary(request)
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        for payload in payloads:
+            await ws.send_json(payload)
+        await ws.close()
+        return ws
+    async with peer(handler) as (port, requests):
+        result = await client(port).diagnose(.5)
+    observed = result["events"]["observations"]
+    assert [row["type"] for row in observed] == [row["type"] for row in payloads]
+    assert observed[1] == {"type": "playback_error", "stage": "load", "kind": "restricted",
+        "unplayable": True, "explanation": "Receiver reported a media restriction."}
+    assert observed[2]["kind"] == "unknown" and observed[2]["unplayable"] is False
+    for row in observed[3:5]:
+        assert row["stage"] is row["kind"] is row["unplayable"] is None
+        assert row["explanation"] == "Receiver reported a playback error without a recognized category."
+    assert result["status"]["paused"] is True
+    assert result["snapshot_freshness"] == "unknown"  # Closed event channel, no reconnect.
+    assert result["events"]["complete_history"] is False
+    assert result["audio_output"] == result["shared_dsp"] == "unverified"
+    assert SECRET not in json.dumps(result)
+    assert all(method == "GET" for method, _, _ in requests)
+    assert [path for _, path, _ in requests].count("/events") == 1
 
 
 @pytest.mark.asyncio
