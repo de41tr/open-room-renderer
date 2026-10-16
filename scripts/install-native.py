@@ -341,28 +341,30 @@ def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require
         if stage_only:
             receipt["mode"] = "staged-only"
         else:
-            subprocess.run([sys.executable, "-m", "venv", str(prefix / "venv")], check=True)
+            subprocess.run([sys.executable, "-I", "-m", "venv", str(prefix / "venv")], check=True)
             python = str(prefix / "venv/bin/python")
-            subprocess.run([python, "-m", "pip", "install", "--only-binary=:all:",
+            # Ignore inherited PYTHONPATH/user-site metadata: checkout egg-info
+            # must not make pip skip installing the application in this venv.
+            subprocess.run([python, "-I", "-m", "pip", "install", "--only-binary=:all:",
                             "--no-deps", "--require-hashes", "--report",
                             str(prefix / "pip-build-tools-report.json"), "-r", "/dev/stdin"],
                            input=BUILD_TOOLS, text=True, check=True)
-            subprocess.run([python, "-m", "pip", "install", "--use-pep517", "--no-build-isolation",
+            subprocess.run([python, "-I", "-m", "pip", "install", "--use-pep517", "--no-build-isolation",
                             "--no-deps", "--require-hashes", "--report",
                             str(prefix / "pip-pure-build-report.json"), "-r", "/dev/stdin"],
                            input=PURE_BUILD_DEPENDENCIES, text=True, check=True)
             wheels = prefix / "wheels"
             wheels.mkdir(mode=0o700)
-            subprocess.run([python, "-m", "pip", "wheel", "--no-build-isolation", "--no-deps",
+            subprocess.run([python, "-I", "-m", "pip", "wheel", "--no-build-isolation", "--no-deps",
                             "--wheel-dir", str(wheels), str(prefix / "source")], check=True)
             application = list(wheels.glob("open_room_renderer-*-py3-none-any.whl"))
             if len(application) != 1:
                 raise ValueError("The source snapshot did not produce one native-profile application wheel.")
-            subprocess.run([python, "-m", "pip", "install", "--report", str(prefix / "pip-install-report.json"), str(application[0])], check=True)
+            subprocess.run([python, "-I", "-m", "pip", "install", "--report", str(prefix / "pip-install-report.json"), str(application[0])], check=True)
             # Keep pip warnings on stderr, separate from the JSON package inventory.
             receipt["packages"] = json.loads(subprocess.check_output(
-                [python, "-m", "pip", "list", "--format=json"], text=True))
-            subprocess.run([str(prefix / "venv/bin/open-room-renderer"), "--help"], check=True, stdout=subprocess.DEVNULL)
+                [python, "-I", "-m", "pip", "list", "--format=json"], text=True))
+            subprocess.run([python, "-I", str(prefix / "venv/bin/open-room-renderer"), "--help"], check=True, stdout=subprocess.DEVNULL)
             receipt["mode"] = "installed"
     finally:
         (prefix / "installation-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")

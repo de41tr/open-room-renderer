@@ -586,9 +586,11 @@ def test_native_package_inventory_keeps_warnings_separate(
     real_run = subprocess.run
     installs = []
     builds = []
+    # The CI checkout exposes same-version egg-info through this inherited path.
+    monkeypatch.setenv("PYTHONPATH", str(ROOT))
 
     def skip_package_build(args, **kwargs):
-        if args[1:3] == ["-m", "venv"]:
+        if args[1:4] == ["-I", "-m", "venv"]:
             python = prefix / "venv/bin/python"
             python.parent.mkdir(parents=True)
             python.write_text(
@@ -596,12 +598,16 @@ def test_native_package_inventory_keeps_warnings_separate(
                 "sys.stderr.write('WARNING: temporary pip cache is unavailable\\n')\n"
                 f"sys.stdout.write({output!r})\nsys.exit({returncode})\n")
             python.chmod(0o700)
-        elif args[1:4] == ["-m", "pip", "install"]:
+        elif args[1:5] == ["-I", "-m", "pip", "install"]:
             installs.append((args, kwargs))
-        elif args[1:4] == ["-m", "pip", "wheel"]:
+        elif args[1:5] == ["-I", "-m", "pip", "wheel"]:
             builds.append(args)
             (prefix / "wheels/open_room_renderer-0.1.0-py3-none-any.whl").touch()
-        elif args[0] != str(prefix / "venv/bin/open-room-renderer"):
+        elif len(args) > 2 and args[2] == str(prefix / "venv/bin/open-room-renderer"):
+            assert args[1] == "-I"
+        else:
+            if args[0] == str(prefix / "venv/bin/python"):
+                assert args[1:5] == ["-I", "-m", "pip", "list"]
             return real_run(args, **kwargs)
         return subprocess.CompletedProcess(args, 0)
 
@@ -645,16 +651,16 @@ def test_native_build_failure_does_not_fall_back_or_claim_installation(
     installs = []
 
     def fail_build(args, **kwargs):
-        if args[1:3] == ["-m", "pip"]:
+        if args[1:4] == ["-I", "-m", "pip"]:
             installs.append(args)
-            if str(prefix / failed_report) in args or args[3] == failed_report:
+            if str(prefix / failed_report) in args or args[4] == failed_report:
                 raise subprocess.CalledProcessError(1, args)
         return subprocess.CompletedProcess(args, 0)
 
     monkeypatch.setattr(installer.subprocess, "run", fail_build)
     with pytest.raises(subprocess.CalledProcessError):
         installer.install(prefix, port=8080, stage_only=False, dry_run=False, require_alsa=False)
-    assert str(prefix / failed_report) in installs[-1] or installs[-1][3] == failed_report
+    assert str(prefix / failed_report) in installs[-1] or installs[-1][4] == failed_report
     assert all(str(prefix / "pip-install-report.json") not in args for args in installs)
     receipt = json.loads((prefix / "installation-receipt.json").read_text())
     assert receipt["mode"] == "installation-incomplete"
