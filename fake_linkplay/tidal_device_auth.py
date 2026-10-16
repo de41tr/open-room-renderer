@@ -160,7 +160,8 @@ def _saved_session(session) -> TidalSession:
             or int(identifier) > 2**63 - 1):
         raise _Failure("login_failed")
     return TidalSession(session.access_token, session.refresh_token,
-                        expires_at, identifier, session.country_code)
+                        expires_at, identifier, session.country_code,
+                        client_id=session.config.client_id, auth_flow="tidalapi-device-v0.8.11")
 
 
 @dataclass(repr=False)

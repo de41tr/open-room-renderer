@@ -9,18 +9,20 @@ import json
 from aiohttp import web
 
 from .web_ui import WebAdmissionError, _HEADERS
+from .tidal_account import TidalAccountUnavailable
 
 PREFIX = "/orr/v1/tidal"
 
 
 class WebTidalLogin:
-    def __init__(self, admission, manager):
+    def __init__(self, admission, manager, account=None):
         self.admission = admission
         self.manager = manager
+        self.account = account
 
     def routes(self):
         return [web.route("*", path, self.handle) for path in
-                ("/ui/tidal", "/ui/tidal.js", PREFIX + "/status", PREFIX + "/start", PREFIX + "/cancel")]
+                ("/ui/tidal", "/ui/tidal.js", PREFIX + "/status", PREFIX + "/start", PREFIX + "/cancel", PREFIX + "/share", PREFIX + "/unshare")]
 
     async def handle(self, request):
         try:
@@ -49,11 +51,24 @@ class WebTidalLogin:
                     pairs = json.loads(raw, object_pairs_hook=lambda value: value)
                 except (ValueError, UnicodeError):
                     raise WebAdmissionError() from None
-                expected = [("confirm_experimental_login", True)] if request.path.endswith("/start") else [("cancel", True)]
+                action = request.path.rsplit("/", 1)[-1]
+                expected = [({"start": "confirm_experimental_login", "cancel": "cancel",
+                              "share": "confirm_lan_account_sharing", "unshare": "stop_lan_account_sharing"}[action], True)]
                 if pairs != expected or any(type(value) is not bool for _, value in pairs):
                     raise WebAdmissionError()
-                result = await (self.manager.start() if request.path.endswith("/start") else self.manager.cancel())
-            allowed = {"state", "active", "verification_uri", "user_code", "expires_in", "expires_at", "retry_after"}
+                if action in {"share", "unshare"}:
+                    result = await self.manager.status()
+                    if self.account is None or (action == "share" and result.get("active")):
+                        raise WebAdmissionError("account_sharing_unavailable", 409)
+                    try:
+                        await self.account.set_shared(action == "share")
+                    except TidalAccountUnavailable:
+                        raise WebAdmissionError("account_sharing_unavailable", 409) from None
+                else:
+                    result = await (self.manager.start() if action == "start" else self.manager.cancel())
+            result = dict(result)
+            result["account_shared"] = bool(self.account and self.account.shared)
+            allowed = {"state", "active", "verification_uri", "user_code", "expires_in", "expires_at", "retry_after", "account_shared"}
             safe_errors = {"dependency_unavailable", "session_exists", "storage_unavailable", "invalid_challenge", "login_failed", "expired", "unsafe_debug"}
             if result.get("error") in safe_errors:
                 allowed.add("error")

@@ -63,3 +63,44 @@ async def test_unadmitted_or_unconfirmed_requests_never_start_provider(api, head
         async with session.post(base + "/orr/v1/tidal/start", json=payload, headers=headers) as response:
             assert response.status in {400, 403}
         assert manager.starts == 0
+
+
+@pytest.mark.asyncio
+async def test_account_sharing_is_explicit_revocable_and_never_in_status(api, tmp_path):
+    import json
+    import time
+    from xml.etree import ElementTree as ET
+    from fake_linkplay.tidal_account import TidalDeviceAccountBridge
+    from fake_linkplay.tidal_session import TidalSession, TidalSessionStore
+    from test_soap_faults import request, fault_code
+
+    store = TidalSessionStore(tmp_path / "private-account")
+    store.save(TidalSession("SYNTHETIC_ACCESS_SECRET", "SYNTHETIC_REFRESH_SECRET",
+                            time.time() + 600, "42", "DE", client_id="synthetic-device-client",
+                            auth_flow="tidalapi-device-v0.8.11"))
+    api.tidal_account = TidalDeviceAccountBridge(store)
+    api.tidal_login = Manager()
+    account_request = lambda: request("GetUserInfo", "<AccountSource>Tidal</AccountSource><Version>2</Version>", service="PlayQueue")
+    assert fault_code(await api.soap(account_request())) == "501"
+    async with serving(api) as (session, base):
+        boot = await state(session, base)
+        headers = {"Origin": base, "X-ORR-CSRF": boot["csrf_token"]}
+        async with session.post(base + "/orr/v1/tidal/share", json={"confirm_lan_account_sharing": True}) as response:
+            assert response.status == 403
+        assert not api.tidal_account.shared
+        async with session.post(base + "/orr/v1/tidal/share", json={"confirm_lan_account_sharing": True}, headers=headers) as response:
+            value = await response.json()
+            assert response.status == 200 and value["account_shared"] is True
+            assert "SECRET" not in json.dumps(value)
+        response = await api.soap(account_request())
+        assert response.status == 200
+        payload = json.loads(next(n.text for n in ET.fromstring(response.text).iter() if n.tag == "Result"))
+        assert "clientId" in payload and "redirectURI" not in payload and "refresh_token" not in payload
+        async with session.get(base + "/orr/v1/tidal/status") as response:
+            assert "SECRET" not in await response.text()
+        assert "Tidal" not in api.state.as_status_ex("127.0.0.1")["supported_services"]
+        async with session.post(base + "/orr/v1/tidal/unshare", json={"stop_lan_account_sharing": True}, headers=headers) as response:
+            assert (await response.json())["account_shared"] is False
+        assert fault_code(await api.soap(account_request())) == "501"
+        assert store.load().access_token == "SYNTHETIC_ACCESS_SECRET"
+        assert not api.mpv.calls

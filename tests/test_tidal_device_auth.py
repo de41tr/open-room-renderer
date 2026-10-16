@@ -26,6 +26,7 @@ class FakeSession:
         self.refresh_token = "synthetic-refresh-secret"
         self.expiry_time = datetime(2030, 1, 2, 3, 4, 5)
         self.country_code = "ZZ"
+        self.config = SimpleNamespace(client_id="synthetic-device-client")
         self.user = SimpleNamespace(id=12345)
         self.request_session = SimpleNamespace(close=self.close)
         self.checked = checked

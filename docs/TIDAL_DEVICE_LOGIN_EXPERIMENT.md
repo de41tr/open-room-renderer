@@ -42,7 +42,7 @@ Close and restart behavior must not be represented as provider logout.
 ## Explicit limits
 
 This milestone does not start audio, advertise a native TIDAL capability,
-return the saved account to WiiM Home, resolve a track, refresh a token, or
+automatically share the saved account, resolve a track, refresh a token, or
 establish full-playback rights. Those require separate actual acceptance checks.
 The independent own-client PKCE CLI remains available as a separate route.
 
@@ -59,3 +59,30 @@ Do not deploy or restart while login is `pending` or `cancelling`; wait until
 `active` is false. The installed user service has a 45-second stop timeout. If
 upstream polling outlives it, a forced stop is not a clean shutdown and the
 existing deployment guard can refuse installation. Do not weaken that guard.
+
+## Explicit LAN account sharing
+
+After a successful device login, **Share account with trusted LAN apps** is a
+separate same-origin, CSRF-protected action. It enables the existing SOAP
+`GetUserInfo(AccountSource=Tidal, Version=2)` response for the exact saved
+session. LAN controllers can obtain its access token through that protocol;
+the refresh token is never included. This is trusted-LAN sharing, not LAN-user
+authentication. Status endpoints still return no credentials or account identity.
+
+The saved record carries the actual device-flow client ID and the pinned
+`tidalapi-device-v0.8.11` provenance. Older records without this provenance
+cannot be shared as library-device sessions. Sharing expires with the token,
+is invalidated by a changed record, and resets on process restart. **Stop
+account sharing** disables projection without deleting or revoking the grant.
+
+The adoption-only response includes the encoded actual client ID but omits
+`redirectURI`: no registered callback for this device client is established.
+Static APK review shows the authenticated account path validates with Bearer
+`/v1/sessions`; its local redirect fallback is not proof of a network callback.
+Native app OAuth re-login is unsupported. There is no automatic refresh here;
+expired sessions fail closed. No TIDAL capability is advertised. Successful
+SOAP tests are synthetic interoperability checks, not Android, catalogue,
+full-playback or XU4 acceptance.
+
+Schema-2 device records require the new reader. Returning to an older release
+preserves the private file but that release refuses to read its newer format.
