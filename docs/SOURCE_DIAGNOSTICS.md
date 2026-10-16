@@ -63,7 +63,7 @@ failure is recorded before existing cleanup; the final HTTP/SOAP/Web result keep
 that category instead of overwriting it with a generic backend failure. An
 independent cleanup failure can still report backend failure. No exception text
 is inspected. Readiness text logs contain neither URL nor backend snapshot.
-Unclassified failures remain unknown; no exception-message parsing is used.
+Unclassified renderer failures remain unknown; their exception text is not parsed.
 
 To add a new reason, add a fixed enum member in reviewed renderer code and call
 the existing diagnostic note/failure helper at the decision point. The host
@@ -71,6 +71,52 @@ validates schema, types, identifier syntax, size and identity rather than keepin
 a per-reason allowlist. New fields or schema versions require explicit integration
 review; arbitrary extra fields are rejected. Enum-only construction in trusted
 renderer code is the privacy boundary, not a general sanitizer for arbitrary text.
+
+## Spotify load restriction diagnosis
+
+An already enabled Spotify EQ source observes its owned receiver's GET /events
+once per matching **renderer** diagnostic lease. The existing backend monitor
+starts this read-only observation; no browser/status polling is required. The
+separate spotify-events capture profile does **not** activate this renderer lease.
+Use the existing renderer capture start/collect workflow and its matching test ID
+and running commit. The resulting reasons appear in the existing source snapshot;
+no host-helper/schema update or new endpoint is required.
+
+`spotify_events_connected` confirms only the owned event handshake, not playback.
+Lease readiness alone does not confirm that handshake. Events have no replay or
+complete-history guarantee. Only events received during the window are diagnosed.
+All observations use backend/unknown, stage playback and outcome unknown, without
+borrowing a nearby HTTP command or changing renderer playback/error state.
+
+Pinned go-librespot v0.10.3 reports both media restrictions and audio-key refusals
+as load/restricted/unplayable. For that exact category triple only, ORR matches
+the complete known stream-load error wrapper in bounded memory:
+
+- `spotify_media_restricted`: the upstream media restriction error.
+- `spotify_key_refused_code_1`: the upstream audio-key provider returned code 1.
+- `spotify_key_refused_other_code`: it returned another valid uint16 code.
+- `spotify_load_restricted_unknown`: missing, changed or unrecognized message.
+- `spotify_playback_error_other`: a different/malformed playback-error category.
+
+Code 1 is reported literally, without guessing its service-side meaning. None of
+these reasons establishes a Premium/account, country, licensing or DSP root cause.
+The closed reason enum deliberately exports no arbitrary numeric values. It does
+not repurpose HTTP/SOAP status codes or add fields to schema 1.
+
+Source contracts: [restriction constant](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/player.go),
+[key error](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/audio/provider.go),
+[key wrapping](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/player/player.go),
+[stream-load wrapping](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/controls.go),
+[coarse classification](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/playback_error.go).
+
+The connection is proved against the existing child PID and exact accepted TCP
+socket inode before HTTP is sent. Raw messages, identifiers, metadata and error
+text are never logged or written; only fixed reasons enter the existing buffer.
+The observer has a 64-KiB message, 1-MiB input and 1,000-frame budget, bounded by
+the remaining lease. It stops on source Stop, lease expiry, malformed/disconnected
+transport or limits. `spotify_events_unavailable`, `spotify_events_disconnected`
+and `spotify_events_limit` report incomplete observation; silence is not success.
+There is no reconnect within the lease and no playback, login or recovery action.
 
 ## Bounds and loss
 

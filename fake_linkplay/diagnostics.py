@@ -57,6 +57,15 @@ class Reason(Enum):
     CANCELLED = "cancelled"
     API = "api_failure"
     CAPABILITY = "capability_unavailable"
+    SPOTIFY_MEDIA_RESTRICTED = "spotify_media_restricted"
+    SPOTIFY_KEY_REFUSED_1 = "spotify_key_refused_code_1"
+    SPOTIFY_KEY_REFUSED_OTHER = "spotify_key_refused_other_code"
+    SPOTIFY_RESTRICTED_UNKNOWN = "spotify_load_restricted_unknown"
+    SPOTIFY_ERROR_OTHER = "spotify_playback_error_other"
+    SPOTIFY_EVENTS_CONNECTED = "spotify_events_connected"
+    SPOTIFY_EVENTS_UNAVAILABLE = "spotify_events_unavailable"
+    SPOTIFY_EVENTS_DISCONNECTED = "spotify_events_disconnected"
+    SPOTIFY_EVENTS_LIMIT = "spotify_events_limit"
 
 def utc():
     return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -372,6 +381,13 @@ class Diagnostics:
         if trace:
             trace.uncertain = True
             trace.event("playback","unknown",reason)
+
+    def background(self, reason, test_id):
+        # Never associate independently observed provider events with a nearby
+        # HTTP command, or admit an observation from a previous diagnostic lease.
+        if self.active() and self.window["test_id"] == test_id:
+            Trace(self, "backend", "unknown", "unknown", None, "unknown", True).event(
+                "playback", "unknown", reason)
 
     def snapshot(self):
         data = {"schema_version":SCHEMA, "test_id":self.window["test_id"],
