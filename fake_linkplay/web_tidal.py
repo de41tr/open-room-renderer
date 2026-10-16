@@ -16,15 +16,16 @@ PREFIX = "/orr/v1/tidal"
 
 
 class WebTidalLogin:
-    def __init__(self, admission, manager, account=None, play_track=None):
+    def __init__(self, admission, manager, account=None, play_track=None, session_refresh=None):
         self.admission = admission
         self.manager = manager
         self.account = account
         self.play_track = play_track
+        self.session_refresh = session_refresh
 
     def routes(self):
         return [web.route("*", path, self.handle) for path in
-                ("/ui/tidal", "/ui/tidal.js", PREFIX + "/status", PREFIX + "/start", PREFIX + "/cancel", PREFIX + "/share", PREFIX + "/unshare", PREFIX + "/play")]
+                ("/ui/tidal", "/ui/tidal.js", PREFIX + "/status", PREFIX + "/start", PREFIX + "/cancel", PREFIX + "/share", PREFIX + "/unshare", PREFIX + "/play", PREFIX + "/refresh")]
 
     async def handle(self, request):
         try:
@@ -65,7 +66,8 @@ class WebTidalLogin:
                         raise WebAdmissionError()
                 else:
                     expected = [({"start": "confirm_experimental_login", "cancel": "cancel",
-                                  "share": "confirm_lan_account_sharing", "unshare": "stop_lan_account_sharing"}[action], True)]
+                                  "share": "confirm_lan_account_sharing", "unshare": "stop_lan_account_sharing",
+                                  "refresh": "confirm_session_refresh"}[action], True)]
                     if pairs != expected or any(type(value) is not bool for _, value in pairs):
                         raise WebAdmissionError()
                 if action == "play":
@@ -74,6 +76,11 @@ class WebTidalLogin:
                         raise WebAdmissionError("experimental_playback_unavailable", 409)
                     await self.play_track(payload["track_id"])
                     result["playback_requested"] = True
+                elif action == "refresh":
+                    current = await self.manager.status()
+                    if self.session_refresh is None or current.get("active"):
+                        raise WebAdmissionError("session_refresh_unavailable", 409)
+                    result = await self.session_refresh.refresh()
                 elif action in {"share", "unshare"}:
                     result = await self.manager.status()
                     if self.account is None or (action == "share" and result.get("active")):
@@ -86,8 +93,8 @@ class WebTidalLogin:
                     result = await (self.manager.start() if action == "start" else self.manager.cancel())
             result = dict(result)
             result["account_shared"] = bool(self.account and self.account.shared)
-            allowed = {"state", "active", "verification_uri", "user_code", "expires_in", "expires_at", "retry_after", "account_shared", "playback_requested"}
-            safe_errors = {"dependency_unavailable", "session_exists", "storage_unavailable", "invalid_challenge", "login_failed", "expired", "unsafe_debug"}
+            allowed = {"state", "active", "verification_uri", "user_code", "expires_in", "expires_at", "retry_after", "account_shared", "playback_requested", "refresh_outcome", "sharing_warning"}
+            safe_errors = {"dependency_unavailable", "session_exists", "storage_unavailable", "invalid_challenge", "login_failed", "expired", "unsafe_debug", "invalid_timeout", "session_unavailable", "client_mismatch", "invalid_response", "identity_mismatch", "refresh_failed", "commit_failed"}
             if result.get("error") in safe_errors:
                 allowed.add("error")
             return web.json_response({key: value for key, value in result.items() if key in allowed}, headers=_HEADERS)

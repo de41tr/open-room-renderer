@@ -137,3 +137,51 @@ async def test_device_sharing_binds_exact_provenance_session_and_resets_on_resta
         await bridge.get_user_info(UUID, version="2")
     await bridge.set_shared(False)
     assert not bridge.shared
+
+
+@crypto
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change', [{}, {'user_id': '43'}, {'client_id': 'different-client'}])
+async def test_verified_refresh_preserves_only_same_account_sharing(tmp_path, change):
+    from fake_linkplay.tidal_account import TidalDeviceAccountBridge
+    store = TidalSessionStore(tmp_path / 'refresh-sharing')
+    previous = TidalSession('synthetic-old', 'synthetic-refresh', time.time()+600, '42', 'DE',
+                            client_id='synthetic-client', auth_flow='tidalapi-device-v0.8.11')
+    store.save(previous)
+    bridge = TidalDeviceAccountBridge(store)
+    await bridge.set_shared(True)
+    replacement = replace(previous, access_token='synthetic-new', refresh_token='synthetic-rotated',
+                          expires_at=time.time()+1200, **change)
+    with store.lease() as lease:
+        lease.save(replacement)
+        bridge._session_refreshed(previous, replacement)
+    assert bridge.shared is (not change)
+    if not change:
+        result = await bridge.get_user_info(UUID, version='2')
+        assert decode_account_field(UUID, result['access_token']) == 'synthetic-new'
+        assert 'synthetic-rotated' not in json.dumps(result)
+    await bridge.set_shared(False)
+    bridge._session_refreshed(replacement, replacement)
+    assert not bridge.shared
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('revoke', [False, True])
+async def test_expiry_suspends_sharing_until_verified_same_owner_refresh(tmp_path, monkeypatch, revoke):
+    from fake_linkplay import tidal_account
+    store = TidalSessionStore(tmp_path / 'expired-sharing')
+    previous = TidalSession('synthetic-old', 'synthetic-refresh', 2000, '42', 'DE',
+                            client_id='synthetic-client', auth_flow='tidalapi-device-v0.8.11')
+    store.save(previous)
+    bridge = tidal_account.TidalDeviceAccountBridge(store)
+    monkeypatch.setattr(tidal_account.time, 'time', lambda: 1000)
+    await bridge.set_shared(True)
+    monkeypatch.setattr(tidal_account.time, 'time', lambda: 2001)
+    assert not bridge.shared
+    if revoke:
+        await bridge.set_shared(False)
+    replacement = replace(previous, access_token='synthetic-new', expires_at=3000)
+    with store.lease() as lease:
+        lease.save(replacement)
+        bridge._session_refreshed(previous, replacement)
+    assert bridge.shared is (not revoke)

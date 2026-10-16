@@ -119,13 +119,14 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
         if session is None:
             return False
         try:
-            valid = bool(session.expires_at and session.expires_at > time.time()
-                         and self._store.load() == session)
+            valid = self._store.load() == session
         except TidalSessionError:
             valid = False
         if not valid:
             self._shared_session = None
-        return valid
+        # Expiry suspends projection, but a verified refresh of this exact
+        # same owner may renew the existing explicit opt-in.
+        return bool(valid and session.expires_at and session.expires_at > time.time())
 
     async def set_shared(self, enabled: bool):
         async with self._lock:
@@ -145,6 +146,23 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
                     self._shared_session = session
             except TidalSessionError:
                 raise TidalAccountUnavailable("Device account sharing is unavailable") from None
+
+    def _session_refreshed(self, previous, replacement):
+        """Carry explicit sharing across one verified same-owner token rotation.
+
+        Called synchronously after the refresh owner's atomic save, without an
+        event-loop yield. Arbitrary store replacement still invalidates sharing.
+        """
+        if self._shared_session != previous:
+            return
+        identity = lambda record: (record.user_id, record.country_code,
+                                   record.client_id, record.auth_flow)
+        if (identity(previous) == identity(replacement)
+                and replacement.auth_flow == "tidalapi-device-v0.8.11"
+                and replacement.expires_at and replacement.expires_at > time.time()):
+            self._shared_session = replacement
+        else:
+            self._shared_session = None
 
     def _client_fields(self, session, short_uuid):
         if not self.shared or session != self._shared_session:

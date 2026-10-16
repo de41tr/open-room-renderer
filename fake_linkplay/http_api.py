@@ -192,13 +192,14 @@ class HttpApi:
 
     def __init__(self, cfg: Config, state: RendererState, mpv: MpvBackend, *, on_rename: Callable[[], Awaitable[None]] | None = None,
                  shuffle_rng: ShuffleRandom | None = None, _startup: bool = False,
-                 tidal_account: TidalAccountBridge | None = None, tidal_login=None, tidal_playback=None) -> None:
+                 tidal_account: TidalAccountBridge | None = None, tidal_login=None, tidal_playback=None, tidal_refresh=None) -> None:
         """Create an API handler bound to config, renderer state, and mpv."""
 
         self.cfg = cfg
         self.tidal_account = tidal_account  # Explicit opt-in; no service advertisement.
         self.tidal_login = tidal_login
         self.tidal_playback = tidal_playback
+        self.tidal_refresh = tidal_refresh
         if _startup and self.tidal_login is None:
             from .tidal_device_auth import TidalDeviceLoginManager
             from .tidal_session import TidalSessionStore
@@ -208,6 +209,10 @@ class HttpApi:
             self.tidal_playback = TidalPlaybackResolver(store)
             if self.tidal_account is None:
                 self.tidal_account = TidalDeviceAccountBridge(store)
+            if self.tidal_refresh is None:
+                from .tidal_refresh import TidalSessionRefreshManager
+                callback = self.tidal_account._session_refreshed if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None
+                self.tidal_refresh = TidalSessionRefreshManager(store, on_committed=callback)
         # None reuses the main IPv4 listener; zero means optional setup failed.
         self.catalog_proxy_port: int | None = None
         self.state = state
@@ -352,7 +357,7 @@ class HttpApi:
         if self.tidal_login is not None:
             from .web_tidal import WebTidalLogin
             app.add_routes(WebTidalLogin(self.web_api, self.tidal_login,
-                                        self.tidal_account if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None, self._play_tidal_track).routes())
+                                        self.tidal_account if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None, self._play_tidal_track, self.tidal_refresh).routes())
             async def close_tidal_login(app):
                 await self.tidal_login.close()
             app.on_cleanup.append(close_tidal_login)

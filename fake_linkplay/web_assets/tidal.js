@@ -3,7 +3,7 @@
   const byId = id => document.getElementById(id);
   let csrf = null, pending = false, busy = false, notice = "";
   async function request(path, body) {
-    const response = await fetch(path, {method: body ? "POST" : "GET", mode: "same-origin", credentials: "same-origin", redirect: "error", cache: "no-store", referrerPolicy: "no-referrer", headers: body ? {"Content-Type": "application/json", "X-ORR-CSRF": csrf} : {}, ...(body ? {body: JSON.stringify(body)} : {}), signal: AbortSignal.timeout(path.endsWith("/play") ? 45000 : 20000)});
+    const response = await fetch(path, {method: body ? "POST" : "GET", mode: "same-origin", credentials: "same-origin", redirect: "error", cache: "no-store", referrerPolicy: "no-referrer", headers: body ? {"Content-Type": "application/json", "X-ORR-CSRF": csrf} : {}, ...(body ? {body: JSON.stringify(body)} : {}), signal: AbortSignal.timeout((path.endsWith("/play") || path.endsWith("/refresh")) ? 45000 : 20000)});
     if (!response.ok) throw new Error("Login request was not accepted. Refresh before trying again.");
     return response.json();
   }
@@ -16,7 +16,8 @@
     byId("cancel").disabled = busy || !pending;
     byId("share").disabled = busy || pending || !csrf || value.account_shared === true;
     byId("play").disabled = busy || pending || !csrf;
-    byId("unshare").disabled = busy || !csrf || value.account_shared !== true;
+    byId("refresh-session").disabled = busy || pending || !csrf;
+    byId("unshare").disabled = busy || !csrf;
     if (value.account_shared === true) byId("status").textContent += " Account sharing with trusted LAN controllers is enabled.";
     byId("challenge").hidden = true;
     byId("verify").removeAttribute("href"); byId("code").textContent = "";
@@ -33,13 +34,14 @@
   async function act(action) {
     if (busy) return;
     notice = ""; busy = true; byId("start").disabled = true; byId("cancel").disabled = true;
-    try { render(await request(`/orr/v1/tidal/${action}`, ({start: {confirm_experimental_login: true}, cancel: {cancel: true}, share: {confirm_lan_account_sharing: true}, unshare: {stop_lan_account_sharing: true}, play: {track_id: byId("track").value.trim(), confirm_experimental_playback: true}}[action]))); }
+    try { const result = await request(`/orr/v1/tidal/${action}`, ({start: {confirm_experimental_login: true}, cancel: {cancel: true}, share: {confirm_lan_account_sharing: true}, unshare: {stop_lan_account_sharing: true}, play: {track_id: byId("track").value.trim(), confirm_experimental_playback: true}, refresh: {confirm_session_refresh: true}}[action])); if (action === "refresh") notice = result.refresh_outcome === "saved" ? (result.sharing_warning ? "Session refresh saved, but account sharing was not renewed. Playback remains unverified." : "Session refresh saved. Playback remains unverified.") : result.refresh_outcome === "uncertain" ? "Refresh outcome uncertain. Do not retry automatically; inspect the local session first." : "Refresh was not started."; render(result); }
     catch (_) { notice = action === "share" ? "Sharing was not confirmed. An unexpired verified device session and an idle login worker are required." : "Action outcome unconfirmed. Check status; no automatic retry was sent."; byId("status").textContent = notice; }
     finally { busy = false; await refresh(); }
   }
   byId("consent").addEventListener("change", () => { if (!busy) refresh(); });
   byId("start").addEventListener("click", () => { if (byId("consent").checked) act("start"); });
   byId("play").addEventListener("click", () => { if (/^[1-9][0-9]{0,18}$/.test(byId("track").value.trim())) act("play"); else { notice = "Enter a numeric TIDAL track ID."; refresh(); } });
+  byId("refresh-session").addEventListener("click", () => act("refresh"));
   byId("share").addEventListener("click", () => act("share"));
   byId("unshare").addEventListener("click", () => act("unshare"));
   byId("cancel").addEventListener("click", () => act("cancel"));
