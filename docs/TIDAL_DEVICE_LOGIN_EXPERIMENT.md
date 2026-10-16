@@ -99,7 +99,21 @@ side effect. This local test does not require LAN account sharing. Explicit TIDA
 sharing. The selected one-based start index resolves before the old queue is
 replaced; later Next/Previous/index commands resolve only their selected ID.
 Unresolved entries retain canonical per-ID catalogue URLs and safe placeholder
-metadata. Header-only albums/playlists and collection paging remain unsupported.
+metadata. Header-only selections support exactly one requested
+`/v1/albums/{id}/tracks` or `/v1/playlists/{id}/items` page, with limit at most
+50 (default 50) and a 64-KiB response bound. The original SearchUrl/query is
+retained; an explicit countryCode must match the saved session. StartPlayIndex
+is local to the returned page. The reported queue size is the loaded item count,
+never the provider's collection total; normal playback ends at this page's end.
+No following or preceding page is fetched or invented.
+
+Every raw page entry must be unambiguously an audio track with allowStreaming
+exactly true. Missing/null/false eligibility and mixed/video pages are unsupported
+as a whole; entries are never filtered in a way that could shift the requested
+index across app SourceVersion variants. Response offset/limit/total/items and
+track IDs are bounded and checked before playback. Page and selected track must
+bind to the identical private session before queue replacement. The bounded
+one-track test lease is unchanged and cannot admit a page.
 This is synthetic local queue coverage, not native-app/provider acceptance.
 
 The small provider adapter uses the saved device access token for bounded,

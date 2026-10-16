@@ -221,10 +221,10 @@ async def test_explicit_queue_resolves_start_before_replacing_and_lazily_navigat
     explicit_context().replace("<Id>43</Id>", "<Id>invalid</Id>"),
     explicit_context().replace("https://api.tidal.com/v1/albums/999/tracks", "https://foreign.example.test/audio"),
     "<PlayList><ListInfo><SourceName>Tidal</SourceName>"
-    "<SearchUrl>https://api.tidal.com/v1/albums/999/tracks</SearchUrl>"
+    "<SearchUrl>https://api.tidal.com/v1/artists/999/albums</SearchUrl>"
     "<StartPlayIndex>2</StartPlayIndex></ListInfo><Tracks/></PlayList>",
 ])
-async def test_invalid_or_header_only_selection_preserves_playing_queue_without_resolution(queue_api, tmp_path, context):
+async def test_invalid_or_unsupported_header_selection_preserves_playing_queue_without_resolution(queue_api, tmp_path, context):
     api = queue_api
     await api._play_url("https://media.example.test/existing.wav")
     resolver = await configured(api, tmp_path)
