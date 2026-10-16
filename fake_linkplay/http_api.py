@@ -58,7 +58,7 @@ from .persistence import (AtomicWriteCommittedError, atomic_write_text, encode_a
                           load_active_dsp, save_gain, validate_eq_records)
 from .queue import PlaybackQueue, QueueError, QueueItem, parse_didl_metadata, parse_queue_context, serialize_queue_context
 from .queue_diagnostics import QueueRejectionReason
-from .tidal_account import TidalAccountBridge, TidalAccountUnavailable
+from .tidal_account import TidalAccountBridge, TidalAccountUnavailable, TidalDeviceAccountBridge
 from .queue_policy import (NORMAL, ShuffleRandom, is_shuffle, natural_successor, parse_loop_mode,
                            parse_play_mode, play_mode_name, shuffle_available, shuffle_cycle,
                            shuffle_exhausted, shuffle_step)
@@ -201,8 +201,10 @@ class HttpApi:
         if _startup and self.tidal_login is None:
             from .tidal_device_auth import TidalDeviceLoginManager
             from .tidal_session import TidalSessionStore
-            self.tidal_login = TidalDeviceLoginManager(TidalSessionStore(
-                Path.home() / ".local/share/open-room-renderer/components/tidal"))
+            store = TidalSessionStore(Path.home() / ".local/share/open-room-renderer/components/tidal")
+            self.tidal_login = TidalDeviceLoginManager(store)
+            if self.tidal_account is None:
+                self.tidal_account = TidalDeviceAccountBridge(store)
         # None reuses the main IPv4 listener; zero means optional setup failed.
         self.catalog_proxy_port: int | None = None
         self.state = state
@@ -346,7 +348,8 @@ class HttpApi:
         app.cleanup_ctx.append(self._state_monitor_context)
         if self.tidal_login is not None:
             from .web_tidal import WebTidalLogin
-            app.add_routes(WebTidalLogin(self.web_api, self.tidal_login).routes())
+            app.add_routes(WebTidalLogin(self.web_api, self.tidal_login,
+                                        self.tidal_account if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None).routes())
             async def close_tidal_login(app):
                 await self.tidal_login.close()
             app.on_cleanup.append(close_tidal_login)

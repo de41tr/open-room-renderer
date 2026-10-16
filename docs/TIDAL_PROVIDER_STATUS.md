@@ -1,16 +1,17 @@
 # TIDAL account interoperability milestone
 
 This is an explicit, non-advertised integration boundary, not working TIDAL
-playback or TIDAL Connect support. Existing renderer startup does not create a
-TIDAL adapter, contact TIDAL, or expose an account.
+playback or TIDAL Connect support. Existing renderer startup creates only inactive login/account boundaries; it
+does not contact TIDAL or expose an account.
 
 Implemented and tested with synthetic data:
 
 - Optional `TidalAccountBridge` injection into `HttpApi`: SOAP
   `GetUserInfo(AccountSource=Tidal, Version=2)` projects a complete, unexpired
   independently authorized session using the advertised status UUID.
-- No manufacturer client fallback. The caller must supply its own authorized
-  client identity and registered redirect. Refresh tokens remain private.
+- Own-client projection requires an explicit client identity and registered
+  redirect. Device-flow projection instead binds the actual library client
+  and omits an unproven callback; see [explicit LAN sharing](TIDAL_DEVICE_LOGIN_EXPERIMENT.md#explicit-lan-account-sharing). Refresh tokens remain private.
 - Separate session storage with explicit private-directory selection, bounded
   strict JSON, atomic writes and ownership/no-follow checks. The caller must
   keep it outside release, renderer configuration and favorites directories.
@@ -29,7 +30,7 @@ Not implemented or established by this milestone:
   active service advertisement, deployment or real WiiM Home acceptance.
 - TIDAL `UserLogin` remains unsupported. The observed app flow does not itself
   establish public-client PKCE compatibility. An independently authorized
-  external login and account adoption is a separate possible integration step.
+  external login remains separate from native app code-login support.
 - Target installation of the runtime dependencies. The codec now uses pure-
   Python `pyaes`, rather than requiring a separate native cryptography extra.
 

@@ -17,6 +17,8 @@ from fake_linkplay.tidal_session import (
 
 ACCESS = "synthetic-access-token"
 REFRESH = "synthetic-refresh-token"
+CLIENT = "synthetic-client._~-09"
+FLOW = "tidalapi-device-v0.8.11"
 
 
 @pytest.fixture
@@ -34,6 +36,57 @@ def test_session_is_immutable_and_repr_excludes_tokens_and_user(session):
     with pytest.raises(FrozenInstanceError):
         session.access_token = "synthetic-replacement"
     assert TidalSession(ACCESS).refresh_token is None
+
+
+def test_provenance_roundtrip_keeps_legacy_schema_unchanged(tmp_path, session):
+    store = TidalSessionStore(tmp_path / "private")
+    store.save(session)
+    path = store.directory / "session.json"
+    legacy = path.read_bytes()
+    assert json.loads(legacy) == {
+        "schema": 1, "access_token": ACCESS, "refresh_token": REFRESH,
+        "expires_at": session.expires_at, "user_id": session.user_id, "country_code": "ZZ",
+    }
+    assert store.load() == session
+    device_session = replace(session, client_id=CLIENT, auth_flow=FLOW)
+    assert CLIENT not in repr(device_session)
+    with store.lease() as lease:
+        lease.save(device_session)
+        assert lease.load() == device_session
+    assert json.loads(path.read_bytes()) == dict(json.loads(legacy), schema=2, client_id=CLIENT, auth_flow=FLOW)
+    store.save(session)
+    assert path.read_bytes() == legacy
+    assert replace(session, client_id="s" * 256, auth_flow=FLOW).client_id == "s" * 256
+
+
+@pytest.mark.parametrize("client_id, auth_flow", [
+    (None, FLOW), (CLIENT, None), ("", FLOW), ("s" * 257, FLOW),
+    ("synthetic unsafe\nclient", FLOW), (True, FLOW), (CLIENT, "synthetic-unknown-flow"),
+])
+def test_provenance_requires_complete_bounded_supported_origin(session, client_id, auth_flow):
+    with pytest.raises(TidalSessionError) as error:
+        replace(session, client_id=client_id, auth_flow=auth_flow)
+    assert CLIENT not in str(error.value) and ACCESS not in repr(error.value)
+
+
+@pytest.mark.parametrize("changes, remove", [
+    ({"schema": 1}, None), ({"schema": 3}, None), ({}, "client_id"),
+    ({"client_id": None, "auth_flow": None}, None),
+    ({"auth_flow": "synthetic-unknown-flow"}, None), ({"client_id": "synthetic unsafe client"}, None),
+])
+def test_saved_provenance_cannot_be_partial_or_relabel_legacy_schema(tmp_path, session, changes, remove):
+    store = TidalSessionStore(tmp_path / "private")
+    store.save(replace(session, client_id=CLIENT, auth_flow=FLOW))
+    path = store.directory / "session.json"
+    value = json.loads(path.read_bytes())
+    value.update(changes)
+    if remove:
+        value.pop(remove)
+    path.write_text(json.dumps(value))
+    with pytest.raises(TidalSessionError) as error:
+        store.load()
+    rendered = "".join(traceback.format_exception(error.value))
+    assert CLIENT not in rendered and ACCESS not in rendered
 
 
 @pytest.mark.parametrize("changes", [

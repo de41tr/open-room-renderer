@@ -111,3 +111,29 @@ async def test_actual_soap_opt_in_uses_status_uuid_without_enabling_service(tmp_
                                      "<Version>2</Version>", service="PlayQueue"))
     assert fault_code(response) == "501"
     assert "synthetic" not in response.text
+
+
+@crypto
+@pytest.mark.asyncio
+async def test_device_sharing_binds_exact_provenance_session_and_resets_on_restart(tmp_path):
+    from fake_linkplay.tidal_account import TidalDeviceAccountBridge
+    store = TidalSessionStore(tmp_path / "device-session")
+    original = TidalSession("synthetic-access", "synthetic-refresh", time.time() + 600, "42", "DE")
+    store.save(original)
+    bridge = TidalDeviceAccountBridge(store)
+    with pytest.raises(TidalAccountUnavailable):
+        await bridge.set_shared(True)
+    record = replace(original, client_id="synthetic-device-client", auth_flow="tidalapi-device-v0.8.11")
+    store.save(record)
+    await bridge.set_shared(True)
+    result = await bridge.get_user_info(UUID, version="2")
+    assert decode_account_field(UUID, result["clientId"]) == record.client_id
+    assert "redirectURI" not in result
+    with pytest.raises(TidalAccountUnavailable):
+        await TidalDeviceAccountBridge(store).get_user_info(UUID, version="2")
+    store.save(replace(record, access_token="synthetic-replacement"))
+    assert not bridge.shared
+    with pytest.raises(TidalAccountUnavailable):
+        await bridge.get_user_info(UUID, version="2")
+    await bridge.set_shared(False)
+    assert not bridge.shared

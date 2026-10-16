@@ -14,6 +14,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import secrets
 import stat
 
@@ -50,6 +51,8 @@ class TidalSession:
     expires_at: float | None = None  # Unix seconds; None means unknown, not valid forever.
     user_id: str | None = field(default=None, repr=False)
     country_code: str | None = None
+    client_id: str | None = field(default=None, repr=False)
+    auth_flow: str | None = None
 
     def __post_init__(self) -> None:
         if not _text(self.access_token, _TOKEN_LIMIT):
@@ -65,6 +68,12 @@ class TidalSession:
             or any(c < "A" or c > "Z" for c in self.country_code)
         ):
             raise TidalSessionError("The TIDAL country code is invalid.")
+        if self.client_id is not None or self.auth_flow is not None:
+            if (type(self.client_id) is not str
+                    or not re.fullmatch(r"[A-Za-z0-9._~-]{1,256}", self.client_id)
+                    or type(self.auth_flow) is not str
+                    or self.auth_flow != "tidalapi-device-v0.8.11"):
+                raise TidalSessionError("The TIDAL session provenance is invalid.")
 
 
 def _unique_object(pairs: list[tuple]) -> dict:
@@ -209,9 +218,15 @@ class TidalSessionStore:
             raise TidalSessionError("The private TIDAL session could not be read.") from None
         try:
             value = json.loads(data.decode("utf-8"), object_pairs_hook=_unique_object)
-            if (type(value) is not dict or set(value) != {
-                "schema", "access_token", "refresh_token", "expires_at", "user_id", "country_code"
-            } or type(value["schema"]) is not int or value["schema"] != 1):
+            if (type(value) is not dict or type(value.get("schema")) is not int
+                    or value["schema"] not in (1, 2)):
+                raise ValueError
+            fields = {"schema", "access_token", "refresh_token", "expires_at", "user_id", "country_code"}
+            if value["schema"] == 2:
+                fields.update({"client_id", "auth_flow"})
+                if value.get("client_id") is None or value.get("auth_flow") is None:
+                    raise ValueError
+            if set(value) != fields:
                 raise ValueError
             return TidalSession(**{key: item for key, item in value.items() if key != "schema"})
         except (ValueError, TypeError, UnicodeError, RecursionError):
@@ -227,11 +242,14 @@ class TidalSessionStore:
             raise TidalSessionError("A validated TIDAL session is required.")
         session.__post_init__()
         try:
-            data = (json.dumps({
+            value = {
                 "schema": 1, "access_token": session.access_token,
                 "refresh_token": session.refresh_token, "expires_at": session.expires_at,
                 "user_id": session.user_id, "country_code": session.country_code,
-            }, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n").encode("utf-8")
+            }
+            if session.client_id is not None:
+                value.update(schema=2, client_id=session.client_id, auth_flow=session.auth_flow)
+            data = (json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n").encode("utf-8")
         except (ValueError, UnicodeError):
             raise TidalSessionError("TIDAL session data could not be encoded.") from None
         if len(data) > MAX_SESSION_BYTES:

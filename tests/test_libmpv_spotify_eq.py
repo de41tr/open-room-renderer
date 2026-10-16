@@ -131,11 +131,21 @@ async def exercise(library: str, root: Path):
         assert bypass == pytest.approx([1,1], rel=.035)
         assert max(abs(x) for x in samples) < .00002
         # Return uses the original backend; the PCM input options are file-local.
-        reply = await backend.loadfile(str(track))
+        # Hold admission so untimed PCM cannot reach EOF before its identity
+        # is observed. Idle alone would also accept a failed asynchronous load.
+        reply = await backend.loadfile(str(track), start_paused=True)
         assert reply['error'] == 'success'
-        await _eventually('normal source return', lambda: backend.read_property('path') == str(track)
-            or backend.read_property('idle-active') is True)
+        await _eventually('normal source loaded and held', lambda: (
+            backend.read_property('path') == str(track)
+            and backend.read_property('pause') is True
+            and backend.read_property('audio-params')['samplerate'] == 16000
+            and backend.read_property('duration') == pytest.approx(30)))
         assert backend.read_property('option-info/demuxer-max-bytes/set-locally') is False
+        return_boundary = sink.stat().st_size
+        await backend.resume()
+        await _eventually('normal source rendered to completion', lambda: (
+            backend.read_property('idle-active') is True
+            and sink.stat().st_size >= return_boundary + 30*16000*2*4))
         await backend.stop()
         return {'lane': 'REAL_SOFTWARE_TESTED/synthetic-owned-child-FIFO-existing-EQ',
                 'input': '44100 Hz stereo f32le, synthetic peak 0.001', 'output': '16000 Hz float PCM file',
