@@ -58,6 +58,7 @@ from .persistence import (AtomicWriteCommittedError, atomic_write_text, encode_a
                           load_active_dsp, save_gain, validate_eq_records)
 from .queue import PlaybackQueue, QueueError, QueueItem, parse_didl_metadata, parse_queue_context, serialize_queue_context
 from .queue_diagnostics import QueueRejectionReason
+from .tidal_account import TidalAccountBridge, TidalAccountUnavailable
 from .queue_policy import (NORMAL, ShuffleRandom, is_shuffle, natural_successor, parse_loop_mode,
                            parse_play_mode, play_mode_name, shuffle_available, shuffle_cycle,
                            shuffle_exhausted, shuffle_step)
@@ -190,10 +191,18 @@ class HttpApi:
     """
 
     def __init__(self, cfg: Config, state: RendererState, mpv: MpvBackend, *, on_rename: Callable[[], Awaitable[None]] | None = None,
-                 shuffle_rng: ShuffleRandom | None = None, _startup: bool = False) -> None:
+                 shuffle_rng: ShuffleRandom | None = None, _startup: bool = False,
+                 tidal_account: TidalAccountBridge | None = None, tidal_login=None) -> None:
         """Create an API handler bound to config, renderer state, and mpv."""
 
         self.cfg = cfg
+        self.tidal_account = tidal_account  # Explicit opt-in; no service advertisement.
+        self.tidal_login = tidal_login
+        if _startup and self.tidal_login is None:
+            from .tidal_device_auth import TidalDeviceLoginManager
+            from .tidal_session import TidalSessionStore
+            self.tidal_login = TidalDeviceLoginManager(TidalSessionStore(
+                Path.home() / ".local/share/open-room-renderer/components/tidal"))
         # None reuses the main IPv4 listener; zero means optional setup failed.
         self.catalog_proxy_port: int | None = None
         self.state = state
@@ -335,6 +344,12 @@ class HttpApi:
 
         app = web.Application()
         app.cleanup_ctx.append(self._state_monitor_context)
+        if self.tidal_login is not None:
+            from .web_tidal import WebTidalLogin
+            app.add_routes(WebTidalLogin(self.web_api, self.tidal_login).routes())
+            async def close_tidal_login(app):
+                await self.tidal_login.close()
+            app.on_cleanup.append(close_tidal_login)
         app.add_routes(self.web_api.routes())
         app.add_routes(self.favorites_api.routes())
         app.add_routes(QueuePlaylistApi(lambda: self.state.queue).routes())
@@ -3798,6 +3813,10 @@ class HttpApi:
 
         if diagnostic.safe(self, "active") or not self.cfg.log_wiim_http_details:
             return
+        # Account responses can contain reversibly encoded bearer credentials
+        # inside escaped JSON/XML. Never rely on token-name regexes for them.
+        account_action = request.headers.get("SOAPACTION", "").strip().strip('"').rsplit("#", 1)[-1]
+        account_payload = account_action in {"UserLogin", "GetUserInfo", "UserLogout"}
         LOG.info(
             "WIIM_HTTP_DETAIL %s",
             json.dumps(
@@ -3806,11 +3825,11 @@ class HttpApi:
                     "remote": request.remote,
                     "method": request.method,
                     "path": request.path,
-                    "query": self._redacted_query(request),
-                    "headers": self._redacted_headers(request),
-                    "request_body": self._preview(request_body),
+                    "query": {} if account_payload else self._redacted_query(request),
+                    "headers": {"SOAPAction": account_action} if account_payload else self._redacted_headers(request),
+                    "request_body": "[account payload omitted]" if account_payload else self._preview(request_body),
                     "response_status": status,
-                    "response_body": self._preview(response_body),
+                    "response_body": "[account payload omitted]" if account_payload else self._preview(response_body),
                 },
                 ensure_ascii=True,
                 separators=(",", ":"),
@@ -4300,7 +4319,16 @@ class HttpApi:
                 queue_name = self._xml_text(action_body, "QueueName")
                 if queue_name and queue_name != self.state.queue.name:
                     raise SoapFault(402, "Invalid Args")
-                result = self._playqueue_response_fields(action, action_body)
+                if (action == "GetUserInfo" and self.tidal_account is not None
+                        and self._xml_text(action_body, "AccountSource") == "Tidal"):
+                    try:
+                        account = await self.tidal_account.get_user_info(
+                            self.cfg.upnp_uuid, version=self._xml_text(action_body, "Version"))
+                    except TidalAccountUnavailable:
+                        raise SoapFault(501, "Action Failed") from None
+                    result = f"<Result>{escape(json.dumps(account, separators=(',', ':')))}</Result>"
+                else:
+                    result = self._playqueue_response_fields(action, action_body)
             elif action == "GetProtocolInfo":
                 properties = connection_manager_properties()
                 result = (f"<Source>{escape(properties['SourceProtocolInfo'])}</Source>"

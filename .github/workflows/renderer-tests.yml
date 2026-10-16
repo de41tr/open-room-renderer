@@ -41,7 +41,7 @@ jobs:
       - name: Install Python test dependencies
         timeout-minutes: 2
         # The default suite needs no mpv, FFmpeg or PulseAudio installation.
-        run: python -m pip --isolated install --index-url https://pypi.org/simple --disable-pip-version-check --no-cache-dir -e '.[dev]'
+        run: python -m pip --isolated install --index-url https://pypi.org/simple --disable-pip-version-check --no-cache-dir -e '.[dev,tidal]'
 
       - name: Verify the runtime floor and record dependencies
         timeout-minutes: 1
