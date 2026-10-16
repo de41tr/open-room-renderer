@@ -1,0 +1,13 @@
+{
+  "api_version": 1,
+  "layout": "xu4-native-v1",
+  "components": [
+    {
+      "name": "spotify-eq",
+      "version": "v1",
+      "driver": "spotify-eq-v1",
+      "rights": "existing-user-v1",
+      "release_binding": "client-pin-v1"
+    }
+  ]
+}

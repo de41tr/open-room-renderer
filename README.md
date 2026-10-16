@@ -356,3 +356,11 @@ Good first tasks:
 - add more sanitized log examples.
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) first.
+
+
+### Versioned native host operations
+
+A reviewed, opt-in [host contract v1](docs/HOST_OPERATIONS.md) separates private
+release preparation, installation, component control and result reporting. It
+uses the existing user layout; no service or playback behavior changes merely
+by installing this package. The private host adapter needs separate approval.

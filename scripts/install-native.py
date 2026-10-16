@@ -121,6 +121,7 @@ def user_unit(prefix: Path) -> str:
 def source_files(root: Path = ROOT) -> list[Path]:
     files = [root / name for name in ("pyproject.toml", "README.md", "LICENSE")]
     files += sorted((root / "fake_linkplay").rglob("*.py"))
+    files.append(root / "fake_linkplay/host_components.json")
     # Keep the installation snapshot narrow: no arbitrary files from web_assets.
     files += [root / "fake_linkplay/web_assets" / name for name in WEB_ASSETS]
     for source in files:
