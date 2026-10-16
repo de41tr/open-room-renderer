@@ -34,6 +34,11 @@ pyaes==1.6.1 --hash=sha256:02c1b1405c38d3c370b085fb952dd8bea3fadcee6411ad99f312c
 ratelimit==2.2.1 --hash=sha256:af8a9b64b821529aca09ebaf6d8d279100d766f19e90b5059ac6a718ca6dee42
 """
 
+# The native profile uses PyYAML's Python SafeLoader, never its optional C API.
+PURE_YAML = """\
+PyYAML==6.0.3 --hash=sha256:d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f
+"""
+
 
 def run(*args: str) -> str:
     return subprocess.check_output(args, text=True, stderr=subprocess.STDOUT).strip()
@@ -353,6 +358,16 @@ def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require
                             "--no-deps", "--require-hashes", "--report",
                             str(prefix / "pip-pure-build-report.json"), "-r", "/dev/stdin"],
                            input=PURE_BUILD_DEPENDENCIES, text=True, check=True)
+            # Avoid Cython/native-extension work for the Python loaders ORR uses.
+            # Do not reuse a cached wheel built with different LibYAML settings.
+            subprocess.run([python, "-I", "-m", "pip", "install", "--no-binary=PyYAML",
+                            "--no-cache-dir", "--no-build-isolation", "--no-deps", "--require-hashes",
+                            "--report", str(prefix / "pip-yaml-report.json"), "-r", "/dev/stdin"],
+                           env={**os.environ, "PYYAML_FORCE_LIBYAML": "0"},
+                           input=PURE_YAML, text=True, check=True)
+            subprocess.run([python, "-I", "-c",
+                            "import yaml; assert yaml.__version__ == '6.0.3' and not yaml.__with_libyaml__"],
+                           check=True)
             wheels = prefix / "wheels"
             wheels.mkdir(mode=0o700)
             subprocess.run([python, "-I", "-m", "pip", "wheel", "--no-build-isolation", "--no-deps",

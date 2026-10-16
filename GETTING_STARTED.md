@@ -81,9 +81,9 @@ installs the package with runtime dependencies, and writes:
 - `open-room-renderer.service`: an uninstalled user-service unit
 - `installation-receipt.json`: source revision/hash, architecture, libc, Python,
   mpv, and resolved Python package versions
-- `pip-build-tools-report.json`, `pip-pure-build-report.json`, and
-  `pip-install-report.json`: pip's artifact/version reports for the build tools,
-  prebuilt pure-Python dependencies, and remaining application install
+- `pip-build-tools-report.json`, `pip-pure-build-report.json`,
+  `pip-yaml-report.json`, and `pip-install-report.json`: pip's artifact/version
+  reports for the build tools, pure-Python dependencies, and application install
 - `installed-files.json`: hashes/links for files owned by this installation
 - `uninstall.py`: the same manifest-aware installer for later removal
 
@@ -96,11 +96,21 @@ The new release venv installs hash-pinned setuptools/wheel once, then builds the
 source-only `pyaes==1.6.1` and `ratelimit==2.2.1` with those tools. It also builds
 ORR's snapshotted sources into a local application wheel under `wheels/`. This
 avoids repeated isolated build-environment setup on CPU-limited devices. Only
-these two known dependency-free packages and ORR's own sources use
-`--no-build-isolation`; other dependencies retain pip's normal isolation. No
+these two known dependency-free packages, the pinned PyYAML source below, and
+ORR's own sources use `--no-build-isolation`; other dependencies retain pip's
+normal isolation. No
 existing renderer venv, service, build timeout, or resource limit is changed.
 ARMv7 install time still requires target verification; this is not an offline
 wheel bundle.
+
+The native profile builds hash-pinned `PyYAML==6.0.3` using its supported
+`PYYAML_FORCE_LIBYAML=0` setting, scoped to that package's build. The optional
+LibYAML C extension and CLoader/CSafeLoader APIs are absent in this private venv.
+ORR uses PyYAML's Python SafeLoader and its own derived strict loaders, whose
+implementation is unchanged. This avoids Cython/native-extension build work;
+it is not a runtime performance improvement or a target build-time guarantee.
+Other applications needing PyYAML's C APIs must use their own environment.
+No previously installed venv or system package is reused.
 
 To inspect packaging without installing dependencies or requiring mpv:
 

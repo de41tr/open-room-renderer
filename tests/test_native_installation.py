@@ -588,6 +588,7 @@ def test_native_package_inventory_keeps_warnings_separate(
     builds = []
     # The CI checkout exposes same-version egg-info through this inherited path.
     monkeypatch.setenv("PYTHONPATH", str(ROOT))
+    monkeypatch.setenv("PYYAML_FORCE_LIBYAML", "1")
 
     def skip_package_build(args, **kwargs):
         if args[1:4] == ["-I", "-m", "venv"]:
@@ -603,6 +604,8 @@ def test_native_package_inventory_keeps_warnings_separate(
         elif args[1:5] == ["-I", "-m", "pip", "wheel"]:
             builds.append(args)
             (prefix / "wheels/open_room_renderer-0.1.0-py3-none-any.whl").touch()
+        elif args[1:3] == ["-I", "-c"]:
+            assert "not yaml.__with_libyaml__" in args[3]
         elif len(args) > 2 and args[2] == str(prefix / "venv/bin/open-room-renderer"):
             assert args[1] == "-I"
         else:
@@ -614,8 +617,8 @@ def test_native_package_inventory_keeps_warnings_separate(
     monkeypatch.setattr(installer.subprocess, "run", skip_package_build)
     succeeded = returncode == 0 and output != "invalid JSON"
     assert installer.main(["--prefix", str(prefix)]) == (0 if succeeded else 2)
-    assert len(installs) == 3
-    bootstrap, pure, application = installs
+    assert len(installs) == 4
+    bootstrap, pure, yaml, application = installs
     assert "--only-binary=:all:" in bootstrap[0]
     assert "--no-build-isolation" not in bootstrap[0]
     assert "--no-build-isolation" in pure[0]
@@ -625,6 +628,12 @@ def test_native_package_inventory_keeps_warnings_separate(
         assert all(" --hash=sha256:" in line for line in kwargs["input"].splitlines())
     for command, _ in (bootstrap, pure):
         assert "--require-hashes" in command and "--no-deps" in command
+    assert yaml[1]["env"]["PYYAML_FORCE_LIBYAML"] == "0"
+    assert os.environ["PYYAML_FORCE_LIBYAML"] == "1"
+    assert all("env" not in kwargs for _, kwargs in (bootstrap, pure, application))
+    assert yaml[1]["input"] == installer.PURE_YAML
+    assert {"--no-binary=PyYAML", "--no-cache-dir", "--no-build-isolation",
+            "--no-deps", "--require-hashes"} <= set(yaml[0])
     # The shortcut must not suppress isolation for arbitrary/native dependencies.
     assert "--no-build-isolation" not in application[0]
     assert application[0][-1] == str(prefix / "wheels/open_room_renderer-0.1.0-py3-none-any.whl")
@@ -644,7 +653,7 @@ def test_native_package_inventory_keeps_warnings_separate(
         entry["path"] for entry in manifest["files"]}
 
 
-@pytest.mark.parametrize("failed_report", ["pip-build-tools-report.json", "pip-pure-build-report.json", "wheel"])
+@pytest.mark.parametrize("failed_report", ["pip-build-tools-report.json", "pip-pure-build-report.json", "pip-yaml-report.json", "wheel"])
 def test_native_build_failure_does_not_fall_back_or_claim_installation(
         installer, tmp_path, monkeypatch, failed_report):
     prefix = tmp_path / "partial-build"

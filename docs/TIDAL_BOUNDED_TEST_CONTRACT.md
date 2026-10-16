@@ -31,9 +31,13 @@ All three successful routes return ONLY these fields:
 - `available`: boolean; a new test can be attempted only when true. It is false
   while a lease is active, after unconfirmed stop, or when backend/idle safety
   checks fail. This is a fresh preflight hint, never a reservation.
+  Before start, `available: true` can coexist with `volume_percent: null` and
+  `volume_confirmed: false`: start sets and confirms 1%. Do not require an
+  initial `idle` state or null lease ID after a previous completed test.
 - `state`: `idle`, `starting`, `playing`, `stopping`, `stopped`, `expired`,
   `superseded`, or `failed`
 - `lease_id`: opaque string, or null before the first admitted test
+  (URL-safe characters; a leading `-` or `_` is valid)
 - `remaining_seconds`: nonnegative integer rounded up; zero when terminal
 - `volume_percent`: 1 only after fresh raw mpv gain confirmation, otherwise null
 - `volume_confirmed`: boolean; unknown or unsafe gain immediately clears it
