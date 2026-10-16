@@ -27,6 +27,17 @@ _BOOLEAN_FIELDS = ("stopped", "paused", "buffering", "repeat_context", "repeat_t
 _EVENT_TYPES = frozenset({"playing", "not_playing", "will_play", "paused", "active", "inactive",
     "metadata", "volume", "seek", "stopped", "repeat_track", "repeat_context", "shuffle_context",
     "playback_ready", "playback_error"})
+_ERROR_STAGES = frozenset({"load", "playback", "session"})
+_ERROR_EXPLANATIONS = {
+    "restricted": "Receiver reported a media restriction.",
+    "unsupported": "Receiver reported no supported media format.",
+    "rate_limited": "Receiver reported a request rate limit.",
+    "rejected": "Receiver reported a rejected service request.",
+    "server": "Receiver reported a service-side error.",
+    "timeout": "Receiver reported an operation timeout.",
+    "network": "Receiver reported a network or session connection failure.",
+    "unknown": "Receiver reported an unclassified playback error.",
+}
 _INVALID_INPUT = "Invalid Spotify diagnostic arguments. Use numeric loopback, port 1..65535 and watch seconds 0..30."
 _REQUEST_FAILED = "Spotify diagnostic failed: local sidecar request was not confirmed."
 _CONTRACT_FAILED = "Spotify diagnostic failed: unsupported or malformed sidecar response."
@@ -134,6 +145,23 @@ def _project_status(value: dict[str, object]) -> dict[str, object]:
     return result
 
 
+def _project_playback_error(data: object) -> dict[str, object]:
+    """Pinned event categories only; absent/unrecognized differs from 'unknown'.
+
+    api_server.go/playback_error.go at 4dbc099f46da3529adaa85feb97c4f49deb0b130.
+    Never retain message, URI, context, play origin or arbitrary future values.
+    These are receiver claims, not an inferred account, audio or DSP diagnosis.
+    """
+    data = data if isinstance(data, dict) else {}
+    stage, kind = data.get("stage"), data.get("kind")
+    stage = stage if type(stage) is str and stage in _ERROR_STAGES else None
+    kind = kind if type(kind) is str and kind in _ERROR_EXPLANATIONS else None
+    return {"stage": stage, "kind": kind,
+            "unplayable": data.get("unplayable") if type(data.get("unplayable")) is bool else None,
+            "explanation": _ERROR_EXPLANATIONS.get(kind,
+                "Receiver reported a playback error without a recognized category.")}
+
+
 async def _reject_redirect(_session, _context, params) -> None:
     # ws_connect has no allow_redirects option. The public redirect trace fires
     # before aiohttp follows Location, including during its WebSocket handshake.
@@ -207,8 +235,13 @@ class SpotifyDiagnosticClient:
                         raise SpotifyDiagnosticError(_CONTRACT_FAILED)
                     if event["type"] not in _EVENT_TYPES:
                         events["unknown_types"] += 1
-                    # Known and unknown events are hints only. Never interpret,
-                    # print or retain event data, even playback_error messages.
+                    else:
+                        observation = {"type": event["type"]}
+                        if event["type"] == "playback_error":
+                            observation.update(_project_playback_error(event["data"]))
+                        events["observations"].append(observation)
+                    # Ordered, bounded observations never mutate the snapshot.
+                    # All other event payload fields remain discarded.
                     await self._status(session, result)
                     events["snapshot_refreshes"] += 1
                 events["end_reason"] = "message_limit"
@@ -240,7 +273,8 @@ class SpotifyDiagnosticClient:
             "audio_output": "unverified", "shared_dsp": "unverified",
             "events": {"channel": "not_requested" if not seconds else "unconfirmed",
                 "end_reason": "not_requested", "messages_received": 0,
-                "unknown_types": 0, "snapshot_refreshes": 0, "complete_history": False},
+                "unknown_types": 0, "snapshot_refreshes": 0, "complete_history": False,
+                "observations": []},
         }
         try:
             # Force a fresh connection for each HTTP read. No pooled-connection

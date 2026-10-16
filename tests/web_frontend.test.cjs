@@ -673,6 +673,50 @@ test('lost DSP response preserves unknown outcome and requires review even when 
   assert.equal(h.posts().length, 1); assert.equal(h.ids.get('notice-kind').textContent, 'UNKNOWN'); assert.equal(h.ids.get('dsp-apply').disabled, true); assert.equal(h.ids.get('dsp-save').disabled, true); assert.match(h.ids.get('dsp-editor-message').textContent, /No retry/);
   await h.ids.get('dsp-discard').fire('click'); assert.equal(h.ids.get('dsp-a_gain').value, '2'); assert.equal(h.ids.get('dsp-draft-label').textContent, 'Confirmed values');
 });
+test('selected EQ preset survives volume and favorite commands without loading automatically', async () => {
+  for (const action of ['volume', 'favorite_play']) {
+    const h = await appHarness(), pending = deferred();
+    await selectPreset(h, revisionID('c')); h.setPost(() => pending.promise);
+    let sending;
+    if (action === 'volume') {
+      h.ids.get('volume').value = '10'; await h.ids.get('volume').fire('input');
+      sending = h.ids.get('volume-form').fire('submit');
+    } else sending = favoriteAction(h, 'play').fire('click');
+    await h.settle();
+    assert.equal(h.ids.get('dsp-preset').value, '');
+    assert.equal(h.ids.get('dsp-preset').disabled, true); assert.equal(h.ids.get('dsp-load').disabled, true);
+    await h.ids.get('dsp-load').fire('click'); assert.equal(h.posts().length, 1);
+    h.setState(soundState(editor({revision: revisionID('e')})));
+    pending.resolve({request_acknowledged: true}); await sending;
+    assert.equal(h.ids.get('dsp-preset').value, revisionID('c'));
+    assert.equal(h.ids.get('dsp-load').disabled, false); assert.equal(h.posts().length, 1);
+    h.setPost(() => ({request_acknowledged: true})); await h.ids.get('dsp-load').fire('click');
+    assert.deepEqual(h.posts()[1], {action: 'dsp_preset_load', expected_dsp: revisionID('e'), preset_id: revisionID('c')});
+  }
+});
+
+test('selected EQ preset waits for confirmed DSP and forgets removal or a different session', async () => {
+  for (const change of ['removed', 'restarted']) {
+    const h = await appHarness(); await selectPreset(h, revisionID('c')); h.offline();
+    h.setState(soundState(null, {status: 'PENDING'})); await h.refresh();
+    assert.equal(h.ids.get('dsp-preset').value, ''); assert.equal(h.ids.get('dsp-load').disabled, true);
+    await h.ids.get('dsp-load').fire('click'); assert.equal(h.posts().length, 0);
+    const session = change === 'restarted' ? 'session-two' : 'session-one';
+    h.setState({...soundState(editor({presets: editor().presets.filter(preset => change !== 'removed' || preset.id !== revisionID('c'))})), session_id: session});
+    h.setFavorites(favorites([], session)); await h.refresh();
+    assert.equal(h.ids.get('dsp-preset').value, ''); assert.equal(h.ids.get('dsp-load').disabled, true);
+    // Later reappearance of the same opaque ID does not undo the invalidation.
+    h.setState({...soundState(), session_id: session}); await h.refresh();
+    assert.equal(h.ids.get('dsp-preset').value, ''); assert.equal(h.posts().length, 0);
+  }
+});
+test('explicitly clearing an EQ preset choice stays cleared after a read interruption', async () => {
+  const h = await appHarness(); await selectPreset(h, revisionID('c')); h.offline(); await h.refresh();
+  assert.equal(h.ids.get('dsp-preset').value, revisionID('c'));
+  await selectPreset(h, ''); h.offline(); await h.refresh();
+  assert.equal(h.ids.get('dsp-preset').value, ''); assert.equal(h.ids.get('dsp-load').disabled, true); assert.equal(h.posts().length, 0);
+});
+
 test('built-in presets load with opaque identity and offer no rename or delete', async () => {
   const h = await appHarness(); await selectPreset(h, revisionID('b')); assert.equal(h.ids.get('dsp-load').disabled, false); assert.equal(h.ids.get('dsp-rename').disabled, true); assert.equal(h.ids.get('dsp-delete').disabled, true);
   await h.ids.get('dsp-rename').fire('click'); await h.ids.get('dsp-delete').fire('click'); assert.equal(h.ids.get('dsp-dialog').open, false);

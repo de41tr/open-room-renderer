@@ -10,7 +10,7 @@
   let playlistDraft = null, queueEditing = null, exportContext = null, roomContext = null, curveExportContext = null, curveImportDraft = null, favoritesExportContext = null, favoritesRestoreDraft = null;
   const queueIntents = new WeakMap();
   let queueReview = 0;
-  let presetSignature = "", presetContext = null, presetSerial = 0, soundSubmission = null;
+  let presetSignature = "", presetSelection = null, presetContext = null, presetSerial = 0, soundSubmission = null;
   const text = (id, value) => { const element = $(id); if (element.textContent !== value) element.textContent = value; };
   const balanceLabel = value => value === 0 ? "Center" : `${Math.round(Math.abs(value) * 100)}% ${value < 0 ? "left" : "right"}`;
   const working = key => drafts[key] || document.activeElement === $(key);
@@ -268,10 +268,13 @@
     $("dsp-apply").disabled = !available || !soundDraft.canApply(snapshot, control.fresh);
     $("dsp-discard").disabled = !editor || control.busy || !local;
     text("dsp-discard", soundDraft.stale || soundDraft.review ? "Discard & reload" : "Discard changes");
+    // Keep only the local choice while a command/read hides confirmed DSP.
+    // A new session or a confirmed removal must never restore an old choice.
+    if (presetSelection?.session !== snapshot.session_id || editor && !editor.presets.some(preset => preset.id === presetSelection?.id)) presetSelection = null;
     const signature = JSON.stringify([snapshot.session_id, editor?.presets || []]);
     if (signature !== presetSignature) {
       presetSignature = signature;
-      const selected = $("dsp-preset").value;
+      const selected = presetSelection?.id || "";
       const fragment = document.createDocumentFragment();
       const prompt = element("option", "", "Choose a preset…"); prompt.value = ""; fragment.append(prompt);
       (editor?.presets || []).forEach(preset => {
@@ -1168,7 +1171,11 @@
     else soundSubmission = null;
     renderSoundEditor();
   });
-  $("dsp-preset").addEventListener("change", renderSoundEditor);
+  $("dsp-preset").addEventListener("change", () => {
+    const id = $("dsp-preset").value;
+    presetSelection = currentEditor()?.presets.some(preset => preset.id === id) ? {session: snapshot.session_id, id} : null;
+    renderSoundEditor();
+  });
   $("dsp-load").addEventListener("click", async () => {
     const editor = currentEditor(), preset = editor?.presets.find(item => item.id === $("dsp-preset").value);
     if (!preset || !control.canMutate("dsp_preset_load") || soundDraft.dirty || soundDraft.stale || soundDraft.pending || soundDraft.review) return;

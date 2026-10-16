@@ -10,7 +10,7 @@ import re
 API_VERSION = 1
 LAYOUT = "xu4-native-v1"
 OPERATIONS = frozenset({
-    "status", "capabilities", "release-prepare", "release-install",
+    "status", "capabilities", "result", "release-prepare", "release-install",
     "release-rollback", "component-prepare", "component-install",
     "component-activate", "component-deactivate", "diagnose-start",
     "diagnose-collect", "test",
@@ -42,6 +42,8 @@ def request(raw: bytes) -> dict:
         raise Refused("invalid_fields")
     if r.get("operation") == "diagnose-collect":
         fields.add("test_id")
+    if r.get("operation") == "result":
+        fields.add("target_request_id")
     if set(r) != fields or type(r.get("api_version")) is not int or r["api_version"] != 1:
         raise Refused("unsupported_request_schema")
     if any(type(v) is not str for k, v in r.items() if k != "api_version"):
@@ -51,12 +53,14 @@ def request(raw: bytes) -> dict:
     op, profile = r["operation"], r["profile"]
     if op not in OPERATIONS or not NAME.fullmatch(profile):
         raise Refused("unsupported_operation_or_profile")
-    if op in {"status", "capabilities", "release-prepare", "release-install", "release-rollback"} and profile != "renderer":
+    if op in {"status", "capabilities", "result", "release-prepare", "release-install", "release-rollback"} and profile != "renderer":
         raise Refused("unsupported_profile")
-    if op.startswith("diagnose-") and profile != "network":
+    if op.startswith("diagnose-") and profile not in {"network", "renderer", "spotify-events"}:
         raise Refused("unsupported_profile")
     if op == "diagnose-collect" and not ID.fullmatch(r["test_id"]):
         raise Refused("invalid_test_id")
+    if op == "result" and not ID.fullmatch(r["target_request_id"]):
+        raise Refused("invalid_target_request_id")
     if op == "test" and profile not in {"environment", "contract"}:
         raise Refused("unsupported_test_profile")
     return r

@@ -13,7 +13,7 @@ from . import host_contract as contract
 from . import host_release as releases
 from . import host_runtime as g
 
-HELPER_VERSION = "product-v1"
+HELPER_VERSION = "product-v1.1"
 MUTATIONS = frozenset({"release-prepare", "release-install", "release-rollback",
     "component-prepare", "component-install", "component-activate", "component-deactivate"})
 
@@ -74,6 +74,15 @@ def execute(r):
             if op in MUTATIONS and not all(dependencies.values()):
                 raise contract.Refused("required_dependency_missing")
             if op in {"status", "capabilities"}:
+                report.update(backend_checked=False, backend_state="unknown",
+                              audio_device_present="KA17" in Path("/proc/asound/cards").read_text())
+                if info["identity"] is not None:
+                    try:
+                        from .host_eq import backend
+                        report.update(backend(info, g, report["activated"]))
+                        report.update(backend_checked=True, backend_state="verified")
+                    except Exception:
+                        report.update(backend_checked=False, backend_state="unverified")
                 report.update(capabilities=contract.capabilities(d), accepted=True,
                               phase="observed", result="success", checks_passed=True)
             elif op.startswith("component-"):
@@ -86,7 +95,7 @@ def execute(r):
                 code, response = driver(r)
                 for key in ("phase", "accepted", "installed", "activated",
                             "service_running", "checks_passed", "installed_commit",
-                            "running_commit", "renderer_pid", "backend_state",
+                            "running_commit", "renderer_pid", "mpv_pid", "spotify_pid", "volume_readback", "backend_state",
                             "component_version", "component_commit", "config_changed",
                             "rollback", "error", "installation_result"):
                     if key in response:

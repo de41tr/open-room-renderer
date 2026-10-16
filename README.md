@@ -364,3 +364,5 @@ A reviewed, opt-in [host contract v1](docs/HOST_OPERATIONS.md) separates private
 release preparation, installation, component control and result reporting. It
 uses the existing user layout; no service or playback behavior changes merely
 by installing this package. The private host adapter needs separate approval.
+
+The versioned maintenance contract returns complete owned-backend PID reports and preserves the existing leased source/Spotify diagnostic return channel. Infrastructure rollout can preserve a running pre-contract renderer; see [host operations](docs/HOST_OPERATIONS.md).

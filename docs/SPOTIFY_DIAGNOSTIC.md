@@ -1,7 +1,8 @@
 # Optional go-librespot diagnostic
 
 `open-room-renderer spotify diagnose` performs a bounded, read-only observation
-of an **already running, independently installed** go-librespot sidecar. It does
+of an **already running** go-librespot sidecar, including an explicitly enabled
+[Spotify EQ source](SPOTIFY_EQ.md). It does
 not require the ORR service or mpv to run. Nothing calls it automatically.
 
 This is the first small integration experiment, not a Spotify playback mode.
@@ -68,8 +69,8 @@ or underlying exception is printed.
 
 `--watch-seconds` accepts 0..30 seconds; zero skips WebSocket access. The observer
 opens `/events` once, refreshes `/status` after connection, and treats each valid
-known **or unknown** event as a hint to refresh `/status`. Event data is never
-printed or used to change the state projection. Null event data is accepted.
+known **or unknown** event as a hint to refresh `/status`. Events never change
+the state projection. Null event data is accepted.
 A final `/status` refresh also covers a quiet or lossy event stream. There is no
 application reconnect loop. After a disconnect, freshness stays unknown and the
 last snapshot is retained, without automatically reconnecting.
@@ -82,6 +83,29 @@ event log**. Upstream has no sequence/replay/initial-snapshot guarantee and its
 64-event buffer can drop oldest entries. A successful refresh is still only a
 point-in-time sidecar report. An oversized/error frame is treated as a disconnect;
 a malformed text event or binary application message fails the observation.
+
+`events.observations` retains at most 32 known event types in receive order.
+Unknown type strings are counted but not copied. For `playback_error`, only
+these additional fields survive:
+
+- `stage`: `load`, `playback` or `session`.
+- `kind`: `restricted`, `unsupported`, `rate_limited`, `rejected`, `server`,
+  `timeout`, `network` or `unknown`.
+- `unplayable`: the receiver's boolean classification, not ORR's conclusion.
+- `explanation`: a fixed, short explanation of that reported category.
+
+Absent, malformed or unrecognized fields become null. In particular, null
+`kind` means no recognized category was received; literal `unknown` means the
+receiver explicitly reported an unclassified error. Raw `message`, media/context
+URIs, account/device identifiers and play-origin data are never retained.
+
+For a skipping-track investigation, start this bounded watch before selecting a
+track yourself in the Spotify app. A `load` error identifies the receiver's load
+stage; `not_playing` is a separate observed event, not a diagnosis of why playback
+ended. The command does not infer an account/licensing cause, blame EQ, change
+playback, or retry the track. No observed errors does **not** mean successful
+playback: the watch is partial and there is no event replay. Exit 0 still means
+only that the observation completed, even if playback errors were observed.
 
 ## Safety and resource bounds
 
@@ -132,6 +156,8 @@ Expected upstream: go-librespot v0.10.3, commit
 
 - [API contract](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/api-spec.yml)
 - [Server defaults](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/config_schema.json)
+- [Playback-error fields](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/api_server.go#L383-L391)
+- [Error categories](https://github.com/devgianlu/go-librespot/blob/4dbc099f46da3529adaa85feb97c4f49deb0b130/daemon/playback_error.go)
 
 The projection checks the primitive fields it retains; it deliberately does not
 validate or expose identity and metadata fields. It is not a full schema validator

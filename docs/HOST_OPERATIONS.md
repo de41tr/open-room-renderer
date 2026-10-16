@@ -101,3 +101,25 @@ Bootstrap order: review/merge product and private integration; separately select
 the merged public-main deployment using the existing route; separately approve
 the exact protected-host rollout. None of these approvals follows from a PR.
 The private README/AGENTS/STATUS are the operational authority.
+
+## v1.1 maintenance clarification
+
+The host can install its broker and source/Spotify diagnostic profiles without
+deploying or restarting the current renderer. A pre-contract renderer remains
+reported as product_contract_available=false. Existing explicit main deployment
+is the one-time product bootstrap; it still requires a separately authorized
+restart/deployment, which this infrastructure task does not perform.
+After that ordinary compatible releases use the same product release engine
+without changing sudo, SSH or protected commit hashes.
+
+The fixed host-only result operation adds target_request_id and reads the
+durable result without executing it again. Unknown/partial outcomes block new
+management and legacy mutations pending explicit review; diagnostics and result
+collection remain available. Source diagnostics use the existing leased buffer;
+network, renderer and spotify-events are profiles of the same Start/Collect path.
+
+Complete backend reports include renderer_pid, mpv_pid and optional spotify_pid.
+The private broker accepts spotify_pid only as a positive bounded integer;
+unknown fields and other invalid types still refuse. Component outcomes retain
+these backend fields too. Status may verify owned IPC with a volume readback,
+but does not play media, authenticate or establish heard audio.
