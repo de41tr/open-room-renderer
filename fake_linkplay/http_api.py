@@ -1179,10 +1179,12 @@ class HttpApi:
                 or self.cfg.proxy_on_demand_audio or self._playback_offset_sec):
             return
         queue, item, index = self.state.queue, self.state.queue.current, self.state.queue.index
-        if item is None or item.stream_type == "station" or index >= queue.count:
+        if (item is None or item.stream_type == "station" or item._tidal_track is not None
+                or index >= queue.count):
             return
         successor = queue.items[index]
-        if (successor.stream_type == "station" or self._radio_station_from_url(successor.url)
+        if (successor._tidal_track is not None or successor.stream_type == "station"
+                or self._radio_station_from_url(successor.url)
                 or station_from_reference(successor.url)):
             return
         stage = None
@@ -3508,6 +3510,7 @@ class HttpApi:
         """Resolve recognized public station references, never arbitrary JSON."""
         selected = self._active_tidal_item()
         if selected is not None and selected.url == url:
+            generation, queue, index = self.state.generation, self.state.queue, self.state.queue.index
             if selected._tidal_require_shared and not self._tidal_sharing_enabled():
                 raise BackendError("TIDAL account sharing is unavailable")
             from .tidal_playback import TidalPlaybackError
@@ -3516,13 +3519,19 @@ class HttpApi:
                 selected._tidal_candidate = None
                 if candidate is None:
                     candidate = await self.tidal_playback.resolve_track(*selected._tidal_track)
-                if (self.state.queue.current is not selected or candidate.session_expires_at <= time.time()
+                if (generation != self.state.generation or self.state.queue is not queue
+                        or queue.index != index or queue.current is not selected
+                        or candidate.session_expires_at <= time.time()
                         or selected._tidal_require_shared and not self._tidal_sharing_enabled()):
                     raise BackendError("TIDAL selection changed")
                 if not self.tidal_playback.session_matches(candidate.session_fingerprint):
                     raise BackendError("TIDAL session changed")
                 selected._tidal_session_fingerprint = candidate.session_fingerprint
                 selected._tidal_stream_url = candidate.stream_url
+                selected.title, selected.artist, selected.album = candidate.title, candidate.artist, candidate.album
+                selected.duration, selected.content_type = candidate.duration, candidate.content_type
+                selected.title_is_fallback = False
+                self._activate_queue_item()
                 return candidate.stream_url
             except TidalPlaybackError:
                 raise BackendError("TIDAL track resolution failed") from None
@@ -3561,15 +3570,46 @@ class HttpApi:
             self._tidal_pending_resolutions.discard(task)
 
     async def _play_tidal_track_inner(self, track_id: str, quality: str = "HIGH", name: str = "CurrentQueue", *, require_shared: bool = False, _test_lease=None):
+        from .tidal_queue import TidalQueueSelection, TidalTrackSelection
+        await self._play_tidal_selection_inner(TidalQueueSelection(
+            name, "", (TidalTrackSelection(track_id),), request_quality=quality),
+            require_shared=require_shared, _test_lease=_test_lease)
+
+    async def _play_tidal_selection(self, selection, *, require_shared: bool = False):
+        self.tidal_test.command_allowed()
+        task = asyncio.current_task()
+        self._tidal_pending_resolutions.add(task)
+        try:
+            return await self._play_tidal_selection_inner(selection, require_shared=require_shared)
+        finally:
+            self._tidal_pending_resolutions.discard(task)
+
+    async def _play_tidal_selection_inner(self, selection, *, require_shared: bool = False, _test_lease=None):
+        """Admit explicit provider identities; bounded leases remain single-track."""
         from .tidal_playback import TidalPlaybackError
-        if (self.tidal_playback is None or self.catalog_proxy_port == 0
+        if (not selection.tracks or self.tidal_playback is None or self.catalog_proxy_port == 0
                 or require_shared and not self._tidal_sharing_enabled()):
             raise BackendError("Experimental TIDAL playback is unavailable")
         if _test_lease is not None:
+            if len(selection.tracks) != 1 or selection.start_index != 1:
+                raise BackendError("Bounded TIDAL test requires one track")
             _test_lease.check()
+        items = []
+        for track in selection.tracks:
+            # Caller metadata/catalogue hints are not playback or display authority.
+            # Every slot keeps its own stable catalogue identity until resolved.
+            item = QueueItem(url=f"https://api.tidal.com/v1/tracks/{track.track_id}",
+                             title=f"TIDAL track {track.track_id}", source="Tidal",
+                             id=track.track_id, title_is_fallback=True)
+            item._tidal_track = (track.track_id, selection.request_quality)
+            item._tidal_test_lease = _test_lease
+            item._tidal_require_shared = require_shared
+            items.append(item)
+        queue = PlaybackQueue(name=selection.name, source="Tidal", items=items,
+                              index=selection.start_index, quality=selection.request_quality)
         generation, previous = self.state.generation, self.state.queue
         try:
-            candidate = await self.tidal_playback.resolve_track(track_id, quality)
+            candidate = await self.tidal_playback.resolve_track(*queue.current._tidal_track)
         except TidalPlaybackError:
             raise BackendError("TIDAL track resolution failed") from None
         if _test_lease is not None:
@@ -3578,21 +3618,15 @@ class HttpApi:
                 or candidate.session_expires_at <= time.time()
                 or require_shared and not self._tidal_sharing_enabled()):
             raise BackendError("TIDAL playback command superseded")
-        item = QueueItem(url=candidate.catalogue_url, title=candidate.title,
-                         source="Tidal", id=candidate.track_id, artist=candidate.artist,
-                         album=candidate.album, duration=candidate.duration,
-                         content_type=candidate.content_type)
-        item._tidal_track = (track_id, quality)
-        item._tidal_test_lease = _test_lease
-        item._tidal_require_shared = require_shared
-        item._tidal_candidate = candidate
-        queue = PlaybackQueue(name=name, source="Tidal", items=[item], index=1)
+        if not self.tidal_playback.session_matches(candidate.session_fingerprint):
+            raise BackendError("TIDAL session changed")
+        queue.current._tidal_candidate = candidate
         await self._replace_queue(queue)
         if _test_lease is not None:
             _test_lease.bind(queue)
         if self.state.queue is not queue or (require_shared and not self._tidal_sharing_enabled()):
             raise BackendError("TIDAL playback command superseded")
-        await self._play_queue_index(1, queue.name)
+        await self._play_queue_index(queue.index, queue.name)
 
     async def _materialize_radio_queue(self, queue: PlaybackQueue) -> None:
         """Resolve a header-only station under the current command generation."""
@@ -5166,11 +5200,11 @@ class HttpApi:
                 from .tidal_queue import parse_tidal_queue, TidalQueueError
                 try:
                     selection = parse_tidal_queue(context, name=self._xml_text(body, "QueueName") or None)
-                    if len(selection.tracks) != 1 or selection.start_index != 1:
-                        raise TidalQueueError("Only single-track selections are supported")
+                    if not selection.tracks:
+                        raise TidalQueueError("Explicit TIDAL tracks are required")
                 except TidalQueueError:
                     raise SoapFault(402, "Invalid Args") from None
-                await self._play_tidal_track(selection.tracks[0].track_id, selection.request_quality, selection.name, require_shared=True)
+                await self._play_tidal_selection(selection, require_shared=True)
                 return
             try:
                 queue = parse_queue_context(context, name=self._xml_text(body, "QueueName") or None)

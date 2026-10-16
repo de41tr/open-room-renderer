@@ -94,9 +94,13 @@ preserves the private file but that release refuses to read its newer format.
 With a valid private device session, enter one numeric TIDAL track
 ID and choose **Test this track on the renderer**. This action replaces the
 current queue and starts the existing player; it is not an automatic login
-side effect. This local test does not require LAN account sharing. The matching single-track TIDAL `CreateQueue` selection also uses
-this path only after explicit LAN account sharing and starts playback, consistent with the current top-level queue
-capability version. Multi-track/header-only collections remain unsupported.
+side effect. This local test does not require LAN account sharing. Explicit TIDAL
+`CreateQueue` track lists use the same queue owner after explicit LAN account
+sharing. The selected one-based start index resolves before the old queue is
+replaced; later Next/Previous/index commands resolve only their selected ID.
+Unresolved entries retain canonical per-ID catalogue URLs and safe placeholder
+metadata. Header-only albums/playlists and collection paging remain unsupported.
+This is synthetic local queue coverage, not native-app/provider acceptance.
 
 The small provider adapter uses the saved device access token for bounded,
 fixed-origin TIDAL v1 metadata and `playbackinfopostpaywall` requests. It does
