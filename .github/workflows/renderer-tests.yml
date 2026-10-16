@@ -230,7 +230,7 @@ jobs:
           .venv-ci/bin/python scripts/run-native-groups.py \
             --timeout 360 --log-dir "$RUNNER_TEMP/orr-libmpv" -- \
             tests/test_libmpv_integration.py tests/test_libmpv_gain.py \
-            tests/test_libmpv_dsp.py tests/test_libmpv_recovery.py \
+            tests/test_libmpv_dsp.py tests/test_libmpv_recovery.py tests/test_libmpv_spotify_eq.py \
             tests/test_libmpv_dsp_restore.py tests/test_libmpv_formats.py tests/test_libmpv_live_metadata.py \
             tests/test_libmpv_live_hls.py \
             tests/test_libmpv_invalid_media.py \
@@ -258,7 +258,7 @@ jobs:
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         env:
           ORR_TEST_UNIX_IPC: "1"
-        run: .venv-ci/bin/python -m pytest -q -s tests/test_mpv_unix_integration.py
+        run: .venv-ci/bin/python -m pytest -q -s tests/test_mpv_unix_integration.py tests/test_libmpv_spotify_eq.py
 
       - name: Exercise real pywiim and standard DMR against production Unix IPC
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}

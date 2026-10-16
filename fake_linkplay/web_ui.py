@@ -61,9 +61,9 @@ _HEADERS = {
         "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
 }
 _GENERATION_ACTIONS = frozenset({"play", "pause", "next", "previous", "seek",
-                               "queue_select", "queue_mode", "favorite_current", "radio_play"}) | PLAYLIST_ACTIONS
+                               "queue_select", "queue_mode", "favorite_current", "radio_play", "spotify_start"}) | PLAYLIST_ACTIONS
 _SCHEMAS = {
-    **{name: {"expected_generation"} for name in ("play", "pause", "next", "previous")},
+    **{name: {"expected_generation"} for name in ("play", "pause", "next", "previous", "spotify_start")},
     "device_rename": {"name", "expected_device"},
     "stop": set(), "seek": {"seconds", "expected_generation"},
     "volume": {"value"}, "mute": {"value"}, "balance": {"value"}, "eq": {"enabled"},
@@ -167,6 +167,9 @@ class WebDspExport:
 class WebRuntime:
     """Synchronous renderer-owned availability and uncertainty observations."""
     actions: frozenset[str]
+    spotify_configured: bool = False
+    spotify_active: bool = False
+    spotify_waiting: bool = False
     catalog_proxy_available: bool = True
     transport_unknown: bool = False
     transport_pending: bool = False
@@ -810,7 +813,7 @@ class WebControlApi:
         title = (_title(state.title, (item.url, item.resolved_url, state.current_url,
                     state.resolved_url, state.backend_url, state.backend_original_url), f"Track {queue.index}")
                  if item else "No selection")
-        actions = {name: name in runtime.actions for name in ("play", "pause", "stop", "next", "previous", "seek")}
+        actions = {name: name in runtime.actions for name in ("play", "pause", "stop", "next", "previous", "seek", "spotify_start")}
         can_save = False
         if item is not None:
             try:
@@ -856,6 +859,8 @@ class WebControlApi:
                      "artist": _display(entry.artist), "album": _display(entry.album),
                      "duration_seconds": _duration(entry.duration)} for number, entry in enumerate(queue.items, 1)]},
             "dsp": dsp, "actions": actions,
+            "spotify": {"configured": runtime.spotify_configured, "active": runtime.spotify_active,
+                        "waiting_for_app": runtime.spotify_waiting},
         }
 
     def favorite_revision(self, entry: dict[str, object]) -> str:
@@ -912,7 +917,7 @@ class WebControlApi:
             if command.action == "radio_play" and (runtime.transport_unknown or runtime.transport_pending):
                 raise WebAdmissionError("unavailable", 409)
             command = replace(command, name=found[1].name, url=found[1].reference)
-        if command.action in {"play", "pause", "next", "previous", "seek"} and command.action not in runtime.actions:
+        if command.action in {"play", "pause", "next", "previous", "seek", "spotify_start"} and command.action not in runtime.actions:
             raise WebAdmissionError("unavailable", 409)
         if command.action == "queue_mode" and runtime.queue_mode_locked:
             raise WebAdmissionError("unavailable", 409)

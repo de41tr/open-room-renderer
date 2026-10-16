@@ -14,7 +14,7 @@ import tempfile
 import uuid as uuidlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -88,6 +88,8 @@ class Config:
     auto_spawn_mpv: bool = True
     # Startup-only; None preserves mpv's existing configuration/defaults.
     mpv_audio_device: str | None = field(default=None, kw_only=True)
+    # Explicit activation only; setup never writes/enables this setting.
+    spotify_eq_profile: str | None = field(default=None, kw_only=True)
     default_volume: int = 50
     default_mute: bool = False
     log_level: str = "INFO"
@@ -138,6 +140,13 @@ class Config:
         """Normalize configured IDs without replacing their identity."""
 
         self.mpv_audio_device = validate_audio_device(self.mpv_audio_device, auto_spawn=self.auto_spawn_mpv)
+        if self.spotify_eq_profile is not None:
+            value = self.spotify_eq_profile
+            if (type(value) is not str or not value.startswith("/") or len(value) > 4096
+                    or str(Path(value)) != value or value == "/" or value.startswith("//")
+                    or any(part in {".", ".."} for part in value.split("/"))
+                    or any(not c.isprintable() or c in "$\\" for c in value)):
+                raise ValueError("spotify_eq_profile must be an absolute normalized path or null")
         if type(self.native_queue_staging) is not bool:
             raise ValueError("native_queue_staging must be boolean")
         if type(self.default_mute) is not bool:
@@ -361,10 +370,16 @@ def read_startup_config(
     return cfg
 
 
-def load_startup_config(path: str | Path, *, missing_ok: bool = False) -> Config:
+def load_startup_config(
+    path: str | Path, *, missing_ok: bool = False,
+    before_state: Callable[[Config], None] | None = None,
+) -> Config:
     """Validate startup input before applying the existing persisted state path."""
 
-    return _load_config_state(read_startup_config(path, missing_ok=missing_ok), _startup=True)
+    cfg = read_startup_config(path, missing_ok=missing_ok)
+    if before_state is not None:
+        before_state(cfg)
+    return _load_config_state(cfg, _startup=True)
 
 
 def _config_from_mapping(raw: dict[str, Any]) -> Config:

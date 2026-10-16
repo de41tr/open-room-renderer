@@ -380,7 +380,7 @@ async def test_cli_validates_and_restores_active_graph_before_first_listener(tmp
     backend, peer = make_backend()
     backend.start = AsyncMock()
     backend.stop_process = AsyncMock()
-    monkeypatch.setattr(cli, 'load_startup_config', lambda _: original.cfg)
+    monkeypatch.setattr(cli, 'load_startup_config', lambda _, **kwargs: original.cfg)
     monkeypatch.setattr(cli, 'setup_logging', lambda _: None)
     monkeypatch.setattr(cli, 'MpvBackend', lambda *args, **kwargs: backend)
     loop = asyncio.get_running_loop()

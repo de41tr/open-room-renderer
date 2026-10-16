@@ -94,6 +94,11 @@
       </div>
       <div class="library-column">
         <section class="card queue-card" aria-labelledby="queue-heading"><div class="section-heading"><h2 id="queue-heading">Up next <span id="queue-count" class="count">0</span></h2><span class="muted" id="queue-name">Current queue</span></div><div class="playlist-toolbar"><button id="playlist-load" class="button small" type="button" disabled>Load playlist</button><button id="playlist-add" class="button subtle small" type="button" disabled>+ Add URLs</button><button id="playlist-export" class="button subtle small" type="button" disabled>Export JSON</button></div><p id="playlist-availability" class="field-hint"></p><p id="queue-empty" class="empty-state">Your queue will appear here.</p><ol id="queue-list" class="queue-list"></ol><p class="field-hint queue-hint">Select a track to play it. Queue edits keep playback stopped and reset shuffle history.</p><p class="field-hint">Loaded queues are kept for this renderer session. Keep your original playlist file.</p></section>
+        <section id="spotify-card" class="card" aria-labelledby="spotify-heading" hidden>
+          <div class="section-heading"><h2 id="spotify-heading">Spotify</h2><button id="spotify-start" class="button small" type="button" disabled>Start Spotify</button></div>
+          <p id="spotify-status" class="field-hint" role="status" aria-live="polite"></p>
+          <p class="field-hint">Uses your configured receiver and the existing ORR EQ. Spotify starts at volume 0. Its app volume and ORR volume/mute are separate controls.</p>
+        </section>
         <section class="card radio-card" aria-labelledby="radio-heading">
           <div class="section-heading"><h2 id="radio-heading">Internet radio</h2><a href="https://www.radio-browser.info/" target="_blank" rel="noopener noreferrer" class="muted">Radio-Browser</a></div>
           <p class="field-hint">Search by station name or country in the public community directory. Leave the name blank to browse a country. Direct MP3/AAC/Ogg streams (chained Vorbis verified); availability and regional restrictions vary. This is an independent ORR catalog.</p>
