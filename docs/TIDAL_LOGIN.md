@@ -76,7 +76,7 @@ grant alone does not establish access to TIDAL's v1 APIs or full playback.
 Only if your independently registered client is **separately permitted** to
 use `https://api.tidal.com/v1/sessions`, add `--probe-v1-session`. That explicit
 opt-in always performs one identity request, even when the token response
-already has identity. Both identities must match when both are complete. Public OAuth scopes are not evidence of that permission;
+already has identity. Any identity fields supplied by the token response must match the probe. Public OAuth scopes are not evidence of that permission;
 this endpoint is not presented here as a generally available public API.
 A denied, invalid, incomplete, or conflicting probe leaves existing storage unchanged and
 reports OAuth success separately from the missing identity/access proof. An
@@ -123,7 +123,7 @@ form POST to `https://auth.tidal.com/v1/oauth2/token` using the same redirect an
 the in-memory verifier. No client secret is used. The back-channel endpoints
 are fixed, HTTPS verification remains enabled, redirects are rejected, and
 proxy/netrc environment configuration is ignored. Individual HTTP requests
-have a 15-second total timeout and a 64 KiB decoded-response limit within the
+have a 15-second total timeout and a 64 KiB response limit (compressed responses are not decoded) within the
 overall login deadline. Provider response bodies and request secrets are never
 included in terminal diagnostics. Tests replace HTTP, listener, and browser
 boundaries; they do not contact TIDAL or authenticate a real account.

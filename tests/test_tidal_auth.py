@@ -239,6 +239,22 @@ async def test_selected_v1_probe_runs_even_with_identity_and_rejects_disagreemen
 
 
 @pytest.mark.asyncio
+async def test_v1_probe_cannot_change_a_partially_known_token_identity(login_harness, monkeypatch):
+    store, _, emitted, _, _ = login_harness
+    before = store.load()
+
+    async def request(url, **kwargs):
+        if url == auth.TOKEN_URL:
+            return dict(TOKEN, user={"userId": 42})
+        return {"userId": 43, "countryCode": "DE"}
+
+    monkeypatch.setattr(auth, "_request_json", request)
+    with pytest.raises(auth.OAuthIncomplete, match="identities disagree"):
+        await auth.login(CLIENT, SCOPE, store, probe_v1_session=True, announce=emitted.append)
+    assert store.load() == before
+
+
+@pytest.mark.asyncio
 async def test_timeout_closes_callback_and_preserves_prior_session(login_harness, monkeypatch):
     store, calls, emitted, _, states = login_harness
     before = store.load()
@@ -288,6 +304,7 @@ async def test_http_is_pinned_bounded_no_redirects_no_proxy_and_error_bodies_are
     class Http:
         def __init__(self, **kwargs):
             assert kwargs["trust_env"] is False and kwargs["timeout"].total == 15
+            assert kwargs["auto_decompress"] is False
         async def __aenter__(self):
             return self
         async def __aexit__(self, *args):

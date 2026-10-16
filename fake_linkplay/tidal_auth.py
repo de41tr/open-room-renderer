@@ -220,11 +220,12 @@ async def _request_json(url: str, *, data: dict | None = None, token: str | None
         (TOKEN_URL, False, True), (SESSIONS_URL, True, False),
     }:
         raise TidalAuthError("Unsupported TIDAL request.")
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", "Accept-Encoding": "identity"}
     if token is not None:
         headers["Authorization"] = "Bearer " + token
     try:
-        async with aiohttp.ClientSession(trust_env=False, timeout=aiohttp.ClientTimeout(total=15)) as http:
+        async with aiohttp.ClientSession(trust_env=False, auto_decompress=False,
+                                         timeout=aiohttp.ClientTimeout(total=15)) as http:
             async with http.request("POST" if data is not None else "GET", url, data=data,
                                     headers=headers, allow_redirects=False) as response:
                 if response.status != 200:
@@ -324,7 +325,16 @@ async def login(client: TidalClientIdentity, scope: str, store: TidalSessionStor
                     raise OAuthIncomplete("OAuth succeeded, but the permitted v1 session probe failed. No session was saved; v1 access and full playback remain unproven.") from None
                 if probed_identity is None:
                     raise OAuthIncomplete("OAuth succeeded, but the permitted v1 session probe returned incomplete identity. No session was saved; full playback remains unproven.")
-                if identity is not None and identity != probed_identity:
+                token_user = value.get("user")
+                mismatch = identity is not None and identity != probed_identity
+                if type(token_user) is dict:
+                    # Even a partial identity must not silently change account.
+                    for key in ("userId", "countryCode"):
+                        if token_user.get(key) is not None:
+                            fields = dict(zip(("userId", "countryCode"), probed_identity))
+                            fields[key] = token_user[key]
+                            mismatch = mismatch or _identity(fields) != probed_identity
+                if mismatch:
                     raise OAuthIncomplete("OAuth succeeded, but token and v1 session identities disagree. No session was saved; full playback remains unproven.")
                 identity = probed_identity
                 v1_verified = True
