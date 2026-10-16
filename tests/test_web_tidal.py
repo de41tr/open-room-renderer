@@ -103,4 +103,8 @@ async def test_account_sharing_is_explicit_revocable_and_never_in_status(api, tm
             assert (await response.json())["account_shared"] is False
         assert fault_code(await api.soap(account_request())) == "501"
         assert store.load().access_token == "SYNTHETIC_ACCESS_SECRET"
+        await api.tidal_account.set_shared(True)
+        store.clear()
+        async with session.get(base + "/orr/v1/tidal/status") as response:
+            assert (await response.json())["account_shared"] is False
         assert not api.mpv.calls

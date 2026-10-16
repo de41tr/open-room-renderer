@@ -132,6 +132,7 @@ async def test_device_sharing_binds_exact_provenance_session_and_resets_on_resta
     with pytest.raises(TidalAccountUnavailable):
         await TidalDeviceAccountBridge(store).get_user_info(UUID, version="2")
     store.save(replace(record, access_token="synthetic-replacement"))
+    assert not bridge.shared
     with pytest.raises(TidalAccountUnavailable):
         await bridge.get_user_info(UUID, version="2")
     await bridge.set_shared(False)

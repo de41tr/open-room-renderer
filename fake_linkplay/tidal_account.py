@@ -116,7 +116,16 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
     @property
     def shared(self):
         session = self._shared_session
-        return bool(session and session.expires_at and session.expires_at > time.time())
+        if session is None:
+            return False
+        try:
+            valid = bool(session.expires_at and session.expires_at > time.time()
+                         and self._store.load() == session)
+        except TidalSessionError:
+            valid = False
+        if not valid:
+            self._shared_session = None
+        return valid
 
     async def set_shared(self, enabled: bool):
         async with self._lock:
