@@ -25,7 +25,7 @@ Implemented and tested with synthetic data:
 Not implemented or established by this milestone:
 
 - An authorized independent client, provider API or full-playback entitlement.
-- Login/token exchange, refresh, stream resolution, protected-media playback,
+- Automatic login/token refresh, stream resolution, protected-media playback,
   active service advertisement, deployment or real WiiM Home acceptance.
 - TIDAL `UserLogin` remains unsupported. The observed app flow does not itself
   establish public-client PKCE compatibility. An independently authorized
@@ -38,3 +38,8 @@ A live release requires the legitimate account/client path, capability and
 playback acceptance, token/URL renewal, controller behavior and target-device
 checks. A saved token, passing mock tests or matching account-field vectors
 is not evidence of those outcomes.
+
+An operator-run own-client PKCE CLI is now available for a browser on the same
+Linux host: see [the login guide](TIDAL_LOGIN.md). Its offline tests do not
+establish live client acceptance. Optional permitted v1 identity probing and
+local storage remain separate from full-playback rights and XU4 transfer.
