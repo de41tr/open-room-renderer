@@ -5,6 +5,7 @@ return provider tokens, internal device codes, account identity or exceptions.
 """
 from importlib.resources import files
 import json
+import re
 
 from aiohttp import web
 
@@ -15,14 +16,15 @@ PREFIX = "/orr/v1/tidal"
 
 
 class WebTidalLogin:
-    def __init__(self, admission, manager, account=None):
+    def __init__(self, admission, manager, account=None, play_track=None):
         self.admission = admission
         self.manager = manager
         self.account = account
+        self.play_track = play_track
 
     def routes(self):
         return [web.route("*", path, self.handle) for path in
-                ("/ui/tidal", "/ui/tidal.js", PREFIX + "/status", PREFIX + "/start", PREFIX + "/cancel", PREFIX + "/share", PREFIX + "/unshare")]
+                ("/ui/tidal", "/ui/tidal.js", PREFIX + "/status", PREFIX + "/start", PREFIX + "/cancel", PREFIX + "/share", PREFIX + "/unshare", PREFIX + "/play")]
 
     async def handle(self, request):
         try:
@@ -52,11 +54,27 @@ class WebTidalLogin:
                 except (ValueError, UnicodeError):
                     raise WebAdmissionError() from None
                 action = request.path.rsplit("/", 1)[-1]
-                expected = [({"start": "confirm_experimental_login", "cancel": "cancel",
-                              "share": "confirm_lan_account_sharing", "unshare": "stop_lan_account_sharing"}[action], True)]
-                if pairs != expected or any(type(value) is not bool for _, value in pairs):
-                    raise WebAdmissionError()
-                if action in {"share", "unshare"}:
+                if action == "play":
+                    if (type(pairs) is not list or len(pairs) != 2
+                            or {key for key, _ in pairs} != {"track_id", "confirm_experimental_playback"}):
+                        raise WebAdmissionError()
+                    payload = dict(pairs)
+                    if (payload["confirm_experimental_playback"] is not True
+                            or type(payload["track_id"]) is not str
+                            or not re.fullmatch(r"[1-9][0-9]{0,18}", payload["track_id"])):
+                        raise WebAdmissionError()
+                else:
+                    expected = [({"start": "confirm_experimental_login", "cancel": "cancel",
+                                  "share": "confirm_lan_account_sharing", "unshare": "stop_lan_account_sharing"}[action], True)]
+                    if pairs != expected or any(type(value) is not bool for _, value in pairs):
+                        raise WebAdmissionError()
+                if action == "play":
+                    result = await self.manager.status()
+                    if self.play_track is None or result.get("active"):
+                        raise WebAdmissionError("experimental_playback_unavailable", 409)
+                    await self.play_track(payload["track_id"])
+                    result["playback_requested"] = True
+                elif action in {"share", "unshare"}:
                     result = await self.manager.status()
                     if self.account is None or (action == "share" and result.get("active")):
                         raise WebAdmissionError("account_sharing_unavailable", 409)
@@ -68,7 +86,7 @@ class WebTidalLogin:
                     result = await (self.manager.start() if action == "start" else self.manager.cancel())
             result = dict(result)
             result["account_shared"] = bool(self.account and self.account.shared)
-            allowed = {"state", "active", "verification_uri", "user_code", "expires_in", "expires_at", "retry_after", "account_shared"}
+            allowed = {"state", "active", "verification_uri", "user_code", "expires_in", "expires_at", "retry_after", "account_shared", "playback_requested"}
             safe_errors = {"dependency_unavailable", "session_exists", "storage_unavailable", "invalid_challenge", "login_failed", "expired", "unsafe_debug"}
             if result.get("error") in safe_errors:
                 allowed.add("error")
