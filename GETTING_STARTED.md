@@ -81,7 +81,9 @@ installs the package with runtime dependencies, and writes:
 - `open-room-renderer.service`: an uninstalled user-service unit
 - `installation-receipt.json`: source revision/hash, architecture, libc, Python,
   mpv, and resolved Python package versions
-- `pip-install-report.json`: pip's artifact/version report for a full install
+- `pip-build-tools-report.json`, `pip-pure-build-report.json`, and
+  `pip-install-report.json`: pip's artifact/version reports for the build tools,
+  prebuilt pure-Python dependencies, and remaining application install
 - `installed-files.json`: hashes/links for files owned by this installation
 - `uninstall.py`: the same manifest-aware installer for later removal
 
@@ -89,6 +91,16 @@ This is a reproducible setup procedure with a version receipt, not a locked
 cross-architecture dependency bundle. Save receipts privately; they may contain
 local paths. The installer does not enable services, create accounts, change
 network/security settings, or install system packages.
+
+The new release venv installs hash-pinned setuptools/wheel once, then builds the
+source-only `pyaes==1.6.1` and `ratelimit==2.2.1` with those tools. It also builds
+ORR's snapshotted sources into a local application wheel under `wheels/`. This
+avoids repeated isolated build-environment setup on CPU-limited devices. Only
+these two known dependency-free packages and ORR's own sources use
+`--no-build-isolation`; other dependencies retain pip's normal isolation. No
+existing renderer venv, service, build timeout, or resource limit is changed.
+ARMv7 install time still requires target verification; this is not an offline
+wheel bundle.
 
 To inspect packaging without installing dependencies or requiring mpv:
 

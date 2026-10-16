@@ -584,6 +584,8 @@ def test_native_package_inventory_keeps_warnings_separate(
     monkeypatch.setattr(installer, "environment", lambda **kwargs: {"alsa_pcm_accessible": False})
     prefix = tmp_path / "native"
     real_run = subprocess.run
+    installs = []
+    builds = []
 
     def skip_package_build(args, **kwargs):
         if args[1:3] == ["-m", "venv"]:
@@ -594,13 +596,34 @@ def test_native_package_inventory_keeps_warnings_separate(
                 "sys.stderr.write('WARNING: temporary pip cache is unavailable\\n')\n"
                 f"sys.stdout.write({output!r})\nsys.exit({returncode})\n")
             python.chmod(0o700)
-        elif args[1:4] != ["-m", "pip", "install"] and args[0] != str(prefix / "venv/bin/open-room-renderer"):
+        elif args[1:4] == ["-m", "pip", "install"]:
+            installs.append((args, kwargs))
+        elif args[1:4] == ["-m", "pip", "wheel"]:
+            builds.append(args)
+            (prefix / "wheels/open_room_renderer-0.1.0-py3-none-any.whl").touch()
+        elif args[0] != str(prefix / "venv/bin/open-room-renderer"):
             return real_run(args, **kwargs)
         return subprocess.CompletedProcess(args, 0)
 
     monkeypatch.setattr(installer.subprocess, "run", skip_package_build)
     succeeded = returncode == 0 and output != "invalid JSON"
     assert installer.main(["--prefix", str(prefix)]) == (0 if succeeded else 2)
+    assert len(installs) == 3
+    bootstrap, pure, application = installs
+    assert "--only-binary=:all:" in bootstrap[0]
+    assert "--no-build-isolation" not in bootstrap[0]
+    assert "--no-build-isolation" in pure[0]
+    for (_, kwargs), names in ((bootstrap, {"setuptools", "wheel"}),
+                               (pure, {"pyaes", "ratelimit"})):
+        assert {line.split("==")[0] for line in kwargs["input"].splitlines()} == names
+        assert all(" --hash=sha256:" in line for line in kwargs["input"].splitlines())
+    for command, _ in (bootstrap, pure):
+        assert "--require-hashes" in command and "--no-deps" in command
+    # The shortcut must not suppress isolation for arbitrary/native dependencies.
+    assert "--no-build-isolation" not in application[0]
+    assert application[0][-1] == str(prefix / "wheels/open_room_renderer-0.1.0-py3-none-any.whl")
+    assert len(builds) == 1 and builds[0][-1] == str(prefix / "source")
+    assert "--no-build-isolation" in builds[0] and "--no-deps" in builds[0]
     captured = capfd.readouterr()
     assert "WARNING: temporary pip cache is unavailable" in captured.err
     receipt = json.loads((prefix / "installation-receipt.json").read_text())
@@ -613,6 +636,30 @@ def test_native_package_inventory_keeps_warnings_separate(
     manifest = json.loads((prefix / installer.MANIFEST).read_text())
     assert {"venv/bin/python", "installation-receipt.json", "uninstall.py"} <= {
         entry["path"] for entry in manifest["files"]}
+
+
+@pytest.mark.parametrize("failed_report", ["pip-build-tools-report.json", "pip-pure-build-report.json", "wheel"])
+def test_native_build_failure_does_not_fall_back_or_claim_installation(
+        installer, tmp_path, monkeypatch, failed_report):
+    prefix = tmp_path / "partial-build"
+    installs = []
+
+    def fail_build(args, **kwargs):
+        if args[1:3] == ["-m", "pip"]:
+            installs.append(args)
+            if str(prefix / failed_report) in args or args[3] == failed_report:
+                raise subprocess.CalledProcessError(1, args)
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(installer.subprocess, "run", fail_build)
+    with pytest.raises(subprocess.CalledProcessError):
+        installer.install(prefix, port=8080, stage_only=False, dry_run=False, require_alsa=False)
+    assert str(prefix / failed_report) in installs[-1] or installs[-1][3] == failed_report
+    assert all(str(prefix / "pip-install-report.json") not in args for args in installs)
+    receipt = json.loads((prefix / "installation-receipt.json").read_text())
+    assert receipt["mode"] == "installation-incomplete"
+    assert "packages" not in receipt
+    assert (prefix / installer.MANIFEST).is_file()
 
 
 def test_incomplete_install_has_safe_manifest(installer, tmp_path, monkeypatch):
