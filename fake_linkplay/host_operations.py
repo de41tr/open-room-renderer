@@ -108,6 +108,10 @@ def execute(r):
                 report["accepted"] = True
                 if op == "release-prepare":
                     releases.prepare(r, info, report)
+                    if not (info["release"] / "source/fake_linkplay/host_operations.py").is_file():
+                        worker = releases.load_prepared(r["commit"])
+                        releases.save(g.BASE / "management/worker.json", {
+                            "api_version": 1, "commit": r["commit"], "release_name": worker.name})
                 else:
                     releases.install(r, info, report)
                 state(report, releases.layout())

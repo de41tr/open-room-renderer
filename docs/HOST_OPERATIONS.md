@@ -123,3 +123,11 @@ The private broker accepts spotify_pid only as a positive bounded integer;
 unknown fields and other invalid types still refuse. Component outcomes retain
 these backend fields too. Status may verify owned IPC with a volume readback,
 but does not play media, authenticate or establish heard audio.
+
+A pre-contract live renderer can prepare a selected reviewed main release without
+switching current or restarting. The bounded host loader runs only the fixed
+product entry as malte/NNP from that main checkout, using the existing interpreter.
+Preparation records management/worker.json, bound to the prepared native release;
+the root broker independently verifies the same receipt/main commit. Both legacy
+orr-update and API operations then use this SAME product engine until a later
+explicit deployment makes it current. No second service or configuration is made.
