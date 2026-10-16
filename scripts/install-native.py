@@ -20,6 +20,19 @@ MIN_PYTHON = (3, 11)
 MIN_MPV = (0, 37)
 MANIFEST = "installed-files.json"
 WEB_ASSETS = ("index.html", "style.css", "controller.js", "app.js", "logo.png", "tidal.html", "tidal.js")
+# These two source-only, dependency-free packages use setuptools/distutils.
+# Reuse one build backend inside the NEW release venv, not one temporary build
+# environment per package on a CPU-limited target. Never apply this shortcut to
+# arbitrary/native runtime dependencies; their ordinary pip build isolation stays.
+# ORR's own snapshot uses the same known backend to build a local wheel below.
+BUILD_TOOLS = """\
+setuptools==80.9.0 --hash=sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922
+wheel==0.45.1 --hash=sha256:708e7481cc80179af0e556bbf0cc00b8444c7321e2700b8d8580231d13017248
+"""
+PURE_BUILD_DEPENDENCIES = """\
+pyaes==1.6.1 --hash=sha256:02c1b1405c38d3c370b085fb952dd8bea3fadcee6411ad99f312cc129c536d8f
+ratelimit==2.2.1 --hash=sha256:af8a9b64b821529aca09ebaf6d8d279100d766f19e90b5059ac6a718ca6dee42
+"""
 
 
 def run(*args: str) -> str:
@@ -328,13 +341,30 @@ def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require
         if stage_only:
             receipt["mode"] = "staged-only"
         else:
-            subprocess.run([sys.executable, "-m", "venv", str(prefix / "venv")], check=True)
+            subprocess.run([sys.executable, "-I", "-m", "venv", str(prefix / "venv")], check=True)
             python = str(prefix / "venv/bin/python")
-            subprocess.run([python, "-m", "pip", "install", "--report", str(prefix / "pip-install-report.json"), str(prefix / "source")], check=True)
+            # Ignore inherited PYTHONPATH/user-site metadata: checkout egg-info
+            # must not make pip skip installing the application in this venv.
+            subprocess.run([python, "-I", "-m", "pip", "install", "--only-binary=:all:",
+                            "--no-deps", "--require-hashes", "--report",
+                            str(prefix / "pip-build-tools-report.json"), "-r", "/dev/stdin"],
+                           input=BUILD_TOOLS, text=True, check=True)
+            subprocess.run([python, "-I", "-m", "pip", "install", "--use-pep517", "--no-build-isolation",
+                            "--no-deps", "--require-hashes", "--report",
+                            str(prefix / "pip-pure-build-report.json"), "-r", "/dev/stdin"],
+                           input=PURE_BUILD_DEPENDENCIES, text=True, check=True)
+            wheels = prefix / "wheels"
+            wheels.mkdir(mode=0o700)
+            subprocess.run([python, "-I", "-m", "pip", "wheel", "--no-build-isolation", "--no-deps",
+                            "--wheel-dir", str(wheels), str(prefix / "source")], check=True)
+            application = list(wheels.glob("open_room_renderer-*-py3-none-any.whl"))
+            if len(application) != 1:
+                raise ValueError("The source snapshot did not produce one native-profile application wheel.")
+            subprocess.run([python, "-I", "-m", "pip", "install", "--report", str(prefix / "pip-install-report.json"), str(application[0])], check=True)
             # Keep pip warnings on stderr, separate from the JSON package inventory.
             receipt["packages"] = json.loads(subprocess.check_output(
-                [python, "-m", "pip", "list", "--format=json"], text=True))
-            subprocess.run([str(prefix / "venv/bin/open-room-renderer"), "--help"], check=True, stdout=subprocess.DEVNULL)
+                [python, "-I", "-m", "pip", "list", "--format=json"], text=True))
+            subprocess.run([python, "-I", str(prefix / "venv/bin/open-room-renderer"), "--help"], check=True, stdout=subprocess.DEVNULL)
             receipt["mode"] = "installed"
     finally:
         (prefix / "installation-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
