@@ -23,13 +23,13 @@ UUID = "0123456789abcdef-SYNTHETIC-ONLY"
 ])
 def test_synthetic_wire_vectors(plaintext, encoded, decoded):
     if plaintext:
-        pytest.importorskip("cryptography")
+        pytest.importorskip("pyaes")
     assert encode_account_field(UUID, plaintext) == encoded
     assert decode_account_field(UUID, encoded) == decoded
 
 
 def test_decoder_accepts_base64_line_breaks():
-    pytest.importorskip("cryptography")
+    pytest.importorskip("pyaes")
     assert decode_account_field(UUID, "y8KHr68Rf8wm\nFOqQxBiPMw==\n") == "synthetic-token"
 
 
@@ -50,7 +50,7 @@ def test_missing_dependency_is_explicit_and_does_not_leak_input(monkeypatch):
     original = builtins.__import__
 
     def without_crypto(name, *args, **kwargs):
-        if name.startswith("cryptography"):
+        if name.startswith("pyaes"):
             raise ImportError("synthetic import failure")
         return original(name, *args, **kwargs)
 
@@ -61,7 +61,7 @@ def test_missing_dependency_is_explicit_and_does_not_leak_input(monkeypatch):
 
 
 def test_decoder_preserves_legacy_nul_removal_but_encoder_rejects_nuls():
-    pytest.importorskip("cryptography")
+    pytest.importorskip("pyaes")
     assert decode_account_field(UUID, "LOYKUT9sPwEt+k7DDzlSoA==") == "AB"
     with pytest.raises(ValueError, match="^Invalid TIDAL account field$"):
         encode_account_field(UUID, "A\0B")
@@ -74,10 +74,23 @@ def test_encoder_rejects_oversized_or_invalid_text_without_leaking(value):
 
 
 def test_field_size_boundary_and_wire_limit():
-    pytest.importorskip("cryptography")
+    pytest.importorskip("pyaes")
     value = "x" * MAX_FIELD_BYTES
     encoded = encode_account_field(UUID, value)
     assert len(encoded) == MAX_ENCODED_CHARS
     assert decode_account_field(UUID, encoded) == value
     with pytest.raises(ValueError, match="^Invalid TIDAL encoded account field$"):
         decode_account_field(UUID, encoded + " ")
+
+
+def test_base_install_codec_does_not_require_native_cryptography(monkeypatch):
+    original = builtins.__import__
+
+    def without_native_crypto(name, *args, **kwargs):
+        if name.startswith("cryptography"):
+            raise ImportError("native cryptography deliberately unavailable")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_native_crypto)
+    assert encode_account_field(UUID, "synthetic-token") == "y8KHr68Rf8wmFOqQxBiPMw=="
+    assert decode_account_field(UUID, "y8KHr68Rf8wmFOqQxBiPMw==") == "synthetic-token"

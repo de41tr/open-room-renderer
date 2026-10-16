@@ -2,7 +2,8 @@
 
 This format provides NO secrecy or authentication: the identifier is public,
 CBC is unauthenticated, and the IV is fixed. Never use it for stored credentials.
-The optional ``cryptography`` dependency is loaded only when encoding is needed.
+The established ``pyaes`` dependency is loaded only when encoding is needed.
+It is also required by the pinned experimental TIDAL library.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ MAX_ENCODED_CHARS = 4 * ((MAX_FIELD_BYTES + 2) // 3)
 
 
 class TidalCodecUnavailable(RuntimeError):
-    """The optional standards-based AES implementation is unavailable."""
+    """The standards-based AES dependency is unavailable."""
 
 
 def _key(short_uuid: str) -> bytes:
@@ -30,10 +31,10 @@ def _key(short_uuid: str) -> bytes:
 
 def _cipher(key: bytes):
     try:
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        import pyaes
     except ImportError:
-        raise TidalCodecUnavailable("TIDAL field encoding requires the optional cryptography dependency") from None
-    return Cipher(algorithms.AES(key), modes.CBC(bytes(16)))
+        raise TidalCodecUnavailable("TIDAL field encoding requires the pyaes dependency") from None
+    return pyaes.AESModeOfOperationCBC(key, iv=bytes(16))
 
 
 def encode_account_field(short_uuid: str, value: str) -> str:
@@ -56,8 +57,9 @@ def encode_account_field(short_uuid: str, value: str) -> str:
     if len(data) > MAX_FIELD_BYTES:
         raise ValueError("Invalid TIDAL account field")
     data += bytes((-len(data)) % 16)
-    encryptor = _cipher(key).encryptor()
-    return base64.b64encode(encryptor.update(data) + encryptor.finalize()).decode("ascii")
+    cipher = _cipher(key)
+    encoded = b"".join(cipher.encrypt(data[offset:offset + 16]) for offset in range(0, len(data), 16))
+    return base64.b64encode(encoded).decode("ascii")
 
 
 def decode_account_field(short_uuid: str, value: str) -> str:
@@ -77,7 +79,8 @@ def decode_account_field(short_uuid: str, value: str) -> str:
         data = base64.b64decode("".join(value.split()), validate=True)
         if not data or len(data) > MAX_FIELD_BYTES or len(data) % 16:
             raise ValueError
-        decryptor = _cipher(key).decryptor()
-        return (decryptor.update(data) + decryptor.finalize()).decode("utf-8").replace("\0", "")
+        cipher = _cipher(key)
+        decoded = b"".join(cipher.decrypt(data[offset:offset + 16]) for offset in range(0, len(data), 16))
+        return decoded.decode("utf-8").replace("\0", "")
     except (ValueError, UnicodeError):
         raise ValueError("Invalid TIDAL encoded account field") from None
