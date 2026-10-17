@@ -214,6 +214,7 @@ def audio_responses(track_id):
 @pytest.mark.parametrize("playlist", [False, True])
 async def test_header_page_uses_local_index_reports_loaded_size_and_ends_there(queue_api, harness, playlist):
     api = queue_api
+    api.cfg.enable_plex_service = True  # Root 1.4 has immediate CreateQueue playback.
     store, responses, requests, *_ = harness
     await connect_page_resolver(api, store)
     url = (PLAYLIST if playlist else ALBUM) + "?offset=20&limit=3&countryCode=DE"
@@ -278,6 +279,7 @@ async def test_failed_page_admission_preserves_existing_playing_queue(queue_api,
 @pytest.mark.asyncio
 async def test_page_and_selected_track_must_use_identical_session_even_if_new_one_is_shared(queue_api, harness):
     api = queue_api
+    api.cfg.enable_plex_service = True  # Root 1.4 has immediate CreateQueue playback.
     store, responses, requests, *_ = harness
     await connect_page_resolver(api, store)
     await api._play_url("https://media.example.test/existing.wav")
@@ -322,6 +324,7 @@ async def test_newer_command_supersedes_pending_page_before_any_track_resolution
 @pytest.mark.asyncio
 async def test_natural_eof_at_loaded_page_end_never_schedules_more_media(queue_api, harness):
     api = queue_api
+    api.cfg.enable_plex_service = True  # Root 1.4 has immediate CreateQueue playback.
     store, responses, requests, *_ = harness
     await connect_page_resolver(api, store)
     responses[:] = [Response(page(ids=(42, 43), total=22)), *audio_responses(43)]
@@ -331,3 +334,51 @@ async def test_natural_eof_at_loaded_page_end_never_schedules_more_media(queue_a
     assert api.state.status == "stop" and api.state.queue.index == api.state.queue.count == 2
     assert api._queue_advance_task is None and len(requests) == 3
     assert len([call for call in api.mpv.calls if call[0] == "load"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_legacy_header_create_materializes_only_page_until_play_index(queue_api, harness):
+    api = queue_api
+    store, responses, requests, *_ = harness
+    await connect_page_resolver(api, store)
+    url = ALBUM + "?offset=20&limit=3"
+    responses[:] = [Response(page(ids=(42, 43), total=22))]
+    assert (await api.soap(header_request(url))).status == 200
+    assert [call[1] for call in requests] == [ALBUM]
+    assert api.mpv.calls == [] and api.state.status == "stop"
+    assert api.state.queue.count == 2 and api.state.queue.index == 2
+    assert api.state.queue.search_url == url and api.state.queue._tidal_prepared_page is not None
+    public = serialize_queue_context(api.state.queue)
+    assert "session_fingerprint" not in public and "synthetic-cdn-secret" not in public
+    responses[:] = audio_responses(43)
+    assert (await api.soap(soap_request("PlayQueueWithIndex", "<Index>2</Index>", service="PlayQueue"))).status == 200
+    assert [call[1] for call in requests] == [ALBUM, "https://api.tidal.com/v1/tracks/43",
+                                            "https://api.tidal.com/v1/tracks/43/playbackinfopostpaywall"]
+    assert [name for name, _ in api.mpv.calls].count("load") == 1
+    assert not any(name == "stop" for name, _ in api.mpv.calls)
+    assert api.state.queue._tidal_prepared_page is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("when", ["before_play", "during_resolution"])
+async def test_legacy_prepared_page_rejects_session_change_before_first_load(queue_api, harness, when):
+    api = queue_api
+    store, responses, requests, *_ = harness
+    await connect_page_resolver(api, store)
+    responses[:] = [Response(page())]
+    assert (await api.soap(header_request(ALBUM + "?offset=20&limit=3"))).status == 200
+    async def change_session():
+        store.save(replace(SESSION, access_token="synthetic-new-session"))
+        await api.tidal_account.set_shared(True)
+    if when == "before_play":
+        await change_session()
+    else:
+        resolve = api.tidal_playback.resolve_track
+        async def changed_session(track_id, quality):
+            await change_session()
+            return await resolve(track_id, quality)
+        api.tidal_playback.resolve_track = changed_session
+        responses[:] = audio_responses(43)
+    assert (await api.soap(soap_request("PlayQueueWithIndex", "<Index>2</Index>", service="PlayQueue"))).status == 500
+    assert len(requests) == (1 if when == "before_play" else 3)
+    assert api.mpv.calls == [] and api.state.queue._tidal_prepared_page is not None

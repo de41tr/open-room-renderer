@@ -118,7 +118,7 @@ async def test_private_play_requires_confirmation_but_no_lan_account_sharing(api
     from test_tidal_queue_playback import configured
     await configured(api, tmp_path)
     api.tidal_login = Manager()
-    api._play_tidal_track = AsyncMock()
+    api._play_tidal_track = AsyncMock(wraps=api._play_tidal_track)
     await api.tidal_account.set_shared(False)
     async with serving(api) as (session, base):
         boot = await state(session, base)
@@ -130,6 +130,9 @@ async def test_private_play_requires_confirmation_but_no_lan_account_sharing(api
             assert response.status == 200
             assert (await response.json())["playback_requested"] is True
         api._play_tidal_track.assert_awaited_once_with("42")
+        assert api.tidal_playback.calls == [("42", "HIGH")]
+        assert [name for name, _ in api.mpv.calls].count("load") == 1
+        assert api.state.status == "play"
 
 
 @pytest.mark.asyncio

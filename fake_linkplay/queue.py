@@ -92,6 +92,10 @@ class PlaybackQueue:
     stream_type: str = ""
     content_type: str = ""
 
+    # A legacy prepared page remains bound until its first selected resolution.
+    # Runtime-only provenance, never parsed from or emitted into queue XML.
+    _tidal_prepared_page: object | None = field(default=None, init=False, repr=False, compare=False)
+
     # Controller-local history; never parsed from or included in queue XML.
     _shuffle: ShuffleTraversal | None = field(default=None, init=False, repr=False, compare=False)
 
