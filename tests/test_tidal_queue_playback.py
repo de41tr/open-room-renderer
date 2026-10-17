@@ -14,7 +14,8 @@ from fake_linkplay.mpv_backend import BackendError
 from fake_linkplay.tidal_account import TidalDeviceAccountBridge
 from fake_linkplay.tidal_session import TidalSession, TidalSessionStore
 from fake_linkplay.upnp_description import avtransport_response_fields
-from fake_linkplay.queue import parse_queue_context, serialize_queue_context
+from fake_linkplay.queue import (PlaybackQueue, QueueItem, parse_didl_metadata,
+                                 parse_queue_context, serialize_queue_context)
 from fake_linkplay.state import PlaybackPhase
 from fake_linkplay.tidal_playback import TidalPlaybackError
 from test_playback_generations import StatefulBackend
@@ -187,6 +188,44 @@ async def test_tidal_artwork_reaches_existing_ui_and_clears_for_coverless_select
     assert api.state.queue.current.artwork == api.state.album_art_uri == ""
     assert api.web_api.snapshot()["media"]["artwork"] is None
     assert COVER_URL not in avtransport_response_fields("GetPositionInfo", api.state)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tidal", [True, False], ids=["tidal-reference", "ordinary-url"])
+async def test_imported_metadata_follows_selected_provider_authority(queue_api, tmp_path, tidal):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    resolver.artwork_by_track["42"] = COVER_URL
+    url = "https://api.tidal.com/v1/tracks/42" if tidal else "https://media.example.test/saved.flac"
+    saved = ("Saved title", "Saved artist", "Saved album", "https://images.example.test/saved.jpg")
+    metadata = api._didl_metadata(url, saved[0], "Local", saved[3], False,
+                                  artist=saved[1], album=saved[2])
+    queue = PlaybackQueue(name="Imported list", source="Local", index=1,
+                          items=[QueueItem(url=url, metadata=metadata, title=saved[0],
+                                           artist=saved[1], album=saved[2], artwork=saved[3])])
+    assert (await create_explicit(api, serialize_queue_context(queue))).status == 200
+    assert api.state.queue.current.metadata == metadata
+    assert resolver.calls == []
+    response = await api.soap(request("PlayQueueWithIndex",
+        "<QueueName>Imported list</QueueName><Index>1</Index>", service="PlayQueue"))
+    assert response.status == 200
+
+    expected = ("Synthetic track 42", "Synthetic artist 42", "Synthetic album 42", COVER_URL) if tidal else saved
+    web = api.web_api.snapshot()["media"]
+    status = api.state.as_meta_info()
+    assert tuple(web[key] for key in ("title", "artist", "album", "artwork")) == expected
+    assert tuple(status[key] for key in ("title", "artist", "album", "albumArtURI")) == expected
+    position = ET.fromstring("<Root>" + avtransport_response_fields("GetPositionInfo", api.state) + "</Root>")
+    didl = position.findtext("TrackMetaData")
+    fields = parse_didl_metadata(didl)
+    assert (fields.title, fields.artist, fields.album, fields.artwork) == expected
+    if tidal:
+        assert resolver.calls == [("42", "LOSSLESS")]
+        assert api.state.queue.current.metadata == ""
+        assert "Saved title" not in didl and "SYNTHETIC_SIGNED" not in didl
+    else:
+        assert resolver.calls == []
+        assert api.state.queue.current.metadata == didl == metadata
 
 
 def assert_public_selection(api, index, track_id):

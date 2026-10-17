@@ -3571,6 +3571,9 @@ class HttpApi:
                 selected.artwork = candidate.artwork
                 selected.duration, selected.content_type = candidate.duration, candidate.content_type
                 selected.title_is_fallback = False
+                # Discard imported DIDL after provider resolution so UPnP
+                # metadata is rebuilt alongside the other current projections.
+                selected.metadata = ""
                 self._activate_queue_item()
                 return candidate.stream_url
             except TidalPlaybackError as exc:
