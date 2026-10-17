@@ -67,10 +67,13 @@ def page_track_ids(value: dict, request: TidalPageRequest) -> tuple[str, ...]:
     if (type(offset) is not int or offset != request.offset
             or type(limit) is not int or limit != request.limit
             or type(total) is not int or not offset <= total <= MAX_PAGE_TOTAL
-            or type(items) is not list or len(items) != min(limit, total - offset)):
+            or type(items) is not list or len(items) > min(limit, total - offset)
+            or not items and total > offset):
         raise TidalPlaybackError("invalid_page_response")
     if not items:
         raise TidalPlaybackError("unsupported_page")
+    # A page may be short before the reported end. Preserve its actual slots;
+    # neither fill gaps nor fetch another page to satisfy the requested limit.
     result = []
     for entry in items:
         if type(entry) is not dict:

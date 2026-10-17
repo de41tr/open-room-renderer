@@ -152,6 +152,21 @@ async def test_short_terminal_page_does_not_claim_total_or_request_more(harness)
     assert not hasattr(result, "total")
 
 
+@pytest.mark.asyncio
+async def test_short_nonterminal_favorites_page_preserves_slots_without_fetching_more(harness):
+    store, responses, requests, *_ = harness
+    ids = (*range(100, 147), 100)  # 48 returned slots, including a repeated track.
+    body = favorites_page(ids=ids, total=80)
+    body.update(offset=0, limit=50)
+    responses[:] = [Response(body)]
+    url = FAVORITES + "?offset=0&limit=50&countryCode=DE&order=DATE&orderDirection=DESC"
+    result = await playback.TidalPlaybackResolver(store).resolve_page(url)
+    assert result.track_ids == tuple(str(value) for value in ids)
+    assert result.catalogue_url == url and len(requests) == 1
+    assert requests[0][2]["params"] == {"offset": "0", "limit": "50", "countryCode": "DE",
+                                         "order": "DATE", "orderDirection": "DESC"}
+
+
 @pytest.mark.parametrize("url", [
     "http://api.tidal.com/v1/albums/123/tracks", ALBUM + "/", ALBUM + "/playbackinfopostpaywall",
     "https://api.tidal.com/v1/albums/0/tracks", "https://api.tidal.com/v1/albums/01/tracks",
@@ -185,7 +200,7 @@ def test_missing_paging_parameters_have_bounded_single_page_defaults():
     ("limit", True), ("limit", 4), ("limit", "3"),
     ("totalNumberOfItems", False), ("totalNumberOfItems", 19),
     ("totalNumberOfItems", 1_000_000_001), ("totalNumberOfItems", "80"),
-    ("items", []), ("items", {}), ("items", [{"id": 42, "allowStreaming": True}]),
+    ("items", []), ("items", {}), ("items", [{"id": 42, "allowStreaming": True}] * 4),
 ])
 @pytest.mark.asyncio
 async def test_inconsistent_provider_page_is_rejected_without_retry(harness, field, value):
