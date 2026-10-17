@@ -21,7 +21,7 @@
     const sessions = {
       missing: "No TIDAL session is stored on this renderer.",
       stored: "An unexpired TIDAL device session is stored locally. Current provider access, playback and app adoption remain unverified.",
-      expired: "The stored TIDAL session has expired. An explicit track test can attempt one session refresh before requesting playback. You can also use Refresh the saved session before sharing.",
+      expired: "The saved access token has expired. A renewable device session is renewed automatically when an app requests the account or playback starts.",
       unsupported: "The stored TIDAL record is incomplete or has unsupported login provenance. Review the local session setup; a new login will not replace it.",
       unavailable: "Private TIDAL session storage could not be read safely. Check the local storage setup before another attempt."
     };
@@ -29,21 +29,22 @@
     byId("status").textContent = sessions[value.session_status] || "Local TIDAL session status is not yet confirmed.";
     if (errors[value.error] || states[value.state]) byId("status").textContent += ` ${errors[value.error] || states[value.state]}`;
     if (notice) byId("status").textContent += ` ${notice}`;
-    const stored = value.session_status === "stored", refreshable = stored || value.session_status === "expired";
+    const shareable = value.account_sharing_available === true, refreshable = value.session_status === "stored" || value.session_status === "expired";
     if (typeof value.account_sharing_remembered === "boolean") {
       if (value.account_sharing_remembered || sharingRemembered) byId("remember-sharing").checked = value.account_sharing_remembered;
       sharingRemembered = value.account_sharing_remembered;
     }
-    byId("remember-sharing").disabled = busy || pending || !csrf || !stored || sharingRemembered;
+    byId("remember-sharing").disabled = busy || pending || !csrf || !shareable || sharingRemembered;
     byId("start").disabled = busy || pending || value.retry_after > 0 || !csrf || !byId("consent").checked || value.session_status !== "missing" || value.state === "closed";
     byId("cancel").disabled = busy || !pending || !csrf;
-    byId("share").disabled = busy || pending || !csrf || !stored || sharingRemembered || (value.account_shared === true && !byId("remember-sharing").checked);
+    byId("share").disabled = busy || pending || !csrf || !shareable || sharingRemembered || (value.account_sharing_requested === true && !byId("remember-sharing").checked);
     byId("play").disabled = busy || pending || !csrf || !refreshable;
     byId("refresh-session").disabled = busy || pending || !csrf || !refreshable;
     byId("disconnect").disabled = busy || pending || !csrf || !byId("forget-consent").checked || !["stored", "expired", "unsupported", "unavailable"].includes(value.session_status);
     byId("unshare").disabled = busy || !csrf;
     if (value.account_sharing_remembered === true) byId("status").textContent += value.account_shared === true ? " Account sharing with trusted LAN controllers is enabled and remembered across restarts." : " Account sharing is remembered across restarts but currently suspended. Stop account sharing removes the saved decision.";
     else if (value.account_shared === true) byId("status").textContent += " Account sharing with trusted LAN controllers is enabled until the renderer restarts.";
+    else if (value.account_sharing_requested === true) byId("status").textContent += " Account sharing is enabled until restart but currently suspended. Stop account sharing removes this decision.";
     byId("challenge").hidden = true;
     byId("verify").removeAttribute("href"); byId("code").textContent = "";
     if (value.state === "pending" && typeof value.verification_uri === "string" && typeof value.user_code === "string") {
@@ -108,7 +109,7 @@
         disconnect_storage_unavailable: "Local session removal was not confirmed. Storage may be busy or unsafe. Check status and local storage; no automatic retry was sent.",
         disconnect_unavailable: "Local session recovery is unavailable for this renderer's account configuration."
       };
-      notice = action === "disconnect" ? disconnectErrors[error.code] || "Local session removal was not confirmed. Check status before trying again; no automatic retry was sent." : action === "share" ? "Sharing was not confirmed. An unexpired device session and an idle login worker are required." : action === "play" ? "Playback request was not confirmed. Check renderer status; no automatic retry was sent." : action === "refresh" ? "Refresh outcome is unconfirmed; the provider may have rotated credentials. Inspect the local session before another explicit attempt. No automatic retry was sent." : "Action outcome unconfirmed. Check status; no automatic retry was sent.";
+      notice = action === "disconnect" ? disconnectErrors[error.code] || "Local session removal was not confirmed. Check status before trying again; no automatic retry was sent." : action === "share" ? "Sharing was not confirmed. A current or safely renewable device session and idle session storage are required." : action === "play" ? "Playback request was not confirmed. Check renderer status; no automatic retry was sent." : action === "refresh" ? "Refresh outcome is unconfirmed; the provider may have rotated credentials. Inspect the local session before another explicit attempt. No automatic retry was sent." : "Action outcome unconfirmed. Check status; no automatic retry was sent.";
       if (error.status === 403) {
         csrf = null; reloadRequired = true;
         notice = "Renderer controls were rejected. Reload this page before trying again. No action was retried.";

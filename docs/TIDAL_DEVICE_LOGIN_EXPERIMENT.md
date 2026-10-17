@@ -76,7 +76,10 @@ renderer restarts for this saved account**, then click **Share account with
 trusted LAN apps** once. This also upgrades an already-active temporary share.
 Without Remember, sharing ends at process restart. Installing an update or
 checking the box alone does not enable sharing; confirm the resulting status.
-Enabling requires an unexpired complete device session and idle session storage.
+Enabling requires a complete device session that is current or safely renewable,
+and idle session storage. An expired renewable record can receive explicit Share
+and Remember consent without contacting TIDAL; credentials are exported only
+after successful on-demand renewal.
 
 The saved record carries the actual device-flow client ID and the pinned
 `tidalapi-device-v0.8.11` provenance. Older records without this provenance
@@ -84,7 +87,8 @@ cannot be shared as library-device sessions. Token expiry suspends projection;
 a verified same-account refresh can renew that prior decision. Remembered
 consent is bound to the exact saved record; an arbitrary replacement or another
 account does not inherit it. Restart restores matching consent locally without
-login or provider requests. An expired remembered session remains suspended.
+login or provider requests. An expired remembered session remains suspended
+until the next account or playback request renews it successfully.
 
 **Stop account sharing** removes both temporary and remembered consent,
 including a suspended decision, so a successful stop stays disabled after
@@ -97,15 +101,18 @@ The adoption-only response includes the encoded actual client ID but omits
 `redirectURI`: no registered callback for this device client is established.
 Static APK review shows the authenticated account path validates with Bearer
 `/v1/sessions`; its local redirect fallback is not proof of a network callback.
-Native app OAuth re-login is unsupported. Version-2 GetUserInfo may renew a
-recognizably expired session only while the exact stored record still has a
-previous explicit LAN-sharing decision. It uses the same refresh owner and
-durable retry guard as playback, with a 10-second total refresh deadline. This
-is an ORR policy, not an observed native-app timeout. Fresh sessions, missing
-sharing, unsupported versions and ordinary status polling do not trigger refresh.
-An Unshare request does not wait for provider refresh. Consent, current storage and
-fresh expiry are checked again before any account response. No TIDAL capability
-is advertised. Successful
+Native app OAuth re-login is unsupported. Version-2 GetUserInfo renews a known
+expired or near-expiry session on demand only while the exact stored record
+still has an explicit LAN-sharing decision. The account freshness window is
+300 seconds, matching the inspected desktop's refresh threshold. It uses the
+same refresh owner and durable retry guard as playback, with a 10-second total
+refresh deadline; that deadline is an ORR policy, not a native-app guarantee.
+Concurrent account reads wait for the existing attempt instead of exporting
+the old token or starting another exchange. Missing sharing, unsupported
+versions and ordinary status polling do not trigger refresh.
+An Unshare request does not wait for provider refresh. Consent, current storage,
+expiry and rejected/uncertain outcomes are checked again before any account
+response. The conditional discovery entry is described below. Successful
 SOAP tests are synthetic interoperability checks, not Android, catalogue,
 full-playback or XU4 acceptance.
 
@@ -174,7 +181,7 @@ retained, and unselected neighbors remain unresolved. Signed URLs and supplied
 metadata do not enter public queue/status data. Header-only or multi-track append,
 other append modes, stale indices and non-TIDAL/unowned queues are rejected before
 provider work or playback changes. This is a bounded search operation, not general
-queue-extension support; root capabilities and radio behavior are unchanged.
+queue-extension support; existing root capability version and radio behavior are unchanged.
 
 ### Native-app static contract observation
 
@@ -188,15 +195,35 @@ version controls the `c22.m0`/`y` CreateQueue success path: below 1.2 it sends
 PlayQueueWithIndex, at least 1.2 it does not. ReplaceQueue uses a different
 callback without that branch. Another CreateQueue callback (`l0`/`b0`) always
 sends the play-index follow-up, so the version-dependent observation is specific
-to the inspected play-media route. Capabilities remain unchanged; no filtering,
+to the inspected play-media route. The root capability version remains unchanged; no filtering,
 autoplay or ReplayGain support is advertised. This is static protocol evidence,
 not verification with the unchanged real app.
 
+Desktop 0.2.10.5 has a separate discovery prerequisite: its initialized
+service registry must contain the exact `Tidal` service ID before it requests
+`GetUserInfo`. The runtime advertises that entry only while the same explicitly
+shared device session and its playback resolver are available. Unshared,
+missing, mismatched, expired-without-renewal, or blocked sessions do not gain a
+service merely from a configuration flag. The entry retains source version
+`1.0`, with account configuration/removal disabled; this does not enable
+native-app login, TIDAL Connect, or unsupported quality modes. All HTTP and SOAP
+capability/status surfaces use the same live availability view. Reads never
+contact the provider. The desktop caches its service registry during device
+initialization; already-initialized clients may need device rediscovery before
+seeing a newly available service. No automatic client cache refresh is claimed.
+A loopback integration test exercises the real HTTP/SOAP handlers with synthetic
+credentials; it is not an acceptance test of the original desktop app.
+The native `Tidal` provider ID is reserved (case-insensitively) in the
+experimental stream-service list, so a configured URL cannot bypass this gate
+or duplicate the entry. Configured local sources and presets keep their URL
+paths; unrelated experimental service IDs are unchanged.
+
 The small provider adapter uses the saved device access token for bounded,
 fixed-origin TIDAL v1 metadata and `playbackinfopostpaywall` requests. It does
-not invoke the library's recursive refresh wrapper. A recognized expiry can
-trigger one bounded refresh under the same exclusive owner before the requested
-track or page GET. An unknown expiry or HTTP 401 fails without refresh/retry.
+not invoke the library's recursive refresh wrapper. A known expiry within
+30 seconds can trigger one bounded refresh under the same exclusive owner
+before the requested track or page GET. An unknown expiry or HTTP 401 fails
+without refresh/retry.
 No timer, startup or status read contacts the provider. LOW/HIGH/LOSSLESS
 are supported requests, AUTO requests HIGH, and HI_RES is rejected.
 
@@ -237,9 +264,16 @@ tracks request **LOSSLESS**. Missing account/runtime/proxy or failed resolution
 fails playback instead of loading the catalogue endpoint as audio. Existing
 provider queues retain their own quality and sharing requirements.
 
-## Explicit same-account session refresh
+## On-demand and explicit same-account session refresh
 
-**Refresh the saved session** performs one bounded renewal using the regular
+Normal account adoption and protected playback/catalogue requests renew a known
+expired or near-expiry session when needed. They do not require a manual Refresh
+click. Discovery and local status reads stay network-free; there is no periodic
+provider refresh. A newly committed short-lived token uses a smaller freshness
+window, capped at 10% of its issued lifetime, so repeated reads do not repeatedly
+rotate the same grant.
+
+The optional **Refresh the saved session** button performs one bounded renewal using the regular
 pinned library's device-client configuration. It does not start a login or
 playback. The private session directory remains exclusively leased across the
 exchange and the returned access token's `/v1/sessions` identity verification.
@@ -259,7 +293,7 @@ there is no automatic retry, implicit re-login or background recovery. A
 filesystem failure after replacement may also mean the provider or local
 session changed despite the error. Recovery needs an explicit local action;
 an existing marked grant is never retried. Ordinary status polling never
-contacts the provider. On-demand playback refresh uses this same owner, deadline,
+contacts the provider. On-demand account and playback refresh use this same owner, deadline,
 identity verification and synchronous consent callback. A successful Unshare
 during refresh cannot be undone by the late refresh callback; expiry does not
 turn a suspended opt-in into shared access.
@@ -269,7 +303,10 @@ fingerprint of the full session and the uncertain outcome. Cancellation, lost
 responses and process restart cannot automatically repeat that grant. Confirmed
 OAuth invalid_grant is retained as rejected and requires a new login; other
 uncertain attempts remain blocked. Both automatic and manual refresh refuse the
-same marked record. A durable successful rotation clears the marker.
+same marked record, even if the old access token has not expired. Account export,
+provider reads and new playback candidates also refuse it after the attempt
+finishes. The exact owner's in-flight attempt remains discoverable while account
+readers wait. A durable successful rotation clears the marker.
 
 ### Explicit local session recovery
 

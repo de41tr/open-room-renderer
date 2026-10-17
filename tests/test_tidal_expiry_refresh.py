@@ -214,3 +214,20 @@ async def test_unsafe_refresh_marker_blocks_before_post(tmp_path, unsafe):
                                               request_json=request).refresh()
     assert result["error"] == "storage_unavailable" and not calls
     assert store.load() == SESSION and other.read_bytes() == b"synthetic-private-other"
+
+
+@pytest.mark.asyncio
+async def test_near_expiry_refreshes_before_a_two_request_track_read(harness, monkeypatch):
+    store, provider_responses, provider_calls, *_ = harness
+    clock = [1999.0]
+    monkeypatch.setattr(playback.time, "time", lambda: clock[0])
+    # Metadata arriving after the original expiry must not strand the playback
+    # request or require a second click. Renewal precedes either provider GET.
+    provider_responses[0].on_enter = lambda: clock.__setitem__(0, 2001.0)
+    request, refresh_calls = responses(TOKEN, IDENTITY)
+    owner = TidalSessionRefreshManager(store, config_factory=config, request_json=request)
+    candidate = await playback.TidalPlaybackResolver(store, refresh_manager=owner).resolve_track(TRACK_ID)
+    assert candidate.session_fingerprint == _session_fingerprint(store.load())
+    assert len(refresh_calls) == 2 and len(provider_calls) == 2
+    assert all(call[2]["headers"]["Authorization"] == "Bearer " + TOKEN["access_token"]
+               for call in provider_calls)

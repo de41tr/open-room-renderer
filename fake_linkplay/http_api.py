@@ -37,7 +37,7 @@ from aiohttp import web
 from . import eq_presets
 from . import diagnostics as diagnostic
 from .eq_presets import DEFAULT_EQ_BAND_FREQS, DEFAULT_EQ_PLUGIN, EqPresetLibrary
-from .capabilities import capability_fields, configured_sources, service_capability
+from .capabilities import configured_sources
 from .eventing import EventSubscriber, EventSubscriptionManager
 from .favorites import FavoriteError, FavoritesApi, FavoritesStore
 from .queue_playlist import QueuePlaylistApi
@@ -205,7 +205,7 @@ class HttpApi:
         """Create an API handler bound to config, renderer state, and mpv."""
 
         self.cfg = cfg
-        self.tidal_account = tidal_account  # Explicit opt-in; no service advertisement.
+        self.tidal_account = tidal_account  # Only explicit device sharing enables discovery.
         self.tidal_login = tidal_login
         self.tidal_playback = tidal_playback
         self.tidal_refresh = tidal_refresh
@@ -230,6 +230,7 @@ class HttpApi:
         # None reuses the main IPv4 listener; zero means optional setup failed.
         self.catalog_proxy_port: int | None = None
         self.state = state
+        self.state.tidal_service_available = lambda: self._tidal_service_available()
         try:
             self.diagnostics = diagnostic.Diagnostics(cfg.state_dir, lambda: self.state)
         except Exception:
@@ -2912,7 +2913,7 @@ class HttpApi:
         """Add configured source/service experiment fields to a status payload."""
 
         payload = dict(payload)
-        payload.update(capability_fields(self.cfg))
+        payload.update(self.state.effective_capability_fields())
         variant = self.cfg.source_experiment_variant
         sources = self._enabled_experimental_sources()
         if variant == "tunein":
@@ -2955,10 +2956,22 @@ class HttpApi:
     def _stream_services_capability(self) -> dict[str, object]:
         """Build the StreamServicesCapability response advertised to clients."""
 
-        return service_capability(self.cfg)
+        return self.state.effective_capability_fields()["streamServicesCapability"]
 
     def _tunein_capability_fields(self) -> dict[str, object]:
-        return capability_fields(self.cfg)
+        return self.state.effective_capability_fields()
+
+    def _tidal_service_available(self) -> bool:
+        """Discovery of usable shared playback, never a new login capability."""
+        from .tidal_playback import TidalPlaybackResolver
+
+        account, playback = self.tidal_account, self.tidal_playback
+        return bool(isinstance(account, TidalDeviceAccountBridge)
+                    and isinstance(playback, TidalPlaybackResolver)
+                    and playback._store is account._store
+                    and playback._refresh is account._refresh
+                    and self.catalog_proxy_port != 0
+                    and account.adoption_available and playback.session_available())
 
     def _require_catalog_proxy(self, url: str) -> None:
         """Reject known unavailable catalog playback before changing ownership."""

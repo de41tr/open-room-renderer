@@ -61,10 +61,16 @@ class RendererState:
     totlen: int = 0
     queue: PlaybackQueue = field(default_factory=PlaybackQueue)
     preset_view: Callable[[], list[dict[str, object]]] | None = field(default=None, repr=False, compare=False)
+    tidal_service_available: Callable[[], bool] | None = field(default=None, repr=False, compare=False)
 
     def effective_presets(self) -> list[dict[str, object]]:
         """Use the service-owned library view, with a config-only standalone fallback."""
         return self.preset_view() if self.preset_view is not None else configured_presets(self.cfg)
+
+    def effective_capability_fields(self) -> dict[str, object]:
+        """Read live service readiness without caching account or token data."""
+        available = self.tidal_service_available
+        return capability_fields(self.cfg, tidal_available=bool(available and available()))
 
     @property
     def loop(self) -> str:
@@ -255,7 +261,7 @@ class RendererState:
             "plm_support": self.cfg.legacy_plm_support_value,
             "cap1": "0",
         }
-        common.update(capability_fields(self.cfg))
+        common.update(self.effective_capability_fields())
         return common
 
     def as_player_status(self) -> dict[str, Any]:

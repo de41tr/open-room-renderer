@@ -276,6 +276,8 @@ async def test_restarted_session_status_is_local_sanitized_and_keeps_sharing_exp
                 assert response.status == 200
                 assert await response.json() == {"state": "idle", "active": False,
                                                 "session_status": expected, "account_shared": False,
+                                                "account_sharing_requested": False,
+                                                "account_sharing_available": expected == "stored",
                                                 "account_sharing_remembered": False}
         assert not api.mpv.calls
 
@@ -285,11 +287,13 @@ async def test_session_status_does_not_export_arbitrary_manager_values(api):
     class InvalidStatus(Manager):
         async def status(self):
             return {"state": "idle", "active": False, "session_status": "SYNTHETIC_SECRET",
-                    "account_shared": "SYNTHETIC_SECRET", "account_sharing_remembered": "SYNTHETIC_SECRET"}
+                    "account_shared": "SYNTHETIC_SECRET", "account_sharing_remembered": "SYNTHETIC_SECRET",
+                    "account_sharing_requested": "SYNTHETIC_SECRET", "account_sharing_available": "SYNTHETIC_SECRET"}
     api.tidal_login = InvalidStatus()
     async with serving(api) as (session, base):
         async with session.get(base + "/orr/v1/tidal/status") as response:
             assert await response.json() == {"state": "idle", "active": False, "account_shared": False,
+                                            "account_sharing_requested": False, "account_sharing_available": False,
                                             "account_sharing_remembered": False}
 
 
@@ -333,7 +337,8 @@ async def test_confirmed_forget_recovers_marked_session_without_retry_or_automat
         headers = {"Origin": base, "X-ORR-CSRF": (await state(session, base))["csrf_token"]}
         async with session.post(base + "/orr/v1/tidal/cancel", json={"cancel": True}, headers=headers) as response:
             assert response.status == 200
-        assert store.load() == saved and api.tidal_account.shared
+        assert store.load() == saved and api.tidal_account.sharing_requested
+        assert not api.tidal_account.shared  # A terminal rotation marker suspends export, even before expiry.
         async with session.post(base + "/orr/v1/tidal/disconnect", json={"confirm_forget_local_session": True}, headers=headers) as response:
             assert response.status == 200
             result = await response.json()
@@ -525,3 +530,39 @@ async def test_forget_refuses_awakened_lock_waiter_even_when_lock_reports_unlock
     # No cancelled acquire or timeout leaks; a fresh explicit call succeeds.
     assert (await api._disconnect_tidal_session())["session_forgotten"]
     assert store.load() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked", [None, "uncertain", "rejected", "no_owner"])
+async def test_expired_share_remembers_only_renewable_exact_record_without_provider_request(api, tmp_path, blocked):
+    from dataclasses import replace
+    from fake_linkplay.tidal_account import TidalDeviceAccountBridge
+    from fake_linkplay.tidal_refresh import TidalSessionRefreshManager
+    store, saved, fake = recovery_account(api, tmp_path)
+    expired = replace(saved, expires_at=1)
+    store.save(expired)
+    owner = TidalSessionRefreshManager(store, on_committed=api.tidal_account._session_refreshed,
+                                       config_factory=lambda: pytest.fail("Share must remain offline"))
+    if blocked != "no_owner":
+        api.tidal_account._bind_refresh_owner(owner)
+    if blocked in {"uncertain", "rejected"}:
+        with store.lease() as lease:
+            lease.mark_refresh_attempt(expired, rejected=blocked == "rejected")
+    before = (store.directory / "session.json").read_bytes()
+    async with serving(api) as (session, base):
+        headers = {"Origin": base, "X-ORR-CSRF": (await state(session, base))["csrf_token"]}
+        async with session.get(base + "/orr/v1/tidal/status") as response:
+            value = await response.json()
+            assert value["session_status"] == "expired"
+            assert value["account_sharing_available"] is (blocked is None)
+            assert not value["account_sharing_requested"] and not value["account_shared"]
+        consent = {"confirm_lan_account_sharing": True, "remember_account_sharing": True}
+        async with session.post(base + "/orr/v1/tidal/share", json=consent, headers=headers) as response:
+            assert response.status == (200 if blocked is None else 409)
+            if blocked is None:
+                value = await response.json()
+                assert value["account_sharing_requested"] and value["account_sharing_remembered"]
+                assert not value["account_shared"]  # No expired access token is exportable.
+        assert TidalDeviceAccountBridge(store).sharing_requested is (blocked is None)
+        assert (store.directory / "session.json").read_bytes() == before
+        assert not fake.calls and not api.mpv.calls

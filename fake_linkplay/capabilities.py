@@ -193,10 +193,15 @@ def configured_presets(cfg: Config) -> list[dict[str, object]]:
     return valid
 
 
-def service_capability(cfg: Config | None) -> dict[str, object]:
+def service_capability(cfg: Config | None, *, tidal_available: bool = False) -> dict[str, object]:
     services: list[dict[str, object]] = []
     if cfg is None:
         return stream_services_capability(cfg, services, "1.0")
+    if tidal_available:
+        # Existing locally shared account and playback only. This does not
+        # advertise native-app login, account management or TIDAL Connect.
+        services.append({"id": "Tidal", "version": "1.0", "active": True,
+                         "configurable": False, "removable": False})
     if cfg.source_experiment_variant == "tunein":
         services.append(new_tunein_stream_service(cfg, modern=cfg.enable_plex_service))
     if cfg.enable_plex_service:
@@ -204,6 +209,10 @@ def service_capability(cfg: Config | None) -> dict[str, object]:
     add_stream_service_sentinels(cfg, services)
     if cfg.source_experiment_variant in {"new_source", "music_service", "all"}:
         for source in configured_sources(cfg):
+            # Reserve the native provider ID for the real account/playback
+            # gate. Keep configured local source and preset paths unchanged.
+            if str(source["id"]).casefold() == "tidal":
+                continue
             services.append({"id": source["id"], "version": "1.0",
                 "active": str(source["id"]).casefold() != "plex",
                 "configurable": False, "removable": False, "name": source["name"],
@@ -211,8 +220,8 @@ def service_capability(cfg: Config | None) -> dict[str, object]:
     return stream_services_capability(cfg, services, "1.4" if cfg.enable_plex_service else "1.0")
 
 
-def capability_fields(cfg: Config) -> dict[str, object]:
-    capability = service_capability(cfg)
+def capability_fields(cfg: Config, *, tidal_available: bool = False) -> dict[str, object]:
+    capability = service_capability(cfg, tidal_available=tidal_available)
     services = capability["streamServices"]
     active = [item for item in services if item.get("active")]
     supported = [str(item["id"]) for item in active]
