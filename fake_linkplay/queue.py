@@ -28,9 +28,15 @@ UPNP_NS = "urn:schemas-upnp-org:metadata-1-0/upnp/"
 class QueueError(ValueError):
     """Invalid queue data, queue name, or one-based queue position."""
 
-    def __init__(self, *args: object, reason: QueueRejectionReason = QueueRejectionReason.UNKNOWN) -> None:
+    def __init__(self, *args: object, reason: QueueRejectionReason = QueueRejectionReason.UNKNOWN,
+                 index_detail: QueueRejectionReason | None = None) -> None:
         super().__init__(*args)
         self.reason = reason
+        self.index_detail = (index_detail if reason is QueueRejectionReason.INDEX
+            and isinstance(index_detail, QueueRejectionReason) and index_detail in {
+                QueueRejectionReason.INDEX_FORMAT, QueueRejectionReason.INDEX_CONFLICT,
+                QueueRejectionReason.INDEX_ZERO, QueueRejectionReason.INDEX_RANGE,
+                QueueRejectionReason.INDEX_EMPTY} else None)
 
 
 @dataclass
@@ -205,14 +211,18 @@ def _text(parent: ET.Element | None, name: str) -> str | None:
 def _integer(value: str, name: str, reason: QueueRejectionReason = QueueRejectionReason.STRUCTURE) -> int:
     value = value.strip()
     if not re.fullmatch(r"[0-9]+", value) or len(value) > 10:
-        raise QueueError(f"Invalid queue {name}", reason=reason)
+        raise QueueError(f"Invalid queue {name}", reason=reason,
+                         index_detail=QueueRejectionReason.INDEX_FORMAT
+                         if reason is QueueRejectionReason.INDEX else None)
     return int(value)
 
 
 def _matching_integer(values: list[str | None], name: str, reason: QueueRejectionReason) -> int | None:
     parsed = [_integer(value, name, reason) for value in values if value is not None]
     if parsed and any(value != parsed[0] for value in parsed):
-        raise QueueError(f"Conflicting queue {name} values", reason=reason)
+        raise QueueError(f"Conflicting queue {name} values", reason=reason,
+                         index_detail=QueueRejectionReason.INDEX_CONFLICT
+                         if reason is QueueRejectionReason.INDEX else None)
     return parsed[0] if parsed else None
 
 
@@ -418,9 +428,12 @@ def parse_queue_context(
         requested_index = 1 if expected_count else 0
     if expected_count:
         if not 1 <= requested_index <= expected_count:
-            raise QueueError("Queue index must be between 1 and track count", reason=QueueRejectionReason.INDEX)
+            raise QueueError("Queue index must be between 1 and track count", reason=QueueRejectionReason.INDEX,
+                             index_detail=QueueRejectionReason.INDEX_ZERO if requested_index == 0
+                             else QueueRejectionReason.INDEX_RANGE)
     elif requested_index != 0:
-        raise QueueError("Empty queue index must be 0", reason=QueueRejectionReason.INDEX)
+        raise QueueError("Empty queue index must be 0", reason=QueueRejectionReason.INDEX,
+                         index_detail=QueueRejectionReason.INDEX_EMPTY)
     queue = PlaybackQueue(
         name=queue_name,
         list_name=list_name,

@@ -5474,6 +5474,16 @@ class HttpApi:
             try:
                 queue = parse_queue_context(context, name=self._xml_text(body, "QueueName") or None)
             except QueueError as exc:
+                # Preserve wire faults and guards; expose only the authored guard
+                # category, never index/count values or exception/request text.
+                if exc.index_detail is not None:
+                    try:
+                        trace = diagnostic.CURRENT.get()
+                        if trace is not None:
+                            trace.soap_code = 402
+                            trace.event("command", "rejected", exc.index_detail, http_code=500)
+                    except Exception:
+                        pass  # Diagnostic failure must not alter the rejection.
                 raise SoapFault(402, "Invalid Args", queue_rejection=exc.reason) from None
             if queue.items or not (queue.source or queue.stream_id or queue.search_url):
                 await self._replace_queue(queue)

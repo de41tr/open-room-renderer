@@ -10,6 +10,12 @@ class QueueRejectionReason(Enum):
     STRUCTURE = "queue-structure"
     COUNT = "queue-count"
     INDEX = "queue-index"
+    # Supplemental source events only; the existing HTTP rejection stays INDEX.
+    INDEX_FORMAT = "queue-index-format"
+    INDEX_CONFLICT = "queue-index-conflict"
+    INDEX_ZERO = "queue-index-zero"
+    INDEX_RANGE = "queue-index-range"
+    INDEX_EMPTY = "queue-index-empty"
     TRACK_URL = "queue-track-url"
     LOOP = "queue-loop"
     DURATION = "queue-duration"
