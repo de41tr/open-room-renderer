@@ -397,6 +397,19 @@ def test_unsafe_artwork_is_absent(value):
     assert safe_artwork(value) is None
 
 
+def test_tunein_station_artwork_drops_only_numeric_cache_version():
+    for scheme, version in (("http", "1"), ("https", "123456789012345678")):
+        image = f"{scheme}://cdn-profiles.tunein.com/s12345/images/logog.png"
+        assert safe_artwork(f"{image}?t={version}") == image
+
+
+def test_tunein_station_artwork_keeps_private_and_ambiguous_queries_hidden():
+    image = "https://cdn-profiles.tunein.com/s12345/images/logog.png"
+    for suffix in ("?token=SECRET", "?t=1&token=SECRET", "?t=1&t=2", "?t=PRIVATE", "?t=1#SECRET"):
+        assert safe_artwork(image + suffix) is None
+    assert safe_artwork("https://other.example.test/s12345/images/logog.png?t=1") is None
+
+
 def test_plain_artwork_is_preserved():
     assert safe_artwork("https://art.example.test/cover.png") == "https://art.example.test/cover.png"
 

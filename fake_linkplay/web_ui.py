@@ -290,9 +290,13 @@ def _queue_label(name: str) -> str:
 
 
 def safe_artwork(value: object) -> str | None:
-    """Artwork may be rendered only without userinfo, query or fragment."""
+    """Render query-free artwork; discard only a public TuneIn logo cache version."""
     if not isinstance(value, str) or not value or len(value) > 8192:
         return None
+    # TuneIn app logos carry a numeric cache version, not image authorization.
+    # Canonicalize only that fixed public format; never strip arbitrary queries.
+    if re.fullmatch(r"https?://cdn-profiles\.tunein\.com/[sp][0-9]{1,32}/images/logo[qg]\.png\?t=[0-9]{1,20}", value):
+        value = value.split("?", 1)[0]
     try:
         if re.search(r"%(?![0-9a-fA-F]{2})", value):
             return None
