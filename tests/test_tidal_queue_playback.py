@@ -15,6 +15,7 @@ from fake_linkplay.tidal_account import TidalDeviceAccountBridge
 from fake_linkplay.tidal_session import TidalSession, TidalSessionStore
 from fake_linkplay.upnp_description import avtransport_response_fields
 from fake_linkplay.queue import parse_queue_context, serialize_queue_context
+from fake_linkplay.state import PlaybackPhase
 from fake_linkplay.tidal_playback import TidalPlaybackError
 from test_playback_generations import StatefulBackend
 from test_native_queue_staging import NativeBackend
@@ -437,6 +438,190 @@ async def append_search(api, *, context=None, action="playnext", start=2, direct
         f"<Direction>{direction}</Direction><Play>{play}</Play>", service="PlayQueue"))
 
 
+def deferred_batch_context(ids):
+    root = ET.fromstring(search_append_context())
+    root.find("ListInfo/TrackNumber").text = str(len(ids))
+    tracks = root.find("Tracks")
+    tracks.clear()
+    for number, track_id in enumerate(ids, 1):
+        track = ET.SubElement(tracks, f"Track{number}")
+        ET.SubElement(track, "Source").text = "Tidal"
+        ET.SubElement(track, "Id").text = str(track_id)
+        ET.SubElement(track, "URL").text = "https://api.tidal.com/v1/albums/123/tracks?countryCode=DE&offset=0&limit=50"
+        ET.SubElement(track, "Metadata").text = "CALLER_SECRET"
+    return ET.tostring(root, encoding="unicode")
+
+
+@pytest.mark.asyncio
+async def test_deferred_playlast_batches_preserve_order_duplicates_and_current_audio(queue_api, tmp_path):
+    api = queue_api
+    api.mpv = NativeBackend()
+    resolver = await configured(api, tmp_path)
+    assert (await create_explicit(api)).status == 200
+    await api._play_queue_index(2)
+    api.state.curpos = api.mpv.position = 17
+    queue, current, old_items = api.state.queue, api.state.queue.current, list(api.state.queue.items)
+    state = {key: value for key, value in asdict(api.state).items() if key != "queue"}
+    native = (api.mpv.entry_id, json.dumps(api.mpv.entries), api._admitted_load_generation, api._admitted_load_entry_id)
+    calls, resolutions = list(api.mpv.calls), list(resolver.calls)
+    expected = [item.id for item in old_items]
+    # Each acknowledged menu13 batch starts again at Track1 and StartIndex=0.
+    for ids in [(["43", "42"] * 250), (["45", "43"] * 248 + ["46"])]:
+        assert (await append_search(api, action="playlast", start=0, play=0,
+                                    context=deferred_batch_context(ids))).status == 200
+        expected.extend(ids)
+        assert [item.id for item in queue.items] == expected
+        assert api.state.queue is queue and queue.current is current and queue.index == 2
+        assert all(item is old for item, old in zip(queue.items, old_items))
+        assert {key: value for key, value in asdict(api.state).items() if key != "queue"} == state
+        assert (api.mpv.entry_id, json.dumps(api.mpv.entries), api._admitted_load_generation, api._admitted_load_entry_id) == native
+        assert api.mpv.calls == calls and resolver.calls == resolutions
+    assert queue.count == 1000 and len({id(item) for item in queue.items}) == 1000
+    assert all(item._tidal_candidate is None and item._tidal_stream_url == ""
+               and item.metadata == "" and item._tidal_require_shared for item in queue.items[3:])
+    assert "CALLER_SECRET" not in api.queue_context and "SYNTHETIC_SIGNED" not in api.queue_context
+    context, full_state = api.queue_context, asdict(api.state)
+    assert (await append_search(api, action="playlast", start=0, play=0)).status == 500
+    assert api.state.queue is queue and asdict(api.state) == full_state and api.queue_context == context
+    assert api.mpv.calls == calls and resolver.calls == resolutions
+    await api._play_queue_index(1000)
+    assert queue.current is queue.items[-1] and resolver.calls == resolutions + [("46", "LOSSLESS")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["last_identity", "mixed", "count", "numbering", "batch_limit", "immediate"])
+async def test_invalid_deferred_batch_is_rejected_atomically(queue_api, tmp_path, invalid):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    assert (await create_explicit(api)).status == 200
+    await api._play_queue_index(2)
+    context = deferred_batch_context(["45", "43", "46"])
+    kwargs = {"action": "playlast", "start": 0, "play": 0}
+    if invalid == "last_identity":
+        context = context.replace("<Id>46</Id>", "<Id>0</Id>")
+    elif invalid == "mixed":
+        context = context.replace("<Track3><Source>Tidal", "<Track3><Source>Other")
+    elif invalid == "count":
+        context = context.replace("<TrackNumber>3", "<TrackNumber>2")
+    elif invalid == "numbering":
+        context = context.replace("Track3>", "Track4>")
+    elif invalid == "batch_limit":
+        context = deferred_batch_context(["45"] * 501)
+    else:
+        kwargs = {"action": "playnext", "start": 2, "play": 1}
+    queue, items, state = api.state.queue, list(api.state.queue.items), asdict(api.state)
+    readback, calls, resolutions = api.queue_context, list(api.mpv.calls), list(resolver.calls)
+    assert (await append_search(api, context=context, **kwargs)).status == 500
+    assert api.state.queue is queue and asdict(api.state) == state and api.queue_context == readback
+    assert all(item is old for item, old in zip(queue.items, items))
+    assert api.mpv.calls == calls and resolver.calls == resolutions
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["BrowseQueue", "BrowseQueueEx"])
+async def test_current_queue_browse_alias_requires_private_tidal_items(queue_api, tmp_path, action):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    assert (await create_explicit(api)).status == 200
+    await api._play_queue_index(2)
+    state, calls, resolutions = asdict(api.state), list(api.mpv.calls), list(resolver.calls)
+    response = await api.soap(request(action, "<QueueName>CurrentQueue</QueueName>", service="PlayQueue"))
+    assert response.status == 200
+    context = ET.fromstring(response.text).findtext(".//QueueContext")
+    assert parse_queue_context(context).name == "Explicit tracks"
+    assert "CALLER_SECRET" not in context and "SYNTHETIC_SIGNED" not in context
+    assert asdict(api.state) == state and api.mpv.calls == calls and resolver.calls == resolutions
+    assert (await api.soap(request(action, "<QueueName>UnknownQueue</QueueName>", service="PlayQueue"))).status == 500
+    api.state.queue.current._tidal_track = None
+    assert (await api.soap(request(action, "<QueueName>CurrentQueue</QueueName>", service="PlayQueue"))).status == 500
+    assert api.mpv.calls == calls and resolver.calls == resolutions
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action,start,intent", [("playnext", 2, "play"), ("playlast", 0, "pause"), ("playlast", 0, "stop")])
+async def test_deferred_singleton_edits_preserve_current_audio_and_resolve_only_when_selected(queue_api, tmp_path, action, start, intent):
+    api = queue_api
+    api.mpv = NativeBackend()
+    resolver = await configured(api, tmp_path)
+    assert (await create_explicit(api)).status == 200
+    await api._play_queue_index(2)
+    if intent != "play":
+        await api._transport_command(intent)
+    api.state.curpos = api.mpv.position = 17
+    api.state.stream_title, api.state.audio_codec = "Current title", "flac"
+    queue, current, old_items = api.state.queue, api.state.queue.current, list(api.state.queue.items)
+    state = {key: value for key, value in asdict(api.state).items() if key != "queue"}
+    native = (api.mpv.entry_id, json.dumps(api.mpv.entries), api._admitted_load_generation, api._admitted_load_entry_id)
+    calls, resolutions = list(api.mpv.calls), list(resolver.calls)
+    context = search_append_context("43").replace("<URL/>",
+        "<URL>https://api.tidal.com/v1/albums/123/tracks?countryCode=DE&amp;offset=0&amp;limit=50</URL>")
+    assert (await append_search(api, action=action, start=start, play=0, context=context)).status == 200
+    position = 2 if action == "playnext" else 3
+    assert api.state.queue is queue and queue.current is current and queue.index == 2
+    assert queue.items[:position] == old_items[:position] and queue.items[position + 1:] == old_items[position:]
+    assert all(item is old for item, old in zip(queue.items[:position] + queue.items[position + 1:], old_items))
+    added = queue.items[position]
+    assert added is not current and added._tidal_track == ("43", "LOSSLESS") and added._tidal_require_shared
+    assert added.url == "https://api.tidal.com/v1/tracks/43" and added.metadata == ""
+    assert added._tidal_candidate is None and added._tidal_stream_url == ""
+    assert {key: value for key, value in asdict(api.state).items() if key != "queue"} == state
+    assert (api.mpv.entry_id, json.dumps(api.mpv.entries), api._admitted_load_generation, api._admitted_load_entry_id) == native
+    assert api.mpv.calls == calls and resolver.calls == resolutions
+    assert "CALLER_SECRET" not in api.queue_context and "SYNTHETIC_SIGNED" not in api.queue_context
+    await api._play_queue_index(position + 1)
+    assert queue.current is added and resolver.calls == resolutions + [("43", "LOSSLESS")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+async def test_deferred_edit_rejects_stop_waiting_for_backend_confirmation(queue_api, tmp_path, batch):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    assert (await create_explicit(api)).status == 200
+    await api._play_queue_index(2)
+    await api._backend_lock.acquire()
+    stop = asyncio.create_task(api._transport_command("stop"))
+    try:
+        await asyncio.sleep(0)
+        assert api.state.phase == PlaybackPhase.COMMAND_ACCEPTED and api.state.intent == "stop"
+        queue, state, calls, resolutions = api.state.queue, asdict(api.state), list(api.mpv.calls), list(resolver.calls)
+        kwargs = ({"action": "playlast", "start": 0, "context": deferred_batch_context(["45", "46"])}
+                  if batch else {})
+        assert (await append_search(api, play=0, **kwargs)).status == 500
+        assert api.state.queue is queue and asdict(api.state) == state
+        assert api.mpv.calls == calls and resolver.calls == resolutions
+    finally:
+        api._backend_lock.release()
+        await stop
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["last_index", "last_play", "multiple", "shuffle", "session"])
+async def test_deferred_unsupported_forms_preserve_queue_and_audio(queue_api, tmp_path, invalid):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    assert (await create_explicit(api)).status == 200
+    await api._play_queue_index(2)
+    kwargs = {"play": 0}
+    if invalid == "last_index":
+        kwargs["action"] = "playlast"
+    elif invalid == "last_play":
+        kwargs.update(action="playlast", start=0, play=1)
+    elif invalid == "multiple":
+        kwargs["context"] = search_append_context().replace("<TrackNumber>1", "<TrackNumber>2").replace(
+            "</Track1>", "</Track1><Track2><Source>Tidal</Source><Id>46</Id></Track2>")
+    elif invalid == "shuffle":
+        api.state.queue.loop = 3
+    else:
+        resolver.store.save(replace(resolver.record, access_token="replacement-synthetic-access"))
+        await api.tidal_account.set_shared(True)
+        resolver.session_available = lambda: True
+    queue, state, calls, resolutions = api.state.queue, asdict(api.state), list(api.mpv.calls), list(resolver.calls)
+    assert (await append_search(api, **kwargs)).status == 500
+    assert api.state.queue is queue and asdict(api.state) == state
+    assert api.mpv.calls == calls and resolver.calls == resolutions
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("appended_id", ["45", "43"])
 async def test_search_append_plays_inserted_identity_preserves_old_slots_and_laziness(queue_api, tmp_path, appended_id):
@@ -547,7 +732,7 @@ async def test_unsupported_search_append_fails_before_resolution_or_mutation(que
     await api._play_queue_index(2)
     kwargs = {}
     if invalid in {"action", "direction", "play"}:
-        kwargs[invalid] = {"action": "create", "direction": 0, "play": 0}[invalid]
+        kwargs[invalid] = {"action": "create", "direction": 0, "play": 2}[invalid]
     elif invalid == "stale_index":
         kwargs["start"] = 1
     elif invalid == "header_only":

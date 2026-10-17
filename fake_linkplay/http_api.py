@@ -3812,6 +3812,60 @@ class HttpApi:
         finally:
             self._tidal_pending_resolutions.discard(task)
 
+    def _append_tidal_deferred(self, selection, start_index: int, *, at_end: bool) -> None:
+        """Edit future slots atomically, without transferring audio ownership."""
+        from .tidal_playback import TidalPlaybackError, validate_track_selection
+        from .tidal_queue import TIDAL_APPEND_BATCH_LIMIT
+        self.tidal_test.command_allowed()
+        queue = self.state.queue
+        stable_intent = {PlaybackPhase.PLAYING: "play", PlaybackPhase.PAUSED: "pause",
+                         PlaybackPhase.STOPPED: "stop"}.get(self.state.phase)
+        if (not queue.items or queue.source != "Tidal"
+                or any(item._tidal_track is None or item._tidal_test_lease is not None
+                       for item in queue.items)
+                or start_index != (0 if at_end else queue.index)
+                or stable_intent is None or self.state.intent != stable_intent
+                or self.spotify_source is not None or self._tidal_pending_resolutions
+                or self._native_stage is not None or self._native_current_id is not None
+                or self._native_owned_entries or self._native_cleanup_tasks or self._native_output_uncertain
+                or self._queue_advance_task is not None and not self._queue_advance_task.done()
+                or is_shuffle(queue.loop) or queue._shuffle is not None):
+            raise SoapFault(701, "Transition Not Available")
+        if (not selection.tracks
+                or len(selection.tracks) > (TIDAL_APPEND_BATCH_LIMIT if at_end else 1)
+                or queue.count + len(selection.tracks) > MAX_QUEUE_TRACKS):
+            raise SoapFault(402, "Invalid Args")
+        if (self.tidal_playback is None or self.catalog_proxy_port == 0
+                or not self._tidal_sharing_requested()):
+            raise BackendError("Experimental TIDAL playback is unavailable")
+        current, page = queue.current, queue._tidal_prepared_page
+        if (not self._tidal_sharing_enabled() or not self.tidal_playback.session_available()
+                or current._tidal_session_fingerprint
+                and not self.tidal_playback.session_matches(current._tidal_session_fingerprint)
+                or page is not None and (page.session_expires_at <= time.time()
+                    or not self.tidal_playback.session_matches(page.session_fingerprint))):
+            raise BackendError("TIDAL queue session changed")
+        appended = []
+        try:
+            for track in selection.tracks:
+                validate_track_selection(track.track_id, selection.request_quality)
+                item = QueueItem(url=f"https://api.tidal.com/v1/tracks/{track.track_id}",
+                                 title=f"TIDAL track {track.track_id}", source="Tidal",
+                                 id=track.track_id, title_is_fallback=True)
+                item._tidal_track = (track.track_id, selection.request_quality)
+                item._tidal_require_shared = True
+                appended.append(item)
+        except TidalPlaybackError as exc:
+            raise TidalPlaybackFailure(exc.code) from None
+        position = queue.count if at_end else queue.index
+        items = [*queue.items[:position], *appended, *queue.items[position:]]
+        context = serialize_queue_context(replace(queue, items=items))
+        # No await or playback command may split this commit. Retain the queue,
+        # current item, native generation, position and prepared-page binding.
+        queue.items = items
+        self.queue_context = context
+        self._schedule_event_notify(("PlayQueue", "AVTransport"))
+
     async def _materialize_radio_queue(self, queue: PlaybackQueue) -> None:
         """Resolve a header-only station under the current command generation."""
         station_id = queue.stream_id or self._radio_station_from_url(queue.search_url, allow_opml=False)
@@ -4677,9 +4731,10 @@ class HttpApi:
                     action, self.state, current_transport_actions=self._current_transport_actions())
             elif service == "PlayQueue":
                 queue_name = self._xml_text(action_body, "QueueName")
-                # The app asks CurrentQueue before its TIDAL search append even
-                # when CreateQueue named the owned selection after an album.
-                tidal_current_alias = (action == "GetQueueIndex" and queue_name == "CurrentQueue"
+                # The app reads CurrentQueue even when CreateQueue named the
+                # privately owned TIDAL selection after an album or playlist.
+                tidal_current_alias = (action in {"GetQueueIndex", "BrowseQueue", "BrowseQueueEx"}
+                                       and queue_name == "CurrentQueue"
                                        and self.state.queue.source == "Tidal" and self.state.queue.items
                                        and all(item._tidal_track is not None for item in self.state.queue.items))
                 if queue_name and queue_name != self.state.queue.name and not tidal_current_alias:
@@ -5427,18 +5482,25 @@ class HttpApi:
             return
         if action == "AppendTracksInQueueEx":
             from xml.etree.ElementTree import fromstring
-            from .tidal_queue import parse_tidal_playnext, TidalQueueError
+            from .tidal_queue import parse_tidal_playlast, parse_tidal_playnext, TidalQueueError
             raw_index = self._xml_text(body, "StartIndex")
-            if (fromstring(body).findtext("Action") != "playnext"
+            operation = fromstring(body).findtext("Action")
+            play = self._xml_text(body, "Play")
+            if (operation not in {"playnext", "playlast"}
                     or self._xml_text(body, "Direction") != "1"
-                    or self._xml_text(body, "Play") != "1"
-                    or not re.fullmatch(r"[1-9][0-9]{0,9}", raw_index)):
+                    or play not in {"0", "1"}
+                    or operation == "playlast" and (play != "0" or raw_index != "0")
+                    or operation == "playnext" and not re.fullmatch(r"[1-9][0-9]{0,9}", raw_index)):
                 raise SoapFault(402, "Invalid Args")
             try:
-                selection = parse_tidal_playnext(self._xml_text(body, "QueueContext"))
+                parse_append = parse_tidal_playlast if operation == "playlast" else parse_tidal_playnext
+                selection = parse_append(self._xml_text(body, "QueueContext"))
             except TidalQueueError:
                 raise SoapFault(402, "Invalid Args") from None
-            await self._append_tidal_playnext(selection, int(raw_index))
+            if play == "1":
+                await self._append_tidal_playnext(selection, int(raw_index))
+            else:
+                self._append_tidal_deferred(selection, int(raw_index), at_end=operation == "playlast")
             return
         if action == "PlayQueueWithIndex":
             raw_index = self._xml_text(body, "Index")
