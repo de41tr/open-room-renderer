@@ -16,6 +16,8 @@ from test_soap_faults import api, request as soap_request
 
 ALBUM = "https://api.tidal.com/v1/albums/123/tracks"
 PLAYLIST = "https://api.tidal.com/v1/playlists/1234-abcd/items"
+FAVORITES = "https://api.tidal.com/v1/users/42/favorites/tracks"
+NEW_TRACKS = "https://api.tidal.com/v1/featured/new/tracks"
 
 
 def page(*, playlist=False, ids=(42, 43, 42), total=80):
@@ -23,6 +25,71 @@ def page(*, playlist=False, ids=(42, 43, 42), total=80):
     if playlist:
         items = [{"type": "track", "item": value} for value in items]
     return {"offset": 20, "limit": 3, "totalNumberOfItems": total, "items": items}
+
+
+def favorites_page(**kwargs):
+    value = page(**kwargs)
+    value["items"] = [{"item": item, "created": "2024-01-01T00:00:00Z"} for item in value["items"]]
+    return value
+
+
+@pytest.mark.asyncio
+async def test_own_favorites_page_keeps_requested_order_slots_and_query(harness, caplog):
+    store, responses, requests, _, dns, _ = harness
+    responses[:] = [Response(favorites_page())]
+    url = FAVORITES + "?offset=020&limit=3&countryCode=DE&order=DATE&orderDirection=DESC"
+    result = await playback.TidalPlaybackResolver(store).resolve_page(url)
+    assert result.catalogue_url == url and result.track_ids == ("42", "43", "42")
+    assert playback.TidalPlaybackResolver(store).session_matches(result.session_fingerprint)
+    assert len(requests) == 1 and requests[0][1] == FAVORITES and dns == []
+    assert requests[0][2]["params"] == {"offset": "020", "limit": "3", "countryCode": "DE",
+                                         "order": "DATE", "orderDirection": "DESC"}
+    assert not requests[0][2]["allow_redirects"]
+    assert ACCESS not in repr(result) + caplog.text and REFRESH not in repr(result) + caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("after_refresh", [False, True])
+async def test_favorites_owner_must_match_before_refresh_and_after_refresh(harness, after_refresh):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    store, _, requests, clients, dns, _ = harness
+    refresh = SimpleNamespace(refresh_owned=AsyncMock())
+    resolver = playback.TidalPlaybackResolver(store, refresh_manager=refresh)
+    if after_refresh:
+        resolver._session_owned = AsyncMock(return_value=replace(SESSION, user_id="43"))
+        url = FAVORITES
+    else:
+        store.save(replace(SESSION, expires_at=999))
+        url = FAVORITES.replace("/users/42/", "/users/43/")
+    with pytest.raises(playback.TidalPlaybackError) as error:
+        await resolver.resolve_page(url)
+    assert error.value.code == "invalid_page_selection"
+    assert requests == clients == dns == []
+    refresh.refresh_owned.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["unwrapped", "null_item", "video", "outer_video", "ineligible"])
+async def test_favorites_reject_bad_or_ineligible_slots_without_filtering(harness, kind):
+    store, responses, requests, *_ = harness
+    body = favorites_page()
+    if kind == "unwrapped":
+        body["items"][1] = body["items"][1]["item"]
+    elif kind == "null_item":
+        body["items"][1]["item"] = None
+    elif kind == "video":
+        body["items"][1]["item"]["type"] = "Video"
+    elif kind == "outer_video":
+        body["items"][1]["type"] = "video"
+        del body["items"][1]["item"]["type"]
+    else:
+        del body["items"][1]["item"]["allowStreaming"]
+    responses[:] = [Response(body)]
+    with pytest.raises(playback.TidalPlaybackError) as error:
+        await playback.TidalPlaybackResolver(store).resolve_page(FAVORITES + "?offset=20&limit=3")
+    assert error.value.code == "unsupported_page" and len(requests) == 1
 
 
 @pytest.mark.asyncio
@@ -68,6 +135,10 @@ async def test_short_terminal_page_does_not_claim_total_or_request_more(harness)
     ALBUM + "?offset=1000000000", ALBUM + "?limit=0", ALBUM + "?limit=51",
     ALBUM + "?limit=3&limit=4", ALBUM + "?access_token=private",
     "https://api.tidal.com@foreign.example.test/v1/albums/123/tracks",
+    FAVORITES.replace("/42/", "/0/"), FAVORITES.replace("/42/", "/042/"),
+    FAVORITES.replace("/42/", "/9223372036854775808/"), FAVORITES + "/",
+    FAVORITES.replace("/tracks", "/albums"), FAVORITES + "?limit=51",
+    NEW_TRACKS + "/", NEW_TRACKS.replace("/new/", "/top/"),
 ])
 @pytest.mark.asyncio
 async def test_invalid_page_request_never_opens_http(harness, url):
@@ -211,14 +282,16 @@ def audio_responses(track_id):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("playlist", [False, True])
-async def test_header_page_uses_local_index_reports_loaded_size_and_ends_there(queue_api, harness, playlist):
+@pytest.mark.parametrize("endpoint", [ALBUM, PLAYLIST, FAVORITES, NEW_TRACKS])
+async def test_header_page_uses_local_index_reports_loaded_size_and_ends_there(queue_api, harness, endpoint):
     api = queue_api
     api.cfg.enable_plex_service = True  # Root 1.4 has immediate CreateQueue playback.
     store, responses, requests, *_ = harness
     await connect_page_resolver(api, store)
-    url = (PLAYLIST if playlist else ALBUM) + "?offset=20&limit=3&countryCode=DE"
-    responses[:] = [Response(page(playlist=playlist, ids=(42, 43), total=22)), *audio_responses(43)]
+    url = endpoint + "?offset=20&limit=3&countryCode=DE"
+    body = (favorites_page(ids=(42, 43), total=22) if endpoint == FAVORITES
+            else page(playlist=endpoint == PLAYLIST, ids=(42, 43), total=22))
+    responses[:] = [Response(body), *audio_responses(43)]
     assert (await api.soap(header_request(url))).status == 200
     assert api.state.queue.count == 2 and api.state.queue.index == 2
     assert api.state.queue.search_url == url and api.state.queue.current.id == "43"
@@ -228,7 +301,7 @@ async def test_header_page_uses_local_index_reports_loaded_size_and_ends_there(q
     assert parsed.search_url == url and parsed.count == 2 and parsed.index == 2
     assert "synthetic-cdn-secret" not in public and "audio.example.test" not in public
     assert [call[1] for call in requests] == [
-        PLAYLIST if playlist else ALBUM,
+        endpoint,
         "https://api.tidal.com/v1/tracks/43",
         "https://api.tidal.com/v1/tracks/43/playbackinfopostpaywall",
     ]
@@ -337,14 +410,16 @@ async def test_natural_eof_at_loaded_page_end_never_schedules_more_media(queue_a
 
 
 @pytest.mark.asyncio
-async def test_legacy_header_create_materializes_only_page_until_play_index(queue_api, harness):
+@pytest.mark.parametrize("favorites", [False, True])
+async def test_legacy_header_create_materializes_only_page_until_play_index(queue_api, harness, favorites):
     api = queue_api
     store, responses, requests, *_ = harness
     await connect_page_resolver(api, store)
-    url = ALBUM + "?offset=20&limit=3"
-    responses[:] = [Response(page(ids=(42, 43), total=22))]
+    endpoint = FAVORITES if favorites else ALBUM
+    url = endpoint + "?offset=20&limit=3&order=DATE&orderDirection=DESC"
+    responses[:] = [Response((favorites_page if favorites else page)(ids=(42, 43), total=22))]
     assert (await api.soap(header_request(url))).status == 200
-    assert [call[1] for call in requests] == [ALBUM]
+    assert [call[1] for call in requests] == [endpoint]
     assert api.mpv.calls == [] and api.state.status == "stop"
     assert api.state.queue.count == 2 and api.state.queue.index == 2
     assert api.state.queue.search_url == url and api.state.queue._tidal_prepared_page is not None
@@ -352,7 +427,7 @@ async def test_legacy_header_create_materializes_only_page_until_play_index(queu
     assert "session_fingerprint" not in public and "synthetic-cdn-secret" not in public
     responses[:] = audio_responses(43)
     assert (await api.soap(soap_request("PlayQueueWithIndex", "<Index>2</Index>", service="PlayQueue"))).status == 200
-    assert [call[1] for call in requests] == [ALBUM, "https://api.tidal.com/v1/tracks/43",
+    assert [call[1] for call in requests] == [endpoint, "https://api.tidal.com/v1/tracks/43",
                                             "https://api.tidal.com/v1/tracks/43/playbackinfopostpaywall"]
     assert [name for name, _ in api.mpv.calls].count("load") == 1
     assert not any(name == "stop" for name, _ in api.mpv.calls)

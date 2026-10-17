@@ -24,6 +24,7 @@ class TidalPageRequest:
     offset: int
     limit: int
     playlist: bool
+    favorites_user_id: str = ""
 
 
 @dataclass(frozen=True, repr=False)
@@ -40,7 +41,11 @@ def parse_page_request(url: str) -> TidalPageRequest:
         parts = urlsplit(url)
         album = re.fullmatch(r"/v1/albums/[1-9][0-9]{0,19}/tracks", parts.path)
         playlist = re.fullmatch(r"/v1/playlists/[A-Za-z0-9][A-Za-z0-9_-]{0,127}/items", parts.path)
-        if not album and not playlist:
+        favorites = re.fullmatch(r"/v1/users/([1-9][0-9]{0,18})/favorites/tracks", parts.path)
+        new_tracks = parts.path == "/v1/featured/new/tracks"
+        if not album and not playlist and not favorites and not new_tracks:
+            raise ValueError
+        if favorites and int(favorites[1]) > 2**63 - 1:
             raise ValueError
         params = dict(parse_qsl(parts.query, keep_blank_values=True, strict_parsing=True,
                                 max_num_fields=16))
@@ -50,7 +55,7 @@ def parse_page_request(url: str) -> TidalPageRequest:
         params.setdefault("offset", offset)
         params.setdefault("limit", limit)
         return TidalPageRequest(url, parts.path.removeprefix("/v1/"), params,
-                                offset, limit, bool(playlist))
+                                offset, limit, bool(playlist), favorites[1] if favorites else "")
     except (TidalQueueError, ValueError, TypeError, UnicodeError):
         raise TidalPlaybackError("invalid_page_selection") from None
 
@@ -70,10 +75,18 @@ def page_track_ids(value: dict, request: TidalPageRequest) -> tuple[str, ...]:
     for entry in items:
         if type(entry) is not dict:
             raise TidalPlaybackError("invalid_page_response")
-        # The album /tracks endpoint is audio-typed. A mixed /items endpoint
+        # The album and featured /tracks endpoints are audio-typed. A mixed /items endpoint
         # must instead prove each wrapper's type; never infer it from an ID.
         if request.playlist:
             if entry.get("type") != "track" or type(entry.get("item")) is not dict:
+                raise TidalPlaybackError("unsupported_page")
+            entry = entry["item"]
+        elif request.favorites_user_id:
+            # /favorites/tracks is audio-typed, but unlike /tracks its entries
+            # wrap each track in item (with optional favorite-created metadata).
+            if (("type" in entry and (type(entry["type"]) is not str
+                                     or entry["type"].lower() != "track"))
+                    or type(entry.get("item")) is not dict):
                 raise TidalPlaybackError("unsupported_page")
             entry = entry["item"]
         if (("type" in entry and entry["type"] != "Track")
