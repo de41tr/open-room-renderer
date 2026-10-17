@@ -66,6 +66,23 @@ class Reason(Enum):
     SPOTIFY_EVENTS_UNAVAILABLE = "spotify_events_unavailable"
     SPOTIFY_EVENTS_DISCONNECTED = "spotify_events_disconnected"
     SPOTIFY_EVENTS_LIMIT = "spotify_events_limit"
+    TIDAL_INVALID_SELECTION = "tidal_invalid_selection"
+    TIDAL_SESSION_REQUIRED = "tidal_session_required"
+    TIDAL_SESSION_EXPIRED = "tidal_session_expired"
+    TIDAL_REFRESH_RESULT_UNCERTAIN = "tidal_refresh_result_uncertain"
+    TIDAL_REFRESH_REJECTED = "tidal_refresh_rejected"
+    TIDAL_REFRESH_FAILED = "tidal_refresh_failed"
+    TIDAL_STORAGE_UNAVAILABLE = "tidal_storage_unavailable"
+    TIDAL_UNAUTHORIZED = "tidal_unauthorized"
+    TIDAL_PROVIDER_REJECTED = "tidal_provider_rejected"
+    TIDAL_REQUEST_FAILED = "tidal_request_failed"
+    TIDAL_INVALID_RESPONSE = "tidal_invalid_response"
+    TIDAL_UNSUPPORTED_MANIFEST = "tidal_unsupported_manifest"
+    TIDAL_UNSUPPORTED_ASSET = "tidal_unsupported_asset"
+    TIDAL_UNSAFE_DESTINATION = "tidal_unsafe_destination"
+    TIDAL_INVALID_PAGE_SELECTION = "tidal_invalid_page_selection"
+    TIDAL_INVALID_PAGE_RESPONSE = "tidal_invalid_page_response"
+    TIDAL_UNSUPPORTED_PAGE = "tidal_unsupported_page"
 
 def utc():
     return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -431,9 +448,21 @@ def source_reason(category):
             Reason.SOURCE_UNREADY.value: Reason.SOURCE_UNREADY,
             Reason.SOURCE_EOF.value: Reason.SOURCE_EOF}.get(category, Reason.UNKNOWN)
 
+def tidal_reason(code: str) -> Reason:
+    # Only fixed enum members can cross the diagnostic boundary, never a message.
+    if type(code) is not str:
+        return Reason.UNKNOWN
+    try:
+        return Reason("tidal_" + code)
+    except ValueError:
+        return Reason.UNKNOWN
+
 def backend_failure(exc, *, soap_code=None):
-    from .http_api import SourcePlaybackError
-    reason = source_reason(exc.category) if isinstance(exc, SourcePlaybackError) else Reason.BACKEND
+    from .http_api import SourcePlaybackError, TidalPlaybackFailure
+    if isinstance(exc, TidalPlaybackFailure):
+        reason = exc.reason if isinstance(exc.reason, Reason) else Reason.UNKNOWN
+    else:
+        reason = source_reason(exc.category) if isinstance(exc, SourcePlaybackError) else Reason.BACKEND
     note(reason, soap_code=soap_code, uncertain=True)
 
 def web_command(command):
