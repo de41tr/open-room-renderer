@@ -5478,12 +5478,20 @@ class HttpApi:
                     selection = parse_tidal_queue(context, name=self._xml_text(body, "QueueName") or None)
                 except TidalQueueError:
                     raise SoapFault(402, "Invalid Args") from None
-                # The app's root-version <1.2 contract sends a separate play.
+                # Android's root-version <1.2 contract sends a separate play.
                 # ReplaceQueue has a different callback and retains its behavior.
                 start_playback = True
                 if action == "CreateQueue":
                     version = self._stream_services_capability()["version"]
-                    start_playback = tuple(int(part) for part in version.split(".")) >= (1, 2)
+                    # Desktop 0.2.10.5 instead sends explicit QueuePolicy=0
+                    # and no follow-up play. This compatibility marker is local
+                    # to TIDAL CreateQueue, not a general queue-policy meaning.
+                    from xml.etree.ElementTree import fromstring
+                    policies = [field for field in fromstring(body)
+                                if field.tag.casefold() == "queuepolicy"]
+                    desktop_play = (len(policies) == 1 and policies[0].tag == "QueuePolicy"
+                                    and policies[0].text == "0")
+                    start_playback = desktop_play or tuple(int(part) for part in version.split(".")) >= (1, 2)
                 await self._play_tidal_selection(selection, require_shared=True,
                                                  start_playback=start_playback)
                 return

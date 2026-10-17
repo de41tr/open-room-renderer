@@ -829,3 +829,113 @@ async def test_non_tidal_queue_medium_projection_remains_unchanged(queue_api, st
     api.state.queue = PlaybackQueue(items=[item], index=1)
     api._activate_queue_item()
     assert api.state.play_medium == ("RADIO-NETWORK" if station else "THIRD-DLNA")
+
+
+async def loopback_queue_action(client, action, arguments):
+    """Exercise the real HTTP/SOAP boundary with synthetic client-shaped data."""
+    from fake_linkplay.soap import SOAP_NS, SERVICE_TYPES
+    namespace = SERVICE_TYPES['PlayQueue']
+    body = (f'<s:Envelope xmlns:s="{SOAP_NS}"><s:Body>'
+            f'<u:{action} xmlns:u="{namespace}">{arguments}</u:{action}>'
+            '</s:Body></s:Envelope>')
+    response = await client.post('/upnp/control/PlayQueue1', data=body.encode(),
+                                headers={'SOAPACTION': f'"{namespace}#{action}"',
+                                         'Content-Type': 'text/xml; charset="utf-8"'})
+    await response.read()
+    return response
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('header_only', [False, True])
+async def test_desktop_tidal_create_queue_policy_zero_starts_without_second_action(queue_api, tmp_path, header_only):
+    from aiohttp.test_utils import TestClient, TestServer
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    page_calls = []
+    async def resolve_page(url):
+        page_calls.append(url)
+        return SimpleNamespace(track_ids=('42', '43', '44'), catalogue_url=url,
+                               session_fingerprint=b'synthetic-session-binding',
+                               session_expires_at=time.time()+600)
+    resolver.resolve_page = resolve_page
+    # Desktop 0.2.10.5 emits one-based StartPlayIndex, either inline tracks or
+    # a header-only catalogue page, and a top-level QueuePolicy=0. It sends no
+    # subsequent PlayQueueWithIndex, regardless of the root capability version.
+    if header_only:
+        context = ('<?xml version="1.0" ?><PlayList><ListName>Explicit tracks</ListName>'
+                   '<ListInfo><SourceName>Tidal</SourceName>'
+                   '<SearchUrl>https://api.tidal.com/v1/albums/999/tracks?countryCode=DE&amp;offset=0&amp;limit=3</SearchUrl>'
+                   '<StreamId>999</StreamId><StartPlayIndex>2</StartPlayIndex>'
+                   '<requestQuality>LOSSLESS</requestQuality></ListInfo><Tracks/></PlayList>')
+    else:
+        context = '<?xml version="1.0" ?>' + explicit_context()
+    assert api._stream_services_capability()['version'] == '1.0'
+    async with TestClient(TestServer(api.app())) as client:
+        response = await loopback_queue_action(client, 'CreateQueue',
+            '<QueueContext>' + escape(context) + '</QueueContext><QueuePolicy>0</QueuePolicy>')
+        assert response.status == 200
+        assert resolver.calls == [('43', 'LOSSLESS')]
+        assert len(page_calls) == int(header_only)
+        assert api.state.status == 'play' and api.state.queue.index == 2
+        assert api.state.queue.current.id == '43'
+        assert [item.id for item in api.state.queue.items] == ['42', '43', '44']
+        assert [name for name, _ in api.mpv.calls].count('load') == 1
+        assert_public_selection(api, 2, '43')
+        assert api._stream_services_capability()['version'] == '1.0'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('policy', [
+    '', '<QueuePolicy/>', '<QueuePolicy>1</QueuePolicy>', '<QueuePolicy>00</QueuePolicy>',
+    '<QueuePolicy>unknown</QueuePolicy>', '<QueuePolicy> 0 </QueuePolicy>',
+    '<queuepolicy>0</queuepolicy>', '<Queuepolicy>0</Queuepolicy>',
+    '<QueuePolicy>0</QueuePolicy><queuepolicy>0</queuepolicy>',
+])
+async def test_non_desktop_tidal_queue_policy_keeps_separate_play_contract(queue_api, tmp_path, policy):
+    from aiohttp.test_utils import TestClient, TestServer
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    # A policy-looking field inside escaped QueueContext is not an action arg.
+    context = explicit_context().replace('</ListInfo>', '<QueuePolicy>0</QueuePolicy></ListInfo>')
+    arguments = '<QueueContext>' + escape(context) + '</QueueContext>' + policy
+    async with TestClient(TestServer(api.app())) as client:
+        assert (await loopback_queue_action(client, 'CreateQueue', arguments)).status == 200
+        assert resolver.calls == [] and api.state.status == 'stop'
+        assert not any(name in {'load', 'resume'} for name, _ in api.mpv.calls)
+        assert (await loopback_queue_action(client, 'PlayQueueWithIndex',
+            '<QueueName>Explicit tracks</QueueName><Index>2</Index>')).status == 200
+        assert resolver.calls == [('43', 'LOSSLESS')]
+        assert [name for name, _ in api.mpv.calls].count('load') == 1
+        assert_public_selection(api, 2, '43')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('policy', [
+    '<QueuePolicy>0</QueuePolicy><QueuePolicy>0</QueuePolicy>',
+    '<Extension><QueuePolicy>0</QueuePolicy></Extension>',
+])
+async def test_malformed_desktop_policy_cannot_create_or_start_queue(queue_api, tmp_path, policy):
+    from aiohttp.test_utils import TestClient, TestServer
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    previous = api.state.queue
+    async with TestClient(TestServer(api.app())) as client:
+        response = await loopback_queue_action(client, 'CreateQueue',
+            '<QueueContext>' + escape(explicit_context()) + '</QueueContext>' + policy)
+        assert response.status == 500
+        assert api.state.queue is previous and resolver.calls == [] and api.mpv.calls == []
+
+
+@pytest.mark.asyncio
+async def test_policy_zero_does_not_autoplay_a_non_tidal_create_queue(queue_api):
+    from aiohttp.test_utils import TestClient, TestServer
+    api = queue_api
+    context = ('<PlayList><ListName>Direct URL</ListName><ListInfo><SourceName>Local</SourceName>'
+               '<TrackNumber>1</TrackNumber><StartPlayIndex>1</StartPlayIndex></ListInfo>'
+               '<Tracks><Track1><URL>https://media.example.test/one.wav</URL></Track1></Tracks></PlayList>')
+    async with TestClient(TestServer(api.app())) as client:
+        response = await loopback_queue_action(client, 'CreateQueue',
+            '<QueueContext>' + escape(context) + '</QueueContext><QueuePolicy>0</QueuePolicy>')
+        assert response.status == 200 and api.state.status == 'stop'
+        assert api.state.queue.current.url == 'https://media.example.test/one.wav'
+        assert not any(name in {'load', 'resume'} for name, _ in api.mpv.calls)
