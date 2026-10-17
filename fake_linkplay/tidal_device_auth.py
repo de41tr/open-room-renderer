@@ -55,7 +55,9 @@ def _quiet_library_logs():
     # These upstream loggers include raw bodies, exception text and session URLs.
     # Logger filters are needed: filtering a parent logger misses child records.
     quiet = _DropLibraryLog()
-    loggers = [logging.getLogger(name) for name in ("tidalapi.session", "tidalapi.request")]
+    loggers = [logging.getLogger(name) for name in (
+        "tidalapi.session", "tidalapi.request", "tidalapi.exceptions",
+    )]
     for logger in loggers:
         logger.addFilter(quiet)
     try:
