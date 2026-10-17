@@ -114,8 +114,10 @@ class WebTidalLogin:
                     result = await (self.manager.start() if action == "start" else self.manager.cancel())
             result = dict(result)
             result["account_shared"] = bool(self.account and self.account.shared)
+            result["account_sharing_available"] = bool(self.account and self.account.sharing_available)
+            result["account_sharing_requested"] = bool(self.account and self.account.sharing_requested)
             result["account_sharing_remembered"] = bool(self.account and self.account.sharing_remembered)
-            allowed = {"state", "active", "verification_uri", "user_code", "expires_in", "expires_at", "retry_after", "account_shared", "account_sharing_remembered", "playback_requested", "refresh_outcome", "sharing_warning", "session_forgotten"}
+            allowed = {"state", "active", "verification_uri", "user_code", "expires_in", "expires_at", "retry_after", "account_shared", "account_sharing_available", "account_sharing_requested", "account_sharing_remembered", "playback_requested", "refresh_outcome", "sharing_warning", "session_forgotten"}
             if result.get("session_status") in ("missing", "stored", "expired", "unsupported", "unavailable"):
                 allowed.add("session_status")
             safe_errors = {"dependency_unavailable", "session_exists", "storage_unavailable", "invalid_challenge", "login_failed", "expired", "unsafe_debug", "invalid_timeout", "session_unavailable", "client_mismatch", "invalid_response", "identity_mismatch", "refresh_failed", "commit_failed", "refresh_result_uncertain", "refresh_rejected"}

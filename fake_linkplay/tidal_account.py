@@ -15,7 +15,11 @@ import time
 from urllib.parse import urlsplit
 
 from .tidal_codec import TidalCodecUnavailable, encode_account_field
+from .tidal_refresh import refresh_due
 from .tidal_session import TidalSessionError, TidalSessionStore
+
+# The observed desktop client asks GetUserInfo when <=300 seconds remain.
+_ACCOUNT_MINIMUM_VALIDITY = 300
 
 
 class TidalAccountUnavailable(RuntimeError):
@@ -158,14 +162,29 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
             # Validate UUID and codec availability before a refresh can consume a
             # grant. This result is discarded; it is never logged or published.
             encode_account_field(short_uuid, previous.client_id)
-            if (self._refresh is not None and previous.expires_at is not None
-                    and previous.expires_at <= checked_at):
+            # A simultaneous controller read must receive the committed result,
+            # not a transient "login required" or a token being rotated. This
+            # includes an explicit refresh of a still-current access token.
+            if self._refresh is not None and await self._refresh.wait_for_refresh(previous):
+                if not self.sharing_requested:
+                    raise TidalAccountUnavailable("Device account sharing needs explicit confirmation")
+                previous = self._shared_session
+                checked_at = time.time()
+                now = None
+            # Even a not-yet-expired access token may have been invalidated by
+            # a failed/uncertain explicit rotation. Never project it as current.
+            if self._store.refresh_outcome(previous) is not None:
+                raise TidalAccountUnavailable("Device account refresh or sharing is unavailable")
+            if (self._refresh is not None and self._refresh.needs_refresh(
+                    previous, now=checked_at, minimum_validity=_ACCOUNT_MINIMUM_VALIDITY)):
                 with self._store.lease() as lease:
                     if lease.load() != previous or self._shared_session != previous:
                         raise TidalAccountUnavailable("Device account sharing needs explicit confirmation")
                     # Do not hold the account lock across network I/O: Unshare
                     # must revoke immediately, including while refresh is pending.
-                    result = await self._refresh.refresh_owned(lease, timeout=10, only_if_expired=True)
+                    result = await self._refresh.refresh_owned(
+                        lease, timeout=10, only_if_expired=True,
+                        minimum_validity=_ACCOUNT_MINIMUM_VALIDITY)
                     if result["state"] not in {"current", "refreshed"} or not self.sharing_requested:
                         raise TidalAccountUnavailable("Device account refresh or sharing is unavailable")
                 now = None  # Projection must use fresh time after network I/O.
@@ -196,6 +215,31 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
         return valid
 
     @property
+    def adoption_available(self):
+        """Local discovery gate, never token export or provider access.
+
+        Expiry cannot hide the account before a controller can request its
+        on-demand renewal. A durable failed attempt stays unavailable; only
+        this exact refresh owner's still-running attempt remains discoverable.
+        """
+        if not self.sharing_requested:
+            return False
+        session = self._shared_session
+        if not self._shareable(session):
+            return False
+        try:
+            if (self._store.refresh_outcome(session) is not None
+                    and not (self._refresh is not None and self._refresh.refresh_in_progress(session))):
+                return False
+            if (not refresh_due(session, minimum_validity=_ACCOUNT_MINIMUM_VALIDITY)
+                    or self._refresh is not None and not self._refresh.needs_refresh(
+                        session, minimum_validity=_ACCOUNT_MINIMUM_VALIDITY)):
+                return True
+            return self._refresh is not None and self._refresh.refresh_available(session)
+        except TidalSessionError:
+            return False
+
+    @property
     def sharing_remembered(self):
         """Durable status, including an unsuccessful attempt to revoke it."""
         try:
@@ -208,8 +252,26 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
     def shared(self):
         # Expiry suspends projection, but a verified refresh of this exact
         # same owner may renew the existing explicit opt-in.
-        return bool(self.sharing_requested and self._shared_session.expires_at
-                    and self._shared_session.expires_at > time.time())
+        try:
+            return bool(self.sharing_requested and self._shared_session.expires_at
+                        and self._shared_session.expires_at > time.time()
+                        and self._store.refresh_outcome(self._shared_session) is None)
+        except TidalSessionError:
+            return False
+
+    def _sharing_candidate(self, session):
+        if not self._shareable(session) or self._store.refresh_outcome(session) is not None:
+            return False
+        return bool(session.expires_at > time.time()
+                    or self._refresh is not None and self._refresh.refresh_available(session))
+
+    @property
+    def sharing_available(self):
+        """Whether an explicit Share can bind this record, without provider I/O."""
+        try:
+            return self._sharing_candidate(self._store.load())
+        except TidalSessionError:
+            return False
 
     async def set_shared(self, enabled: bool, *, remember: bool = False):
         if type(enabled) is not bool or type(remember) is not bool or remember and not enabled:
@@ -224,8 +286,11 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
                 # Refuse while login/refresh owns the store; pin the exact record.
                 with self._store.lease() as lease:
                     session = lease.load()
-                    if not self._shareable(session) or session.expires_at <= time.time():
+                    if not self._sharing_candidate(session):
                         raise TidalAccountUnavailable("A verified device session is required")
+                    # Explicit consent can bind a renewable expired record.
+                    # Export remains suspended until an on-demand refresh; Share
+                    # itself never contacts the provider or exports credentials.
                     self._store.remember_sharing(session if remember else None)
                     self._shared_session = session
                     self._remembered = remember

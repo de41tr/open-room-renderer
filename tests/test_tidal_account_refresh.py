@@ -46,10 +46,11 @@ def bind(store, bridge, request):
 
 
 @pytest.mark.asyncio
-async def test_expired_shared_account_refreshes_and_projects_with_fresh_time(shared_account):
+@pytest.mark.parametrize("read_at", [1700, 1999.5, 2001])
+async def test_expired_shared_account_refreshes_and_projects_with_fresh_time(shared_account, read_at):
     store, bridge, clock = shared_account
     calls = []
-    clock[0] = 2001
+    clock[0] = read_at
 
     async def request(url, **kwargs):
         calls.append((url, kwargs))
@@ -59,7 +60,7 @@ async def test_expired_shared_account_refreshes_and_projects_with_fresh_time(sha
         return IDENTITY
 
     bind(store, bridge, request)
-    result = await bridge.get_user_info(UUID, version="2", now=2001)
+    result = await bridge.get_user_info(UUID, version="2", now=read_at)
     assert decode_account_field(UUID, result["access_token"]) == TOKEN["access_token"]
     assert decode_account_field(UUID, result["clientId"]) == "synthetic-client"
     assert result["expires_in"] == 3590 and result["user"] == IDENTITY | {"username": ""}
@@ -110,6 +111,9 @@ async def test_revocation_or_record_replacement_during_refresh_denies_export(sha
     bind(store, bridge, request)
     running = asyncio.create_task(bridge.get_user_info(UUID, version="2"))
     await entered.wait()
+    waiting = asyncio.create_task(bridge.get_user_info(UUID, version="2"))
+    await asyncio.sleep(0)
+    assert not waiting.done() and bridge.adoption_available
     if change == "unshare":
         # This completes while the refresh is still blocked: no account lock
         # is held across network I/O, and the commit callback cannot re-share.
@@ -119,9 +123,10 @@ async def test_revocation_or_record_replacement_during_refresh_denies_export(sha
         replacement = replace(store.load(), access_token="synthetic-replaced", user_id="43")
         (store.directory / "session.json").write_text(json.dumps({"schema": 2, **asdict(replacement)}))
     release.set()
-    with pytest.raises(TidalAccountUnavailable):
-        await running
-    assert not bridge.sharing_requested
+    for task in (running, waiting):
+        with pytest.raises(TidalAccountUnavailable):
+            await task
+    assert not bridge.sharing_requested and not bridge.adoption_available
 
 
 @pytest.mark.asyncio
@@ -142,7 +147,7 @@ async def test_cancel_or_timeout_keeps_marker_and_blocks_repeat(shared_account, 
         def timeout(seconds):
             deadlines.append(seconds)
             return asyncio.timeout(.01)
-        monkeypatch.setattr(tidal_refresh, "asyncio", SimpleNamespace(timeout=timeout))
+        monkeypatch.setattr(tidal_refresh, "asyncio", SimpleNamespace(timeout=timeout, Event=asyncio.Event))
     running = asyncio.create_task(bridge.get_user_info(UUID, version="2"))
     await entered.wait()
     if stop == "cancel":
@@ -160,7 +165,8 @@ async def test_cancel_or_timeout_keeps_marker_and_blocks_repeat(shared_account, 
 
 
 @pytest.mark.asyncio
-async def test_concurrent_account_reads_cannot_double_refresh(shared_account):
+@pytest.mark.parametrize("explicit", [False, True])
+async def test_concurrent_account_reads_cannot_double_refresh(shared_account, explicit):
     store, bridge, clock = shared_account
     clock[0] = 2001
     entered, release = asyncio.Event(), asyncio.Event()
@@ -174,13 +180,18 @@ async def test_concurrent_account_reads_cannot_double_refresh(shared_account):
             return TOKEN
         return IDENTITY
 
-    bind(store, bridge, request)
-    first = asyncio.create_task(bridge.get_user_info(UUID, version="2"))
+    owner = bind(store, bridge, request)
+    if explicit:
+        clock[0] = 1000  # A manual refresh can rotate an otherwise current token.
+    first = asyncio.create_task(owner.refresh() if explicit else bridge.get_user_info(UUID, version="2"))
     await entered.wait()
-    with pytest.raises(TidalAccountUnavailable):
-        await bridge.get_user_info(UUID, version="2")
+    second = asyncio.create_task(bridge.get_user_info(UUID, version="2"))
+    await asyncio.sleep(0)
+    assert not second.done() and bridge.adoption_available
     release.set()
-    assert (await first)["token_type"] == "Bearer"
+    assert (await first)["state" if explicit else "token_type"] == ("refreshed" if explicit else "Bearer")
+    result = await second
+    assert decode_account_field(UUID, result["access_token"]) == TOKEN["access_token"]
     await bridge.get_user_info(UUID, version="2")
     assert len(calls) == 2
 
@@ -482,3 +493,95 @@ async def test_failed_consent_rotation_reports_warning_and_restart_stays_unshare
     assert len(calls) == 2 and store.load().access_token == TOKEN["access_token"]
     assert not bridge.shared and not bridge.sharing_remembered
     assert not TidalDeviceAccountBridge(store).sharing_requested
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lifetime", [20, 120])
+async def test_short_lived_replacement_is_used_instead_of_repeated_immediate_rotation(shared_account, lifetime):
+    store, bridge, clock = shared_account
+    clock[0] = 2001
+    token = {**TOKEN, "expires_in": lifetime}
+    request, calls = responses(token, IDENTITY, token, IDENTITY)
+    bind(store, bridge, request)
+    for _ in range(3):
+        result = await bridge.get_user_info(UUID, version="2")
+        assert decode_account_field(UUID, result["access_token"]) == TOKEN["access_token"]
+        assert result["expires_in"] == lifetime and bridge.adoption_available
+    assert len(calls) == 2
+    # The narrow guard does not suppress the next real renewal.
+    clock[0] += lifetime * .9
+    await bridge.get_user_info(UUID, version="2")
+    assert len(calls) == 4 and store.load().expires_at > clock[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked", [None, "uncertain", "rejected", "missing_grant", "unshared", "replaced"])
+async def test_adoption_readiness_keeps_expired_consent_visible_without_network(shared_account, blocked):
+    store, bridge, clock = shared_account
+    if blocked == "missing_grant":
+        store.save(replace(store.load(), refresh_token=None))
+    await bridge.set_shared(True, remember=True)
+    clock[0] = 2001
+    bridge = TidalDeviceAccountBridge(store)
+    request, calls = responses()
+    bind(store, bridge, request)
+    if blocked in {"uncertain", "rejected"}:
+        with store.lease() as lease:
+            lease.mark_refresh_attempt(store.load(), rejected=blocked == "rejected")
+    elif blocked == "unshared":
+        await bridge.set_shared(False)
+    elif blocked == "replaced":
+        store.save(replace(store.load(), user_id="43"))
+    before = {p.name: p.read_bytes() for p in store.directory.iterdir()}
+    assert bridge.adoption_available is (blocked is None)
+    assert before == {p.name: p.read_bytes() for p in store.directory.iterdir()}
+    assert not calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["uncertain", "rejected"])
+async def test_failed_manual_rotation_blocks_fresh_token_waiters_and_provider_reads(shared_account, outcome):
+    from fake_linkplay.tidal_playback import TidalPlaybackError, TidalPlaybackResolver
+    from fake_linkplay.tidal_session import _session_fingerprint
+    store, bridge, _ = shared_account
+    await bridge.set_shared(True, remember=True)
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def request(url, **kwargs):
+        calls.append(url)
+        entered.set()
+        await release.wait()
+        if outcome == "rejected":
+            raise tidal_refresh._Failure("refresh_rejected")
+        raise TimeoutError("Synthetic uncertain provider rotation")
+
+    owner = bind(store, bridge, request)
+    resolver = TidalPlaybackResolver(store, refresh_manager=owner)
+    running = asyncio.create_task(owner.refresh())
+    await entered.wait()
+    waiting = asyncio.create_task(bridge.get_user_info(UUID, version="2"))
+    await asyncio.sleep(0)
+    assert not waiting.done() and bridge.adoption_available and resolver.session_available()
+    release.set()
+    assert (await running)["refresh_outcome"] == outcome
+    with pytest.raises(TidalAccountUnavailable):
+        await waiting
+    assert not bridge.adoption_available and not bridge.shared and not resolver.session_available()
+    assert bridge.sharing_requested  # Explicit consent remains suspended, not silently discarded.
+    assert not resolver.session_matches(_session_fingerprint(store.load()))
+    with pytest.raises(TidalAccountUnavailable):
+        await bridge.get_user_info(UUID, version="2")
+    with pytest.raises(TidalPlaybackError) as failure:
+        await resolver.resolve_track("42")
+    assert failure.value.code == ("refresh_rejected" if outcome == "rejected" else "refresh_result_uncertain")
+    with store.lease() as lease:
+        assert (await owner.refresh_owned(lease, only_if_expired=True))["refresh_outcome"] == outcome
+    restarted_store = TidalSessionStore(store.directory)
+    restarted = TidalDeviceAccountBridge(restarted_store)
+    restarted_owner = bind(restarted_store, restarted, request)
+    assert restarted.sharing_requested and not restarted.adoption_available
+    assert not TidalPlaybackResolver(restarted_store, refresh_manager=restarted_owner).session_available()
+    with pytest.raises(TidalAccountUnavailable):
+        await restarted.get_user_info(UUID, version="2")
+    assert len(calls) == 1

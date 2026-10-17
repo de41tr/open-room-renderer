@@ -165,7 +165,8 @@ def control_device_info_json(cfg: Config, ip: str, state: Any | None = None) -> 
         "http_port": str(cfg.http_api_port),
         "model": cfg.model_name,
     }
-    payload.update(capability_fields(cfg))
+    capability_view = getattr(state, "effective_capability_fields", None)
+    payload.update(capability_view() if callable(capability_view) else capability_fields(cfg))
     sources = configured_sources(cfg)
     variant = cfg.source_experiment_variant
     if sources and variant in {"new_source", "music_service", "all"}:
@@ -226,7 +227,9 @@ def avtransport_response_fields(
     transport_status = getattr(state, "transport_status", "OK")
     play_medium = getattr(state, "play_medium", "") or ("STATION-NETWORK" if current_uri else "NONE")
     loop_mode = getattr(state, "loop", str(NORMAL))
-    stream_capability = json.dumps(service_capability(cfg), separators=(",", ":"))
+    capability_view = getattr(state, "effective_capability_fields", None)
+    stream_capability = (capability_view()["StreamCapability"] if callable(capability_view)
+                         else json.dumps(service_capability(cfg), separators=(",", ":")))
     if action == "GetMediaInfo":
         duration = seconds_to_hms(getattr(state, "totlen", 0))
         return "\n".join(

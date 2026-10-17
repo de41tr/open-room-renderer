@@ -1,6 +1,6 @@
 """Single-owner refresh of an ordinary tidalapi 0.8.11 device session.
 
-Refresh is explicit or on demand before an expired session's provider GET.
+Refresh is explicit or on demand before an expired/near-expiry provider GET.
 No refresh happens at import, construction, status reads, or provider failures.
 The pinned library supplies its own ordinary client configuration; its refresh
 method is deliberately not used because it discards rotated refresh tokens.
@@ -25,6 +25,15 @@ TOKEN_URL = "https://auth.tidal.com/v1/oauth2/token"
 SESSIONS_URL = "https://api.tidal.com/v1/sessions"
 _FLOW = "tidalapi-device-v0.8.11"
 _MAX_RESPONSE_BYTES = 65536
+# Enough for the bounded two-request resolver and ordinary client clock skew.
+# This is evaluated only on demand; no timer or background provider request.
+REFRESH_SKEW_SECONDS = 30
+
+
+def refresh_due(session, *, now=None, minimum_validity=REFRESH_SKEW_SECONDS):
+    """Whether a known expiry needs renewal before another protected access."""
+    return (session.expires_at is not None
+            and session.expires_at <= (time.time() if now is None else now) + minimum_validity)
 
 
 class _Failure(Exception):
@@ -160,6 +169,42 @@ class TidalSessionRefreshManager:
         self._on_committed = on_committed
         self._config_factory = config_factory or _library_config
         self._request = request_json or _request_json
+        self._pending = None
+        self._committed = None
+
+    def needs_refresh(self, session, *, now=None, minimum_validity=REFRESH_SKEW_SECONDS):
+        """Bound skew by a newly issued token's lifetime to avoid rotation loops.
+
+        A provider can issue a shorter token than the caller's freshness window.
+        Remember only this exact committed record; use at least 90% of its known
+        lifetime before another automatic refresh. A restart can require one
+        renewal, but subsequent reads cannot repeatedly rotate the new grant.
+        """
+        if self._committed is not None and self._committed[0] == session:
+            minimum_validity = min(minimum_validity,
+                                   (session.expires_at - self._committed[1]) / 10)
+        return refresh_due(session, now=now, minimum_validity=minimum_validity)
+
+    def refresh_in_progress(self, session):
+        """Only this owner's exact in-flight record, never an old durable attempt."""
+        return self._pending is not None and self._pending[0] == session
+
+    async def wait_for_refresh(self, session):
+        """Join an existing attempt without retrying or cancelling its owner."""
+        pending = self._pending
+        if pending is None or pending[0] != session:
+            return False
+        await pending[1].wait()
+        return True
+
+    def refresh_available(self, session):
+        """Read-only availability, including this owner's still-running attempt."""
+        return bool(session is not None and session.expires_at is not None
+                    and session.auth_flow == _FLOW and session.client_id
+                    and _identity({"userId": session.user_id, "countryCode": session.country_code})
+                    and _token(session.access_token) and _token(session.refresh_token)
+                    and (self.refresh_in_progress(session)
+                         or self._store.refresh_outcome(session) is None))
 
     async def refresh(self, *, timeout=30) -> dict:
         try:
@@ -169,7 +214,8 @@ class TidalSessionRefreshManager:
             return {"state": "error", "session_saved": False, "refresh_outcome": "not_started",
                     "sharing_warning": False, "error": "storage_unavailable"}
 
-    async def refresh_owned(self, lease, *, timeout=30, only_if_expired=False) -> dict:
+    async def refresh_owned(self, lease, *, timeout=30, only_if_expired=False,
+                            minimum_validity=REFRESH_SKEW_SECONDS) -> dict:
         """Use the caller's existing lease; re-read before deciding to refresh.
 
         This internal resolver integration must use this manager's store lease.
@@ -177,6 +223,7 @@ class TidalSessionRefreshManager:
         """
         attempted = committing = saved = warning = False
         outcome = "not_started"
+        pending = None
         try:
             if (type(timeout) not in (int, float) or not math.isfinite(timeout)
                     or not 1 <= timeout <= 60):
@@ -185,18 +232,18 @@ class TidalSessionRefreshManager:
             if (old is None or old.auth_flow != _FLOW or not old.client_id
                     or _identity({"userId": old.user_id, "countryCode": old.country_code}) is None):
                 raise _Failure("session_unavailable")
-            if only_if_expired:
-                if old.expires_at is None:
-                    raise _Failure("session_unavailable")
-                if old.expires_at > time.time():
-                    return {"state": "current", "session_saved": False,
-                            "refresh_outcome": "not_started", "sharing_warning": False}
-            if not _token(old.refresh_token):
-                raise _Failure("session_unavailable")
             blocked = lease.refresh_outcome(old)
             if blocked is not None:
                 outcome = blocked
                 raise _Failure("refresh_rejected" if blocked == "rejected" else "refresh_result_uncertain")
+            if only_if_expired:
+                if old.expires_at is None:
+                    raise _Failure("session_unavailable")
+                if not self.needs_refresh(old, minimum_validity=minimum_validity):
+                    return {"state": "current", "session_saved": False,
+                            "refresh_outcome": "not_started", "sharing_warning": False}
+            if not _token(old.refresh_token):
+                raise _Failure("session_unavailable")
             config = self._config_factory()
             if (config.client_id != old.client_id or config.api_oauth2_token != TOKEN_URL
                     or config.api_v1_location != "https://api.tidal.com/v1/"
@@ -208,6 +255,7 @@ class TidalSessionRefreshManager:
                 started_at = time.time()
                 lease.mark_refresh_attempt(old)
                 attempted = True
+                pending = self._pending = (old, asyncio.Event())
                 outcome = "uncertain"
                 value = await self._request(TOKEN_URL, data={
                     "grant_type": "refresh_token", "refresh_token": old.refresh_token,
@@ -227,6 +275,7 @@ class TidalSessionRefreshManager:
                 committing = True
                 lease.save(new)
                 saved, outcome = True, "saved"
+                self._committed = (new, started_at)
                 if self._on_committed is not None:
                     try:
                         self._on_committed(old, new)
@@ -247,5 +296,9 @@ class TidalSessionRefreshManager:
             category = "commit_failed" if committing else "storage_unavailable"
         except Exception:
             category = "commit_failed" if committing else "refresh_failed"
+        finally:
+            if pending is not None:
+                self._pending = None
+                pending[1].set()
         return {"state": "error", "session_saved": saved, "refresh_outcome": outcome,
                 "sharing_warning": warning, "error": category}

@@ -279,17 +279,21 @@ class TidalPlaybackResolver:
             session = _device_session(self._store.load(), allow_expired=self._refresh is not None)
             if session.expires_at is None:
                 return False
-            return (session.expires_at > time.time()
-                    or self._refresh is not None and type(session.refresh_token) is str
-                    and bool(re.fullmatch(r"[\x21-\x7e]{1,16384}", session.refresh_token))
-                    and self._store.refresh_outcome(session) is None)
+            if (self._store.refresh_outcome(session) is not None
+                    and not (self._refresh is not None and self._refresh.refresh_in_progress(session))):
+                return False
+            return (self._refresh is not None and not self._refresh.needs_refresh(session)
+                    or self._refresh is not None and self._refresh.refresh_available(session)
+                    or self._refresh is None and session.expires_at > time.time())
         except (TidalSessionError, TidalPlaybackError, OSError):
             return False
 
     async def _session_owned(self, lease):
         session = _device_session(lease.load(), allow_expired=True)
-        if (self._refresh is not None and session.expires_at is not None
-                and session.expires_at <= time.time()):
+        blocked = lease.refresh_outcome(session)
+        if blocked is not None:
+            raise TidalPlaybackError("refresh_rejected" if blocked == "rejected" else "refresh_result_uncertain")
+        if self._refresh is not None and self._refresh.needs_refresh(session):
             result = await self._refresh.refresh_owned(lease, only_if_expired=True)
             if result["state"] not in {"current", "refreshed"}:
                 code = result.get("error")
@@ -304,7 +308,8 @@ class TidalPlaybackResolver:
             return False
         try:
             session = _device_session(self._store.load())
-            return hmac.compare_digest(fingerprint, _session_fingerprint(session))
+            return (self._store.refresh_outcome(session) is None
+                    and hmac.compare_digest(fingerprint, _session_fingerprint(session)))
         except (ValueError, TypeError, OSError, OverflowError):
             return False
 
