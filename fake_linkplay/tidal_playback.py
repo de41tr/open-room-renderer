@@ -46,7 +46,7 @@ _MESSAGES = {
     "unsupported_manifest": "Only a single unencrypted TIDAL BTS audio candidate is supported.",
     "unsupported_asset": "TIDAL returned a preview or another unsupported asset presentation.",
     "unsafe_destination": "The TIDAL audio candidate has an unsafe or unavailable destination.",
-    "invalid_page_selection": "Select one bounded TIDAL album-tracks or playlist-items page.",
+    "invalid_page_selection": "Select one supported bounded TIDAL track page.",
     "invalid_page_response": "TIDAL returned an inconsistent catalogue page.",
     "unsupported_page": "Only nonempty pages of explicitly streamable audio tracks are supported.",
 }
@@ -305,9 +305,12 @@ class TidalPlaybackResolver:
             with self._store.lease() as lease:
                 session = _device_session(lease.load(), allow_expired=True)
                 params = dict(request.params)
-                if params.get("countryCode", session.country_code) != session.country_code:
+                if (params.get("countryCode", session.country_code) != session.country_code
+                        or request.favorites_user_id and request.favorites_user_id != session.user_id):
                     raise TidalPlaybackError("invalid_page_selection")
                 session = await self._session_owned(lease)
+                if request.favorites_user_id and request.favorites_user_id != session.user_id:
+                    raise TidalPlaybackError("invalid_page_selection")
                 params["countryCode"] = session.country_code
                 async with asyncio.timeout(15):
                     async with aiohttp.ClientSession(
