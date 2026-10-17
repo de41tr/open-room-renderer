@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const snapshot = (session_status, extra = {}) => ({state: 'idle', active: false, session_status, account_shared: false, account_sharing_remembered: false, ...extra});
 
-async function harness(initial) {
+async function harness(initial, bootstrap = async () => ({csrf_token: 'synthetic-csrf'})) {
   let status = initial, poll, post = async () => ({}), failedStatus = false;
   const elements = {}, calls = [];
   const html = fs.readFileSync(path.join(__dirname, '../fake_linkplay/web_assets/tidal.html'), 'utf8');
@@ -19,7 +19,7 @@ async function harness(initial) {
   const fetch = async (url, options) => {
     calls.push({url, options});
     if (options.method === 'POST') return post(url, JSON.parse(options.body));
-    if (url.endsWith('/web/state')) return {ok: true, json: async () => ({csrf_token: 'synthetic-csrf'})};
+    if (url.endsWith('/web/state')) return {ok: true, json: bootstrap};
     if (failedStatus) throw new Error('synthetic-private-error');
     return {ok: true, json: async () => ({...status})};
   };
@@ -34,11 +34,83 @@ async function harness(initial) {
     failStatus() { failedStatus = true; },
     async poll() { poll(); await tick(); },
     async click(id) { if (!elements[id].disabled) elements[id].events.click(); await tick(); },
-    async rememberSharing(checked = true) { elements['remember-sharing'].checked = checked; elements['remember-sharing'].events.change(); await tick(); },
+    async rememberSharing(checked = true) { if (!elements['remember-sharing'].disabled) { elements['remember-sharing'].checked = checked; elements['remember-sharing'].events.change(); } await tick(); },
     async consent() { elements.consent.checked = true; elements.consent.events.change(); await tick(); },
     async forgetConsent() { elements["forget-consent"].checked = true; elements["forget-consent"].events.change(); await tick(); }
   };
 }
+
+test('a failed initial control bootstrap recovers by reads before Remember and Stop can be used', async () => {
+  let attempts = 0;
+  const h = await harness(snapshot('stored'), async () => {
+    if (++attempts === 1) throw new Error('SYNTHETIC_PRIVATE_ERROR');
+    return {csrf_token: 'synthetic-csrf'};
+  });
+  assert.equal(h.elements['remember-sharing'].disabled, true);
+  assert.equal(h.elements.unshare.disabled, true);
+  await h.rememberSharing();
+  assert.equal(h.elements['remember-sharing'].checked, false);
+  await h.poll();
+  assert.equal(h.elements['remember-sharing'].disabled, false);
+  assert.equal(h.elements.unshare.disabled, false);
+  await h.rememberSharing();
+  await h.poll();
+  assert.equal(h.elements['remember-sharing'].checked, true);
+  assert.equal(h.posts().length, 0);
+  h.setPost(async (url, body) => {
+    assert.ok(url.endsWith('/share'));
+    assert.deepEqual(body, {confirm_lan_account_sharing: true, remember_account_sharing: true});
+    return {ok: true, json: async () => snapshot('stored', {account_shared: true, account_sharing_remembered: true})};
+  });
+  await h.click('share');
+  assert.equal(h.posts().length, 1);
+});
+
+test('a rejected control session requires explicit reload and never retries Stop or hides the warning', async () => {
+  const h = await harness(snapshot('stored', {account_shared: true}));
+  h.setPost(async url => {
+    assert.ok(url.endsWith('/unshare'));
+    return {ok: false, status: 403};
+  });
+  await h.click('unshare');
+  await h.poll();
+  await h.click('unshare');
+  assert.equal(h.posts().length, 1);
+  assert.equal(h.elements.unshare.disabled, true);
+  assert.equal(h.elements['remember-sharing'].disabled, true);
+  assert.match(h.elements.status.textContent, /Reload this page.*No action was retried/);
+  assert.doesNotMatch(h.elements.status.textContent, /sharing was stopped/);
+});
+
+test('a delayed bootstrap cannot unlock controls after a rejected mutation requires reload', async () => {
+  let finish, attempts = 0;
+  const h = await harness(snapshot('stored'), () => {
+    if (++attempts === 1) return new Promise(resolve => { finish = resolve; });
+    return {csrf_token: 'synthetic-new-csrf'};
+  });
+  await h.poll();
+  h.setPost(async () => ({ok: false, status: 403}));
+  await h.click('unshare');
+  finish({csrf_token: 'synthetic-stale-csrf'});
+  await tick();
+  await h.poll();
+  await h.click('unshare');
+  assert.equal(h.posts().length, 1);
+  assert.equal(h.elements.unshare.disabled, true);
+  assert.equal(h.elements['remember-sharing'].disabled, true);
+  assert.match(h.elements.status.textContent, /Reload this page.*No action was retried/);
+});
+
+test('successful Stop explicitly confirms durable disable even when already off', async () => {
+  for (const kind of ['stored', 'expired']) {
+    const h = await harness(snapshot(kind));
+    h.setPost(async () => ({ok: true, json: async () => snapshot(kind)}));
+    await h.click('unshare');
+    await h.poll();
+    assert.equal(h.posts().length, 1);
+    assert.match(h.elements.status.textContent, /sharing was stopped.*restart.*copied access tokens/);
+  }
+});
 
 test('restart reports a stored local session without logging in, sharing or refreshing', async () => {
   const h = await harness(snapshot('stored'));
