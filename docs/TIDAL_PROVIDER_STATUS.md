@@ -1,8 +1,10 @@
 # TIDAL account interoperability milestone
 
-This is an explicit, non-advertised integration boundary, not working TIDAL
-playback or TIDAL Connect support. Existing renderer startup creates only inactive login/account boundaries; it
-does not contact TIDAL or expose an account.
+This milestone describes the independent-client account boundary, not TIDAL
+Connect support or live playback acceptance. For current device-login behavior,
+including explicitly remembered LAN sharing restored at startup, see the
+[experimental device-login guide](TIDAL_DEVICE_LOGIN_EXPERIMENT.md). Startup
+does not contact TIDAL or enable sharing for a previously unshared account.
 
 Implemented and tested with synthetic data:
 
