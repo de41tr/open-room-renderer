@@ -52,6 +52,14 @@ All three successful routes return ONLY these fields:
   `volume_limit_exceeded`, `source_changed`, `stop_unconfirmed`,
   `lease_mismatch`, `test_closed`
 
+When no lease error exists, an unavailable status can report `test_unavailable`
+for a failed local capability/session prerequisite or `source_not_idle` for a
+failed renderer-idle check. These response-only hints do not change lease state,
+availability or admission; they clear when that check no longer fails. Existing
+lease errors take precedence. The hints are not exhaustive: `error: null` does
+not imply availability, and `test_unavailable` does not identify a particular
+session or backend-hook failure.
+
 Start returns HTTP 202 after an admitted lease has confirmed raw mpv volume 1;
 playback/provider resolution continues in a renderer-owned task. Poll status
 until `playing` or a terminal state. An HTTP/client disconnect does not cancel
