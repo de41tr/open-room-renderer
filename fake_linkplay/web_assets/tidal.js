@@ -1,11 +1,12 @@
 "use strict";
 (() => {
   const byId = id => document.getElementById(id);
-  let csrf = null, pending = false, busy = false, notice = "", sharingRemembered = false;
+  let csrf = null, pending = false, busy = false, notice = "", sharingRemembered = false, reloadRequired = false;
   async function request(path, body) {
     const response = await fetch(path, {method: body ? "POST" : "GET", mode: "same-origin", credentials: "same-origin", redirect: "error", cache: "no-store", referrerPolicy: "no-referrer", headers: body ? {"Content-Type": "application/json", "X-ORR-CSRF": csrf} : {}, ...(body ? {body: JSON.stringify(body)} : {}), signal: AbortSignal.timeout((path.endsWith("/play") || path.endsWith("/refresh")) ? 45000 : 20000)});
     if (!response.ok) {
       const error = new Error("TIDAL request was not accepted.");
+      error.status = response.status;
       if (path.endsWith("/disconnect")) {
         const value = await response.json();
         if (["disconnect_busy", "disconnect_stop_first", "disconnect_storage_unavailable", "disconnect_unavailable"].includes(value.error)) error.code = value.error;
@@ -35,7 +36,7 @@
     }
     byId("remember-sharing").disabled = busy || pending || !csrf || !stored || sharingRemembered;
     byId("start").disabled = busy || pending || value.retry_after > 0 || !csrf || !byId("consent").checked || value.session_status !== "missing" || value.state === "closed";
-    byId("cancel").disabled = busy || !pending;
+    byId("cancel").disabled = busy || !pending || !csrf;
     byId("share").disabled = busy || pending || !csrf || !stored || sharingRemembered || (value.account_shared === true && !byId("remember-sharing").checked);
     byId("play").disabled = busy || pending || !csrf || !refreshable;
     byId("refresh-session").disabled = busy || pending || !csrf || !refreshable;
@@ -52,16 +53,29 @@
     }
   }
   async function refresh() {
-    try { render(await request("/orr/v1/tidal/status")); }
-    catch (_) { render({session_status: "unavailable"}); }
+    try {
+      if (!csrf && !reloadRequired) {
+        const value = await request("/orr/v1/web/state");
+        if (!value || typeof value.csrf_token !== "string" || !value.csrf_token) throw new Error("Control session unavailable.");
+        if (!reloadRequired) csrf = value.csrf_token;
+      }
+      render(await request("/orr/v1/tidal/status"));
+    }
+    catch (_) {
+      render({session_status: "unavailable"});
+      if (!csrf && !reloadRequired) byId("status").textContent = "Renderer controls are unavailable. Retrying the read-only connection check; no action was sent.";
+    }
   }
   async function act(action) {
-    if (busy) return;
+    if (busy || !csrf || reloadRequired) return;
     notice = ""; busy = true;
     for (const id of ["start", "cancel", "share", "unshare", "play", "refresh-session", "disconnect", "remember-sharing"]) byId(id).disabled = true;
     try {
       const result = await request(`/orr/v1/tidal/${action}`, ({start: {confirm_experimental_login: true}, cancel: {cancel: true}, share: {confirm_lan_account_sharing: true, ...(byId("remember-sharing").checked ? {remember_account_sharing: true} : {})}, unshare: {stop_lan_account_sharing: true}, play: {track_id: byId("track").value.trim(), confirm_experimental_playback: true}, refresh: {confirm_session_refresh: true}, disconnect: {confirm_forget_local_session: true}}[action]));
-      if (action === "unshare" && result.account_shared === false && result.account_sharing_remembered === false) byId("remember-sharing").checked = false;
+      if (action === "unshare" && result.account_shared === false && result.account_sharing_remembered === false) {
+        byId("remember-sharing").checked = false;
+        notice = "Account sharing was stopped and its restart setting was cleared. Previously copied access tokens are not revoked.";
+      }
       if (action === "disconnect" && result.session_forgotten === true) {
         notice = "The saved local TIDAL session was forgotten and account sharing was removed. To sign in again, confirm and start a new device login. Your TIDAL account and provider grants were not deleted or revoked.";
         byId("consent").checked = false;
@@ -95,6 +109,10 @@
         disconnect_unavailable: "Local session recovery is unavailable for this renderer's account configuration."
       };
       notice = action === "disconnect" ? disconnectErrors[error.code] || "Local session removal was not confirmed. Check status before trying again; no automatic retry was sent." : action === "share" ? "Sharing was not confirmed. An unexpired device session and an idle login worker are required." : action === "play" ? "Playback request was not confirmed. Check renderer status; no automatic retry was sent." : action === "refresh" ? "Refresh outcome is unconfirmed; the provider may have rotated credentials. Inspect the local session before another explicit attempt. No automatic retry was sent." : "Action outcome unconfirmed. Check status; no automatic retry was sent.";
+      if (error.status === 403) {
+        csrf = null; reloadRequired = true;
+        notice = "Renderer controls were rejected. Reload this page before trying again. No action was retried.";
+      }
       byId("status").textContent = notice;
     }
     finally { if (action === "disconnect") byId("forget-consent").checked = false; busy = false; await refresh(); }
@@ -109,6 +127,6 @@
   byId("unshare").addEventListener("click", () => act("unshare"));
   byId("cancel").addEventListener("click", () => act("cancel"));
   byId("disconnect").addEventListener("click", () => { if (byId("forget-consent").checked) act("disconnect"); });
-  request("/orr/v1/web/state").then(value => { csrf = value.csrf_token; return refresh(); }).catch(() => { byId("status").textContent = "Renderer unavailable. Reload this page."; });
+  refresh();
   window.setInterval(() => { if (!busy) refresh(); }, 2000);
 })();

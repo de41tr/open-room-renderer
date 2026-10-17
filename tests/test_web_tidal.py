@@ -177,10 +177,22 @@ async def test_remembered_sharing_status_survives_restart_and_reports_expiry_wit
         assert before == {path.name: path.read_bytes() for path in store.directory.iterdir() if path.is_file()}
         assert not fake.calls and not api.mpv.calls
         headers = {"Origin": base, "X-ORR-CSRF": (await state(session, base))["csrf_token"]}
+        # A tab predating a renderer restart retains the old control token while
+        # read-only status still works. Rejection must not revoke remembered consent.
+        api.web_api._csrf_token = "synthetic-new-renderer-control-token"
+        async with session.get(base + "/orr/v1/tidal/status") as response:
+            assert response.status == 200 and (await response.json())["session_status"] == "expired"
         async with session.post(base + "/orr/v1/tidal/unshare", json={"stop_lan_account_sharing": True}, headers=headers) as response:
-            assert response.status == 200
-            value = await response.json()
-            assert not value["account_shared"] and not value["account_sharing_remembered"]
+            assert response.status == 403
+        assert api.tidal_account.sharing_remembered
+        assert before == {path.name: path.read_bytes() for path in store.directory.iterdir() if path.is_file()}
+        headers["X-ORR-CSRF"] = (await state(session, base))["csrf_token"]
+        # Explicit Stop after reload is valid during expiry and idempotent.
+        for _ in range(2):
+            async with session.post(base + "/orr/v1/tidal/unshare", json={"stop_lan_account_sharing": True}, headers=headers) as response:
+                assert response.status == 200
+                value = await response.json()
+                assert not value["account_shared"] and not value["account_sharing_remembered"]
         assert not TidalDeviceAccountBridge(store).sharing_remembered
         assert store.load() == saved and not fake.calls and not api.mpv.calls
 
