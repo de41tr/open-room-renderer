@@ -269,3 +269,100 @@ async def test_injected_other_store_account_keeps_working_without_wrong_refresh_
     assert decode_account_field(UUID, result["access_token"]) == "synthetic-old-access"
     await api.tidal_login.close()
     await api._eventing.close()
+
+
+@pytest.mark.asyncio
+async def test_expired_remembered_account_restores_suspended_without_startup_refresh(shared_account):
+    store, bridge, clock = shared_account
+    await bridge.set_shared(True, remember=True)
+    clock[0] = 2001
+    restarted = TidalDeviceAccountBridge(store)
+    request, calls = responses(TOKEN, IDENTITY)
+    bind(store, restarted, request)
+    assert not calls and not restarted.shared and restarted.sharing_requested and restarted.sharing_remembered
+    result = await restarted.get_user_info(UUID, version="2")
+    assert decode_account_field(UUID, result["access_token"]) == TOKEN["access_token"]
+    assert len(calls) == 2 and restarted.shared and restarted.sharing_remembered
+    assert TidalDeviceAccountBridge(store).shared
+    await restarted.get_user_info(UUID, version="2")
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_unshare_during_refresh_stays_revoked_after_restart(shared_account):
+    store, bridge, clock = shared_account
+    await bridge.set_shared(True, remember=True)
+    clock[0] = 2001
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def request(url, **kwargs):
+        if "data" in kwargs:
+            entered.set()
+            await release.wait()
+            return TOKEN
+        return IDENTITY
+    bind(store, bridge, request)
+    running = asyncio.create_task(bridge.get_user_info(UUID, version="2"))
+    await entered.wait()
+    await asyncio.wait_for(bridge.set_shared(False), timeout=.2)
+    assert not TidalDeviceAccountBridge(store).sharing_requested
+    release.set()
+    with pytest.raises(TidalAccountUnavailable):
+        await running
+    assert not bridge.sharing_requested and not bridge.sharing_remembered
+    assert not TidalDeviceAccountBridge(store).sharing_requested
+    assert store.load().access_token == TOKEN["access_token"]
+
+
+@pytest.mark.asyncio
+async def test_external_unshare_cannot_be_resurrected_by_refresh_callback(shared_account):
+    store, bridge, clock = shared_account
+    await bridge.set_shared(True, remember=True)
+    clock[0] = 2001
+    entered, release = asyncio.Event(), asyncio.Event()
+    async def request(url, **kwargs):
+        if "data" in kwargs:
+            entered.set()
+            await release.wait()
+            return TOKEN
+        return IDENTITY
+    bind(store, bridge, request)
+    running = asyncio.create_task(bridge.get_user_info(UUID, version="2"))
+    await entered.wait()
+    await TidalDeviceAccountBridge(store).set_shared(False)
+    release.set()
+    with pytest.raises(TidalAccountUnavailable):
+        await running
+    assert not bridge.sharing_remembered and not TidalDeviceAccountBridge(store).shared
+
+
+@pytest.mark.asyncio
+async def test_interruption_between_session_commit_and_consent_rotation_fails_closed(shared_account):
+    store, bridge, _ = shared_account
+    await bridge.set_shared(True, remember=True)
+    replacement = replace(store.load(), access_token="synthetic-new", expires_at=3000)
+    with store.lease() as lease:
+        lease.save(replacement)  # Simulate process exit before its consent callback.
+    restarted = TidalDeviceAccountBridge(store)
+    assert not restarted.shared and not restarted.sharing_remembered
+    assert not bridge.shared
+
+
+@pytest.mark.asyncio
+async def test_failed_consent_rotation_reports_warning_and_restart_stays_unshared(shared_account, monkeypatch):
+    from fake_linkplay import tidal_session
+    store, bridge, clock = shared_account
+    await bridge.set_shared(True, remember=True)
+    clock[0] = 2001
+    request, calls = responses(TOKEN, IDENTITY)
+    owner = bind(store, bridge, request)
+    original_write = tidal_session.TidalSessionStore._write_at
+    def failed_consent(directory, target, data):
+        original_write(directory, target, data)
+        if target == "account-sharing":
+            raise OSError("Synthetic post-replace consent failure")
+    monkeypatch.setattr(tidal_session.TidalSessionStore, "_write_at", staticmethod(failed_consent))
+    result = await owner.refresh()
+    assert result["refresh_outcome"] == "saved" and result["sharing_warning"]
+    assert len(calls) == 2 and store.load().access_token == TOKEN["access_token"]
+    assert not bridge.shared and not bridge.sharing_remembered
+    assert not TidalDeviceAccountBridge(store).sharing_requested

@@ -187,3 +187,81 @@ async def test_expiry_suspends_sharing_until_verified_same_owner_refresh(tmp_pat
         lease.save(replacement)
         bridge._session_refreshed(previous, replacement)
     assert bridge.shared is (not revoke)
+
+
+@crypto
+@pytest.mark.asyncio
+async def test_remembered_sharing_survives_restart_and_unshare_is_durable(tmp_path):
+    from fake_linkplay.tidal_account import TidalDeviceAccountBridge
+    store = TidalSessionStore(tmp_path / "remembered-sharing")
+    record = TidalSession("synthetic-access", "synthetic-refresh", time.time()+600, "42", "DE",
+                          "synthetic-client", "tidalapi-device-v0.8.11")
+    store.save(record)
+    bridge = TidalDeviceAccountBridge(store)
+    assert not bridge.shared and not bridge.sharing_remembered
+    assert not (store.directory / "account-sharing").exists()
+    await bridge.set_shared(True, remember=True)
+    marker = (store.directory / "account-sharing").read_bytes()
+    assert (store.directory / "account-sharing").stat().st_mode & 0o777 == 0o600
+    assert all(value.encode() not in marker for value in (record.access_token, record.refresh_token, record.client_id))
+    restarted = TidalDeviceAccountBridge(store)
+    assert restarted.shared and restarted.sharing_remembered
+    result = await restarted.get_user_info(UUID, version="2")
+    assert decode_account_field(UUID, result["access_token"]) == record.access_token
+    await restarted.set_shared(False)
+    assert not bridge.shared  # Another live owner must observe durable revocation too.
+    assert not (store.directory / "account-sharing").exists()
+    assert not TidalDeviceAccountBridge(store).sharing_requested
+    assert store.load() == record
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", [
+    {"access_token": "synthetic-replaced"}, {"user_id": "43"}, {"country_code": "US"},
+    {"client_id": "synthetic-other-client"}, {"client_id": None, "auth_flow": None},
+])
+async def test_remembered_sharing_never_applies_to_a_replaced_record(tmp_path, change):
+    from fake_linkplay.tidal_account import TidalDeviceAccountBridge
+    store = TidalSessionStore(tmp_path / "replacement-sharing")
+    record = TidalSession("synthetic-access", "synthetic-refresh", time.time()+600, "42", "DE",
+                          "synthetic-client", "tidalapi-device-v0.8.11")
+    store.save(record)
+    bridge = TidalDeviceAccountBridge(store)
+    await bridge.set_shared(True, remember=True)
+    store.save(replace(record, **change))
+    assert not bridge.shared and not bridge.sharing_remembered
+    assert not TidalDeviceAccountBridge(store).sharing_requested
+
+
+@pytest.mark.asyncio
+async def test_forget_clears_remembered_consent_even_if_session_is_already_missing(tmp_path):
+    from fake_linkplay.tidal_account import TidalDeviceAccountBridge
+    store = TidalSessionStore(tmp_path / "forgotten-sharing")
+    record = TidalSession("synthetic-access", "synthetic-refresh", time.time()+600, "42", "DE",
+                          "synthetic-client", "tidalapi-device-v0.8.11")
+    store.save(record)
+    bridge = TidalDeviceAccountBridge(store)
+    await bridge.set_shared(True, remember=True)
+    (store.directory / "session.json").unlink()
+    await bridge.clear_local_session()
+    assert not (store.directory / "account-sharing").exists()
+    store.save(record)  # Even restoring identical bytes must not restore forgotten consent.
+    assert not bridge.sharing_requested and not TidalDeviceAccountBridge(store).sharing_requested
+
+
+@pytest.mark.asyncio
+async def test_failed_durable_unshare_revokes_current_export_but_reports_saved_consent(tmp_path, monkeypatch):
+    from fake_linkplay.tidal_account import TidalDeviceAccountBridge
+    from fake_linkplay.tidal_session import TidalSessionError
+    store = TidalSessionStore(tmp_path / "failed-unshare")
+    store.save(TidalSession("synthetic-access", "synthetic-refresh", time.time()+600, "42", "DE",
+                            "synthetic-client", "tidalapi-device-v0.8.11"))
+    bridge = TidalDeviceAccountBridge(store)
+    await bridge.set_shared(True, remember=True)
+    def unavailable(*args):
+        raise TidalSessionError("Synthetic storage failure")
+    monkeypatch.setattr(store, "remember_sharing", unavailable)
+    with pytest.raises(TidalAccountUnavailable):
+        await bridge.set_shared(False)
+    assert not bridge.shared and bridge.sharing_remembered
+    assert TidalDeviceAccountBridge(store).sharing_remembered  # Revocation was not durable.

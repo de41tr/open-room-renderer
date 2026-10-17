@@ -53,12 +53,13 @@ class WebTidalLogin:
                 if request.method != "POST":
                     raise WebAdmissionError("method_not_allowed", 405)
                 raw = await self.admission._body(request, origin)
-                # Exact one-field request, no URLs, credentials or arbitrary options.
+                # Exact action fields, no URLs, credentials or arbitrary options.
                 try:
                     pairs = json.loads(raw, object_pairs_hook=lambda value: value)
                 except (ValueError, UnicodeError):
                     raise WebAdmissionError() from None
                 action = request.path.rsplit("/", 1)[-1]
+                remember = False
                 if action == "play":
                     if (type(pairs) is not list or len(pairs) != 2
                             or {key for key, _ in pairs} != {"track_id", "confirm_experimental_playback"}):
@@ -68,6 +69,17 @@ class WebTidalLogin:
                             or type(payload["track_id"]) is not str
                             or not re.fullmatch(r"[1-9][0-9]{0,18}", payload["track_id"])):
                         raise WebAdmissionError()
+                elif action == "share":
+                    if (type(pairs) is not list or len(pairs) not in (1, 2)
+                            or any(type(pair) is not tuple or len(pair) != 2 for pair in pairs)):
+                        raise WebAdmissionError()
+                    payload = dict(pairs)
+                    fields = {"confirm_lan_account_sharing"}
+                    if len(pairs) == 2:
+                        fields.add("remember_account_sharing")
+                    if set(payload) != fields or any(value is not True for value in payload.values()):
+                        raise WebAdmissionError()
+                    remember = payload.get("remember_account_sharing", False)
                 else:
                     expected = [({"start": "confirm_experimental_login", "cancel": "cancel",
                                   "share": "confirm_lan_account_sharing", "unshare": "stop_lan_account_sharing",
@@ -95,14 +107,15 @@ class WebTidalLogin:
                     if self.account is None or (action == "share" and result.get("active")):
                         raise WebAdmissionError("account_sharing_unavailable", 409)
                     try:
-                        await self.account.set_shared(action == "share")
+                        await self.account.set_shared(action == "share", remember=remember)
                     except TidalAccountUnavailable:
                         raise WebAdmissionError("account_sharing_unavailable", 409) from None
                 else:
                     result = await (self.manager.start() if action == "start" else self.manager.cancel())
             result = dict(result)
             result["account_shared"] = bool(self.account and self.account.shared)
-            allowed = {"state", "active", "verification_uri", "user_code", "expires_in", "expires_at", "retry_after", "account_shared", "playback_requested", "refresh_outcome", "sharing_warning", "session_forgotten"}
+            result["account_sharing_remembered"] = bool(self.account and self.account.sharing_remembered)
+            allowed = {"state", "active", "verification_uri", "user_code", "expires_in", "expires_at", "retry_after", "account_shared", "account_sharing_remembered", "playback_requested", "refresh_outcome", "sharing_warning", "session_forgotten"}
             if result.get("session_status") in ("missing", "stored", "expired", "unsupported", "unavailable"):
                 allowed.add("session_status")
             safe_errors = {"dependency_unavailable", "session_exists", "storage_unavailable", "invalid_challenge", "login_failed", "expired", "unsafe_debug", "invalid_timeout", "session_unavailable", "client_mismatch", "invalid_response", "identity_mismatch", "refresh_failed", "commit_failed", "refresh_result_uncertain", "refresh_rejected"}

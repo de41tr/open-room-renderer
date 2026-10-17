@@ -367,3 +367,97 @@ def test_unsupported_lock_fails_closed_without_altering_existing_session(tmp_pat
             operation()
         assert ACCESS not in "".join(traceback.format_exception(error.value))
     assert store.load() == session
+
+
+def test_sharing_reads_and_revocation_do_not_create_missing_storage(tmp_path, session):
+    store = TidalSessionStore(tmp_path / "private-sharing")
+    assert not store.sharing_matches(session)
+    store.remember_sharing(None)
+    assert not store.directory.exists()
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "permissions", "directory", "oversize", "malformed"])
+def test_sharing_marker_safety_is_fail_closed_and_never_echoes_tokens(tmp_path, session, kind):
+    store = TidalSessionStore(tmp_path / "private-sharing")
+    store.save(session)
+    store.remember_sharing(session)
+    marker = store.directory / "account-sharing"
+    if kind == "symlink":
+        marker.unlink()
+        marker.symlink_to(store.directory / "session.json")
+    elif kind == "hardlink":
+        os.link(marker, store.directory / "extra-link")
+    elif kind == "permissions":
+        marker.chmod(0o644)
+    elif kind == "directory":
+        marker.unlink()
+        marker.mkdir()
+    else:
+        marker.write_text(ACCESS * 10 if kind == "oversize" else ACCESS)
+    with pytest.raises(TidalSessionError) as error:
+        store.sharing_matches(session)
+    assert ACCESS not in "".join(traceback.format_exception(error.value))
+    assert store.load() == session
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink", "permissions", "content"])
+def test_sharing_lock_cannot_follow_or_replace_an_unsafe_inode(tmp_path, session, kind):
+    store = TidalSessionStore(tmp_path / "private-sharing")
+    store.save(session)
+    store.remember_sharing(session)
+    lock = store.directory / "account-sharing.lock"
+    if kind == "symlink":
+        lock.unlink()
+        lock.symlink_to(store.directory / "session.json")
+    elif kind == "hardlink":
+        os.link(lock, store.directory / "extra-lock")
+    elif kind == "permissions":
+        lock.chmod(0o644)
+    else:
+        lock.write_text(ACCESS)
+    with pytest.raises(TidalSessionError) as error:
+        store.remember_sharing(None)
+    assert ACCESS not in "".join(traceback.format_exception(error.value))
+    assert store.sharing_matches(session) and store.load() == session
+
+
+def test_sharing_lock_is_independent_of_session_lease_and_blocks_competing_process(tmp_path, session):
+    store = TidalSessionStore(tmp_path / "private-sharing")
+    store.save(session)
+    store.remember_sharing(session)
+    with store.lease():
+        store.remember_sharing(None)  # Refresh may own this lease across its await.
+    assert not store.sharing_matches(session)
+    store.remember_sharing(session)
+    with store._directory() as directory, store._sharing_locked(directory):
+        subprocess.run([sys.executable, "-c", """
+import sys
+from fake_linkplay.tidal_session import TidalSessionError, TidalSessionStore
+try:
+    TidalSessionStore(sys.argv[1]).remember_sharing(None)
+except TidalSessionError as error:
+    assert 'already in progress' in str(error)
+else:
+    raise AssertionError('competing consent write was allowed')
+""", str(store.directory)], check=True, capture_output=True, timeout=5)
+    assert store.sharing_matches(session)
+
+
+@pytest.mark.parametrize("after_replace", [False, True])
+def test_failed_sharing_write_removes_even_post_replace_grant(tmp_path, monkeypatch, session, after_replace):
+    store = TidalSessionStore(tmp_path / "private-sharing")
+    store.save(session)
+    original_fsync = os.fsync
+    failed = False
+    def fail_once(fd):
+        nonlocal failed
+        if not failed and stat.S_ISDIR(os.fstat(fd).st_mode) is after_replace:
+            failed = True
+            raise OSError(errno.EIO, ACCESS)
+        return original_fsync(fd)
+    monkeypatch.setattr(tidal_session.os, "fsync", fail_once)
+    with pytest.raises(TidalSessionError) as error:
+        store.remember_sharing(session)
+    assert failed and "not saved" in str(error.value)
+    assert ACCESS not in "".join(traceback.format_exception(error.value))
+    assert not store.sharing_matches(session) and store.load() == session
