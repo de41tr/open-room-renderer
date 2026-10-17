@@ -4677,9 +4677,16 @@ class HttpApi:
                     raise SoapFault(402, "Invalid Args")
                 if (action == "GetUserInfo" and self.tidal_account is not None
                         and self._xml_text(action_body, "AccountSource") == "Tidal"):
+                    version = self._xml_text(action_body, "Version")
+                    # Windows 0.2.10.5 omits Version for device-account adoption.
+                    # parse_request canonicalizes even empty/self-closing elements;
+                    # only absence may reuse v2, with all bridge consent gates intact.
+                    if (isinstance(self.tidal_account, TidalDeviceAccountBridge)
+                            and not re.search(r"<Version>", action_body, re.IGNORECASE)):
+                        version = "2"
                     try:
                         account = await self.tidal_account.get_user_info(
-                            self.cfg.upnp_uuid, version=self._xml_text(action_body, "Version"))
+                            self.cfg.upnp_uuid, version=version)
                     except TidalAccountUnavailable:
                         raise SoapFault(501, "Action Failed") from None
                     result = f"<Result>{escape(json.dumps(account, separators=(',', ':')))}</Result>"
