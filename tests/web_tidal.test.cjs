@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const tick = () => new Promise(resolve => setImmediate(resolve));
-const snapshot = (session_status, extra = {}) => ({state: 'idle', active: false, session_status, account_shared: false, ...extra});
+const snapshot = (session_status, extra = {}) => ({state: 'idle', active: false, session_status, account_shared: false, account_sharing_remembered: false, ...extra});
 
 async function harness(initial) {
   let status = initial, poll, post = async () => ({}), failedStatus = false;
@@ -34,6 +34,7 @@ async function harness(initial) {
     failStatus() { failedStatus = true; },
     async poll() { poll(); await tick(); },
     async click(id) { if (!elements[id].disabled) elements[id].events.click(); await tick(); },
+    async rememberSharing(checked = true) { elements['remember-sharing'].checked = checked; elements['remember-sharing'].events.change(); await tick(); },
     async consent() { elements.consent.checked = true; elements.consent.events.change(); await tick(); },
     async forgetConsent() { elements["forget-consent"].checked = true; elements["forget-consent"].events.change(); await tick(); }
   };
@@ -47,6 +48,7 @@ test('restart reports a stored local session without logging in, sharing or refr
   assert.equal(h.elements['refresh-session'].disabled, false);
   assert.equal(h.elements.share.disabled, false);
   assert.equal(h.elements.unshare.disabled, false);
+  assert.equal(h.elements['remember-sharing'].checked, false);
   await h.poll();
   assert.equal(h.posts().length, 0);
   h.setPost(async (url, body) => {
@@ -58,6 +60,80 @@ test('restart reports a stored local session without logging in, sharing or refr
   await h.click('share');
   assert.equal(h.posts().length, 1);
   assert.equal(h.elements.share.disabled, true);
+});
+
+test('Remember requires an explicit Share and can upgrade transient sharing with one request', async () => {
+  const h = await harness(snapshot('stored', {account_shared: true}));
+  assert.equal(h.elements.share.disabled, true);
+  assert.equal(h.elements['remember-sharing'].checked, false);
+  await h.rememberSharing();
+  await h.poll();
+  assert.equal(h.posts().length, 0);
+  assert.equal(h.elements.share.disabled, false);
+  let finish;
+  h.setPost((url, body) => {
+    assert.ok(url.endsWith('/share'));
+    assert.deepEqual(body, {confirm_lan_account_sharing: true, remember_account_sharing: true});
+    return new Promise(resolve => { finish = resolve; });
+  });
+  await h.click('share');
+  await h.click('share');
+  assert.equal(h.posts().length, 1);
+  const remembered = snapshot('stored', {account_shared: true, account_sharing_remembered: true});
+  h.setStatus(remembered);
+  finish({ok: true, json: async () => remembered});
+  await tick();
+  await h.poll();
+  assert.equal(h.elements['remember-sharing'].checked, true);
+  assert.equal(h.elements['remember-sharing'].disabled, true);
+  assert.equal(h.elements.share.disabled, true);
+  assert.equal(h.elements.unshare.disabled, false);
+  assert.match(h.elements.status.textContent, /enabled and remembered across restarts/);
+  assert.equal(h.posts().length, 1);
+});
+
+test('restart shows remembered active or suspended sharing and Stop durably clears the selected state', async () => {
+  for (const active of [true, false]) {
+    const kind = active ? 'stored' : 'expired';
+    const h = await harness(snapshot(kind, {account_shared: active, account_sharing_remembered: true}));
+    await h.poll();
+    assert.equal(h.elements['remember-sharing'].checked, true);
+    assert.equal(h.elements['remember-sharing'].disabled, true);
+    assert.equal(h.elements.share.disabled, true);
+    assert.equal(h.elements.unshare.disabled, false);
+    assert.match(h.elements.status.textContent, active ? /enabled and remembered across restarts/ : /remembered across restarts but currently suspended.*Stop account sharing/);
+    assert.equal(h.posts().length, 0);
+    h.setPost(async (url, body) => {
+      assert.ok(url.endsWith('/unshare'));
+      assert.deepEqual(body, {stop_lan_account_sharing: true});
+      const stopped = snapshot(kind);
+      h.setStatus(stopped);
+      return {ok: true, json: async () => stopped};
+    });
+    await h.click('unshare');
+    await h.poll();
+    assert.equal(h.elements['remember-sharing'].checked, false);
+    assert.doesNotMatch(h.elements.status.textContent, /sharing.*enabled|sharing.*remembered/);
+    assert.equal(h.posts().length, 1);
+  }
+});
+
+test('unchecking an unsaved Remember choice stays transient and failed sharing never retries', async () => {
+  const h = await harness(snapshot('stored'));
+  await h.rememberSharing();
+  await h.rememberSharing(false);
+  assert.equal(h.posts().length, 0);
+  h.setPost(async (url, body) => {
+    assert.ok(url.endsWith('/share'));
+    assert.deepEqual(body, {confirm_lan_account_sharing: true});
+    throw new Error('SYNTHETIC_PRIVATE_ERROR');
+  });
+  await h.click('share');
+  await h.poll();
+  assert.match(h.elements.status.textContent, /Sharing was not confirmed/);
+  assert.doesNotMatch(h.elements.status.textContent, /SYNTHETIC_PRIVATE/);
+  assert.equal(h.posts().length, 1);
+  assert.equal(h.elements.unshare.disabled, false);
 });
 
 test('expired and unsupported local sessions block new login while Unshare remains available', async () => {

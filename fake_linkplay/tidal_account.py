@@ -101,18 +101,35 @@ or incomplete sessions fail closed, rather than becoming phantom accounts.
 
 
 class TidalDeviceAccountBridge(TidalAccountBridge):
-    """Explicit, process-local sharing of a provenance-bound device session.
+    """Explicit sharing of one provenance-bound device session.
 
     The real device client is projected; no registered redirect is invented.
     The app's already-authenticated branch uses Bearer /v1/sessions. Native
-    app OAuth re-login remains unsupported. Restart revokes this local opt-in.
+    app OAuth re-login remains unsupported. Remembering consent is a separate
+    opt-in; ordinary sharing still ends at restart. No startup network activity.
     """
 
     def __init__(self, store):
         self._store = store
         self._lock = asyncio.Lock()
         self._shared_session = None
+        self._remembered = False
         self._refresh = None
+        try:
+            session = self._store.load()
+            if self._shareable(session) and self._store.sharing_matches(session):
+                self._shared_session = session
+                self._remembered = True
+        except TidalSessionError:
+            pass  # Missing/unsafe consent fails closed without blocking startup.
+
+    @staticmethod
+    def _shareable(session):
+        # Expired remembered consent may be restored only as suspended consent.
+        return (session is not None and session.auth_flow == "tidalapi-device-v0.8.11"
+                and bool(session.client_id) and bool(session.expires_at) and bool(session.country_code)
+                and bool(session.user_id) and re.fullmatch(r"[1-9][0-9]{0,18}", session.user_id)
+                and int(session.user_id) <= 2**63 - 1)
 
     def _bind_refresh_owner(self, owner):
         """Bind only the runtime's exact store owner and consent callback."""
@@ -125,6 +142,7 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
     async def clear_local_session(self) -> None:
         await super().clear_local_session()
         self._shared_session = None
+        self._remembered = False
 
     async def get_user_info(self, short_uuid: str, *, version: str, now: float | None = None) -> dict:
         if version != "2":
@@ -168,12 +186,23 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
         if session is None:
             return False
         try:
-            valid = self._store.load() == session
+            valid = (self._store.load() == session
+                     and (not self._remembered or self._store.sharing_matches(session)))
         except TidalSessionError:
             valid = False
         if not valid:
             self._shared_session = None
+            self._remembered = False
         return valid
+
+    @property
+    def sharing_remembered(self):
+        """Durable status, including an unsuccessful attempt to revoke it."""
+        try:
+            session = self._store.load()
+            return bool(self._shareable(session) and self._store.sharing_matches(session))
+        except TidalSessionError:
+            return False
 
     @property
     def shared(self):
@@ -182,22 +211,24 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
         return bool(self.sharing_requested and self._shared_session.expires_at
                     and self._shared_session.expires_at > time.time())
 
-    async def set_shared(self, enabled: bool):
+    async def set_shared(self, enabled: bool, *, remember: bool = False):
+        if type(enabled) is not bool or type(remember) is not bool or remember and not enabled:
+            raise TidalAccountUnavailable("TIDAL sharing confirmation is invalid")
         async with self._lock:
             self._shared_session = None
-            if not enabled:
-                return
+            self._remembered = False
             try:
+                if not enabled:
+                    self._store.remember_sharing(None)
+                    return
                 # Refuse while login/refresh owns the store; pin the exact record.
                 with self._store.lease() as lease:
                     session = lease.load()
-                    if (session is None or session.auth_flow != "tidalapi-device-v0.8.11"
-                            or not session.client_id or not session.expires_at
-                            or session.expires_at <= time.time() or not session.country_code
-                            or not session.user_id or not re.fullmatch(r"[1-9][0-9]{0,18}", session.user_id)
-                            or int(session.user_id) > 2**63 - 1):
+                    if not self._shareable(session) or session.expires_at <= time.time():
                         raise TidalAccountUnavailable("A verified device session is required")
+                    self._store.remember_sharing(session if remember else None)
                     self._shared_session = session
+                    self._remembered = remember
             except TidalSessionError:
                 raise TidalAccountUnavailable("Device account sharing is unavailable") from None
 
@@ -214,9 +245,18 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
         if (identity(previous) == identity(replacement)
                 and replacement.auth_flow == "tidalapi-device-v0.8.11"
                 and replacement.expires_at and replacement.expires_at > time.time()):
+            if self._remembered:
+                # Revoke this projection before committing renewed consent.
+                # An error must not keep it active; durable Unshare stays final.
+                self._shared_session = None
+                self._remembered = False
+                if not self._store.renew_sharing(previous, replacement):
+                    return
+                self._remembered = True
             self._shared_session = replacement
         else:
             self._shared_session = None
+            self._remembered = False
 
     def _client_fields(self, session, short_uuid):
         if not self.shared or session != self._shared_session:

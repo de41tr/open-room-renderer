@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   const byId = id => document.getElementById(id);
-  let csrf = null, pending = false, busy = false, notice = "";
+  let csrf = null, pending = false, busy = false, notice = "", sharingRemembered = false;
   async function request(path, body) {
     const response = await fetch(path, {method: body ? "POST" : "GET", mode: "same-origin", credentials: "same-origin", redirect: "error", cache: "no-store", referrerPolicy: "no-referrer", headers: body ? {"Content-Type": "application/json", "X-ORR-CSRF": csrf} : {}, ...(body ? {body: JSON.stringify(body)} : {}), signal: AbortSignal.timeout((path.endsWith("/play") || path.endsWith("/refresh")) ? 45000 : 20000)});
     if (!response.ok) {
@@ -29,14 +29,20 @@
     if (errors[value.error] || states[value.state]) byId("status").textContent += ` ${errors[value.error] || states[value.state]}`;
     if (notice) byId("status").textContent += ` ${notice}`;
     const stored = value.session_status === "stored", refreshable = stored || value.session_status === "expired";
+    if (typeof value.account_sharing_remembered === "boolean") {
+      if (value.account_sharing_remembered || sharingRemembered) byId("remember-sharing").checked = value.account_sharing_remembered;
+      sharingRemembered = value.account_sharing_remembered;
+    }
+    byId("remember-sharing").disabled = busy || pending || !csrf || !stored || sharingRemembered;
     byId("start").disabled = busy || pending || value.retry_after > 0 || !csrf || !byId("consent").checked || value.session_status !== "missing" || value.state === "closed";
     byId("cancel").disabled = busy || !pending;
-    byId("share").disabled = busy || pending || !csrf || !stored || value.account_shared === true;
+    byId("share").disabled = busy || pending || !csrf || !stored || sharingRemembered || (value.account_shared === true && !byId("remember-sharing").checked);
     byId("play").disabled = busy || pending || !csrf || !refreshable;
     byId("refresh-session").disabled = busy || pending || !csrf || !refreshable;
     byId("disconnect").disabled = busy || pending || !csrf || !byId("forget-consent").checked || !["stored", "expired", "unsupported", "unavailable"].includes(value.session_status);
     byId("unshare").disabled = busy || !csrf;
-    if (value.account_shared === true) byId("status").textContent += " Account sharing with trusted LAN controllers is enabled.";
+    if (value.account_sharing_remembered === true) byId("status").textContent += value.account_shared === true ? " Account sharing with trusted LAN controllers is enabled and remembered across restarts." : " Account sharing is remembered across restarts but currently suspended. Stop account sharing removes the saved decision.";
+    else if (value.account_shared === true) byId("status").textContent += " Account sharing with trusted LAN controllers is enabled until the renderer restarts.";
     byId("challenge").hidden = true;
     byId("verify").removeAttribute("href"); byId("code").textContent = "";
     if (value.state === "pending" && typeof value.verification_uri === "string" && typeof value.user_code === "string") {
@@ -52,12 +58,14 @@
   async function act(action) {
     if (busy) return;
     notice = ""; busy = true;
-    for (const id of ["start", "cancel", "share", "unshare", "play", "refresh-session", "disconnect"]) byId(id).disabled = true;
+    for (const id of ["start", "cancel", "share", "unshare", "play", "refresh-session", "disconnect", "remember-sharing"]) byId(id).disabled = true;
     try {
-      const result = await request(`/orr/v1/tidal/${action}`, ({start: {confirm_experimental_login: true}, cancel: {cancel: true}, share: {confirm_lan_account_sharing: true}, unshare: {stop_lan_account_sharing: true}, play: {track_id: byId("track").value.trim(), confirm_experimental_playback: true}, refresh: {confirm_session_refresh: true}, disconnect: {confirm_forget_local_session: true}}[action]));
+      const result = await request(`/orr/v1/tidal/${action}`, ({start: {confirm_experimental_login: true}, cancel: {cancel: true}, share: {confirm_lan_account_sharing: true, ...(byId("remember-sharing").checked ? {remember_account_sharing: true} : {})}, unshare: {stop_lan_account_sharing: true}, play: {track_id: byId("track").value.trim(), confirm_experimental_playback: true}, refresh: {confirm_session_refresh: true}, disconnect: {confirm_forget_local_session: true}}[action]));
+      if (action === "unshare" && result.account_shared === false && result.account_sharing_remembered === false) byId("remember-sharing").checked = false;
       if (action === "disconnect" && result.session_forgotten === true) {
         notice = "The saved local TIDAL session was forgotten and account sharing was removed. To sign in again, confirm and start a new device login. Your TIDAL account and provider grants were not deleted or revoked.";
         byId("consent").checked = false;
+        byId("remember-sharing").checked = false;
       }
       if (action === "refresh") {
         const errors = {
@@ -93,6 +101,7 @@
   }
   byId("consent").addEventListener("change", () => { if (!busy) refresh(); });
   byId("forget-consent").addEventListener("change", () => { if (!busy) refresh(); });
+  byId("remember-sharing").addEventListener("change", () => { if (!busy) refresh(); });
   byId("start").addEventListener("click", () => { if (byId("consent").checked) act("start"); });
   byId("play").addEventListener("click", () => { if (/^[1-9][0-9]{0,18}$/.test(byId("track").value.trim())) act("play"); else { notice = "Enter a numeric TIDAL track ID."; refresh(); } });
   byId("refresh-session").addEventListener("click", () => act("refresh"));

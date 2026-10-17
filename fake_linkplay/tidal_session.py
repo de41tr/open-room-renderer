@@ -24,6 +24,8 @@ MAX_SESSION_BYTES = 65536
 _TOKEN_LIMIT = 16384
 _SESSION_FILE = "session.json"
 _REFRESH_FILE = "refresh-attempt"
+_SHARING_FILE = "account-sharing"
+_SHARING_LOCK = "account-sharing.lock"
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 
@@ -112,7 +114,7 @@ class TidalSessionStore:
     Save or lease creates the final directory; its ancestors must already exist.
     Existing unsafe files/directories are rejected, never permission-repaired.
     load returns None only for missing storage, and raises for invalid storage.
-    clear removes the stored session only; it does not revoke provider tokens.
+    clear removes the stored session and sharing consent; it does not revoke provider tokens.
     """
 
     def __init__(self, directory: str | Path):
@@ -271,6 +273,102 @@ class TidalSessionStore:
         except OSError:
             raise TidalSessionError("The private TIDAL refresh marker could not be read.") from None
 
+    @staticmethod
+    def _sharing_matches_at(directory: int, session: TidalSession) -> bool:
+        marker = TidalSessionStore._read_at(directory, _SHARING_FILE, 67)
+        if marker is None:
+            return False
+        match = re.fullmatch(rb"1 ([a-f0-9]{64})\n", marker)
+        if match is None:
+            raise TidalSessionError("Stored TIDAL sharing consent is invalid.")
+        return hmac.compare_digest(match[1], _session_fingerprint(session).hex().encode("ascii"))
+
+    def sharing_matches(self, session: TidalSession) -> bool:
+        """Read only: consent belongs to this exact record, never another login."""
+        try:
+            with self._directory() as directory:
+                return self._sharing_matches_at(directory, session)
+        except FileNotFoundError:
+            return False
+        except OSError:
+            raise TidalSessionError("The private TIDAL sharing consent could not be read.") from None
+
+    @staticmethod
+    @contextmanager
+    def _sharing_locked(directory: int):
+        # Separate from the directory lease held across refresh network I/O:
+        # Unshare must revoke immediately. This lock is never held across await.
+        fd = os.open(_SHARING_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                     0o600, dir_fd=directory)
+        try:
+            info = os.fstat(fd)
+            _file_info(info)
+            path_info = TidalSessionStore._entry(directory, _SHARING_LOCK)
+            if (path_info is None or info.st_size != 0
+                    or (info.st_dev, info.st_ino) != (path_info.st_dev, path_info.st_ino)):
+                raise TidalSessionError("TIDAL sharing consent ownership is unavailable.")
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise TidalSessionError("Another TIDAL sharing operation is already in progress.") from None
+            yield
+        finally:
+            os.close(fd)
+
+    @staticmethod
+    def _clear_sharing_at(directory: int) -> None:
+        if TidalSessionStore._entry(directory, _SHARING_FILE) is not None:
+            os.unlink(_SHARING_FILE, dir_fd=directory)
+            os.fsync(directory)
+
+    @staticmethod
+    def _write_sharing_at(directory: int, session: TidalSession) -> None:
+        marker = b"1 " + _session_fingerprint(session).hex().encode("ascii") + b"\n"
+        try:
+            TidalSessionStore._write_at(directory, _SHARING_FILE, marker)
+        except (OSError, TidalSessionError):
+            # replace() may have succeeded before fsync failed. Remove even a
+            # newly visible grant before reporting failure, under the same lock.
+            try:
+                TidalSessionStore._clear_sharing_at(directory)
+            except (OSError, TidalSessionError):
+                raise TidalSessionError("TIDAL sharing consent outcome is uncertain.") from None
+            raise TidalSessionError("TIDAL sharing consent was not saved.") from None
+
+    def remember_sharing(self, session: TidalSession | None) -> None:
+        """Explicit consent/revocation only; no credentials are copied to the marker."""
+        try:
+            with self._directory() as directory:
+                if session is None and self._entry(directory, _SHARING_FILE) is None:
+                    return
+                with self._sharing_locked(directory):
+                    if session is None:
+                        self._clear_sharing_at(directory)
+                    else:
+                        if self._load_at(directory) != session:
+                            raise TidalSessionError("TIDAL sharing consent requires the current session.")
+                        self._write_sharing_at(directory, session)
+        except FileNotFoundError:
+            if session is not None:
+                raise TidalSessionError("TIDAL sharing consent requires the current session.") from None
+        except OSError:
+            raise TidalSessionError("The private TIDAL sharing consent could not be saved.") from None
+
+    def renew_sharing(self, previous: TidalSession, replacement: TidalSession) -> bool:
+        """Called only by the bound refresh callback after its verified commit."""
+        try:
+            with self._directory() as directory:
+                with self._sharing_locked(directory):
+                    if (not self._sharing_matches_at(directory, previous)
+                            or self._load_at(directory) != replacement):
+                        return False
+                    self._write_sharing_at(directory, replacement)
+                    return True
+        except FileNotFoundError:
+            return False
+        except OSError:
+            raise TidalSessionError("The private TIDAL sharing consent could not be renewed.") from None
+
     def save(self, session: TidalSession) -> None:
         with self.lease() as lease:
             lease.save(session)
@@ -323,15 +421,17 @@ class TidalSessionStore:
             raise TidalSessionError("The private TIDAL session could not be saved.") from None
 
     def clear(self) -> bool:
-        """Delete only the private session; return whether one was present."""
+        """Forget the private session and its sharing consent, never provider grants."""
         try:
             with self._directory() as directory:
                 with self._locked(directory):
-                    if self._entry(directory) is None:
-                        return False
-                    os.unlink(_SESSION_FILE, dir_fd=directory)
-                    os.fsync(directory)
-                    return True
+                    with self._sharing_locked(directory):
+                        self._clear_sharing_at(directory)
+                        if self._entry(directory) is None:
+                            return False
+                        os.unlink(_SESSION_FILE, dir_fd=directory)
+                        os.fsync(directory)
+                        return True
         except FileNotFoundError:
             return False
         except OSError:

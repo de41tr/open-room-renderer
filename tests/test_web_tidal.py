@@ -68,7 +68,8 @@ async def test_unadmitted_or_unconfirmed_requests_never_start_provider(api, head
 
 
 @pytest.mark.asyncio
-async def test_account_sharing_is_explicit_revocable_and_never_in_status(api, tmp_path):
+@pytest.mark.parametrize("remember", [False, True])
+async def test_account_sharing_is_explicit_revocable_and_never_in_status(api, tmp_path, remember):
     import json
     import time
     from xml.etree import ElementTree as ET
@@ -87,13 +88,19 @@ async def test_account_sharing_is_explicit_revocable_and_never_in_status(api, tm
     async with serving(api) as (session, base):
         boot = await state(session, base)
         headers = {"Origin": base, "X-ORR-CSRF": boot["csrf_token"]}
-        async with session.post(base + "/orr/v1/tidal/share", json={"confirm_lan_account_sharing": True}) as response:
+        consent = {"confirm_lan_account_sharing": True}
+        if remember:
+            consent["remember_account_sharing"] = True
+        async with session.post(base + "/orr/v1/tidal/share", json=consent) as response:
             assert response.status == 403
         assert not api.tidal_account.shared
-        async with session.post(base + "/orr/v1/tidal/share", json={"confirm_lan_account_sharing": True}, headers=headers) as response:
+        async with session.post(base + "/orr/v1/tidal/share", json=consent, headers=headers) as response:
             value = await response.json()
             assert response.status == 200 and value["account_shared"] is True
+            assert value["account_sharing_remembered"] is remember
             assert "SECRET" not in json.dumps(value)
+        restarted = TidalDeviceAccountBridge(store)
+        assert restarted.shared is remember and restarted.sharing_remembered is remember
         response = await api.soap(account_request())
         assert response.status == 200
         payload = json.loads(next(n.text for n in ET.fromstring(response.text).iter() if n.tag == "Result"))
@@ -102,7 +109,10 @@ async def test_account_sharing_is_explicit_revocable_and_never_in_status(api, tm
             assert "SECRET" not in await response.text()
         assert "Tidal" not in api.state.as_status_ex("127.0.0.1")["supported_services"]
         async with session.post(base + "/orr/v1/tidal/unshare", json={"stop_lan_account_sharing": True}, headers=headers) as response:
-            assert (await response.json())["account_shared"] is False
+            value = await response.json()
+            assert value["account_shared"] is False and value["account_sharing_remembered"] is False
+        restarted = TidalDeviceAccountBridge(store)
+        assert not restarted.shared and not restarted.sharing_remembered
         assert fault_code(await api.soap(account_request())) == "501"
         assert store.load().access_token == "SYNTHETIC_ACCESS_SECRET"
         await api.tidal_account.set_shared(True)
@@ -110,6 +120,69 @@ async def test_account_sharing_is_explicit_revocable_and_never_in_status(api, tm
         async with session.get(base + "/orr/v1/tidal/status") as response:
             assert (await response.json())["account_shared"] is False
         assert not api.mpv.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload", [
+    '{}', '{"remember_account_sharing":true}',
+    '{"confirm_lan_account_sharing":false}', '{"confirm_lan_account_sharing":1}',
+    '{"confirm_lan_account_sharing":true,"remember_account_sharing":false}',
+    '{"confirm_lan_account_sharing":true,"remember_account_sharing":1}',
+    '{"confirm_lan_account_sharing":true,"remember_account_sharing":"true"}',
+    '{"confirm_lan_account_sharing":true,"remember_account_sharing":null}',
+    '{"confirm_lan_account_sharing":true,"remember_account_sharing":{}}',
+    '{"confirm_lan_account_sharing":true,"remember_account_sharing":[]}',
+    '{"confirm_lan_account_sharing":true,"confirm_lan_account_sharing":true}',
+    '{"confirm_lan_account_sharing":true,"remember_account_sharing":true,"remember_account_sharing":true}',
+    '{"confirm_lan_account_sharing":true,"remember_account_sharing":true,"extra":true}',
+    '[["confirm_lan_account_sharing",true],["remember_account_sharing",true]]',
+    'null', 'true',
+])
+async def test_share_rejects_inexact_consent_without_changing_saved_sharing(api, tmp_path, payload):
+    store, saved, fake = recovery_account(api, tmp_path)
+    await api.tidal_account.set_shared(True, remember=True)
+    before = {path.name: path.read_bytes() for path in store.directory.iterdir() if path.is_file()}
+    async with serving(api) as (session, base):
+        headers = {"Origin": base, "X-ORR-CSRF": (await state(session, base))["csrf_token"],
+                   "Content-Type": "application/json"}
+        async with session.post(base + "/orr/v1/tidal/share", data=payload, headers=headers) as response:
+            assert response.status == 400
+        assert api.tidal_account.shared and api.tidal_account.sharing_remembered
+        assert before == {path.name: path.read_bytes() for path in store.directory.iterdir() if path.is_file()}
+        assert store.load() == saved and not fake.calls and not api.mpv.calls
+
+
+@pytest.mark.asyncio
+async def test_remembered_sharing_status_survives_restart_and_reports_expiry_without_provider_calls(api, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from fake_linkplay import tidal_account, tidal_device_auth
+    from fake_linkplay.tidal_account import TidalDeviceAccountBridge
+
+    store, saved, fake = recovery_account(api, tmp_path)
+    await api.tidal_account.set_shared(True, remember=True)
+    api.tidal_account = TidalDeviceAccountBridge(store)
+    before = {path.name: path.read_bytes() for path in store.directory.iterdir() if path.is_file()}
+    async with serving(api) as (session, base):
+        for expired in (False, True):
+            if expired:
+                clock = SimpleNamespace(time=lambda: saved.expires_at + 1, monotonic=lambda: 100.0)
+                monkeypatch.setattr(tidal_account, "time", clock)
+                monkeypatch.setattr(tidal_device_auth, "time", clock)
+            async with session.get(base + "/orr/v1/tidal/status") as response:
+                value = await response.json()
+                assert response.status == 200 and value["account_shared"] is (not expired)
+                assert value["account_sharing_remembered"] is True
+                assert value["session_status"] == ("expired" if expired else "stored")
+                assert "SYNTHETIC" not in await response.text()
+        assert before == {path.name: path.read_bytes() for path in store.directory.iterdir() if path.is_file()}
+        assert not fake.calls and not api.mpv.calls
+        headers = {"Origin": base, "X-ORR-CSRF": (await state(session, base))["csrf_token"]}
+        async with session.post(base + "/orr/v1/tidal/unshare", json={"stop_lan_account_sharing": True}, headers=headers) as response:
+            assert response.status == 200
+            value = await response.json()
+            assert not value["account_shared"] and not value["account_sharing_remembered"]
+        assert not TidalDeviceAccountBridge(store).sharing_remembered
+        assert store.load() == saved and not fake.calls and not api.mpv.calls
 
 
 @pytest.mark.asyncio
@@ -190,7 +263,8 @@ async def test_restarted_session_status_is_local_sanitized_and_keeps_sharing_exp
             async with session.get(base + "/orr/v1/tidal/status") as response:
                 assert response.status == 200
                 assert await response.json() == {"state": "idle", "active": False,
-                                                "session_status": expected, "account_shared": False}
+                                                "session_status": expected, "account_shared": False,
+                                                "account_sharing_remembered": False}
         assert not api.mpv.calls
 
 
@@ -198,11 +272,13 @@ async def test_restarted_session_status_is_local_sanitized_and_keeps_sharing_exp
 async def test_session_status_does_not_export_arbitrary_manager_values(api):
     class InvalidStatus(Manager):
         async def status(self):
-            return {"state": "idle", "active": False, "session_status": "SYNTHETIC_SECRET"}
+            return {"state": "idle", "active": False, "session_status": "SYNTHETIC_SECRET",
+                    "account_shared": "SYNTHETIC_SECRET", "account_sharing_remembered": "SYNTHETIC_SECRET"}
     api.tidal_login = InvalidStatus()
     async with serving(api) as (session, base):
         async with session.get(base + "/orr/v1/tidal/status") as response:
-            assert await response.json() == {"state": "idle", "active": False, "account_shared": False}
+            assert await response.json() == {"state": "idle", "active": False, "account_shared": False,
+                                            "account_sharing_remembered": False}
 
 
 def recovery_account(api, tmp_path):
