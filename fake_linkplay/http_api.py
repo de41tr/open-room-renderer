@@ -212,6 +212,11 @@ class HttpApi:
                 from .tidal_refresh import TidalSessionRefreshManager
                 callback = self.tidal_account._session_refreshed if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None
                 self.tidal_refresh = TidalSessionRefreshManager(store, on_committed=callback)
+            if isinstance(self.tidal_account, TidalDeviceAccountBridge):
+                try:
+                    self.tidal_account._bind_refresh_owner(self.tidal_refresh)
+                except TidalAccountUnavailable:
+                    pass  # Preserve custom account wiring without attaching a different owner.
             self.tidal_playback = TidalPlaybackResolver(store, refresh_manager=self.tidal_refresh)
         # None reuses the main IPv4 listener; zero means optional setup failed.
         self.catalog_proxy_port: int | None = None

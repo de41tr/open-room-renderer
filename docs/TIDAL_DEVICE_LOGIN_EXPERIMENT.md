@@ -81,9 +81,15 @@ The adoption-only response includes the encoded actual client ID but omits
 `redirectURI`: no registered callback for this device client is established.
 Static APK review shows the authenticated account path validates with Bearer
 `/v1/sessions`; its local redirect fallback is not proof of a network callback.
-Native app OAuth re-login is unsupported. GetUserInfo remains a local-only read;
-expired sessions cannot be exported until a separate refresh completes. No TIDAL
-capability is advertised. Successful
+Native app OAuth re-login is unsupported. Version-2 GetUserInfo may renew a
+recognizably expired session only while the exact stored record still has a
+previous explicit LAN-sharing decision. It uses the same refresh owner and
+durable retry guard as playback, with a 10-second total refresh deadline. This
+is an ORR policy, not an observed native-app timeout. Fresh sessions, missing
+sharing, other versions and ordinary status polling do not trigger refresh.
+Unshare remains immediate during the request, and consent, current storage and
+fresh expiry are checked again before any account response. No TIDAL capability
+is advertised. Successful
 SOAP tests are synthetic interoperability checks, not Android, catalogue,
 full-playback or XU4 acceptance.
 
