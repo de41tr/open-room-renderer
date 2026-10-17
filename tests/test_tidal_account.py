@@ -178,8 +178,10 @@ async def test_expiry_suspends_sharing_until_verified_same_owner_refresh(tmp_pat
     await bridge.set_shared(True)
     monkeypatch.setattr(tidal_account.time, 'time', lambda: 2001)
     assert not bridge.shared
+    assert bridge.sharing_requested
     if revoke:
         await bridge.set_shared(False)
+        assert not bridge.sharing_requested
     replacement = replace(previous, access_token='synthetic-new', expires_at=3000)
     with store.lease() as lease:
         lease.save(replacement)

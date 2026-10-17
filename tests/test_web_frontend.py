@@ -76,7 +76,7 @@ def test_web_frontend_control_flow_node():
     node_version = re.match(r"v[0-9.]+", version).group(0)
     print(f"FRONTEND_NODE_SUITE_START utc={datetime.now(timezone.utc).isoformat(timespec='milliseconds')} "
           f"elapsed={time.monotonic() - started:.3f}s node={node_version}", flush=True)
-    result = subprocess.run([node, "--test", str(ROOT / "tests" / "web_frontend.test.cjs"), str(ROOT / "tests" / "web_curve_transfer.test.cjs"), str(ROOT / "tests" / "web_favorites_transfer.test.cjs")], capture_output=True, text=True, timeout=60)
+    result = subprocess.run([node, "--test", str(ROOT / "tests" / "web_frontend.test.cjs"), str(ROOT / "tests" / "web_curve_transfer.test.cjs"), str(ROOT / "tests" / "web_favorites_transfer.test.cjs"), str(ROOT / "tests" / "web_tidal.test.cjs")], capture_output=True, text=True, timeout=60)
     print(f"FRONTEND_NODE_SUITE_RETURNED utc={datetime.now(timezone.utc).isoformat(timespec='milliseconds')} "
           f"elapsed={time.monotonic() - started:.3f}s", flush=True)
     assert result.returncode == 0, result.stdout + result.stderr

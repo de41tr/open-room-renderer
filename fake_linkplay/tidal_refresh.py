@@ -1,5 +1,6 @@
-"""Explicit, single-owner refresh of an ordinary tidalapi 0.8.11 device session.
+"""Single-owner refresh of an ordinary tidalapi 0.8.11 device session.
 
+Refresh is explicit or on demand before an expired session's provider GET.
 No refresh happens at import, construction, status reads, or provider failures.
 The pinned library supplies its own ordinary client configuration; its refresh
 method is deliberately not used because it discards rotated refresh tokens.
@@ -73,7 +74,7 @@ async def _request_json(url, *, data=None, token=None):
             "POST" if data is not None else "GET", url, data=data,
             headers=headers, allow_redirects=False, ssl=True,
         ) as response:
-            if response.status != 200:
+            if response.status != 200 and not (data is not None and response.status in {400, 401}):
                 raise _Failure("refresh_failed")
             body = bytearray()
             async for chunk in response.content.iter_chunked(8192):
@@ -86,6 +87,9 @@ async def _request_json(url, *, data=None, token=None):
                 raise _Failure("invalid_response") from None
             if type(value) is not dict:
                 raise _Failure("invalid_response")
+            if response.status != 200:
+                raise _Failure("refresh_rejected" if value.get("error") == "invalid_grant"
+                               else "refresh_failed")
             return value
 
 
@@ -158,58 +162,90 @@ class TidalSessionRefreshManager:
         self._request = request_json or _request_json
 
     async def refresh(self, *, timeout=30) -> dict:
-        attempted = committing = False
+        try:
+            with self._store.lease() as lease:
+                return await self.refresh_owned(lease, timeout=timeout)
+        except TidalSessionError:
+            return {"state": "error", "session_saved": False, "refresh_outcome": "not_started",
+                    "sharing_warning": False, "error": "storage_unavailable"}
+
+    async def refresh_owned(self, lease, *, timeout=30, only_if_expired=False) -> dict:
+        """Use the caller's existing lease; re-read before deciding to refresh.
+
+        This internal resolver integration must use this manager's store lease.
+        There is no second lock or automatic retry of an attempted grant.
+        """
+        attempted = committing = saved = warning = False
+        outcome = "not_started"
         try:
             if (type(timeout) not in (int, float) or not math.isfinite(timeout)
                     or not 1 <= timeout <= 60):
                 raise _Failure("invalid_timeout")
-            with self._store.lease() as lease:
-                old = lease.load()
-                if (old is None or old.auth_flow != _FLOW or not old.client_id
-                        or not _token(old.refresh_token)
-                        or _identity({"userId": old.user_id, "countryCode": old.country_code}) is None):
+            old = lease.load()
+            if (old is None or old.auth_flow != _FLOW or not old.client_id
+                    or _identity({"userId": old.user_id, "countryCode": old.country_code}) is None):
+                raise _Failure("session_unavailable")
+            if only_if_expired:
+                if old.expires_at is None:
                     raise _Failure("session_unavailable")
-                config = self._config_factory()
-                if (config.client_id != old.client_id or config.api_oauth2_token != TOKEN_URL
-                        or config.api_v1_location != "https://api.tidal.com/v1/"
-                        or not _token(config.client_secret)):
-                    raise _Failure("client_mismatch")
-                _no_wire_debug()
-                deadline = time.monotonic() + timeout
-                async with asyncio.timeout(timeout):
-                    started_at = time.time()
-                    attempted = True
-                    value = await self._request(TOKEN_URL, data={
-                        "grant_type": "refresh_token", "refresh_token": old.refresh_token,
-                        "client_id": config.client_id, "client_secret": config.client_secret,
-                    })
-                    new = _replacement(value, old, started_at)
-                    identity = await self._request(SESSIONS_URL, token=new.access_token)
-                    if (_identity(identity) != (old.user_id, old.country_code)
-                            or ("clientId" in identity and identity["clientId"] != old.client_id)):
-                        raise _Failure("identity_mismatch")
-                    if time.monotonic() >= deadline:
-                        raise _Failure("refresh_failed")
-                    if new.expires_at <= time.time():
-                        raise _Failure("invalid_response")
-                    if lease.load() != old:
-                        raise _Failure("storage_unavailable")
-                    committing = True
-                    lease.save(new)
-                    warning = False
-                    if self._on_committed is not None:
-                        try:
-                            self._on_committed(old, new)
-                        except Exception:
-                            warning = True
-                    return {"state": "refreshed", "session_saved": True,
-                            "refresh_outcome": "saved", "sharing_warning": warning}
+                if old.expires_at > time.time():
+                    return {"state": "current", "session_saved": False,
+                            "refresh_outcome": "not_started", "sharing_warning": False}
+            if not _token(old.refresh_token):
+                raise _Failure("session_unavailable")
+            blocked = lease.refresh_outcome(old)
+            if blocked is not None:
+                outcome = blocked
+                raise _Failure("refresh_rejected" if blocked == "rejected" else "refresh_result_uncertain")
+            config = self._config_factory()
+            if (config.client_id != old.client_id or config.api_oauth2_token != TOKEN_URL
+                    or config.api_v1_location != "https://api.tidal.com/v1/"
+                    or not _token(config.client_secret)):
+                raise _Failure("client_mismatch")
+            _no_wire_debug()
+            deadline = time.monotonic() + timeout
+            async with asyncio.timeout(timeout):
+                started_at = time.time()
+                lease.mark_refresh_attempt(old)
+                attempted = True
+                outcome = "uncertain"
+                value = await self._request(TOKEN_URL, data={
+                    "grant_type": "refresh_token", "refresh_token": old.refresh_token,
+                    "client_id": config.client_id, "client_secret": config.client_secret,
+                })
+                new = _replacement(value, old, started_at)
+                identity = await self._request(SESSIONS_URL, token=new.access_token)
+                if (_identity(identity) != (old.user_id, old.country_code)
+                        or ("clientId" in identity and identity["clientId"] != old.client_id)):
+                    raise _Failure("identity_mismatch")
+                if time.monotonic() >= deadline:
+                    raise _Failure("refresh_failed")
+                if new.expires_at <= time.time():
+                    raise _Failure("invalid_response")
+                if lease.load() != old:
+                    raise _Failure("storage_unavailable")
+                committing = True
+                lease.save(new)
+                saved, outcome = True, "saved"
+                if self._on_committed is not None:
+                    try:
+                        self._on_committed(old, new)
+                    except Exception:
+                        warning = True
+                lease.clear_refresh_attempt()
+                return {"state": "refreshed", "session_saved": True,
+                        "refresh_outcome": "saved", "sharing_warning": warning}
         except _Failure as error:
             category = error.args[0]
+            if category == "refresh_rejected" and attempted:
+                outcome = "rejected"
+                try:
+                    lease.mark_refresh_attempt(old, rejected=True)
+                except TidalSessionError:
+                    pass  # The already-durable uncertain marker still blocks retries.
         except TidalSessionError:
             category = "commit_failed" if committing else "storage_unavailable"
         except Exception:
             category = "commit_failed" if committing else "refresh_failed"
-        return {"state": "error", "session_saved": False,
-                "refresh_outcome": "uncertain" if attempted else "not_started",
-                "sharing_warning": False, "error": category}
+        return {"state": "error", "session_saved": saved, "refresh_outcome": outcome,
+                "sharing_warning": warning, "error": category}

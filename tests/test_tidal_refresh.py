@@ -79,6 +79,7 @@ async def test_refresh_commits_complete_rotation_and_hook_under_single_lease(tmp
     assert saved.refresh_token == (TOKEN["refresh_token"] if rotated else OLD.refresh_token)
     assert saved.user_id == OLD.user_id and saved.country_code == OLD.country_code
     assert saved.client_id == OLD.client_id and saved.auth_flow == OLD.auth_flow
+    assert not (store.directory / "refresh-attempt").exists()
     assert calls == [
         (tidal_refresh.TOKEN_URL, {"data": {"grant_type": "refresh_token",
           "refresh_token": OLD.refresh_token, "client_id": OLD.client_id,
@@ -172,6 +173,10 @@ async def test_concurrent_refresh_and_logout_fail_and_cancel_never_commits(tmp_p
     assert store.load() == OLD and len(calls) == 1
     with store.lease():
         pass
+    restarted = TidalSessionRefreshManager(TidalSessionStore(store.directory),
+                                           config_factory=config, request_json=request)
+    blocked = await restarted.refresh()
+    assert blocked["error"] == "refresh_result_uncertain" and len(calls) == 1
 
 
 @pytest.mark.asyncio

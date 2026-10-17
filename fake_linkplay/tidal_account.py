@@ -112,9 +112,54 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
         self._store = store
         self._lock = asyncio.Lock()
         self._shared_session = None
+        self._refresh = None
+
+    def _bind_refresh_owner(self, owner):
+        """Bind only the runtime's exact store owner and consent callback."""
+        from .tidal_refresh import TidalSessionRefreshManager
+        if (type(owner) is not TidalSessionRefreshManager or owner._store is not self._store
+                or owner._on_committed != self._session_refreshed):
+            raise TidalAccountUnavailable("Device account refresh ownership is unavailable")
+        self._refresh = owner
+
+    async def get_user_info(self, short_uuid: str, *, version: str, now: float | None = None) -> dict:
+        if version != "2":
+            raise TidalAccountUnavailable("Unsupported TIDAL account contract version")
+        checked_at = time.time() if now is None else now
+        try:
+            if (type(checked_at) not in (int, float) or not math.isfinite(checked_at)
+                    or checked_at < 0):
+                raise TidalAccountUnavailable("TIDAL account time is unavailable")
+            if not self.sharing_requested:
+                raise TidalAccountUnavailable("Device account sharing needs explicit confirmation")
+            previous = self._shared_session
+            # Validate UUID and codec availability before a refresh can consume a
+            # grant. This result is discarded; it is never logged or published.
+            encode_account_field(short_uuid, previous.client_id)
+            if (self._refresh is not None and previous.expires_at is not None
+                    and previous.expires_at <= checked_at):
+                with self._store.lease() as lease:
+                    if lease.load() != previous or self._shared_session != previous:
+                        raise TidalAccountUnavailable("Device account sharing needs explicit confirmation")
+                    # Do not hold the account lock across network I/O: Unshare
+                    # must revoke immediately, including while refresh is pending.
+                    result = await self._refresh.refresh_owned(lease, timeout=10, only_if_expired=True)
+                    if result["state"] not in {"current", "refreshed"} or not self.sharing_requested:
+                        raise TidalAccountUnavailable("Device account refresh or sharing is unavailable")
+                now = None  # Projection must use fresh time after network I/O.
+            # Existing projection reloads storage and rechecks exact consent,
+            # expiry and identity. A stale result can never authorize export.
+            return await super().get_user_info(short_uuid, version=version, now=now)
+        except (TidalSessionError, TidalCodecUnavailable, ValueError, TypeError, OverflowError):
+            raise TidalAccountUnavailable("TIDAL account projection is unavailable") from None
 
     @property
-    def shared(self):
+    def sharing_requested(self):
+        """Existing exact-record consent, including a suspended expired record.
+
+        This authorizes only an on-demand resolution attempt, never export of
+        expired credentials. Explicit Unshare clears it even during refresh.
+        """
         session = self._shared_session
         if session is None:
             return False
@@ -124,9 +169,14 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
             valid = False
         if not valid:
             self._shared_session = None
+        return valid
+
+    @property
+    def shared(self):
         # Expiry suspends projection, but a verified refresh of this exact
         # same owner may renew the existing explicit opt-in.
-        return bool(valid and session.expires_at and session.expires_at > time.time())
+        return bool(self.sharing_requested and self._shared_session.expires_at
+                    and self._shared_session.expires_at > time.time())
 
     async def set_shared(self, enabled: bool):
         async with self._lock:

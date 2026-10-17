@@ -9,7 +9,8 @@ class Manager:
         self.cancels = 0
         self.closed = False
     async def status(self):
-        return {"state": "idle", "active": False, "access_token": "SYNTHETIC_SECRET"}
+        return {"state": "idle", "active": False, "session_status": "missing",
+                "access_token": "SYNTHETIC_SECRET"}
     async def start(self):
         self.starts += 1
         return {"state": "pending", "active": True, "verification_uri": "https://link.tidal.com/SYNTHETIC",
@@ -33,6 +34,7 @@ async def test_explicit_login_and_cancel_reuse_existing_browser_admission(api):
                 assert response.headers["Cache-Control"] == "no-store"
         async with session.get(base + "/orr/v1/tidal/status") as response:
             assert "SYNTHETIC_SECRET" not in await response.text()
+            assert (await response.json())["session_status"] == "missing"
         headers = {"Origin": base, "X-ORR-CSRF": boot["csrf_token"]}
         async with session.post(base + "/orr/v1/tidal/start", json={"confirm_experimental_login": True}, headers=headers) as response:
             assert response.status == 200
@@ -131,12 +133,16 @@ async def test_private_play_requires_confirmation_but_no_lan_account_sharing(api
 
 
 @pytest.mark.asyncio
-async def test_explicit_refresh_reuses_admission_and_does_not_export_session(api):
+@pytest.mark.parametrize("error,outcome", [
+    (None, "saved"), ("refresh_result_uncertain", "uncertain"), ("refresh_rejected", "rejected"),
+])
+async def test_explicit_refresh_reuses_admission_and_does_not_export_session(api, error, outcome):
     class Refresh:
         calls = 0
         async def refresh(self):
             self.calls += 1
-            return {'state': 'refreshed', 'session_saved': True, 'refresh_outcome': 'saved',
+            return {'state': 'refreshed' if error is None else 'error',
+                    'session_saved': error is None, 'refresh_outcome': outcome, 'error': error,
                     'sharing_warning': False, 'access_token': 'SYNTHETIC_SECRET',
                     'refresh_token': 'SYNTHETIC_SECRET', 'user_id': 'SYNTHETIC_SECRET'}
     manager = Manager()
@@ -152,7 +158,45 @@ async def test_explicit_refresh_reuses_admission_and_does_not_export_session(api
             assert response.status == 200
             body = await response.text()
             assert 'SYNTHETIC_SECRET' not in body
-            assert (await response.json())['refresh_outcome'] == 'saved'
+            value = await response.json()
+            assert value['refresh_outcome'] == outcome
+            assert value.get('error') == error
         async with session.get(base + '/orr/v1/tidal/status') as response:
             assert response.status == 200
         assert refresh.calls == 1 and manager.starts == 0 and not api.mpv.calls
+
+
+@pytest.mark.asyncio
+async def test_restarted_session_status_is_local_sanitized_and_keeps_sharing_explicit(api, tmp_path):
+    import time
+    from dataclasses import replace
+    from fake_linkplay.tidal_account import TidalDeviceAccountBridge
+    from fake_linkplay.tidal_device_auth import TidalDeviceLoginManager
+    from fake_linkplay.tidal_session import TidalSession, TidalSessionStore
+
+    store = TidalSessionStore(tmp_path / "private-account")
+    saved = TidalSession("SYNTHETIC_ACCESS_SECRET", "SYNTHETIC_REFRESH_SECRET",
+                         time.time() + 600, "12345", "DE", client_id="synthetic-device-client",
+                         auth_flow="tidalapi-device-v0.8.11")
+    store.save(saved)
+    api.tidal_login = TidalDeviceLoginManager(store, session_factory=lambda: pytest.fail("provider call"))
+    api.tidal_account = TidalDeviceAccountBridge(store)
+    async with serving(api) as (session, base):
+        for record, expected in ((saved, "stored"), (replace(saved, expires_at=1), "expired")):
+            store.save(record)
+            async with session.get(base + "/orr/v1/tidal/status") as response:
+                assert response.status == 200
+                assert await response.json() == {"state": "idle", "active": False,
+                                                "session_status": expected, "account_shared": False}
+        assert not api.mpv.calls
+
+
+@pytest.mark.asyncio
+async def test_session_status_does_not_export_arbitrary_manager_values(api):
+    class InvalidStatus(Manager):
+        async def status(self):
+            return {"state": "idle", "active": False, "session_status": "SYNTHETIC_SECRET"}
+    api.tidal_login = InvalidStatus()
+    async with serving(api) as (session, base):
+        async with session.get(base + "/orr/v1/tidal/status") as response:
+            assert await response.json() == {"state": "idle", "active": False, "account_shared": False}
