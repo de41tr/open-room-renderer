@@ -26,6 +26,12 @@ _QUALITIES = frozenset({"LOW", "HIGH", "LOSSLESS", "HI_RES", "AUTO"})
 _LEGACY_QUALITY = {"0": "LOW", "1": "HIGH", "2": "LOSSLESS", "3": "HI_RES", "4": "AUTO"}
 
 
+def track_id_from_reference(value: str) -> str:
+    """Recognize only the exact stable track URL emitted by this renderer."""
+    match = re.fullmatch(r"https://api\.tidal\.com/v1/tracks/([1-9][0-9]{0,19})", value)
+    return match[1] if match else ""
+
+
 def validate_catalogue_url(value: str) -> str:
     """Accept only bounded, credential-free TIDAL v1 catalogue references.
 

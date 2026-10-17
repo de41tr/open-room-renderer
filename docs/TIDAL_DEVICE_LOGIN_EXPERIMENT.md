@@ -170,6 +170,21 @@ loopback-only proxy with public-address DNS pinning, no LAN exceptions, no
 TIDAL media redirects, and no API authorization header forwarded to the CDN.
 No new listener or native TIDAL capability is enabled by this step.
 
+### Saved favorites and URL playlists
+
+**Save current as favorite** and playlist export retain the stable track URL,
+never the private session or signed media URL. Recalling a favorite or playing
+an imported playlist recognizes only the renderer's exact
+`https://api.tidal.com/v1/tracks/<numeric-id>` form, without query parameters,
+fragments, user information or alternate origins. It resolves that track again
+through the existing private session and protected media proxy; LAN account
+sharing is not required. Saving and importing alone do not contact TIDAL.
+
+These URL-only formats do not preserve the original quality choice. Restored
+tracks request **LOSSLESS**. Missing account/runtime/proxy or failed resolution
+fails playback instead of loading the catalogue endpoint as audio. Existing
+provider queues retain their own quality and sharing requirements.
+
 ## Explicit same-account session refresh
 
 **Refresh the saved session** performs one bounded renewal using the regular

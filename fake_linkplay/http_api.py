@@ -59,6 +59,7 @@ from .persistence import (AtomicWriteCommittedError, atomic_write_text, encode_a
 from .queue import PlaybackQueue, QueueError, QueueItem, parse_didl_metadata, parse_queue_context, serialize_queue_context
 from .queue_diagnostics import QueueRejectionReason
 from .tidal_account import TidalAccountBridge, TidalAccountUnavailable, TidalDeviceAccountBridge
+from .tidal_queue import track_id_from_reference as tidal_track_from_reference
 from .queue_policy import (NORMAL, ShuffleRandom, is_shuffle, natural_successor, parse_loop_mode,
                            parse_play_mode, play_mode_name, shuffle_available, shuffle_cycle,
                            shuffle_exhausted, shuffle_step)
@@ -2954,6 +2955,8 @@ class HttpApi:
         """Reject known unavailable catalog playback before changing ownership."""
         if isinstance(url, str) and url.lower().startswith("orr-spotify:"):
             raise BackendError("Spotify PCM is an internally owned source; use an explicit Spotify EQ run")
+        if tidal_track_from_reference(url) and (self.tidal_playback is None or self.catalog_proxy_port == 0):
+            raise BackendError("Experimental TIDAL playback is unavailable")
         if self.catalog_proxy_port == 0 and station_from_reference(url):
             raise CatalogPlaybackUnavailable()
 
@@ -3515,6 +3518,8 @@ class HttpApi:
         """Resolve recognized public station references, never arbitrary JSON."""
         selected = self._active_tidal_item()
         if selected is not None and selected.url == url:
+            if self.tidal_playback is None or self.catalog_proxy_port == 0:
+                raise BackendError("Experimental TIDAL playback is unavailable")
             generation, queue, index = self.state.generation, self.state.queue, self.state.queue.index
             if selected._tidal_require_shared and not self._tidal_sharing_requested():
                 raise BackendError("TIDAL account sharing is unavailable")
@@ -3547,6 +3552,8 @@ class HttpApi:
                 return candidate.stream_url
             except TidalPlaybackError:
                 raise BackendError("TIDAL track resolution failed") from None
+        if tidal_track_from_reference(url):
+            raise BackendError("TIDAL catalogue reference has no selected provider owner")
         catalog_id = station_from_reference(url)
         station_id = "rb:" + catalog_id if catalog_id else self._radio_station_from_url(url)
         if station_id:
@@ -5010,6 +5017,14 @@ class HttpApi:
     async def _replace_queue(self, queue: PlaybackQueue) -> None:
         self.tidal_test.command_allowed()
         queue.validate()
+        for item in queue.items:
+            track_id = tidal_track_from_reference(item.url)
+            if track_id and item._tidal_track is None:
+                # Favorites and URL playlists retain only catalogue identity.
+                # Restore provider ownership before native successor staging;
+                # resolution stays lazy and uses the private session at Play.
+                item._tidal_track = (track_id, "LOSSLESS")
+                item.resolved_url = ""
         if self.spotify_source is not None:
             await self._transport_command("stop")
         if self.state.backend_url or self.state.status in {"play", "pause", "transition"}:
