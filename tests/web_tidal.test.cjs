@@ -34,7 +34,8 @@ async function harness(initial) {
     failStatus() { failedStatus = true; },
     async poll() { poll(); await tick(); },
     async click(id) { if (!elements[id].disabled) elements[id].events.click(); await tick(); },
-    async consent() { elements.consent.checked = true; elements.consent.events.change(); await tick(); }
+    async consent() { elements.consent.checked = true; elements.consent.events.change(); await tick(); },
+    async forgetConsent() { elements["forget-consent"].checked = true; elements["forget-consent"].events.change(); await tick(); }
   };
 }
 
@@ -111,7 +112,7 @@ test('refresh marker results retain distinct recovery guidance without new login
     });
     await h.click('refresh-session');
     await h.poll();
-    assert.match(h.elements.status.textContent, /Further refresh attempts are blocked.*Explicitly recover the local session.*existing record will not be replaced/);
+    assert.match(h.elements.status.textContent, /Further refresh attempts are blocked.*Forget saved TIDAL session.*explicitly start a new login/);
     assert.doesNotMatch(h.elements.status.textContent, /Refresh was not started/);
     if (refresh_outcome === 'rejected') {
       assert.match(h.elements.status.textContent, /TIDAL rejected the saved refresh grant/);
@@ -191,5 +192,75 @@ test('failed playback is described as playback and failed status closes session 
   await h.poll();
   for (const id of ['start', 'play', 'share', 'refresh-session']) assert.equal(h.elements[id].disabled, true);
   assert.equal(h.elements.unshare.disabled, false);
+  assert.equal(h.posts().length, 1);
+});
+
+test('Forget requires separate confirmation, sends once, and requires fresh login consent afterward', async () => {
+  const h = await harness(snapshot('expired'));
+  await h.consent();
+  assert.equal(h.elements.disconnect.disabled, true);
+  await h.click('disconnect');
+  assert.equal(h.posts().length, 0);
+  await h.forgetConsent();
+  assert.equal(h.elements.disconnect.disabled, false);
+  let finish;
+  h.setPost((url, body) => {
+    assert.ok(url.endsWith('/disconnect'));
+    assert.deepEqual(body, {confirm_forget_local_session: true});
+    return new Promise(resolve => { finish = resolve; });
+  });
+  await h.click('disconnect');
+  await h.click('disconnect');
+  assert.equal(h.posts().length, 1);
+  h.setStatus(snapshot('missing'));
+  finish({ok: true, json: async () => ({session_forgotten: true})});
+  await tick();
+  await h.poll();
+  assert.equal(h.elements['forget-consent'].checked, false);
+  assert.equal(h.elements.consent.checked, false);
+  assert.equal(h.elements.start.disabled, true);
+  assert.equal(h.elements.disconnect.disabled, true);
+  assert.match(h.elements.status.textContent, /session was forgotten.*sharing was removed/);
+  assert.equal(h.posts().length, 1);
+  await h.consent();
+  assert.equal(h.elements.start.disabled, false);
+  assert.equal(h.posts().length, 1);
+});
+
+test('Forget handles stop-first, busy and lost responses without retries or reusing confirmation', async () => {
+  for (const [error, pattern] of [
+    ['disconnect_stop_first', /Stop TIDAL playback first.*No playback was stopped/],
+    ['disconnect_busy', /Another renderer or TIDAL operation is active/],
+    ['disconnect_storage_unavailable', /Storage may be busy or unsafe/],
+    ['disconnect_unavailable', /recovery is unavailable/],
+    [null, /removal was not confirmed.*no automatic retry/]
+  ]) {
+    const h = await harness(snapshot('expired'));
+    await h.forgetConsent();
+    h.setPost(async () => {
+      if (!error) throw new Error('SYNTHETIC_PRIVATE_RESPONSE');
+      return {ok: false, json: async () => ({error})};
+    });
+    await h.click('disconnect');
+    await h.poll();
+    assert.match(h.elements.status.textContent, pattern);
+    assert.doesNotMatch(h.elements.status.textContent, /SYNTHETIC_PRIVATE/);
+    assert.equal(h.elements['forget-consent'].checked, false);
+    assert.equal(h.elements.disconnect.disabled, true);
+    assert.equal(h.posts().length, 1);
+  }
+});
+
+test('pending login cannot Forget and Cancel does not send a Forget request', async () => {
+  const h = await harness(snapshot('missing', {state: 'pending', active: true}));
+  await h.forgetConsent();
+  assert.equal(h.elements.disconnect.disabled, true);
+  h.setPost(async (url, body) => {
+    assert.ok(url.endsWith('/cancel'));
+    assert.deepEqual(body, {cancel: true});
+    h.setStatus(snapshot('missing', {state: 'cancelled'}));
+    return {ok: true, json: async () => ({state: 'cancelled'})};
+  });
+  await h.click('cancel');
   assert.equal(h.posts().length, 1);
 });

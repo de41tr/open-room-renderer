@@ -325,6 +325,44 @@ async def exercise_spotify_integration(browser, api, backend, workspace, artifac
         await api._replace_queue(queue)
 
 
+async def exercise_tidal_recovery(browser, api, base, artifacts, label, evidence):
+    """Real page controls over synthetic local storage; never start a provider."""
+    from fake_linkplay.tidal_session import TidalSession
+    import time
+
+    store = api.tidal_login._store
+    saved = TidalSession("SYNTHETIC_BROWSER_ACCESS", "SYNTHETIC_BROWSER_REFRESH",
+                         time.time() + 600, "42", "DE", "synthetic-browser-client",
+                         "tidalapi-device-v0.8.11")
+    store.save(saved)
+    with store.lease() as lease:
+        lease.mark_refresh_attempt(saved, rejected=True)
+    before = len(evidence["http_commands"]), evidence["media_requests"]
+    await browser.call("POST", "/url", {"url": base + "/ui/tidal"})
+    await browser.wait("document.querySelector('#status').textContent.includes('stored locally') && !document.querySelector('#refresh-session').disabled")
+    assert await browser.inspect("document.querySelector('#cancel').disabled && document.querySelector('#disconnect').disabled && document.querySelector('#start').disabled")
+    await browser.click("#cancel")  # A saved session is not a pending login.
+    assert store.load() == saved
+    await browser.click("#refresh-session")
+    await browser.wait("document.querySelector('#status').textContent.includes('TIDAL rejected the saved refresh grant') && !document.querySelector('#refresh-session').disabled")
+    assert store.load() == saved and store.refresh_outcome(saved) == "rejected"
+    await browser.click("#forget-consent")
+    await browser.wait("!document.querySelector('#disconnect').disabled")
+    await browser.click("#disconnect")
+    await browser.wait("document.querySelector('#status').textContent.includes('session was forgotten') && document.querySelector('#disconnect').disabled")
+    assert store.load() is None and store.refresh_outcome(saved) == "rejected"
+    assert not api.tidal_account.sharing_requested
+    assert await browser.inspect("!document.querySelector('#forget-consent').checked && !document.querySelector('#consent').checked && document.querySelector('#start').disabled")
+    await browser.click("#consent")
+    await browser.wait("!document.querySelector('#start').disabled")
+    assert before == (len(evidence["http_commands"]), evidence["media_requests"])
+    assert evidence["tidal_provider_starts"] == 0
+    await browser.screenshot(artifacts / (label + "-tidal-recovery.png"))
+    return {"stored_rejected_to_missing": True, "cancel_disabled_for_saved_session": True,
+            "fresh_login_requires_consent": True, "provider_starts": 0,
+            "web_playback_commands": 0, "record": "synthetic local credentials only"}
+
+
 async def smoke(artifacts: Path, evidence: dict):
     chrome, driver, mpv = (shutil.which(name) for name in ("google-chrome", "chromedriver", "mpv"))
     assert chrome and driver and mpv, "Installed google-chrome, chromedriver and mpv are required; no fallback or download"
@@ -362,6 +400,17 @@ async def smoke(artifacts: Path, evidence: dict):
                             state_dir=str(workspace / "state"), bind_address="127.0.0.1", advertise_ip="127.0.0.1",
                             default_volume=25, auto_spawn_mpv=False, enable_ssdp=False, enable_mdns=False)
                         api = HttpApi(cfg, RendererState.from_config(cfg), backend)
+                        from fake_linkplay.tidal_account import TidalDeviceAccountBridge
+                        from fake_linkplay.tidal_device_auth import TidalDeviceLoginManager
+                        from fake_linkplay.tidal_refresh import TidalSessionRefreshManager
+                        from fake_linkplay.tidal_session import TidalSessionStore
+                        store = TidalSessionStore(workspace / "synthetic-tidal")
+                        def no_provider():
+                            evidence["tidal_provider_starts"] += 1
+                            raise AssertionError("Browser recovery must not start a TIDAL provider operation")
+                        api.tidal_login = TidalDeviceLoginManager(store, session_factory=no_provider)
+                        api.tidal_account = TidalDeviceAccountBridge(store)
+                        api.tidal_refresh = TidalSessionRefreshManager(store, config_factory=no_provider)
                         await api.initialize_channel_balance()
                         app = api.app()
                         @web.middleware
@@ -415,6 +464,8 @@ async def smoke(artifacts: Path, evidence: dict):
                                             browser, api, backend, base, artifacts, label)
                                         evidence[label]["spotify_integration"] = await exercise_spotify_integration(
                                             browser, api, backend, workspace, artifacts, label)
+                                        evidence[label]["tidal_recovery"] = await exercise_tidal_recovery(
+                                            browser, api, base, artifacts, label, evidence)
                                     except BaseException:
                                         await browser.diagnostics(artifacts, label + "-failure")
                                         raise
@@ -434,7 +485,7 @@ async def worker(artifacts: Path) -> None:
     sources += [Path(__file__), ROOT / "tools/radio_catalog_browser.py", ROOT / "tests/test_mpv_unix_integration.py", ROOT / "tools/native_probe_supervisor.py"]
     hashes = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in sources if path.is_file()}
     evidence = {"status": "FAILED", "lane": "REAL_CHROME / production HTTP / production Unix IPC / mpv null",
-        "architecture": platform.machine(), "source_sha256": hashes, "http_commands": [], "http_exports": [], "media_requests": 0,
+        "architecture": platform.machine(), "source_sha256": hashes, "http_commands": [], "http_exports": [], "media_requests": 0, "tidal_provider_starts": 0,
         "scope": "Generated local WAV/MP3 and synthetic directory only; mobile emulation, not hardware. No physical audio, Firefox, screen reader or broad accessibility claim."}
     try:
         async with asyncio.timeout(120):

@@ -366,7 +366,8 @@ class HttpApi:
         if self.tidal_login is not None:
             from .web_tidal import WebTidalLogin
             app.add_routes(WebTidalLogin(self.web_api, self.tidal_login,
-                                        self.tidal_account if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None, self._play_tidal_track, self.tidal_refresh, self.tidal_test).routes())
+                                        self.tidal_account if isinstance(self.tidal_account, TidalDeviceAccountBridge) else None, self._play_tidal_track, self.tidal_refresh, self.tidal_test,
+                                        disconnect=self._disconnect_tidal_session).routes())
             async def close_tidal_login(app):
                 await self.tidal_login.close()
             app.on_cleanup.append(close_tidal_login)
@@ -3580,6 +3581,57 @@ class HttpApi:
 
     def _tidal_sharing_requested(self):
         return isinstance(self.tidal_account, TidalDeviceAccountBridge) and self.tidal_account.sharing_requested
+
+    async def _disconnect_tidal_session(self):
+        """Forget only the idle local account; never stop or replace a source.
+
+        The caller owns browser confirmation/CSRF admission. All locks fail
+        busy rather than queueing a credential deletion behind another action.
+        No await can yield between the final owner checks and store.clear().
+        """
+        from .tidal_device_auth import TidalDeviceLoginManager
+
+        account, login = self.tidal_account, self.tidal_login
+        if (not isinstance(account, TidalDeviceAccountBridge)
+                or not isinstance(login, TidalDeviceLoginManager)
+                or login._store is not account._store
+                or self.tidal_refresh is not None and getattr(self.tidal_refresh, "_store", None) is not account._store
+                or self.tidal_playback is not None and getattr(self.tidal_playback, "_store", None) is not account._store):
+            raise WebAdmissionError("disconnect_unavailable", 409)
+        if self._backend_lock.locked() or account._lock.locked():
+            raise WebAdmissionError("disconnect_busy", 409)
+        try:
+            # A released asyncio lock can still have an awakened FIFO waiter.
+            # A zero-deadline timeout permits only acquire paths that do not
+            # yield, including the account lock inside clear_local_session().
+            async with asyncio.timeout(0), self._backend_lock:
+                if (login._snapshot()["active"] or self._tidal_pending_resolutions
+                        or self.tidal_test._reservation is not None or self.tidal_test._live
+                        or self.tidal_test.controls_owned_source() or self.tidal_test._tasks_pending()):
+                    raise WebAdmissionError("disconnect_busy", 409)
+                if (self.spotify_source is None
+                        and (self._active_tidal_item() is not None
+                             or tidal_track_from_reference(self.state.backend_original_url))
+                        and (self.state.phase != PlaybackPhase.STOPPED or self.state.intent != "stop"
+                             or self.state.backend_url or self.state.backend_original_url)):
+                    raise WebAdmissionError("disconnect_stop_first", 409)
+                try:
+                    # Queued account-lock acquisition hits the zero-deadline timeout
+                    # before clear() can run. The store uses its existing
+                    # nonblocking directory lease and safe-file checks.
+                    await account.clear_local_session()
+                except TidalAccountUnavailable:
+                    raise WebAdmissionError("disconnect_storage_unavailable", 409) from None
+                for item in self.state.queue.items:
+                    if item._tidal_track is not None:
+                        self._proxy_sources.pop(item._tidal_stream_url, None)
+                        item._tidal_stream_url = ""
+                        item._tidal_candidate = None
+                        item._tidal_session_fingerprint = b""
+                        self.state.queue._tidal_prepared_page = None
+        except TimeoutError:
+            raise WebAdmissionError("disconnect_busy", 409) from None
+        return {"session_forgotten": True}
 
     async def _play_tidal_track(self, track_id: str, quality: str = "HIGH", name: str = "CurrentQueue", *, require_shared: bool = False, _test_lease=None):
         self.tidal_test.command_allowed()
