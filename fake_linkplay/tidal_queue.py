@@ -26,6 +26,12 @@ _QUALITIES = frozenset({"LOW", "HIGH", "LOSSLESS", "HI_RES", "AUTO"})
 _LEGACY_QUALITY = {"0": "LOW", "1": "HIGH", "2": "LOSSLESS", "3": "HI_RES", "4": "AUTO"}
 
 
+def track_id_from_reference(value: str) -> str:
+    """Recognize only the exact stable track URL emitted by this renderer."""
+    match = re.fullmatch(r"https://api\.tidal\.com/v1/tracks/([1-9][0-9]{0,19})", value)
+    return match[1] if match else ""
+
+
 def validate_catalogue_url(value: str) -> str:
     """Accept only bounded, credential-free TIDAL v1 catalogue references.
 
@@ -91,7 +97,15 @@ used as authority or fallback media. Existing direct-URL queues are untouched.
         raise TidalQueueError("Invalid TIDAL queue structure") from None
 
 
-def _parse_selection(value: str | bytes, name: str | None) -> TidalQueueSelection:
+def parse_tidal_playnext(value: str | bytes) -> TidalQueueSelection:
+    """Parse the observed one-track search append, whose XML start is zero."""
+    try:
+        return _parse_selection(value, None, playnext=True)
+    except QueueError:
+        raise TidalQueueError("Invalid TIDAL queue structure") from None
+
+
+def _parse_selection(value: str | bytes, name: str | None, *, playnext: bool = False) -> TidalQueueSelection:
     root = _parse_xml(value, MAX_QUEUE_BYTES)
     if _local_name(root.tag) != "PlayList":
         raise TidalQueueError("Invalid TIDAL queue structure")
@@ -120,6 +134,10 @@ def _parse_selection(value: str | bytes, name: str | None) -> TidalQueueSelectio
     count = _matching_integer(
         [_text(root, "Count"), _text(info, "Count"), _text(info, "TrackNumber")],
         "count", QueueRejectionReason.COUNT)
+    if playnext:
+        if start != 0 or queue_name != "CurrentQueue" or catalogue:
+            raise TidalQueueError("Unsupported TIDAL append selection")
+        start = 1
     start = 1 if start is None else start
     if not 1 <= start <= 1_000_000_000:
         raise TidalQueueError("Invalid TIDAL start index")
@@ -147,6 +165,8 @@ def _parse_selection(value: str | bytes, name: str | None) -> TidalQueueSelectio
         if url:
             validate_catalogue_url(url)
         selections.append(TidalTrackSelection(track_id, url, _text(track, "Metadata") or ""))
+    if playnext and len(selections) != 1:
+        raise TidalQueueError("TIDAL search append requires one track")
     if selections:
         if (count is not None and count != len(selections)) or start > len(selections):
             raise TidalQueueError("Invalid TIDAL queue count or index")

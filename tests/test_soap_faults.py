@@ -84,7 +84,7 @@ def fault_code(response):
     ("UnknownAction", "AVTransport"),
     ("SetChannel", "RenderingControl"), ("SelectPreset", "RenderingControl"),
     ("SetQueuePolicy", "PlayQueue"), ("AppendQueue", "PlayQueue"),
-    ("AppendTracksInQueue", "PlayQueue"), ("AppendTracksInQueueEx", "PlayQueue"),
+    ("AppendTracksInQueue", "PlayQueue"),
     ("RemoveTracksInQueue", "PlayQueue"), ("GetStatus", "ConnectionManager"),
 ])
 async def test_unsupported_faults_without_mutation(api, action, service):
