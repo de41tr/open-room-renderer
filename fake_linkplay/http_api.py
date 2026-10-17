@@ -3547,6 +3547,7 @@ class HttpApi:
                 selected._tidal_session_fingerprint = candidate.session_fingerprint
                 selected._tidal_stream_url = candidate.stream_url
                 selected.title, selected.artist, selected.album = candidate.title, candidate.artist, candidate.album
+                selected.artwork = candidate.artwork
                 selected.duration, selected.content_type = candidate.duration, candidate.content_type
                 selected.title_is_fallback = False
                 self._activate_queue_item()
