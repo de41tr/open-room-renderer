@@ -122,6 +122,10 @@ class TidalDeviceAccountBridge(TidalAccountBridge):
             raise TidalAccountUnavailable("Device account refresh ownership is unavailable")
         self._refresh = owner
 
+    async def clear_local_session(self) -> None:
+        await super().clear_local_session()
+        self._shared_session = None
+
     async def get_user_info(self, short_uuid: str, *, version: str, now: float | None = None) -> dict:
         if version != "2":
             raise TidalAccountUnavailable("Unsupported TIDAL account contract version")

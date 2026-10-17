@@ -236,7 +236,33 @@ OAuth invalid_grant is retained as rejected and requires a new login; other
 uncertain attempts remain blocked. Both automatic and manual refresh refuse the
 same marked record. A durable successful rotation clears the marker.
 
-Recovery requires explicit local session recovery before a new login. The web
-Start button still cannot overwrite an existing record; this patch adds no
-credential-reset or logout endpoint. Offline tests do not establish live-provider
-refresh acceptance or full playback.
+### Explicit local session recovery
+
+Use **Forget saved TIDAL session** on `/ui/tidal` after a rejected or uncertain
+refresh, or when deliberately changing accounts. Check its separate removal
+confirmation, then press the button. The CSRF/same-origin-protected
+`POST /orr/v1/tidal/disconnect` accepts only
+`{"confirm_forget_local_session": true}`. Cancel is different: it prevents adoption
+of a pending login and never removes an already-saved session.
+
+Forgetting removes the local session and its process-local sharing decision,
+including suspended sharing. It does not delete the TIDAL account, revoke
+provider grants, start another login, or send a playback command. Pending login,
+refresh, resolution, bounded tests and conflicting renderer mutations refuse
+removal without waiting. Cancel a pending login and let its worker finish;
+stop active or paused TIDAL playback first. Foreign-source playback is preserved.
+Existing private-file ownership, permissions, symlink and exclusive-lease checks
+remain in force. Unsafe storage needs operator repair; the web action never
+repairs permissions or follows an unsafe file.
+
+The old fingerprint-bound refresh marker is retained, so reintroducing the same
+uncertain/rejected record cannot silently retry its grant. A genuinely new login
+record is not blocked by that old marker. Forgetting clears private cached TIDAL
+stream candidates but preserves public saved track references. After success,
+confirm and start a new device login explicitly; sharing needs new confirmation.
+No automatic retry follows a lost response: inspect local status first.
+
+Native SOAP `UserLogout` remains unsupported. The observed Android path also
+re-reads `GetUserInfo` and expects a parseable logged-out account response; the
+web recovery action does not claim that native contract. Offline tests do not
+establish live-provider refresh acceptance or full playback.
