@@ -18,6 +18,11 @@ ALBUM = "https://api.tidal.com/v1/albums/123/tracks"
 PLAYLIST = "https://api.tidal.com/v1/playlists/1234-abcd/items"
 FAVORITES = "https://api.tidal.com/v1/users/42/favorites/tracks"
 NEW_TRACKS = "https://api.tidal.com/v1/featured/new/tracks"
+COLLECTION_PATHS = (
+    "featured/recommended/tracks", "featured/top/tracks", "rising/new/tracks",
+    "artists/123/toptracks", "mixes/synthetic-mix-1/items", "tracks/123/radio",
+    "artists/123/radio", "genres/synthetic-genre/tracks",
+)
 
 
 def page(*, playlist=False, ids=(42, 43, 42), total=80):
@@ -179,7 +184,11 @@ async def test_short_nonterminal_favorites_page_preserves_slots_without_fetching
     FAVORITES.replace("/42/", "/0/"), FAVORITES.replace("/42/", "/042/"),
     FAVORITES.replace("/42/", "/9223372036854775808/"), FAVORITES + "/",
     FAVORITES.replace("/tracks", "/albums"), FAVORITES + "?limit=51",
-    NEW_TRACKS + "/", NEW_TRACKS.replace("/new/", "/top/"),
+    NEW_TRACKS + "/", NEW_TRACKS.replace("/new/", "/unknown/"),
+    "https://api.tidal.com/v1/rising/new/albums", "https://api.tidal.com/v1/genres/rock/albums",
+    "https://api.tidal.com/v1/artists/0/toptracks", "https://api.tidal.com/v1/tracks/01/radio",
+    "https://api.tidal.com/v1/mixes/" + "a" * 129 + "/items",
+    "https://api.tidal.com/v1/genres/rock/../tracks",
 ])
 @pytest.mark.asyncio
 async def test_invalid_page_request_never_opens_http(harness, url):
@@ -322,6 +331,113 @@ async def connect_page_resolver(api, store):
 
 def audio_responses(track_id):
     return [Response({**METADATA, "id": track_id}), Response(stream(trackId=track_id))]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", COLLECTION_PATHS)
+async def test_proven_collection_routes_keep_requested_page_slots_and_selected_index(queue_api, harness, path):
+    api = queue_api
+    api.cfg.enable_plex_service = True
+    store, responses, requests, *_ = harness
+    await connect_page_resolver(api, store)
+    endpoint = "https://api.tidal.com/v1/" + path
+    url = endpoint + "?countryCode=DE&order=DATE&orderDirection=DESC&offset=020&limit=3"
+    responses[:] = [Response(page(total=23)), *audio_responses(43)]
+    context = header_context(url).replace("<TrackNumber>999", "<TrackNumber>0")
+    request = soap_request("CreateQueue", "<QueueContext>" + escape(context) + "</QueueContext>", service="PlayQueue")
+    assert (await api.soap(request)).status == 200
+    assert [item.id for item in api.state.queue.items] == ["42", "43", "42"]
+    assert api.state.queue.index == 2 and api.state.queue.current.id == "43"
+    assert api.state.queue.search_url == url and api.state.queue.count == 3
+    assert [call[1] for call in requests] == [endpoint, "https://api.tidal.com/v1/tracks/43",
+                                           "https://api.tidal.com/v1/tracks/43/playbackinfopostpaywall"]
+    assert list(requests[0][2]["params"].items()) == [
+        ("countryCode", "DE"), ("order", "DATE"), ("orderDirection", "DESC"), ("offset", "020"), ("limit", "3")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wrapper", ["raw", "item", "value", "track_url", "legacy_track_url"])
+async def test_new_tracks_first_paged_list_accepts_only_explicit_track_wrappers(harness, wrapper):
+    store, responses, requests, *_ = harness
+    body = page(total=23)
+    if wrapper in {"track_url", "legacy_track_url"}:
+        for item in body["items"]:
+            del item["type"]
+            base = "http://www.tidal.com/track/" if wrapper == "legacy_track_url" else "https://tidal.com/browse/track/"
+            item["url"] = base + str(item["id"])
+        body["items"] = [{"item": item} for item in body["items"]]
+    elif wrapper != "raw":
+        body["items"] = [{"type": "track", wrapper: item} for item in body["items"]]
+    responses[:] = [Response({"rows": [{"modules": [{"pagedList": body}, {"pagedList": page(ids=(99,), total=21)}]}]})]
+    result = await playback.TidalPlaybackResolver(store).resolve_page(NEW_TRACKS + "?offset=20&limit=3")
+    assert result.track_ids == ("42", "43", "42") and len(requests) == 1
+    assert playback.TidalPlaybackResolver(store).session_matches(result.session_fingerprint)
+
+
+@pytest.mark.asyncio
+async def test_raw_new_tracks_keep_existing_optional_metadata_contract(harness):
+    store, responses, requests, *_ = harness
+    body = page(total=23)
+    body["rows"] = None
+    for item in body["items"]:
+        item.update(url=f"https://tidal.com/browse/track/{item['id']}?origin=synthetic#track",
+                    uuid="synthetic-decoration", value=None, playlist=None, mixType=None)
+    responses[:] = [Response(body)]
+    result = await playback.TidalPlaybackResolver(store).resolve_page(NEW_TRACKS + "?offset=20&limit=3")
+    assert result.track_ids == ("42", "43", "42") and len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["outer_video", "outer_playlist", "playlist_wrapper", "ambiguous_wrappers",
+                                  "untyped_wrapper", "untyped_mixed_raw", "mix_type", "video_url", "different_track_url", "uuid"])
+async def test_collection_media_ambiguity_rejects_entire_page_without_filtering(harness, kind):
+    store, responses, requests, *_ = harness
+    body = page(total=23)
+    inner = body["items"][1]
+    endpoint = NEW_TRACKS
+    entry = {"type": "track", "item": inner}
+    if kind in {"outer_video", "outer_playlist"}:
+        entry["type"] = kind.removeprefix("outer_")
+    elif kind == "playlist_wrapper":
+        entry = {"playlist": inner}
+    elif kind == "ambiguous_wrappers":
+        entry["value"] = inner
+    elif kind == "untyped_wrapper":
+        entry = {"value": {"id": 43, "allowStreaming": True}}
+    elif kind == "untyped_mixed_raw":
+        endpoint = "https://api.tidal.com/v1/mixes/synthetic-mix-1/items"
+        entry = {"id": 43, "allowStreaming": True}
+    elif kind == "mix_type":
+        entry["item"]["mixType"] = "VIDEO_DAILY_MIX"
+    elif kind == "uuid":
+        entry["item"]["uuid"] = "different-id"
+        entry["item"]["url"] = "http://www.tidal.com/track/43"
+    else:
+        entry["item"]["url"] = ("https://tidal.com/browse/video/43" if kind == "video_url"
+                                else "https://tidal.com/browse/track/99")
+    body["items"][1] = entry
+    responses[:] = [Response(body)]
+    with pytest.raises(playback.TidalPlaybackError) as error:
+        await playback.TidalPlaybackResolver(store).resolve_page(endpoint + "?offset=20&limit=3")
+    assert error.value.code == "unsupported_page" and len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["two_pages", "later_module", "wrong_offset"])
+async def test_collection_page_ambiguity_never_searches_or_merges_containers(harness, kind):
+    store, responses, requests, *_ = harness
+    body = page(total=23)
+    nested = {"rows": [{"modules": [{"pagedList": body}]}]}
+    if kind == "two_pages":
+        nested.update(page(total=23))
+    elif kind == "later_module":
+        nested["rows"][0]["modules"].insert(0, {})
+    else:
+        body["offset"] = 0
+    responses[:] = [Response(nested)]
+    with pytest.raises(playback.TidalPlaybackError) as error:
+        await playback.TidalPlaybackResolver(store).resolve_page(NEW_TRACKS + "?offset=20&limit=3")
+    assert error.value.code == "invalid_page_response" and len(requests) == 1
 
 
 @pytest.mark.asyncio

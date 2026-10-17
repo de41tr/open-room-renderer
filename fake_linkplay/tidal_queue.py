@@ -24,6 +24,7 @@ _QUERY_FIELDS = frozenset({
 })
 _QUALITIES = frozenset({"LOW", "HIGH", "LOSSLESS", "HI_RES", "AUTO"})
 _LEGACY_QUALITY = {"0": "LOW", "1": "HIGH", "2": "LOSSLESS", "3": "HI_RES", "4": "AUTO"}
+_GENRE_TRACKS_PATH = r"/v1/genres/(?:[A-Za-z0-9][A-Za-z0-9_-]{0,127}/){1,4}tracks"
 TIDAL_APPEND_BATCH_LIMIT = 500
 
 
@@ -46,9 +47,11 @@ needs authorized credentials, response validation and redirect protection.
         parts = urlsplit(value)
         if (parts.scheme != "https" or parts.netloc != "api.tidal.com"
                 or parts.fragment or len(parts.query) > 2048
-                or not re.fullmatch(
+                or not (re.fullmatch(
                     r"/v1/(?:albums|artists|tracks|playlists|mixes|users|featured|search)"
-                    r"(?:/[A-Za-z0-9_-]+)*/?", parts.path)):
+                    r"(?:/[A-Za-z0-9_-]+)*/?", parts.path)
+                        or parts.path == "/v1/rising/new/tracks"
+                        or re.fullmatch(_GENRE_TRACKS_PATH, parts.path))):
             raise ValueError
         query = parse_qsl(parts.query, keep_blank_values=True, strict_parsing=True,
                           max_num_fields=16)
