@@ -12,6 +12,8 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from fake_linkplay.config import Config
+from fake_linkplay.queue import MAX_QUEUE_TRACKS
+from fake_linkplay.radio import RadioResolution
 from fake_linkplay.diagnostics import Diagnostics
 from fake_linkplay.http_api import HttpApi
 from fake_linkplay.state import RendererState
@@ -71,8 +73,9 @@ class RadioIndexDiagnostics(unittest.IsolatedAsyncioTestCase):
         for root_fields, count, index, detail in cases:
             with self.subTest(guard=detail):
                 start = len(self.api.diagnostics.events)
-                context = (f"<PlayList>{root_fields}<ListInfo>"
-                           "<SourceName>newTuneIn</SourceName><StreamId>s12345</StreamId>"
+                source = ("" if detail == "empty" else
+                          "<SourceName>newTuneIn</SourceName><StreamId>s12345</StreamId>")
+                context = (f"<PlayList>{root_fields}<ListInfo>{source}"
                            f"{count}<StartPlayIndex>{escape(index)}</StartPlayIndex>"
                            "</ListInfo></PlayList>")
                 response = await self.reject(context, "queue-index")
@@ -102,6 +105,48 @@ class RadioIndexDiagnostics(unittest.IsolatedAsyncioTestCase):
                          "<StreamId>s12345</StreamId><TrackNumber>1</TrackNumber>"
                          "<StartPlayIndex>0</StartPlayIndex></ListInfo></PlayList>")
         await self.reject(index_context, "queue-index")
+
+
+    async def post_context(self, context):
+        body = (f'<s:Envelope xmlns:s="{SOAP_NS}"><s:Body>'
+                f'<u:CreateQueue xmlns:u="{SERVICE_TYPES["PlayQueue"]}">'
+                f'<QueueContext>{escape(context)}</QueueContext>'
+                '</u:CreateQueue></s:Body></s:Envelope>')
+        return await self.client.post("/upnp/control/PlayQueue1", data=body,
+            headers={"SOAPACTION": f'"{SERVICE_TYPES["PlayQueue"]}#CreateQueue"'})
+
+    async def test_unknown_radio_count_keeps_remote_index_a_hint_until_resolution(self):
+        media = "https://media.example.invalid/synthetic-station.mp3"
+        self.api._resolve_station_id = AsyncMock(return_value=RadioResolution(media, "s12345"))
+        self.api._resolve_playback_url = AsyncMock(side_effect=AssertionError("No media I/O"))
+        for count in ("", "<TrackNumber>0</TrackNumber>"):
+            for index in (1, 20):
+                with self.subTest(count_present=bool(count), remote_index=index):
+                    self.api._resolve_station_id.reset_mock()
+                    context = ("<PlayList><ListInfo><SourceName>newTuneIn</SourceName>"
+                               f"<StreamId>s12345</StreamId>{count}"
+                               f"<StartPlayIndex>{index}</StartPlayIndex>"
+                               "</ListInfo></PlayList>")
+                    response = await self.post_context(context)
+                    self.assertEqual(response.status, 200)
+                    await response.read()
+                    self.api._resolve_station_id.assert_awaited_once_with("s12345")
+                    queue = self.api.state.queue
+                    self.assertEqual((queue.count, queue.index), (1, 1))
+                    self.assertEqual((queue.current.id, queue.current.url), ("s12345", media))
+                    self.assertEqual(self.api.state.status, "stop")
+                    self.api._resolve_playback_url.assert_not_awaited()
+
+    async def test_unknown_count_still_bounds_index_and_checks_provider_before_effects(self):
+        oversized = ("<PlayList><ListInfo><SourceName>newTuneIn</SourceName>"
+                     "<StreamId>s12345</StreamId><TrackNumber>0</TrackNumber>"
+                     f"<StartPlayIndex>{MAX_QUEUE_TRACKS + 1}</StartPlayIndex>"
+                     "</ListInfo></PlayList>")
+        await self.reject(oversized, "queue-index")
+        unsupported = ("<PlayList><ListInfo><SourceName>other</SourceName>"
+                       "<StreamId>s12345</StreamId><TrackNumber>0</TrackNumber>"
+                       "<StartPlayIndex>1</StartPlayIndex></ListInfo></PlayList>")
+        await self.reject(unsupported, "provider-source")
 
 
 if __name__ == "__main__":
