@@ -19,6 +19,8 @@ def test_failed_prepare_keeps_last_phase_before_cleanup(tmp_path, monkeypatch, t
         (base / name).mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(releases.g, "BASE", base)
     monkeypatch.setattr(releases, "private", lambda p: None)
+    # pytest tmp_path may have a shared /tmp ancestor: fixture I/O only.
+    monkeypatch.setattr(releases.g, "document", lambda p: json.loads(Path(p).read_text()))
     monkeypatch.setattr(releases, "run", lambda *a, **k: None)
     monkeypatch.setattr(releases, "descriptor", lambda raw: {"layout": releases.g.LAYOUT})
     # Only the fixture's known descriptor read is mocked; progress file is real.
