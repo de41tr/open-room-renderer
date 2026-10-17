@@ -103,8 +103,17 @@ ID and choose **Test this track on the renderer**. This action replaces the
 current queue and starts the existing player; it is not an automatic login
 side effect. This local test does not require LAN account sharing. Explicit TIDAL
 `CreateQueue` track lists use the same queue owner after explicit LAN account
-sharing. The selected one-based start index resolves before the old queue is
-replaced; later Next/Previous/index commands resolve only their selected ID.
+sharing. With the currently advertised root capability version 1.0,
+`CreateQueue` prepares canonical IDs without track metadata/STREAM requests or
+native load/resume. The app's following `PlayQueueWithIndex` resolves and loads
+only the selected ID. Invalid, unshared or locally unavailable preparations leave
+the old queue unchanged. A successful preparation replaces it in STOPPED state;
+provider track errors are therefore reported by the later play command.
+For root versions at least 1.2 (currently 1.4 only with the existing Plex
+experiment), the selected one-based start index resolves before replacement
+and playback begins immediately. Explicit private Webplay and bounded tests
+remain immediate; `ReplaceQueue` retains its existing behavior. Later
+Next/Previous/index commands resolve only their selected ID.
 Unresolved entries retain canonical per-ID catalogue URLs and safe placeholder
 metadata. Header-only selections support exactly one requested
 `/v1/albums/{id}/tracks` or `/v1/playlists/{id}/items` page, with limit at most
@@ -119,9 +128,26 @@ exactly true. Missing/null/false eligibility and mixed/video pages are unsupport
 as a whole; entries are never filtered in a way that could shift the requested
 index across app SourceVersion variants. Response offset/limit/total/items and
 track IDs are bounded and checked before playback. Page and selected track must
-bind to the identical private session before queue replacement. The bounded
-one-track test lease is unchanged and cannot admit a page.
+bind to the identical private session. Legacy preparation reads only the page
+and retains that private binding until the first selected track is resolved;
+a changed or expired page session cannot authorize a load. Immediate playback
+checks both bindings before queue replacement. The bounded one-track test lease
+is unchanged and cannot admit a page.
 This is synthetic local queue coverage, not native-app/provider acceptance.
+
+### Native-app static contract observation
+
+Clean-room inspection of APK 3.6.11 finds that absence of a Tidal service entry
+does not itself block account adoption or CreateQueue. The per-source version
+falls back to empty, and normal/default quality becomes LOSSLESS; this resolver
+supports LOW/HIGH/LOSSLESS, not Master. Separately, the root servicesCapability
+version controls the `c22.m0`/`y` CreateQueue success path: below 1.2 it sends
+PlayQueueWithIndex, at least 1.2 it does not. ReplaceQueue uses a different
+callback without that branch. Another CreateQueue callback (`l0`/`b0`) always
+sends the play-index follow-up, so the version-dependent observation is specific
+to the inspected play-media route. Capabilities remain unchanged; no filtering,
+autoplay or ReplayGain support is advertised. This is static protocol evidence,
+not verification with the unchanged real app.
 
 The small provider adapter uses the saved device access token for bounded,
 fixed-origin TIDAL v1 metadata and `playbackinfopostpaywall` requests. It does

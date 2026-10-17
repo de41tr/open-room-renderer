@@ -26,6 +26,8 @@ class Resolver:
         self.calls = []
         self.wait = None
         self.error = None
+    def session_available(self):
+        return self.store.load() == self.record
     def session_matches(self, fingerprint):
         return fingerprint == b"synthetic-session-binding" and self.store.load() == self.record
     async def resolve_track(self, track_id, quality="HIGH"):
@@ -53,13 +55,19 @@ async def configured(api, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_single_tidal_create_queue_starts_existing_player_without_public_signed_url(api, tmp_path):
+@pytest.mark.parametrize("root_version", ["1.4", "1.10"])
+async def test_single_tidal_create_queue_starts_existing_player_without_public_signed_url(api, tmp_path, monkeypatch, root_version):
+    api.cfg.enable_plex_service = True  # Root 1.4 has immediate CreateQueue playback.
+    if root_version != "1.4":
+        capability = {**api._stream_services_capability(), "version": root_version}
+        monkeypatch.setattr(api, "_stream_services_capability", lambda: capability)
     resolver = await configured(api, tmp_path)
     context = '<PlayList><ListName>CurrentQueue</ListName><ListInfo><SourceName>Tidal</SourceName><TrackNumber>1</TrackNumber><StartPlayIndex>1</StartPlayIndex></ListInfo><Tracks><Track1><Id>42</Id></Track1></Tracks></PlayList>'
     response = await api.soap(request("CreateQueue", '<QueueContext>'+escape(context)+'</QueueContext>', service="PlayQueue"))
     assert response.status == 200
     assert resolver.calls == [("42", "AUTO")]
-    assert any(name == "load" and "/proxy/audio?url=" in value for name, value in api.mpv.calls)
+    loads = [value for name, value in api.mpv.calls if name == "load"]
+    assert len(loads) == 1 and "/proxy/audio?url=" in loads[0]
     assert api.state.queue.source == "Tidal" and api.state.status == "play"
     assert api.state.queue.current._tidal_stream_url.endswith("SYNTHETIC_SIGNED")
     assert api._proxy_source_allowed(api.state.queue.current._tidal_stream_url)
@@ -182,6 +190,7 @@ def assert_public_selection(api, index, track_id):
 @pytest.mark.parametrize("native_staging", [False, True])
 async def test_explicit_queue_resolves_start_before_replacing_and_lazily_navigates(queue_api, tmp_path, native_staging):
     api = queue_api
+    api.cfg.enable_plex_service = True  # Root 1.4 has immediate CreateQueue playback.
     api.cfg.native_queue_staging = native_staging
     if native_staging:
         api.mpv = NativeBackend()
@@ -255,6 +264,7 @@ async def test_unshared_explicit_selection_preserves_playing_queue_without_resol
 @pytest.mark.asyncio
 async def test_failed_start_resolution_preserves_existing_queue(queue_api, tmp_path):
     api = queue_api
+    api.cfg.enable_plex_service = True  # Root 1.4 has immediate CreateQueue playback.
     await api._play_url("https://media.example.test/existing.wav")
     resolver = await configured(api, tmp_path)
     resolver.error = TidalPlaybackError("provider_rejected")
@@ -267,6 +277,7 @@ async def test_failed_start_resolution_preserves_existing_queue(queue_api, tmp_p
 @pytest.mark.asyncio
 async def test_stop_supersedes_lazy_resolution_without_applying_metadata_or_loading(queue_api, tmp_path):
     api = queue_api
+    api.cfg.enable_plex_service = True  # Root 1.4 has immediate CreateQueue playback.
     resolver = await configured(api, tmp_path)
     assert (await create_explicit(api)).status == 200
     resolver.wait = asyncio.Event()
@@ -286,6 +297,7 @@ async def test_stop_supersedes_lazy_resolution_without_applying_metadata_or_load
 @pytest.mark.asyncio
 async def test_session_replaced_while_lazy_selection_waits_for_backend_prevents_load(queue_api, tmp_path):
     api = queue_api
+    api.cfg.enable_plex_service = True  # Root 1.4 has immediate CreateQueue playback.
     resolver = await configured(api, tmp_path)
     assert (await create_explicit(api)).status == 200
     resolved = asyncio.Event()
@@ -306,3 +318,75 @@ async def test_session_replaced_while_lazy_selection_waits_for_backend_prevents_
         await advance
     assert resolver.calls == [("43", "LOSSLESS"), ("44", "LOSSLESS")]
     assert len([value for name, value in api.mpv.calls if name == "load"]) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("existing_source", [False, True])
+async def test_legacy_create_then_play_index_resolves_and_loads_only_once(queue_api, tmp_path, existing_source):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    assert api._stream_services_capability()["version"] == "1.0"
+    if existing_source:
+        await api._play_url("https://media.example.test/existing.wav")
+    before = len(api.mpv.calls)
+    assert (await create_explicit(api)).status == 200
+    assert resolver.calls == []
+    assert api.state.status == "stop"
+    assert api.state.queue.index == 2 and api.state.queue.current.id == "43"
+    assert all(item._tidal_candidate is None and item._tidal_stream_url == "" for item in api.state.queue.items)
+    assert not any(name in {"load", "resume"} for name, _ in api.mpv.calls[before:])
+    assert [name for name, _ in api.mpv.calls[before:]].count("stop") == int(existing_source)
+    assert (await api.soap(request("PlayQueueWithIndex", "<QueueName>Explicit tracks</QueueName><Index>2</Index>",
+                                   service="PlayQueue"))).status == 200
+    assert resolver.calls == [("43", "LOSSLESS")]
+    assert [name for name, _ in api.mpv.calls[before:]].count("load") == 1
+    assert [name for name, _ in api.mpv.calls[before:]].count("stop") == int(existing_source)
+    assert_public_selection(api, 2, "43")
+
+
+@pytest.mark.asyncio
+async def test_legacy_unavailable_preparation_preserves_old_queue_without_provider_work(queue_api, tmp_path):
+    api = queue_api
+    await api._play_url("https://media.example.test/existing.wav")
+    resolver = await configured(api, tmp_path)
+    resolver.session_available = lambda: False
+    previous, state, calls = api.state.queue, asdict(api.state), list(api.mpv.calls)
+    assert (await create_explicit(api)).status == 500
+    assert api.state.queue is previous and asdict(api.state) == state
+    assert api.mpv.calls == calls and resolver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_unshare_after_legacy_preparation_prevents_resolution_and_load(queue_api, tmp_path):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    assert (await create_explicit(api)).status == 200
+    await api.tidal_account.set_shared(False)
+    response = await api.soap(request("PlayQueueWithIndex", "<QueueName>Explicit tracks</QueueName><Index>2</Index>",
+                                      service="PlayQueue"))
+    assert response.status == 500
+    assert resolver.calls == [] and api.mpv.calls == []
+
+
+@pytest.mark.asyncio
+async def test_replace_queue_retains_immediate_playback_for_legacy_root(queue_api, tmp_path):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    response = await api.soap(request("ReplaceQueue", "<QueueContext>" + escape(explicit_context()) + "</QueueContext>",
+                                      service="PlayQueue"))
+    assert response.status == 200 and resolver.calls == [("43", "LOSSLESS")]
+    assert [name for name, _ in api.mpv.calls].count("load") == 1
+    assert_public_selection(api, 2, "43")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("track_id,quality", [("0", "LOSSLESS"), ("043", "LOSSLESS"), ("43", "HI_RES")])
+async def test_legacy_invalid_selected_identity_or_quality_preserves_old_queue(queue_api, tmp_path, track_id, quality):
+    api = queue_api
+    await api._play_url("https://media.example.test/existing.wav")
+    resolver = await configured(api, tmp_path)
+    context = explicit_context().replace("<Id>43</Id>", f"<Id>{track_id}</Id>").replace("LOSSLESS", quality)
+    previous, state, calls = api.state.queue, asdict(api.state), list(api.mpv.calls)
+    assert (await create_explicit(api, context)).status == 500
+    assert api.state.queue is previous and asdict(api.state) == state
+    assert resolver.calls == [] and api.mpv.calls == calls

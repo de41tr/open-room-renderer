@@ -83,6 +83,14 @@ class TidalTrackCandidate:
     session_fingerprint: bytes
 
 
+def validate_track_selection(track_id: str, quality: str) -> str:
+    """Local-only selection validation shared by preparation and resolution."""
+    if (type(track_id) is not str or not re.fullmatch(r"[1-9][0-9]{0,19}", track_id)
+            or type(quality) is not str or quality not in _QUALITIES | {"AUTO"}):
+        raise TidalPlaybackError("invalid_selection")
+    return "HIGH" if quality == "AUTO" else quality
+
+
 def _unique_object(pairs: list[tuple]) -> dict:
     result = {}
     for key, value in pairs:
@@ -322,10 +330,7 @@ class TidalPlaybackResolver:
             raise TidalPlaybackError("invalid_page_response") from None
 
     async def resolve_track(self, track_id: str, quality: str = "HIGH") -> TidalTrackCandidate:
-        if (type(track_id) is not str or not re.fullmatch(r"[1-9][0-9]{0,19}", track_id)
-                or type(quality) is not str or quality not in _QUALITIES | {"AUTO"}):
-            raise TidalPlaybackError("invalid_selection")
-        quality = "HIGH" if quality == "AUTO" else quality
+        quality = validate_track_selection(track_id, quality)
         try:
             with self._store.lease() as lease:
                 session = await self._session_owned(lease)
