@@ -337,7 +337,9 @@ def parse_queue_context(
     malformed/truncated queue. Header-only provider selections are the sole
     exception: their count/start hints describe unresolved remote content and
     normalize to actual local count/index zero. Their hints must still agree
-    and be in range. ``name`` may assign an explicit server-side queue name.
+    and be in range. With no positive remote count, bound the index hint by
+    max_tracks rather than treating unresolved content as a local empty queue.
+    ``name`` may assign an explicit server-side queue name.
     """
     if type(max_tracks) is not int or not 1 <= max_tracks <= MAX_QUEUE_TRACKS:
         raise QueueError(f"Queue track limit must be between 1 and {MAX_QUEUE_TRACKS}", reason=QueueRejectionReason.LIMIT)
@@ -426,7 +428,11 @@ def parse_queue_context(
         raise QueueError("Declared queue count does not match tracks", reason=QueueRejectionReason.COUNT)
     if requested_index is None:
         requested_index = 1 if expected_count else 0
-    if expected_count:
+    if unresolved and not expected_count:
+        if requested_index > max_tracks:
+            raise QueueError("Unresolved queue index exceeds track limit", reason=QueueRejectionReason.INDEX,
+                             index_detail=QueueRejectionReason.INDEX_RANGE)
+    elif expected_count:
         if not 1 <= requested_index <= expected_count:
             raise QueueError("Queue index must be between 1 and track count", reason=QueueRejectionReason.INDEX,
                              index_detail=QueueRejectionReason.INDEX_ZERO if requested_index == 0
