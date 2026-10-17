@@ -397,16 +397,17 @@ def test_legacy_scpd_bytes_are_preserved_and_canonical_only_removes_control_sour
     assert ET.tostring(legacy) == ET.tostring(canonical)
 
 
-def test_tidal_search_append_declares_only_the_implemented_wire_form():
+def test_tidal_append_declares_only_the_implemented_wire_forms():
     _, actions, variables = contract("PlayQueue")
     assert arguments(actions["AppendTracksInQueueEx"]) == [
         ("QueueContext", "in", "QueueContext"),
         ("Action", "in", "A_ARG_TYPE_AppendAction"),
         ("Direction", "in", "A_ARG_TYPE_AppendDirection"),
-        ("StartIndex", "in", "A_ARG_TYPE_QueueIndex"),
+        ("StartIndex", "in", "A_ARG_TYPE_AppendIndex"),
         ("Play", "in", "A_ARG_TYPE_AppendPlay"),
     ]
-    assert allowed_values(variables["A_ARG_TYPE_AppendAction"]) == ["playnext"]
+    assert allowed_values(variables["A_ARG_TYPE_AppendAction"]) == ["playnext", "playlast"]
     for field in ("A_ARG_TYPE_AppendDirection", "A_ARG_TYPE_AppendPlay"):
         assert variables[field].findtext("s:dataType", namespaces=NS) == "ui4"
-        assert allowed_values(variables[field]) == ["1"]
+    assert allowed_values(variables["A_ARG_TYPE_AppendDirection"]) == ["1"]
+    assert allowed_values(variables["A_ARG_TYPE_AppendPlay"]) == ["0", "1"]
