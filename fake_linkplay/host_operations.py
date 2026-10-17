@@ -13,7 +13,7 @@ from . import host_contract as contract
 from . import host_release as releases
 from . import host_runtime as g
 
-HELPER_VERSION = "product-v1.1"
+HELPER_VERSION = "product-v1.2"
 MUTATIONS = frozenset({"release-prepare", "release-install", "release-rollback",
     "component-prepare", "component-install", "component-activate", "component-deactivate"})
 
@@ -108,10 +108,9 @@ def execute(r):
                 report["accepted"] = True
                 if op == "release-prepare":
                     releases.prepare(r, info, report)
-                    if not (info["release"] / "source/fake_linkplay/host_operations.py").is_file():
-                        worker = releases.load_prepared(r["commit"])
-                        releases.save(g.BASE / "management/worker.json", {
-                            "api_version": 1, "commit": r["commit"], "release_name": worker.name})
+                    worker = releases.load_prepared(r["commit"])
+                    releases.save(g.BASE / "management/worker.json", {
+                        "api_version": 1, "commit": r["commit"], "release_name": worker.name})
                 else:
                     releases.install(r, info, report)
                 state(report, releases.layout())

@@ -4,6 +4,9 @@ No service operation during preparation. Never restore old config/state bytes.
 """
 from __future__ import annotations
 import contextlib
+import datetime as dt
+import time
+import signal
 import fcntl
 import hashlib
 import json
@@ -28,6 +31,55 @@ def run(argv, timeout=30, *, output=False):
         if len(p.stdout) > 65536:
             raise Refused("product_reply_limit")
         return p.stdout
+
+BUILD_PHASES = frozenset({"venv", "build_tools", "pure_dependencies", "yaml",
+                         "application", "runtime_install", "inventory", "launcher_validation"})
+
+def run_installer(source, target, report):
+    """One 660s attempt; keep safe last phase before failed staging is removed."""
+    started_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    begin = time.monotonic()
+    process = subprocess.Popen(["/usr/bin/python3", str(source / "scripts/install-native.py"),
+                                "--prefix", str(target)],
+                               env=g.ENV, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, start_new_session=True)
+    result = "success"
+    try:
+        process.wait(timeout=660)
+        if process.returncode:
+            result = "installer_failed"
+    except subprocess.TimeoutExpired:
+        result = "installer_timeout"
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGTERM)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=5)
+    finally:
+        finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        duration = round(max(0, time.monotonic() - begin), 3)
+        phase, phase_started = "unknown", None
+        try:
+            value = g.document(target / "build-progress.json")
+            stamp = dt.datetime.fromisoformat(value["phase_started_at"])
+            if (type(value) is dict and value.get("schema_version") == 1
+                    and value.get("phase") in BUILD_PHASES and stamp.utcoffset() == dt.timedelta(0)
+                    and dt.datetime.fromisoformat(started_at) <= stamp <= dt.datetime.fromisoformat(finished_at)):
+                phase, phase_started = value["phase"], value["phase_started_at"]
+        except Exception:
+            pass
+        code = process.returncode
+        report["build"] = {"schema_version": 1, "phase": phase, "result": result,
+            "started_at": started_at, "finished_at": finished_at, "duration_seconds": duration,
+            "phase_started_at": phase_started,
+            "exit_code": code if type(code) is int and code >= 0 else None,
+            "signal": -code if type(code) is int and code < 0 else None}
+    if result != "success":
+        raise Refused(result)
+
 
 def layout():
     raw = g.regular(g.CONFIG)
@@ -172,7 +224,7 @@ def prepare(r, before, report):
         target = Path(tempfile.mkdtemp(prefix=r["commit"][:12] + ".", dir=g.BASE / "releases"))
         target.rmdir()
         report["phase"] = "building"
-        run(["/usr/bin/python3", repo / "scripts/install-native.py", "--prefix", target], timeout=660)
+        run_installer(repo, target, report)
         receipt = compatible(target, before)
         if receipt.get("source", {}).get("revision") != r["commit"]:
             raise Refused("prepared_commit_mismatch")

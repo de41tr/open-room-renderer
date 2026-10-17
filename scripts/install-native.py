@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import time
 import hashlib
 import importlib.util
 import json
@@ -38,6 +40,38 @@ ratelimit==2.2.1 --hash=sha256:af8a9b64b821529aca09ebaf6d8d279100d766f19e90b5059
 PURE_YAML = """\
 PyYAML==6.0.3 --hash=sha256:d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f
 """
+
+
+class BuildProgress:
+    """Bounded developer-authored phases only; never subprocess text or paths."""
+    def __init__(self, prefix):
+        self.path = prefix / "build-progress.json"
+        self.started = time.monotonic()
+        self.started_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        self.phase = "venv"
+        self.phase_started = self.started
+        self.phase_started_at = self.started_at
+
+    def mark(self, phase, result="running"):
+        now = time.monotonic()
+        stamp = dt.datetime.now(dt.timezone.utc).isoformat()
+        if phase != self.phase:
+            self.phase, self.phase_started, self.phase_started_at = phase, now, stamp
+        value = {"schema_version": 1, "phase": self.phase, "result": result,
+                 "started_at": self.started_at, "updated_at": stamp,
+                 "duration_seconds": round(now - self.started, 3),
+                 "phase_started_at": self.phase_started_at}
+        temporary = self.path.with_suffix(".new")
+        try:
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "w") as output:
+                json.dump(value, output, separators=(",", ":"))
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, self.path)
+        except OSError:
+            # Reporting cannot change installation or hide the original failure.
+            pass
 
 
 def run(*args: str) -> str:
@@ -327,6 +361,7 @@ def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require
         raise ValueError("Run the user installer as your normal account, without sudo.")
     prefix.mkdir(parents=True, mode=0o700)
     receipt = {"format": 1, "mode": "installation-incomplete", "environment": info, "source": None}
+    progress = BuildProgress(prefix) if not stage_only else None
     try:
         for directory in ("run", "state", "source"):
             (prefix / directory).mkdir(mode=0o700)
@@ -346,20 +381,24 @@ def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require
         if stage_only:
             receipt["mode"] = "staged-only"
         else:
+            progress.mark("venv")
             subprocess.run([sys.executable, "-I", "-m", "venv", str(prefix / "venv")], check=True)
             python = str(prefix / "venv/bin/python")
             # Ignore inherited PYTHONPATH/user-site metadata: checkout egg-info
             # must not make pip skip installing the application in this venv.
+            progress.mark("build_tools")
             subprocess.run([python, "-I", "-m", "pip", "install", "--only-binary=:all:",
                             "--no-deps", "--require-hashes", "--report",
                             str(prefix / "pip-build-tools-report.json"), "-r", "/dev/stdin"],
                            input=BUILD_TOOLS, text=True, check=True)
+            progress.mark("pure_dependencies")
             subprocess.run([python, "-I", "-m", "pip", "install", "--use-pep517", "--no-build-isolation",
                             "--no-deps", "--require-hashes", "--report",
                             str(prefix / "pip-pure-build-report.json"), "-r", "/dev/stdin"],
                            input=PURE_BUILD_DEPENDENCIES, text=True, check=True)
             # Avoid Cython/native-extension work for the Python loaders ORR uses.
             # Do not reuse a cached wheel built with different LibYAML settings.
+            progress.mark("yaml")
             subprocess.run([python, "-I", "-m", "pip", "install", "--no-binary=PyYAML",
                             "--no-cache-dir", "--no-build-isolation", "--no-deps", "--require-hashes",
                             "--report", str(prefix / "pip-yaml-report.json"), "-r", "/dev/stdin"],
@@ -368,6 +407,7 @@ def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require
             subprocess.run([python, "-I", "-c",
                             "import yaml; assert yaml.__version__ == '6.0.3' and not yaml.__with_libyaml__"],
                            check=True)
+            progress.mark("application")
             wheels = prefix / "wheels"
             wheels.mkdir(mode=0o700)
             subprocess.run([python, "-I", "-m", "pip", "wheel", "--no-build-isolation", "--no-deps",
@@ -375,13 +415,18 @@ def install(prefix: Path, *, port: int, stage_only: bool, dry_run: bool, require
             application = list(wheels.glob("open_room_renderer-*-py3-none-any.whl"))
             if len(application) != 1:
                 raise ValueError("The source snapshot did not produce one native-profile application wheel.")
+            progress.mark("runtime_install")
             subprocess.run([python, "-I", "-m", "pip", "install", "--report", str(prefix / "pip-install-report.json"), str(application[0])], check=True)
             # Keep pip warnings on stderr, separate from the JSON package inventory.
+            progress.mark("inventory")
             receipt["packages"] = json.loads(subprocess.check_output(
                 [python, "-I", "-m", "pip", "list", "--format=json"], text=True))
+            progress.mark("launcher_validation")
             subprocess.run([python, "-I", str(prefix / "venv/bin/open-room-renderer"), "--help"], check=True, stdout=subprocess.DEVNULL)
             receipt["mode"] = "installed"
     finally:
+        if progress is not None:
+            progress.mark(progress.phase, "success" if receipt["mode"] == "installed" else "installer_failed")
         (prefix / "installation-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
         write_manifest(prefix)
     print(f"Receipt: {prefix / 'installation-receipt.json'}")
