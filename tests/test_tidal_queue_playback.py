@@ -390,3 +390,191 @@ async def test_legacy_invalid_selected_identity_or_quality_preserves_old_queue(q
     assert (await create_explicit(api, context)).status == 500
     assert api.state.queue is previous and asdict(api.state) == state
     assert resolver.calls == [] and api.mpv.calls == calls
+
+
+def search_append_context(track_id="45"):
+    # WiiM Home 3.6.11 search append: CurrentQueue alias, explicit one-track
+    # identity, and a zero XML start; the SOAP StartIndex addresses the old item.
+    return ("<PlayList><ListName>CurrentQueue</ListName><ListInfo><SourceName>Tidal</SourceName>"
+            "<SearchUrl/><TrackNumber>1</TrackNumber><StartPlayIndex>0</StartPlayIndex>"
+            "<requestQuality>LOSSLESS</requestQuality></ListInfo><Tracks><Track1>"
+            f"<Source>Tidal</Source><Id>{track_id}</Id><URL/>"
+            "<Metadata>&lt;res&gt;https://foreign.example.test/?token=CALLER_SECRET&lt;/res&gt;</Metadata>"
+            "</Track1></Tracks></PlayList>")
+
+
+async def append_search(api, *, context=None, action="playnext", start=2, direction=1, play=1):
+    return await api.soap(request("AppendTracksInQueueEx", "<QueueContext>" + escape(
+        search_append_context() if context is None else context) + "</QueueContext>"
+        f"<Action>{action}</Action><StartIndex>{start}</StartIndex>"
+        f"<Direction>{direction}</Direction><Play>{play}</Play>", service="PlayQueue"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("appended_id", ["45", "43"])
+async def test_search_append_plays_inserted_identity_preserves_old_slots_and_laziness(queue_api, tmp_path, appended_id):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    assert (await create_explicit(api)).status == 200
+    await api._play_queue_index(2)
+    old_items = list(api.state.queue.items)
+    old_name = api.state.queue.name
+    # The native app's same-source search branch is gated by this play medium.
+    info = await api.soap(request("GetInfoEx"))
+    assert info.status == 200
+    assert ET.fromstring(info.text).findtext(".//PlayMedium") == "SONGLIST-NETWORK"
+    assert api.state.as_status_ex("127.0.0.1")["dlna_play_medium"] == "SONGLIST-NETWORK"
+    assert "SONGLIST-NETWORK" in api._event_body("AVTransport")
+    assert api.state.as_meta_info()["PlayMedium"] == "SONGLIST-NETWORK"
+    index_response = await api.soap(request("GetQueueIndex", "<QueueName>CurrentQueue</QueueName>",
+                                            service="PlayQueue"))
+    assert index_response.status == 200
+    index = int(ET.fromstring(index_response.text).findtext(".//CurrentIndex"))
+    assert index == 2
+    resolver.wait = asyncio.Event()
+    calls, previous = list(api.mpv.calls), api.state.queue
+    pending = asyncio.create_task(append_search(api, context=search_append_context(appended_id), start=index))
+    await asyncio.sleep(0)
+    assert api.state.queue is previous and api.mpv.calls == calls
+    resolver.wait.set()
+    assert (await pending).status == 200
+    queue = api.state.queue
+    assert queue.name == old_name and queue.index == 3 and queue.count == 4
+    assert [item.id for item in queue.items] == ["42", "43", appended_id, "44"]
+    assert all(queue.items[index] is old for index, old in zip((0, 1, 3), old_items))
+    assert queue.current._tidal_track == (appended_id, "LOSSLESS") and queue.current._tidal_require_shared
+    assert resolver.calls == [("43", "LOSSLESS"), (appended_id, "LOSSLESS")]
+    assert queue.items[0]._tidal_stream_url == queue.items[3]._tidal_stream_url == ""
+    assert [name for name, _ in api.mpv.calls[len(calls):]].count("stop") == 1
+    assert [name for name, _ in api.mpv.calls[len(calls):]].count("load") == 1
+    public = (api._playqueue_response_fields("BrowseQueue") + serialize_queue_context(queue)
+              + json.dumps(api.state.as_status_ex("127.0.0.1")) + api.state.track_metadata
+              + avtransport_response_fields("GetPositionInfo", api.state)
+              + api._event_body("AVTransport") + api._event_body("PlayQueue"))
+    for secret in ("SYNTHETIC_SIGNED", "CALLER_SECRET", "audio.example.test", "foreign.example.test"):
+        assert secret not in public
+    await api._play_queue_index(4)
+    assert api.state.queue.current is old_items[2]
+    assert resolver.calls[-1] == ("44", "LOSSLESS")
+    assert api._stream_services_capability()["version"] == "1.0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["generation", "same_name_queue", "share", "session", "resolution_failure"])
+async def test_search_append_stale_or_failed_resolution_preserves_current_audio(queue_api, tmp_path, change):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    assert (await create_explicit(api)).status == 200
+    await api._play_queue_index(2)
+    resolver.wait = asyncio.Event()
+    pending = asyncio.create_task(append_search(api))
+    await asyncio.sleep(0)
+    if change == "generation":
+        api._accept_playback_command("stop")
+    elif change == "same_name_queue":
+        api.state.queue = replace(api.state.queue)
+    elif change == "share":
+        await api.tidal_account.set_shared(False)
+    elif change == "session":
+        resolver.store.save(replace(resolver.record, access_token="replacement-synthetic-access"))
+    else:
+        resolver.error = TidalPlaybackError("synthetic failure")
+    previous, state, calls = api.state.queue, asdict(api.state), list(api.mpv.calls)
+    resolver.wait.set()
+    assert (await pending).status == 500
+    assert api.state.queue is previous and asdict(api.state) == state
+    assert api.mpv.calls == calls
+    assert len(resolver.calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["share", "session", "generation"])
+async def test_search_append_rechecks_owner_after_stop_before_queue_insertion(queue_api, tmp_path, change):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    assert (await create_explicit(api)).status == 200
+    await api._play_queue_index(2)
+    previous = api.state.queue
+    stop = api.mpv.stop
+    async def revoke_at_stop():
+        if change == "share":
+            await api.tidal_account.set_shared(False)
+        elif change == "session":
+            resolver.store.save(replace(resolver.record, access_token="replacement-synthetic-access"))
+        else:
+            api._accept_playback_command("stop")
+        return await stop()
+    api.mpv.stop = revoke_at_stop
+    calls = list(api.mpv.calls)
+    assert (await append_search(api)).status == 500
+    assert api.state.queue is previous and previous.count == 3
+    assert [name for name, _ in api.mpv.calls[len(calls):]] == ["stop"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["action", "direction", "play", "stale_index", "header_only", "source", "xml_start", "queue_alias", "radio_queue", "unowned_queue", "unshared"])
+async def test_unsupported_search_append_fails_before_resolution_or_mutation(queue_api, tmp_path, invalid):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    assert (await create_explicit(api)).status == 200
+    await api._play_queue_index(2)
+    kwargs = {}
+    if invalid in {"action", "direction", "play"}:
+        kwargs[invalid] = {"action": "create", "direction": 0, "play": 0}[invalid]
+    elif invalid == "stale_index":
+        kwargs["start"] = 1
+    elif invalid == "header_only":
+        kwargs["context"] = ('<PlayList><ListName>CurrentQueue</ListName><ListInfo>'
+            '<SourceName>Tidal</SourceName><StartPlayIndex>0</StartPlayIndex>'
+            '<SearchUrl>https://api.tidal.com/v1/albums/123/tracks</SearchUrl></ListInfo></PlayList>')
+    elif invalid == "source":
+        kwargs["context"] = search_append_context().replace("Tidal", "newTuneIn")
+    elif invalid == "xml_start":
+        kwargs["context"] = search_append_context().replace("<StartPlayIndex>0", "<StartPlayIndex>1")
+    elif invalid == "queue_alias":
+        kwargs["context"] = search_append_context().replace("CurrentQueue", "OtherQueue")
+    elif invalid == "radio_queue":
+        api.state.queue.source = "newTuneIn"
+    elif invalid == "unowned_queue":
+        api.state.queue.items[0]._tidal_track = None
+    elif invalid == "unshared":
+        await api.tidal_account.set_shared(False)
+    previous, state, calls, resolutions = api.state.queue, asdict(api.state), list(api.mpv.calls), list(resolver.calls)
+    assert (await append_search(api, **kwargs)).status == 500
+    assert api.state.queue is previous and asdict(api.state) == state
+    assert api.mpv.calls == calls and resolver.calls == resolutions
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["radio", "unowned_tidal", "wrong_alias", "mutation"])
+async def test_current_queue_alias_is_only_a_privately_owned_tidal_index_read(queue_api, tmp_path, kind):
+    api = queue_api
+    resolver = await configured(api, tmp_path)
+    assert (await create_explicit(api)).status == 200
+    if kind == "radio":
+        api.state.queue.source = "newTuneIn"
+    elif kind == "unowned_tidal":
+        api.state.queue.current._tidal_track = None
+    alias = "UnknownQueue" if kind == "wrong_alias" else "CurrentQueue"
+    action = "PlayQueueWithIndex" if kind == "mutation" else "GetQueueIndex"
+    previous, state, calls = api.state.queue, asdict(api.state), list(api.mpv.calls)
+    response = await api.soap(request(action, f"<QueueName>{alias}</QueueName><Index>2</Index>",
+                                      service="PlayQueue"))
+    assert response.status == 500
+    assert api.state.queue is previous and asdict(api.state) == state
+    assert api.mpv.calls == calls and resolver.calls == []
+    exact = await api.soap(request("GetQueueIndex", f"<QueueName>{api.state.queue.name}</QueueName>",
+                                   service="PlayQueue"))
+    assert exact.status == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("station", [False, True])
+async def test_non_tidal_queue_medium_projection_remains_unchanged(queue_api, station):
+    from fake_linkplay.queue import PlaybackQueue, QueueItem
+    api = queue_api
+    item = QueueItem("https://media.example.test/stream", source="newTuneIn" if station else "DLNA",
+                     stream_type="station" if station else "")
+    api.state.queue = PlaybackQueue(items=[item], index=1)
+    api._activate_queue_item()
+    assert api.state.play_medium == ("RADIO-NETWORK" if station else "THIRD-DLNA")

@@ -135,12 +135,31 @@ checks both bindings before queue replacement. The bounded one-track test lease
 is unchanged and cannot admit a page.
 This is synthetic local queue coverage, not native-app/provider acceptance.
 
+Privately owned TIDAL tracks report `PlayMedium=SONGLIST-NETWORK`, matching the
+app's same-source search gate. Radio and ordinary direct-URL media labels are
+unchanged. The observed native-app search path can insert and immediately start one TIDAL
+track in an existing privately owned TIDAL queue using `AppendTracksInQueueEx`:
+`Action=playnext`, `Direction=1`, `Play=1`, and `StartIndex` equal to the current
+one-based queue index. The preceding `GetQueueIndex(QueueName=CurrentQueue)`
+read recognizes that alias only for a privately owned TIDAL queue; other name
+checks remain exact. Its explicit one-track XML uses `ListName=CurrentQueue`
+and `StartPlayIndex=0`. The new track resolves before current audio is stopped;
+session, LAN sharing and queue ownership are checked again after resolution and
+after Stop confirmation. Existing track objects and their private provenance are
+retained, and unselected neighbors remain unresolved. Signed URLs and supplied
+metadata do not enter public queue/status data. Header-only or multi-track append,
+other append modes, stale indices and non-TIDAL/unowned queues are rejected before
+provider work or playback changes. This is a bounded search operation, not general
+queue-extension support; root capabilities and radio behavior are unchanged.
+
 ### Native-app static contract observation
 
 Clean-room inspection of APK 3.6.11 finds that absence of a Tidal service entry
 does not itself block account adoption or CreateQueue. The per-source version
 falls back to empty, and normal/default quality becomes LOSSLESS; this resolver
-supports LOW/HIGH/LOSSLESS, not Master. Separately, the root servicesCapability
+supports LOW/HIGH/LOSSLESS, not Master. A globally saved Master/HI_RES choice
+is also reduced to LOSSLESS when the selected renderer's qualities omit HI_RES;
+the app applies this check when constructing the playback header. Separately, the root servicesCapability
 version controls the `c22.m0`/`y` CreateQueue success path: below 1.2 it sends
 PlayQueueWithIndex, at least 1.2 it does not. ReplaceQueue uses a different
 callback without that branch. Another CreateQueue callback (`l0`/`b0`) always

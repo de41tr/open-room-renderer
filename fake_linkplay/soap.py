@@ -36,7 +36,7 @@ MUTATING_ACTIONS = {
     "AVTransport": {"SetAVTransportURI", "Play", "Pause", "Stop", "Next", "Previous", "Seek", "SeekForward", "SeekBackward", "SetPlayMode"},
     "RenderingControl": {"SetVolume", "SetMute"},
     "ConnectionManager": set(),
-    "PlayQueue": {"CreateQueue", "ReplaceQueue", "PlayQueueWithIndex", "SetQueueLoopMode", "UserLogin"},
+    "PlayQueue": {"CreateQueue", "ReplaceQueue", "PlayQueueWithIndex", "SetQueueLoopMode", "UserLogin", "AppendTracksInQueueEx"},
 }
 
 

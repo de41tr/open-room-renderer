@@ -56,7 +56,7 @@ from .network_policy import NetworkPolicyError, PinnedResolver, resolve_proxy_ta
 from .radio import RadioResolution, RadioResolutionError, resolve_station
 from .persistence import (AtomicWriteCommittedError, atomic_write_text, encode_active_dsp,
                           load_active_dsp, save_gain, validate_eq_records)
-from .queue import PlaybackQueue, QueueError, QueueItem, parse_didl_metadata, parse_queue_context, serialize_queue_context
+from .queue import MAX_QUEUE_TRACKS, PlaybackQueue, QueueError, QueueItem, parse_didl_metadata, parse_queue_context, serialize_queue_context
 from .queue_diagnostics import QueueRejectionReason
 from .tidal_account import TidalAccountBridge, TidalAccountUnavailable, TidalDeviceAccountBridge
 from .tidal_queue import track_id_from_reference as tidal_track_from_reference
@@ -3693,6 +3693,64 @@ class HttpApi:
             raise BackendError("TIDAL playback command superseded")
         await self._play_queue_index(queue.index, queue.name)
 
+    async def _append_tidal_playnext(self, selection, start_index: int) -> None:
+        """Insert one resolved search selection after the current owned item."""
+        from .tidal_playback import TidalPlaybackError
+        self.tidal_test.command_allowed()
+        queue = self.state.queue
+        if (not queue.items or queue.source != "Tidal" or start_index != queue.index
+                or any(item._tidal_track is None or item._tidal_test_lease is not None
+                       for item in queue.items)
+                or self.spotify_source is not None
+                or self.state.phase == PlaybackPhase.ERROR or self._native_output_uncertain):
+            raise SoapFault(701, "Transition Not Available")
+        if queue.count >= MAX_QUEUE_TRACKS:
+            raise SoapFault(402, "Invalid Args")
+        if (self.tidal_playback is None or self.catalog_proxy_port == 0
+                or not self._tidal_sharing_requested()):
+            raise BackendError("Experimental TIDAL playback is unavailable")
+        generation, current = self.state.generation, queue.current
+        task = asyncio.current_task()
+        self._tidal_pending_resolutions.add(task)
+        try:
+            track = selection.tracks[0]
+            try:
+                candidate = await self.tidal_playback.resolve_track(track.track_id, selection.request_quality)
+            except TidalPlaybackError:
+                raise BackendError("TIDAL track resolution failed") from None
+
+            def still_owned():
+                page = queue._tidal_prepared_page
+                return (self.state.queue is queue and queue.index == start_index
+                        and queue.current is current and self._tidal_sharing_enabled()
+                        and candidate.session_expires_at > time.time()
+                        and self.tidal_playback.session_matches(candidate.session_fingerprint)
+                        and (page is None or (page.session_fingerprint == candidate.session_fingerprint
+                                             and page.session_expires_at > time.time())))
+
+            if generation != self.state.generation or not still_owned():
+                raise BackendError("TIDAL append superseded")
+            # Resolution failure must leave the old audio untouched. Confirm Stop
+            # before altering any queue slots, then recheck consent/session because
+            # that confirmation may have waited behind another backend command.
+            await self._transport_command("stop")
+            if not still_owned():
+                raise BackendError("TIDAL append superseded")
+            item = QueueItem(url=f"https://api.tidal.com/v1/tracks/{track.track_id}",
+                             title=f"TIDAL track {track.track_id}", source="Tidal",
+                             id=track.track_id, title_is_fallback=True)
+            item._tidal_track = (track.track_id, selection.request_quality)
+            item._tidal_require_shared = True
+            item._tidal_candidate = candidate
+            # Keep the old QueueItem objects and their private provenance. Other
+            # tracks remain lazy; an explicit selection starts a new shuffle cycle.
+            appended = replace(queue, items=[*queue.items[:start_index], item,
+                                            *queue.items[start_index:]], index=start_index + 1)
+            await self._replace_queue(appended)
+            await self._play_queue_index(appended.index, appended.name)
+        finally:
+            self._tidal_pending_resolutions.discard(task)
+
     async def _materialize_radio_queue(self, queue: PlaybackQueue) -> None:
         """Resolve a header-only station under the current command generation."""
         station_id = queue.stream_id or self._radio_station_from_url(queue.search_url, allow_opml=False)
@@ -4558,7 +4616,12 @@ class HttpApi:
                     action, self.state, current_transport_actions=self._current_transport_actions())
             elif service == "PlayQueue":
                 queue_name = self._xml_text(action_body, "QueueName")
-                if queue_name and queue_name != self.state.queue.name:
+                # The app asks CurrentQueue before its TIDAL search append even
+                # when CreateQueue named the owned selection after an album.
+                tidal_current_alias = (action == "GetQueueIndex" and queue_name == "CurrentQueue"
+                                       and self.state.queue.source == "Tidal" and self.state.queue.items
+                                       and all(item._tidal_track is not None for item in self.state.queue.items))
+                if queue_name and queue_name != self.state.queue.name and not tidal_current_alias:
                     raise SoapFault(402, "Invalid Args")
                 if (action == "GetUserInfo" and self.tidal_account is not None
                         and self._xml_text(action_body, "AccountSource") == "Tidal"):
@@ -4916,7 +4979,8 @@ class HttpApi:
         self.state.album = item.album if item else ""
         self.state.album_art_uri = self.queue_pic_url
         self.state.track_source = self.queue_source
-        self.state.play_medium = "RADIO-NETWORK" if self.queue_is_live else "THIRD-DLNA"
+        self.state.play_medium = ("RADIO-NETWORK" if self.queue_is_live else
+                                  "SONGLIST-NETWORK" if item and item._tidal_track is not None else "THIRD-DLNA")
         self.state.track_metadata = (item.metadata or self._didl_metadata(item.resolved_url or item.url, self.queue_title, self.queue_source, self.queue_pic_url, self.queue_is_live, artist=item.artist, album=item.album, item_id=item.id or None)) if item else ""
         if item and not item.metadata and item.duration > 0:
             self.state.track_metadata = self._metadata_with_duration(self.state.track_metadata, int(item.duration))
@@ -5293,6 +5357,21 @@ class HttpApi:
                 return
             await self._materialize_radio_queue(queue)
             return
+        if action == "AppendTracksInQueueEx":
+            from xml.etree.ElementTree import fromstring
+            from .tidal_queue import parse_tidal_playnext, TidalQueueError
+            raw_index = self._xml_text(body, "StartIndex")
+            if (fromstring(body).findtext("Action") != "playnext"
+                    or self._xml_text(body, "Direction") != "1"
+                    or self._xml_text(body, "Play") != "1"
+                    or not re.fullmatch(r"[1-9][0-9]{0,9}", raw_index)):
+                raise SoapFault(402, "Invalid Args")
+            try:
+                selection = parse_tidal_playnext(self._xml_text(body, "QueueContext"))
+            except TidalQueueError:
+                raise SoapFault(402, "Invalid Args") from None
+            await self._append_tidal_playnext(selection, int(raw_index))
+            return
         if action == "PlayQueueWithIndex":
             raw_index = self._xml_text(body, "Index")
             if not re.fullmatch(r"[0-9]+", raw_index):
@@ -5306,7 +5385,7 @@ class HttpApi:
                 raise SoapFault(712, "Play Mode Not Supported") from None
             self._set_queue_loop_mode(mode, self._xml_text(body, "QueueName"))
             return
-        if action in {"SetQueuePolicy", "AppendQueue", "AppendTracksInQueue", "AppendTracksInQueueEx", "RemoveTracksInQueue"}:
+        if action in {"SetQueuePolicy", "AppendQueue", "AppendTracksInQueue", "RemoveTracksInQueue"}:
             raise SoapFault(401, "Invalid Action")
 
     async def _plex_user_info_from_pin(self, pin_id: str) -> dict[str, object] | None:

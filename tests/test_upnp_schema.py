@@ -126,7 +126,7 @@ def test_unsupported_actions_are_never_advertised(service):
     _, actions, _ = contract(service, enable_plex=True)
     assert not set(actions) & {
         "GetStatus", "SetChannel", "SelectPreset", "SetQueuePolicy", "AppendQueue",
-        "AppendTracksInQueue", "AppendTracksInQueueEx", "RemoveTracksInQueue",
+        "AppendTracksInQueue", "RemoveTracksInQueue",
         "SetNextAVTransportURI", "GetCurrentConnectionInfo",
     }
     assert "QPlay" not in scpd_xml(service, enable_plex=True)
@@ -391,3 +391,18 @@ def test_legacy_scpd_bytes_are_preserved_and_canonical_only_removes_control_sour
     ET.indent(legacy)
     ET.indent(canonical)
     assert ET.tostring(legacy) == ET.tostring(canonical)
+
+
+def test_tidal_search_append_declares_only_the_implemented_wire_form():
+    _, actions, variables = contract("PlayQueue")
+    assert arguments(actions["AppendTracksInQueueEx"]) == [
+        ("QueueContext", "in", "QueueContext"),
+        ("Action", "in", "A_ARG_TYPE_AppendAction"),
+        ("Direction", "in", "A_ARG_TYPE_AppendDirection"),
+        ("StartIndex", "in", "A_ARG_TYPE_QueueIndex"),
+        ("Play", "in", "A_ARG_TYPE_AppendPlay"),
+    ]
+    assert allowed_values(variables["A_ARG_TYPE_AppendAction"]) == ["playnext"]
+    for field in ("A_ARG_TYPE_AppendDirection", "A_ARG_TYPE_AppendPlay"):
+        assert variables[field].findtext("s:dataType", namespaces=NS) == "ui4"
+        assert allowed_values(variables[field]) == ["1"]

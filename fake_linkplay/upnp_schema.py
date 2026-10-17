@@ -154,6 +154,13 @@ _ACTIONS: dict[str, dict[str, tuple[_Argument, ...]]] = {
         # is the actual selected name in the response, not an in/out duplicate.
         "CreateQueue": (_in("QueueContext"), _out("QueueName", "CurrentPlayListName")),
         "ReplaceQueue": (_in("QueueContext"), _out("QueueName", "CurrentPlayListName")),
+        # Only the observed TIDAL single-track search play-next/start form.
+        "AppendTracksInQueueEx": (
+            _in("QueueContext"), _in("Action", "A_ARG_TYPE_AppendAction"),
+            _in("Direction", "A_ARG_TYPE_AppendDirection"),
+            _in("StartIndex", "A_ARG_TYPE_QueueIndex"),
+            _in("Play", "A_ARG_TYPE_AppendPlay"),
+        ),
         "PlayQueueWithIndex": (_in("QueueName", "CurrentPlayListName"), _in("Index", "A_ARG_TYPE_QueueIndex")),
         # Paging is not implemented: both browse actions return the full queue.
         "BrowseQueue": (_in("QueueName", "CurrentPlayListName"), _out("QueueContext")),
@@ -187,6 +194,9 @@ _VARIABLES: dict[str, _Variable] = {
     "A_ARG_TYPE_SeekMode": _Variable(allowed_values=("REL_TIME",)),
     "A_ARG_TYPE_SeekTarget": _Variable(),
     "A_ARG_TYPE_QueueIndex": _Variable("ui4", value_range=(1, 4294967295, 1)),
+    "A_ARG_TYPE_AppendAction": _Variable(allowed_values=("playnext",)),
+    "A_ARG_TYPE_AppendDirection": _Variable("ui4", allowed_values=("1",)),
+    "A_ARG_TYPE_AppendPlay": _Variable("ui4", allowed_values=("1",)),
     "A_ARG_TYPE_AccountSource": _Variable(),
     "A_ARG_TYPE_ServiceVersion": _Variable(),
     "A_ARG_TYPE_RefreshToken": _Variable(),
