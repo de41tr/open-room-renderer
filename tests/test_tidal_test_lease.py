@@ -199,6 +199,42 @@ async def test_idle_gain_is_reduced_before_load_and_never_restored(api):
     assert api.mpv.calls == calls
 
 
+@pytest.mark.parametrize("blocked,expected", [
+    ("session", "test_unavailable"),
+    ("renderer", "source_not_idle"),
+])
+@pytest.mark.parametrize("lease_error", [None, "playback_failed"])
+async def test_status_reports_transient_readiness_without_overwriting_lease_error(api, blocked, expected, lease_error):
+    available_session = api.tidal_playback.session_available
+    if blocked == "session":
+        api.tidal_playback.session_available = lambda: False
+    else:
+        api.state.mark_playing("https://foreign.example.test/already-playing")
+    api.tidal_test._error = lease_error
+    before = asdict(api.state)
+    async with serving(api) as (session, base):
+        async with session.get(base + PREFIX + "/status") as response:
+            assert response.status == 200
+            value = await response.json()
+        assert_public(value)
+        assert value["available"] is False
+        assert value["error"] == (lease_error or expected)
+        assert value["state"] == "idle" and value["lease_id"] is None
+        assert api.tidal_test._error == lease_error
+        assert not api.mpv.calls and not api.tidal_playback.calls
+        assert api.mpv.actual_volume == 77 and asdict(api.state) == before
+        if blocked == "session":
+            api.tidal_playback.session_available = available_session
+        else:
+            api.state.mark_stop()
+        async with session.get(base + PREFIX + "/status") as response:
+            recovered = await response.json()
+        assert response.status == 200 and recovered["available"] is True
+        assert recovered["error"] == lease_error
+        assert api.tidal_test._error == lease_error
+        assert not api.mpv.calls and not api.tidal_playback.calls
+
+
 @pytest.mark.parametrize("foreign", ["renderer_playing", "renderer_paused", "native_playing"])
 async def test_unrelated_active_source_is_refused_without_mutation(api, foreign):
     if foreign.startswith("renderer"):

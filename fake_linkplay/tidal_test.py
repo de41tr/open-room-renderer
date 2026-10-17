@@ -158,12 +158,13 @@ class TidalTestLease:
 
     async def status(self):
         available = False
+        hooks_ready = renderer_idle = None
         if not self._live:
             self._volume_confirmed = False
         if (not self._closed and not self._live and not self._tasks_pending() and self._state != "stopping"
-                and self._error != "stop_unconfirmed" and self._hooks()
+                and self._error != "stop_unconfirmed" and (hooks_ready := self._hooks())
                 and not self.api._backend_lock.locked() and not self._start_lock.locked()
-                and self._renderer_idle()):
+                and (renderer_idle := self._renderer_idle())):
             generation, queue = self.api.state.generation, self.api.state.queue
             try:
                 async with asyncio.timeout(self._io_timeout), self.api._backend_lock:
@@ -174,7 +175,16 @@ class TidalTestLease:
                     self._volume_confirmed = available and raw == 1
             except (BackendError, OSError, TimeoutError):
                 pass
-        return self._result(available)
+        # Report only predicates actually reached above. These are response-only
+        # readiness hints; a real lease error, including one raised while awaiting
+        # the backend observation, always takes precedence.
+        error = self._error
+        if error is None:
+            if hooks_ready is False:
+                error = "test_unavailable"
+            elif renderer_idle is False:
+                error = "source_not_idle"
+        return self._result(available, error=error)
 
     async def start(self, track_id, duration_seconds):
         # The caller/request may disappear; the renderer retains both admission
