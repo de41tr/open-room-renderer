@@ -17,7 +17,7 @@ from fake_linkplay.tidal_refresh import TidalSessionRefreshManager
 from fake_linkplay.tidal_session import TidalSession, TidalSessionStore
 from test_tidal_account import UUID
 from test_tidal_refresh import TOKEN, config, responses
-from test_soap_faults import FakeBackend, request as soap_request
+from test_soap_faults import FakeBackend, fault_code, request as soap_request
 
 
 IDENTITY = {"userId": 42, "countryCode": "DE"}
@@ -221,7 +221,8 @@ async def test_replacement_expiring_before_projection_cannot_use_stale_now(share
 
 
 @pytest.mark.asyncio
-async def test_real_get_user_info_route_uses_refreshed_encoded_device_record(shared_account, tmp_path):
+@pytest.mark.parametrize("version_arg", ["", "<Version>2</Version>"])
+async def test_real_get_user_info_route_uses_refreshed_encoded_device_record(shared_account, tmp_path, version_arg):
     store, bridge, clock = shared_account
     clock[0] = 2001
     request, calls = responses(TOKEN, IDENTITY)
@@ -231,12 +232,127 @@ async def test_real_get_user_info_route_uses_refreshed_encoded_device_record(sha
     api = HttpApi(cfg, RendererState.from_config(cfg), FakeBackend(),
                   tidal_account=bridge, tidal_refresh=owner)
     response = await api.soap(soap_request("GetUserInfo", "<AccountSource>Tidal</AccountSource>"
-                                          "<Version>2</Version>", service="PlayQueue"))
+                                          + version_arg, service="PlayQueue", path="PlayQueue1"))
     assert response.status == 200 and len(calls) == 2
     root = ET.fromstring(response.text)
     result = json.loads(next(node.text for node in root.iter() if node.tag == "Result"))
     assert decode_account_field(cfg.upnp_uuid, result["access_token"]) == TOKEN["access_token"]
     assert "refresh_token" not in result and TOKEN["refresh_token"] not in response.text
+    await api._eventing.close()
+
+
+@pytest.mark.asyncio
+async def test_windows_omitted_version_adopts_shared_account_without_mutation_or_secret_logs(shared_account, tmp_path, caplog):
+    store, bridge, _ = shared_account
+    request, calls = responses()
+    owner = bind(store, bridge, request)
+    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", state_dir=str(tmp_path),
+                 advertise_ip="127.0.0.1", wiim_home_profile=True, log_wiim_http_details=True)
+    api = HttpApi(cfg, RendererState.from_config(cfg), FakeBackend(),
+                  tidal_account=bridge, tidal_refresh=owner)
+    before = store.load(), (store.directory / "session.json").read_bytes(), asdict(api.state)
+    results = []
+    with caplog.at_level("INFO", logger="fake_linkplay.http_api"):
+        for version_arg in ("", "<Version>2</Version>"):
+            # Windows 0.2.10.5 sends just AccountSource; the explicit v2 result
+            # must remain identical. All identity/token values here are synthetic.
+            req = soap_request("GetUserInfo", "<AccountSource>Tidal</AccountSource>" + version_arg,
+                               service="PlayQueue", path="PlayQueue1")
+            req.remote, req.method, req.path = "192.0.2.1", "POST", "/upnp/control/PlayQueue1"
+            response = await api.soap(req)
+            assert response.status == 200
+            results.append(json.loads(ET.fromstring(response.text).findtext(".//Result")))
+    result = results[0]
+    assert result == results[1]
+    status_uuid = api.state.as_status_ex("127.0.0.1")["uuid"]
+    assert decode_account_field(status_uuid, result["access_token"]) == before[0].access_token
+    assert decode_account_field(status_uuid, result["clientId"]) == before[0].client_id
+    assert result["user"] == IDENTITY | {"username": ""}
+    assert "refresh_token" not in result and "redirectURI" not in result
+    assert before == (store.load(), (store.directory / "session.json").read_bytes(), asdict(api.state))
+    assert not calls and not api.mpv.calls and api.tidal_login is None
+    assert not (store.directory / "refresh-attempt").exists()
+    assert "[account payload omitted]" in caplog.text
+    for secret in (before[0].access_token, before[0].refresh_token, before[0].client_id,
+                   result["access_token"], result["clientId"]):
+        assert secret not in caplog.text
+    assert "Tidal" not in api.state.as_status_ex("127.0.0.1")["supported_services"]
+    await api._eventing.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("version_arg", [
+    "<Version/>", "<Version></Version>", "<Version> \t\n </Version>",
+    "<Version>1</Version>", "<Version>3</Version>", "<Version>2.0</Version>",
+    '<v:Version xmlns:v="urn:synthetic"/>', "<version/>",
+])
+async def test_explicit_invalid_version_cannot_adopt_or_refresh(shared_account, tmp_path, version_arg):
+    store, bridge, clock = shared_account
+    clock[0] = 2001
+    request, calls = responses()
+    owner = bind(store, bridge, request)
+    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", state_dir=str(tmp_path),
+                 advertise_ip="127.0.0.1")
+    api = HttpApi(cfg, RendererState.from_config(cfg), FakeBackend(),
+                  tidal_account=bridge, tidal_refresh=owner)
+    before = store.load()
+    response = await api.soap(soap_request("GetUserInfo", "<AccountSource>Tidal</AccountSource>"
+                                          + version_arg, service="PlayQueue", path="PlayQueue1"))
+    assert fault_code(response) == "501"
+    assert not calls and store.load() == before and not api.mpv.calls
+    assert not (store.directory / "refresh-attempt").exists()
+    assert "synthetic" not in response.text
+    await api._eventing.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["unshared", "restart", "replaced", "country", "provenance", "expired"])
+async def test_omitted_version_preserves_device_sharing_and_session_gates(shared_account, tmp_path, case):
+    store, bridge, clock = shared_account
+    if case == "unshared":
+        await bridge.set_shared(False)
+    elif case == "restart":
+        bridge = TidalDeviceAccountBridge(store)
+    elif case == "replaced":
+        store.save(replace(store.load(), access_token="synthetic-replacement"))
+    elif case == "country":
+        store.save(replace(store.load(), country_code=None))
+    elif case == "provenance":
+        store.save(replace(store.load(), client_id=None, auth_flow=None))
+    else:
+        clock[0] = 2001  # No refresh owner: an expired token must not escape.
+    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", state_dir=str(tmp_path),
+                 advertise_ip="127.0.0.1")
+    api = HttpApi(cfg, RendererState.from_config(cfg), FakeBackend(), tidal_account=bridge)
+    before = store.load()
+    response = await api.soap(soap_request("GetUserInfo", "<AccountSource>Tidal</AccountSource>",
+                                          service="PlayQueue", path="PlayQueue1"))
+    assert fault_code(response) == "501"
+    assert store.load() == before and not api.mpv.calls and api.tidal_login is None
+    assert not (store.directory / "refresh-attempt").exists()
+    assert "synthetic" not in response.text
+    await api._eventing.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["Qobuz", "Deezer2", "tidal", ""])
+async def test_omitted_version_never_exports_tidal_account_for_other_sources(shared_account, tmp_path, source):
+    store, bridge, clock = shared_account
+    clock[0] = 2001
+    request, calls = responses()
+    owner = bind(store, bridge, request)
+    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", state_dir=str(tmp_path),
+                 advertise_ip="127.0.0.1")
+    api = HttpApi(cfg, RendererState.from_config(cfg), FakeBackend(),
+                  tidal_account=bridge, tidal_refresh=owner)
+    before = store.load()
+    response = await api.soap(soap_request("GetUserInfo", f"<AccountSource>{source}</AccountSource>",
+                                          service="PlayQueue", path="PlayQueue1"))
+    assert response.status == 200
+    result = json.loads(ET.fromstring(response.text).findtext(".//Result"))
+    assert result["id"] == source and result["userId"] == "" and "access_token" not in result
+    assert not calls and store.load() == before and not api.mpv.calls
+    assert not (store.directory / "refresh-attempt").exists()
     await api._eventing.close()
 
 

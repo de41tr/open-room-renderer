@@ -82,6 +82,7 @@ class TidalTrackCandidate:
     asset_presentation: str | None
     session_expires_at: float
     session_fingerprint: bytes
+    artwork: str = ""
 
 
 def validate_track_selection(track_id: str, quality: str) -> str:
@@ -191,6 +192,14 @@ def _metadata(value: dict, track_id: str) -> tuple[str, str, str, float]:
         raise TidalPlaybackError("invalid_response")
     return (_text(value.get("title", "")), _text(artist.get("name", "")),
             _text(album.get("title", "")), float(duration))
+
+
+def _cover_artwork(value: object) -> str:
+    """Map only a provider cover UUID to a fixed public image URL."""
+    if (type(value) is not str or len(value) != 36
+            or not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", value)):
+        return ""
+    return "https://resources.tidal.com/images/" + value.lower().replace("-", "/") + "/640x640.jpg"
 
 
 def _has_drm_fields(value: object) -> bool:
@@ -355,7 +364,8 @@ class TidalPlaybackResolver:
                     return TidalTrackCandidate(track_id, _API_TRACKS + track_id,
                                                title, artist, album, duration, content_type,
                                                codec, url, audio_quality, presentation,
-                                               float(session.expires_at), _session_fingerprint(session))
+                                               float(session.expires_at), _session_fingerprint(session),
+                                               artwork=_cover_artwork(metadata.get("album", {}).get("cover")))
         except TidalPlaybackError:
             raise
         except TidalSessionError:

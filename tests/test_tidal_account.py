@@ -115,6 +115,23 @@ async def test_actual_soap_opt_in_uses_status_uuid_without_enabling_service(tmp_
 
 @crypto
 @pytest.mark.asyncio
+@pytest.mark.parametrize("version_arg", ["", "<Version/>", "<Version>1</Version>"])
+async def test_independent_client_bridge_still_requires_explicit_v2(tmp_path, account, version_arg):
+    store, bridge = account
+    store.save(replace(store.load(), expires_at=time.time() + 600))
+    cfg = Config(uuid="00000000-0000-4000-8000-000000000000", state_dir=str(tmp_path),
+                 advertise_ip="127.0.0.1")
+    api = HttpApi(cfg, RendererState.from_config(cfg), FakeBackend(), tidal_account=bridge)
+    before = store.load()
+    response = await api.soap(request("GetUserInfo", "<AccountSource>Tidal</AccountSource>"
+                                     + version_arg, service="PlayQueue", path="PlayQueue1"))
+    assert fault_code(response) == "501"
+    assert store.load() == before and not api.mpv.calls and api.tidal_login is None
+    await api._eventing.close()
+
+
+@crypto
+@pytest.mark.asyncio
 async def test_device_sharing_binds_exact_provenance_session_and_resets_on_restart(tmp_path):
     from fake_linkplay.tidal_account import TidalDeviceAccountBridge
     store = TidalSessionStore(tmp_path / "device-session")

@@ -19,6 +19,8 @@ CATALOGUE_URL = "https://api.tidal.com/v1/tracks/" + TRACK_ID
 SESSION = TidalSession(ACCESS, REFRESH, 2000, "42", "DE", "synthetic-client", "tidalapi-device-v0.8.11")
 METADATA = {"id": int(TRACK_ID), "title": "A track", "artist": {"name": "An artist"},
             "album": {"title": "An album"}, "duration": 213, "url": "https://ignored.example.test/"}
+COVER_ID = "00000000-0000-4000-8000-00000000000a"
+COVER_URL = "https://resources.tidal.com/images/00000000/0000/4000/8000/00000000000a/640x640.jpg"
 
 
 def manifest(**changes):
@@ -110,6 +112,7 @@ async def test_explicit_resolution_uses_fixed_origins_and_retains_private_candid
     result = await playback.TidalPlaybackResolver(store).resolve_track(TRACK_ID, "LOSSLESS")
     assert result.track_id == TRACK_ID and result.catalogue_url == CATALOGUE_URL
     assert (result.title, result.artist, result.album, result.duration) == ("A track", "An artist", "An album", 213.0)
+    assert result.artwork == ""
     assert result.stream_url == SIGNED_URL
     assert (result.content_type, result.codec, result.audio_quality) == ("audio/flac", "flac", "LOSSLESS")
     assert result.asset_presentation == "FULL" and result.session_expires_at == SESSION.expires_at
@@ -129,6 +132,23 @@ async def test_explicit_resolution_uses_fixed_origins_and_retains_private_candid
     assert (store.directory / "session.json").read_bytes() == before
     visible = repr(result) + str(capsys.readouterr()) + caplog.text
     assert all(secret not in visible for secret in (ACCESS, REFRESH, SIGNED_URL, TRACK_ID, "An artist"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cover,expected", [
+    (COVER_ID, COVER_URL), (COVER_ID.upper(), COVER_URL),
+    (None, ""), (42, ""), ({"url": "https://foreign.example.test/art"}, ""),
+    ("https://foreign.example.test/art?token=synthetic-secret", ""),
+    (COVER_ID + "?token=synthetic-secret", ""), (COVER_ID + "\n", ""),
+    (COVER_ID.replace("-", "/"), ""), ("../" + COVER_ID, ""),
+])
+async def test_optional_cover_uses_only_fixed_uuid_image_without_extra_requests(harness, cover, expected):
+    store, responses, requests, _, dns, _ = harness
+    responses[0] = Response({**METADATA, "album": {**METADATA["album"], "cover": cover}})
+    result = await playback.TidalPlaybackResolver(store).resolve_track(TRACK_ID)
+    assert result.artwork == expected and result.stream_url == SIGNED_URL
+    assert [call[1] for call in requests] == [CATALOGUE_URL, CATALOGUE_URL + "/playbackinfopostpaywall"]
+    assert dns == [("audio.example.test", 443)]
 
 
 @pytest.mark.asyncio

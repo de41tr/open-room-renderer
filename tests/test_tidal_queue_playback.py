@@ -20,12 +20,15 @@ from test_playback_generations import StatefulBackend
 from test_native_queue_staging import NativeBackend
 from test_soap_faults import api, request
 
+COVER_URL = "https://resources.tidal.com/images/00000000/0000/4000/8000/00000000000a/640x640.jpg"
+
 
 class Resolver:
     def __init__(self):
         self.calls = []
         self.wait = None
         self.error = None
+        self.artwork_by_track = {}
     def session_available(self):
         return self.store.load() == self.record
     def session_matches(self, fingerprint):
@@ -39,6 +42,7 @@ class Resolver:
         return SimpleNamespace(track_id=track_id, catalogue_url=f"https://api.tidal.com/v1/tracks/{track_id}",
                                title=f"Synthetic track {track_id}", artist=f"Synthetic artist {track_id}",
                                album=f"Synthetic album {track_id}", duration=float(track_id) + 100,
+                               artwork=self.artwork_by_track.get(track_id, ""),
                                session_fingerprint=b"synthetic-session-binding", session_expires_at=time.time()+600,
                                content_type="audio/flac", stream_url=f"https://audio.example.test/media/{track_id}?token=SYNTHETIC_SIGNED")
 
@@ -163,6 +167,27 @@ async def create_explicit(api, context=None):
         context if context is not None else explicit_context()) + "</QueueContext>", service="PlayQueue"))
 
 
+@pytest.mark.asyncio
+async def test_tidal_artwork_reaches_existing_ui_and_clears_for_coverless_selection(queue_api, tmp_path):
+    api = queue_api
+    api.cfg.enable_plex_service = True
+    resolver = await configured(api, tmp_path)
+    resolver.artwork_by_track["43"] = COVER_URL
+    context = explicit_context().replace("<Title>",
+        "<PicUrl>https://foreign.example.test/?token=CALLER_SECRET</PicUrl><Title>")
+    assert (await create_explicit(api, context)).status == 200
+    assert api.state.queue.current.artwork == api.state.album_art_uri == COVER_URL
+    assert api.web_api.snapshot()["media"]["artwork"] == COVER_URL
+    public = serialize_queue_context(api.state.queue) + api.state.track_metadata
+    assert COVER_URL in public and "foreign.example.test" not in public and "CALLER_SECRET" not in public
+
+    assert (await api.soap(request("Next"))).status == 200
+    assert api.state.queue.current.id == "44"
+    assert api.state.queue.current.artwork == api.state.album_art_uri == ""
+    assert api.web_api.snapshot()["media"]["artwork"] is None
+    assert COVER_URL not in avtransport_response_fields("GetPositionInfo", api.state)
+
+
 def assert_public_selection(api, index, track_id):
     assert api.state.queue.index == api.state.plicurr == index
     assert api.state.queue.count == api.state.plicount == 3
@@ -279,6 +304,7 @@ async def test_stop_supersedes_lazy_resolution_without_applying_metadata_or_load
     api = queue_api
     api.cfg.enable_plex_service = True  # Root 1.4 has immediate CreateQueue playback.
     resolver = await configured(api, tmp_path)
+    resolver.artwork_by_track["44"] = COVER_URL
     assert (await create_explicit(api)).status == 200
     resolver.wait = asyncio.Event()
     advance = asyncio.create_task(api._play_queue_index(3))
@@ -291,6 +317,7 @@ async def test_stop_supersedes_lazy_resolution_without_applying_metadata_or_load
         await advance
     assert asdict(api.state) == state and api.mpv.calls == calls
     assert api.state.queue.current.title == "TIDAL track 44"
+    assert api.state.queue.current.artwork == api.state.album_art_uri == ""
     assert api.state.queue.current._tidal_stream_url == ""
 
 
