@@ -65,17 +65,33 @@ existing deployment guard can refuse installation. Do not weaken that guard.
 After a successful device login, **Share account with trusted LAN apps** is a
 separate same-origin, CSRF-protected action. It enables the existing SOAP
 `GetUserInfo(AccountSource=Tidal, Version=2)` response for the exact saved
-session. LAN controllers can obtain its access token through that protocol;
-the refresh token is never included. This is trusted-LAN sharing, not LAN-user
+session. Reachable LAN controllers, not only WiiM Home, can obtain its access
+token and account identifiers through that protocol; the refresh token is never
+included. This is trusted-LAN sharing, not LAN-user
 authentication. Status endpoints still return no credentials or account identity.
+
+Sharing is off by default for new installations and accounts. To keep the
+decision across renderer restarts, check **Remember account sharing across
+renderer restarts for this saved account**, then click **Share account with
+trusted LAN apps** once. This also upgrades an already-active temporary share.
+Without Remember, sharing ends at process restart. Installing an update or
+checking the box alone does not enable sharing; confirm the resulting status.
+Enabling requires an unexpired complete device session and idle session storage.
 
 The saved record carries the actual device-flow client ID and the pinned
 `tidalapi-device-v0.8.11` provenance. Older records without this provenance
 cannot be shared as library-device sessions. Token expiry suspends projection;
-a verified same-account refresh can renew that prior decision. An arbitrary
-changed record invalidates sharing, and process restart clears it. **Stop
-account sharing** revokes even a suspended sharing decision without deleting
-or revoking the provider grant.
+a verified same-account refresh can renew that prior decision. Remembered
+consent is bound to the exact saved record; an arbitrary replacement or another
+account does not inherit it. Restart restores matching consent locally without
+login or provider requests. An expired remembered session remains suspended.
+
+**Stop account sharing** removes both temporary and remembered consent,
+including a suspended decision, so a successful stop stays disabled after
+restart. It does not delete the saved session or revoke the provider grant,
+and cannot recall access tokens already copied by an app. Check status if the
+action fails or its reply is lost; storage failure can leave durable revocation
+unconfirmed. **Forget saved TIDAL session** also removes remembered consent.
 
 The adoption-only response includes the encoded actual client ID but omits
 `redirectURI`: no registered callback for this device client is established.
@@ -86,12 +102,20 @@ recognizably expired session only while the exact stored record still has a
 previous explicit LAN-sharing decision. It uses the same refresh owner and
 durable retry guard as playback, with a 10-second total refresh deadline. This
 is an ORR policy, not an observed native-app timeout. Fresh sessions, missing
-sharing, other versions and ordinary status polling do not trigger refresh.
-Unshare remains immediate during the request, and consent, current storage and
+sharing, unsupported versions and ordinary status polling do not trigger refresh.
+An Unshare request does not wait for provider refresh. Consent, current storage and
 fresh expiry are checked again before any account response. No TIDAL capability
 is advertised. Successful
 SOAP tests are synthetic interoperability checks, not Android, catalogue,
 full-playback or XU4 acceptance.
+
+WiiM Home Windows 0.2.10.5 was statically observed to omit the `Version` element
+from its TIDAL adoption request. For the explicitly shared device-session path
+only, ORR treats an absent element as version 2. An explicit empty/whitespace
+element, version 1 or another unsupported value still fails. Other providers
+and the independent-client bridge are unchanged. This fallback retains the
+same consent, provenance and on-demand refresh checks; it does not initiate a
+login. Other Windows builds and live-app adoption remain unverified.
 
 Schema-2 device records require the new reader. Returning to an older release
 preserves the private file but that release refuses to read its newer format.
@@ -189,6 +213,15 @@ loopback-only proxy with public-address DNS pinning, no LAN exceptions, no
 TIDAL media redirects, and no API authorization header forwarded to the CDN.
 No new listener or native TIDAL capability is enabled by this step.
 
+### Cover metadata
+
+When a selected track resolves, a valid provider `album.cover` UUID becomes a
+fixed `https://resources.tidal.com/images/.../640x640.jpg` URL in the existing
+queue artwork, now-playing and UPnP metadata. No separate cover API or token
+export is needed. Missing or malformed cover IDs leave artwork empty without
+rejecting the track. Unresolved queue entries need not have covers; actual
+display depends on the controller and remains a live-app acceptance check.
+
 ### Saved favorites and URL playlists
 
 **Save current as favorite** and playlist export retain the stable track URL,
@@ -216,8 +249,9 @@ saved atomically. No credentials or account identity appear in the response.
 
 Previously enabled LAN sharing follows this verified same-account/client
 rotation, without enabling sharing for a previously unshared session. An
-arbitrary file replacement, changed identity, explicit unshare or process
-restart still requires a fresh sharing decision. Cached playback candidates
+arbitrary file replacement, changed identity or explicit unshare still requires
+a fresh sharing decision; process restart retains only explicitly remembered
+consent. Cached playback candidates
 bound to the old record cannot authorize a new load after rotation.
 
 A failed exchange is uncertain unless OAuth explicitly rejects the grant:
@@ -226,8 +260,9 @@ filesystem failure after replacement may also mean the provider or local
 session changed despite the error. Recovery needs an explicit local action;
 an existing marked grant is never retried. Ordinary status polling never
 contacts the provider. On-demand playback refresh uses this same owner, deadline,
-identity verification and synchronous consent callback. Explicit Unshare during
-refresh always wins; expiry does not turn a suspended opt-in into shared access.
+identity verification and synchronous consent callback. A successful Unshare
+during refresh cannot be undone by the late refresh callback; expiry does not
+turn a suspended opt-in into shared access.
 
 Before a refresh POST, a private atomic 0600 NOFOLLOW sidecar records only a
 fingerprint of the full session and the uncertain outcome. Cancellation, lost
@@ -245,8 +280,8 @@ confirmation, then press the button. The CSRF/same-origin-protected
 `{"confirm_forget_local_session": true}`. Cancel is different: it prevents adoption
 of a pending login and never removes an already-saved session.
 
-Forgetting removes the local session and its process-local sharing decision,
-including suspended sharing. It does not delete the TIDAL account, revoke
+Forgetting removes the local session and its temporary or remembered sharing
+decision, including suspended sharing. It does not delete the TIDAL account, revoke
 provider grants, start another login, or send a playback command. Pending login,
 refresh, resolution, bounded tests and conflicting renderer mutations refuse
 removal without waiting. Cancel a pending login and let its worker finish;
