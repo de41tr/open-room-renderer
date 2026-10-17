@@ -98,7 +98,8 @@ async def test_backend_uncertainty_and_diagnostic_failure_do_not_change_commands
     response=await api.soap(request("Stop"))
     assert response.status==500
     rows=api.diagnostics.events
-    assert any(e["action"]=="Stop" and e["stage"]=="command" and e["outcome"]=="unknown" and e["soap_code"]==501 for e in rows)
+    assert any(e["action"]=="Stop" and e["stage"]=="command" and e["outcome"]=="unknown"
+               and e["soap_code"]==501 and e["reason"]=="backend_operation_failed" for e in rows)
     assert not any(e["reason"]=="backend_transport_confirmed" for e in rows)
     api.execute=AsyncMock(side_effect=RuntimeError("SECRET_MARKER https://PRIVATE_URL/?token=TOKEN_MARKER"))
     assert (await api.handle_httpapi(http("getPlayerStatus"))).status==500
@@ -110,6 +111,59 @@ async def test_backend_uncertainty_and_diagnostic_failure_do_not_change_commands
     assert (await api.soap(request("Stop"))).status==200
     assert api.mpv.calls==[("stop",None),("stop",None)]
     assert_private(api.diagnostics.events,caplog)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage,code", [
+    ("page", "invalid_response"),
+    ("page", "invalid_page_response"),
+    ("page", "unsupported_page"),
+    ("page", "unauthorized"),
+    ("track", "unsupported_manifest"),
+])
+async def test_tidal_create_queue_terminal_reason_survives_backend_handler(api, tmp_path, caplog, stage, code):
+    from fake_linkplay.tidal_playback import TidalPlaybackError
+    from test_tidal_page import header_request
+    from test_tidal_queue_playback import configured, create_explicit
+
+    api.cfg.enable_plex_service = True  # Current root contract plays CreateQueue immediately.
+    resolver = await configured(api, tmp_path)
+    error = TidalPlaybackError(code)
+    error.args = ("SECRET_MARKER https://PRIVATE_URL/?token=TOKEN_MARKER",)
+    previous, generation, phase = api.state.queue, api.state.generation, api.state.phase
+    if stage == "page":
+        resolver.resolve_page = AsyncMock(side_effect=error)
+        response = await api.soap(header_request(
+            "https://api.tidal.com/v1/users/42/favorites/tracks?countryCode=DE&offset=0&limit=50"))
+        resolver.resolve_page.assert_awaited_once()
+        assert resolver.calls == []
+    else:
+        resolver.error = error
+        response = await create_explicit(api)
+        assert resolver.calls == [("43", "LOSSLESS")]
+
+    assert response.status == 500 and "<errorCode>501</errorCode>" in response.text
+    assert api.state.queue is previous and api.state.generation == generation and api.state.phase == phase
+    assert api.mpv.calls == []
+    data = finish_window(api.diagnostics)
+    terminal = [e for e in data["events"] if e["action"] == "CreateQueue" and e["stage"] == "command"
+                and e["http_code"] == 500]
+    assert len(terminal) == 1
+    assert terminal[0]["reason"] == "tidal_" + code
+    assert terminal[0]["soap_code"] == 501 and terminal[0]["outcome"] == "unknown"
+    assert_private(data, caplog)
+    assert "SECRET_MARKER" not in response.text
+
+@pytest.mark.asyncio
+async def test_tidal_reason_rejects_unrecognized_code_without_exporting_text(api, caplog):
+    from fake_linkplay.http_api import TidalPlaybackFailure
+
+    error = TidalPlaybackFailure("SECRET_MARKER:https://PRIVATE_URL/?token=TOKEN_MARKER")
+    api.execute = AsyncMock(side_effect=error)
+    response = await api.handle_httpapi(http("setPlayerCmd:play:https://PRIVATE_URL/TOKEN_MARKER"))
+    assert response.status == 502
+    row = api.diagnostics.events[-1]
+    assert row["reason"] == "unknown" and row["outcome"] == "unknown"
+    assert_private(api.diagnostics.events, caplog)
 
 @pytest.mark.asyncio
 async def test_private_snapshot_expiry_restart_and_bounded_overwrite(api,tmp_path):

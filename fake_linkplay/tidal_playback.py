@@ -25,6 +25,7 @@ from .network_policy import NetworkPolicyError, resolve_proxy_target
 from .tidal_session import TidalSession, TidalSessionError, TidalSessionStore, _session_fingerprint
 
 MAX_RESPONSE_BYTES = 65536
+MAX_PAGE_RESPONSE_BYTES = 512 * 1024  # Up to 50 catalogue records with rich metadata.
 MAX_MANIFEST_BYTES = 32768
 _MAX_URL_BYTES = 8192
 _API_TRACKS = "https://api.tidal.com/v1/tracks/"
@@ -142,7 +143,8 @@ async def _request_json(http, track_id: str, session: TidalSession, *,
     return await _request_api_json(http, path, session, params)
 
 
-async def _request_api_json(http, path: str, session: TidalSession, params: dict) -> dict:
+async def _request_api_json(http, path: str, session: TidalSession, params: dict, *,
+                            max_response_bytes: int = MAX_RESPONSE_BYTES) -> dict:
     """Shared bounded fixed-origin reader; paths come only from local admission."""
     _unexpired(session)
     async with http.request("GET", "https://api.tidal.com/v1/" + path,
@@ -157,7 +159,7 @@ async def _request_api_json(http, path: str, session: TidalSession, params: dict
         body = bytearray()
         async for chunk in response.content.iter_chunked(8192):
             body.extend(chunk)
-            if len(body) > MAX_RESPONSE_BYTES:
+            if len(body) > max_response_bytes:
                 raise TidalPlaybackError("invalid_response")
         return _json_object(body)
 
@@ -318,7 +320,8 @@ class TidalPlaybackResolver:
                         timeout=aiohttp.ClientTimeout(total=15),
                         cookie_jar=aiohttp.DummyCookieJar(),
                     ) as http:
-                        value = await _request_api_json(http, request.path, session, params)
+                        value = await _request_api_json(http, request.path, session, params,
+                                                        max_response_bytes=MAX_PAGE_RESPONSE_BYTES)
                     track_ids = page_track_ids(value, request)
                     _unexpired(session)
                     return TidalPageCandidate(request.catalogue_url, track_ids,

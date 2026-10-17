@@ -34,6 +34,32 @@ def favorites_page(**kwargs):
 
 
 @pytest.mark.asyncio
+async def test_rich_favorites_page_has_its_own_bounded_response_budget(harness):
+    store, responses, requests, _, dns, _ = harness
+    body = favorites_page(ids=range(100, 150), total=50)
+    body.update(offset=0, limit=50)
+    for entry in body["items"]:
+        track = entry["item"]
+        track.update(title="A synthetic live recording with the orchestra and guest performers",
+                     version="Extended studio session", duration=432,
+                     copyright="Synthetic independent recording rights statement. " * 4,
+                     artists=[{"id": 1000 + i, "name": "Synthetic guest performer with a long credited ensemble name",
+                               "picture": "00000000-0000-4000-8000-000000000000"} for i in range(8)],
+                     album={"id": 200, "title": "Synthetic concert collection",
+                            "cover": "00000000-0000-4000-8000-000000000000"},
+                     url=f"https://tidal.com/browse/track/{track['id']}",
+                     audioModes=["STEREO"], mediaMetadata={"tags": ["LOSSLESS"]})
+    response = Response(body)
+    assert 64 * 1024 < len(response.body) <= 512 * 1024
+    responses[:] = [response]
+    result = await playback.TidalPlaybackResolver(store).resolve_page(FAVORITES + "?offset=0&limit=50")
+    assert result.track_ids == tuple(str(value) for value in range(100, 150))
+    assert len(requests) == 1 and requests[0][1] == FAVORITES and dns == []
+    assert not requests[0][2]["allow_redirects"] and response.closed
+    assert playback.MAX_RESPONSE_BYTES == 64 * 1024
+
+
+@pytest.mark.asyncio
 async def test_own_favorites_page_keeps_requested_order_slots_and_query(harness, caplog):
     store, responses, requests, _, dns, _ = harness
     responses[:] = [Response(favorites_page())]
@@ -238,7 +264,7 @@ async def test_page_reuses_bounded_reader_and_private_lease_without_refresh(harn
     if failure in {"redirect", "unauthorized"}:
         response = Response({}, status=302 if failure == "redirect" else 401)
     elif failure == "oversized":
-        body["ignored"] = "x" * playback.MAX_RESPONSE_BYTES
+        body["ignored"] = "x" * (playback.MAX_PAGE_RESPONSE_BYTES + 16384)
         response = Response(body)
     elif failure == "duplicate_json":
         response = Response(raw=b'{"items": [], "items": []}')
@@ -258,6 +284,8 @@ async def test_page_reuses_bounded_reader_and_private_lease_without_refresh(harn
     assert len(requests) == (0 if failure in {"country", "lease"} else 1) and dns == []
     if requests:
         assert requests[0][2]["allow_redirects"] is False and response.closed
+    if failure == "oversized":
+        assert playback.MAX_PAGE_RESPONSE_BYTES < response.bytes_read <= playback.MAX_PAGE_RESPONSE_BYTES + 8192
 
 
 # The real page/track resolver is wired into the existing mock playback owner.

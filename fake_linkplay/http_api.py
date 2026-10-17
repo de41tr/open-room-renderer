@@ -91,6 +91,14 @@ class SourcePlaybackError(BackendError):
         self.category = category
 
 
+class TidalPlaybackFailure(BackendError):
+    """Keep a checked resolver cause through the terminal backend-error handler."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__("TIDAL track resolution failed")
+        self.reason = diagnostic.tidal_reason(code)
+
+
 @dataclass
 class StationRecovery:
     """One owner selection's finite retry budget, including successful retries."""
@@ -3551,8 +3559,8 @@ class HttpApi:
                 selected.title_is_fallback = False
                 self._activate_queue_item()
                 return candidate.stream_url
-            except TidalPlaybackError:
-                raise BackendError("TIDAL track resolution failed") from None
+            except TidalPlaybackError as exc:
+                raise TidalPlaybackFailure(exc.code) from None
         if tidal_track_from_reference(url):
             raise BackendError("TIDAL catalogue reference has no selected provider owner")
         catalog_id = station_from_reference(url)
@@ -3669,7 +3677,7 @@ class HttpApi:
                         raise TidalPlaybackError("invalid_page_selection")
                     page = await self.tidal_playback.resolve_page(selection.catalogue_url)
                 except TidalPlaybackError as exc:
-                    raise BackendError(str(exc)) from None
+                    raise TidalPlaybackFailure(exc.code) from None
                 if (generation != self.state.generation or self.state.queue is not previous
                         or page.session_expires_at <= time.time()
                         or not self.tidal_playback.session_matches(page.session_fingerprint)
@@ -3713,8 +3721,8 @@ class HttpApi:
             from .tidal_playback import validate_track_selection
             try:
                 validate_track_selection(*queue.current._tidal_track)
-            except TidalPlaybackError:
-                raise BackendError("TIDAL track resolution failed") from None
+            except TidalPlaybackError as exc:
+                raise TidalPlaybackFailure(exc.code) from None
             if not self.tidal_playback.session_available():
                 raise BackendError("Experimental TIDAL playback is unavailable")
             queue._tidal_prepared_page = _page
@@ -3725,8 +3733,8 @@ class HttpApi:
         generation, previous = self.state.generation, self.state.queue
         try:
             candidate = await self.tidal_playback.resolve_track(*queue.current._tidal_track)
-        except TidalPlaybackError:
-            raise BackendError("TIDAL track resolution failed") from None
+        except TidalPlaybackError as exc:
+            raise TidalPlaybackFailure(exc.code) from None
         if _test_lease is not None:
             _test_lease.check()
         if (generation != self.state.generation or self.state.queue is not previous
@@ -3768,8 +3776,8 @@ class HttpApi:
             track = selection.tracks[0]
             try:
                 candidate = await self.tidal_playback.resolve_track(track.track_id, selection.request_quality)
-            except TidalPlaybackError:
-                raise BackendError("TIDAL track resolution failed") from None
+            except TidalPlaybackError as exc:
+                raise TidalPlaybackFailure(exc.code) from None
 
             def still_owned():
                 page = queue._tidal_prepared_page
