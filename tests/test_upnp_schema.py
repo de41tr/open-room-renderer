@@ -249,6 +249,10 @@ def test_queue_contract_has_identity_context_indexes_and_service_read_fields():
         "Count", "CurrentIndex", "PreloadingIndex", "CurrentPage", "TrackNums",
     ]
     assert value_range(variable_for("PlayQueue", "PlayQueueWithIndex", "Index", "in"))[0] == "1"
+    assert value_range(variable_for("PlayQueue", "AppendTracksInQueueEx", "StartIndex", "in")) == ("0", "4294967295", "1")
+    assert allowed_values(variable_for("PlayQueue", "AppendTracksInQueueEx", "Action", "in")) == ["playnext", "playlast"]
+    assert allowed_values(variable_for("PlayQueue", "AppendTracksInQueueEx", "Play", "in")) == ["0", "1"]
+    assert allowed_values(variable_for("PlayQueue", "AppendTracksInQueueEx", "Direction", "in")) == ["1"]
     assert [name for name, _, _ in arguments(actions["GetUserInfo"], "in")] == [
         "AccountSource", "Version", "RefreshToken",
     ]

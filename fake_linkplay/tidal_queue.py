@@ -24,6 +24,7 @@ _QUERY_FIELDS = frozenset({
 })
 _QUALITIES = frozenset({"LOW", "HIGH", "LOSSLESS", "HI_RES", "AUTO"})
 _LEGACY_QUALITY = {"0": "LOW", "1": "HIGH", "2": "LOSSLESS", "3": "HI_RES", "4": "AUTO"}
+TIDAL_APPEND_BATCH_LIMIT = 500
 
 
 def track_id_from_reference(value: str) -> str:
@@ -98,14 +99,22 @@ used as authority or fallback media. Existing direct-URL queues are untouched.
 
 
 def parse_tidal_playnext(value: str | bytes) -> TidalQueueSelection:
-    """Parse the observed one-track search append, whose XML start is zero."""
+    """Parse the observed one-track append, whose XML start is zero."""
     try:
-        return _parse_selection(value, None, playnext=True)
+        return _parse_selection(value, None, append_limit=1)
     except QueueError:
         raise TidalQueueError("Invalid TIDAL queue structure") from None
 
 
-def _parse_selection(value: str | bytes, name: str | None, *, playnext: bool = False) -> TidalQueueSelection:
+def parse_tidal_playlast(value: str | bytes) -> TidalQueueSelection:
+    """Parse one bounded deferred append batch with batch-local numbering."""
+    try:
+        return _parse_selection(value, None, append_limit=TIDAL_APPEND_BATCH_LIMIT)
+    except QueueError:
+        raise TidalQueueError("Invalid TIDAL queue structure") from None
+
+
+def _parse_selection(value: str | bytes, name: str | None, *, append_limit: int = 0) -> TidalQueueSelection:
     root = _parse_xml(value, MAX_QUEUE_BYTES)
     if _local_name(root.tag) != "PlayList":
         raise TidalQueueError("Invalid TIDAL queue structure")
@@ -134,7 +143,7 @@ def _parse_selection(value: str | bytes, name: str | None, *, playnext: bool = F
     count = _matching_integer(
         [_text(root, "Count"), _text(info, "Count"), _text(info, "TrackNumber")],
         "count", QueueRejectionReason.COUNT)
-    if playnext:
+    if append_limit:
         if start != 0 or queue_name != "CurrentQueue" or catalogue:
             raise TidalQueueError("Unsupported TIDAL append selection")
         start = 1
@@ -143,7 +152,7 @@ def _parse_selection(value: str | bytes, name: str | None, *, playnext: bool = F
         raise TidalQueueError("Invalid TIDAL start index")
     numbered = {}
     if tracks is not None:
-        if len(tracks) > MAX_QUEUE_TRACKS:
+        if len(tracks) > (append_limit or MAX_QUEUE_TRACKS):
             raise TidalQueueError("TIDAL queue exceeds track limit")
         for track in tracks:
             match = re.fullmatch(r"Track([1-9][0-9]{0,3})", _local_name(track.tag))
@@ -165,8 +174,8 @@ def _parse_selection(value: str | bytes, name: str | None, *, playnext: bool = F
         if url:
             validate_catalogue_url(url)
         selections.append(TidalTrackSelection(track_id, url, _text(track, "Metadata") or ""))
-    if playnext and len(selections) != 1:
-        raise TidalQueueError("TIDAL search append requires one track")
+    if append_limit and not 1 <= len(selections) <= append_limit:
+        raise TidalQueueError("Invalid TIDAL append track count")
     if selections:
         if (count is not None and count != len(selections)) or start > len(selections):
             raise TidalQueueError("Invalid TIDAL queue count or index")
